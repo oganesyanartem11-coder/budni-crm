@@ -1,0 +1,73 @@
+import {
+  LayoutDashboard,
+  ClipboardList,
+  Building2,
+  UtensilsCrossed,
+  Carrot,
+  ChefHat,
+  Truck,
+  BarChart3,
+  Settings,
+  type LucideIcon,
+} from 'lucide-react'
+
+export type NavSection = {
+  href: string
+  label: string
+  icon: LucideIcon
+  // Кому показывать раздел (если undefined — показываем всем)
+  roles?: Array<'ADMIN' | 'MANAGER' | 'CHEF' | 'COURIER'>
+}
+
+// Главное меню в топ-навигации
+export const TOP_NAV_SECTIONS: NavSection[] = [
+  { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/orders', label: 'Заказы', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/clients', label: 'Клиенты', icon: Building2, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/menu', label: 'Меню', icon: UtensilsCrossed, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
+  { href: '/ingredients', label: 'Сырьё', icon: Carrot, roles: ['ADMIN', 'CHEF'] },
+  { href: '/production', label: 'Производство', icon: ChefHat, roles: ['ADMIN', 'CHEF'] },
+  { href: '/delivery', label: 'Доставка', icon: Truck, roles: ['ADMIN', 'MANAGER', 'COURIER'] },
+  { href: '/analytics', label: 'Аналитика', icon: BarChart3, roles: ['ADMIN'] },
+]
+
+// Только для админа в выпадашке профиля
+export const ADMIN_NAV_SECTIONS: NavSection[] = [
+  { href: '/settings', label: 'Настройки', icon: Settings, roles: ['ADMIN'] },
+]
+
+// Мобильный таббар — приоритет роли курьера на главные функции
+export const MOBILE_TABBAR_BY_ROLE = {
+  COURIER: [
+    { href: '/delivery', label: 'Доставка', icon: Truck },
+    { href: '/orders', label: 'Заказы', icon: ClipboardList },
+    { href: '/clients', label: 'Клиенты', icon: Building2 },
+    { href: '/settings', label: 'Профиль', icon: Settings },
+  ],
+  MANAGER: [
+    { href: '/orders', label: 'Заказы', icon: ClipboardList },
+    { href: '/clients', label: 'Клиенты', icon: Building2 },
+    { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
+    { href: '/delivery', label: 'Доставка', icon: Truck },
+  ],
+  CHEF: [
+    { href: '/production', label: 'Цех', icon: ChefHat },
+    { href: '/menu', label: 'Меню', icon: UtensilsCrossed },
+    { href: '/ingredients', label: 'Сырьё', icon: Carrot },
+    { href: '/orders', label: 'Заказы', icon: ClipboardList },
+  ],
+  ADMIN: [
+    { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
+    { href: '/orders', label: 'Заказы', icon: ClipboardList },
+    { href: '/production', label: 'Цех', icon: ChefHat },
+    { href: '/analytics', label: 'Аналитика', icon: BarChart3 },
+  ],
+} as const
+
+// Стартовая страница после логина — по роли
+export const HOME_BY_ROLE = {
+  ADMIN: '/dashboard',
+  MANAGER: '/orders',
+  CHEF: '/production',
+  COURIER: '/delivery',
+} as const

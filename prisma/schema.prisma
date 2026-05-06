@@ -1,0 +1,431 @@
+// Prisma schema для CRM "Будни" — B2B-доставка еды
+// Документация бизнес-логики см. в README.md (будет создан позже)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  CHEF
+  COURIER
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+}
+
+enum OrderType {
+  DYNAMIC // Каждый день меняется, требует подтверждения до cut-off
+  FIXED   // Постоянное число, автогенерация
+}
+
+enum DeliveryHorizon {
+  NEXT_DAY  // Заказ сегодня → доставка завтра (типичный случай)
+  SAME_DAY  // Заказ утром → доставка в обед того же дня
+}
+
+enum ScheduleType {
+  DAILY        // Каждый день
+  WEEKDAYS     // Пн-Пт
+  WEEKENDS     // Сб-Вс
+  CUSTOM_DAYS  // Конкретные дни недели (см. scheduleData.daysOfWeek)
+  ONE_TIME     // Разовый, на конкретные даты (см. scheduleData.dates)
+  INTERVAL     // С интервалом или по датам месяца (см. scheduleData)
+}
+
+enum PackagingType {
+  INDIVIDUAL // По 1 порции в индивидуальной таре
+  BULK       // В коробках по типам (супы отдельно, горячее отдельно)
+}
+
+enum OrderStatus {
+  DRAFT                  // Черновик (создан, но не сохранён окончательно)
+  PENDING_CONFIRMATION   // Ждём подтверждения (динамика, до 16:00)
+  CONFIRMED              // Подтверждён, будет производиться
+  LOCKED                 // Залочен после 18:00, изменения только админом
+  IN_PRODUCTION          // На производстве
+  OUT_FOR_DELIVERY       // В доставке
+  DELIVERED              // Доставлен
+  CANCELLED              // Отменён
+}
+
+enum OrderSource {
+  MANUAL          // Вручную через UI
+  MESSENGER       // Из мессенджера (после AI-парсинга)
+  FIXED_AUTO      // Автоматически сгенерирован для FIXED-конфига
+  RECURRING_AUTO  // Из расписания
+}
+
+enum DeliveryType {
+  IN_HOUSE          // Свой курьер
+  EXTERNAL_COURIER  // Внешний (Яндекс/Достависта/etc)
+}
+
+enum DeliveryStatus {
+  ASSIGNED      // Назначен курьер
+  PICKED_UP     // Забрал с производства
+  EN_ROUTE      // В пути
+  DELIVERED     // Доставлено
+  FAILED        // Не доставлено (с комментарием)
+}
+
+enum DishCategory {
+  SOUP        // Суп
+  MAIN        // Горячее блюдо
+  GARNISH     // Гарнир
+  SALAD       // Салат
+  DESSERT     // Десерт
+  DRINK       // Компот / напиток
+  BREAD_WHITE // Белый хлеб
+  BREAD_DARK  // Чёрный хлеб
+  PORRIDGE    // Каша (завтрак)
+  EGGS        // Яйца / омлет (завтрак)
+  PANCAKE     // Блинчики (ужин)
+  OTHER       // Прочее
+}
+
+enum IngredientUnit {
+  KG
+  L
+  PCS
+}
+
+enum DishUnit {
+  PORTION  // На порцию
+  LITER    // На литр (для супов, компотов)
+  KG       // На кг (для гарниров, салатов)
+  PIECE    // Поштучно (хлеб, блинчики)
+}
+
+enum MenuStatus {
+  DRAFT
+  APPROVED
+  ARCHIVED
+}
+
+// ============================================================
+// USERS / AUTH
+// ============================================================
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  role         UserRole
+  pinHash      String   @unique // Хэш PIN-кода (bcrypt)
+  isActive     Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  approvedMenus MenuCycle[] @relation("MenuApprovedBy")
+  activityLogs  ActivityLog[]
+
+  @@index([role, isActive])
+}
+
+// ============================================================
+// CLIENTS
+// ============================================================
+
+model Client {
+  id              String   @id @default(cuid())
+  name            String
+  contactName     String?
+  contactPhone    String?
+  contactMessenger String? // Username/ID в мессенджере
+  notes           String?  // Свободное поле о клиенте
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  locations    ClientLocation[]
+  mealConfigs  ClientMealConfig[]
+  orders       Order[]
+
+  @@index([isActive])
+  @@index([name])
+}
+
+model ClientLocation {
+  id                  String   @id @default(cuid())
+  clientId            String
+  client              Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name                String   // Например, "Офис на Ленина" или "Стройка №3"
+  address             String
+  deliveryWindowFrom  String?  // Формат "HH:mm", например "11:30"
+  deliveryWindowTo    String?  // Формат "HH:mm", например "12:00"
+  packaging           PackagingType @default(INDIVIDUAL)
+  tags                String[] @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  mealConfigs ClientMealConfig[]
+  orders      Order[]
+
+  @@index([clientId, isActive])
+}
+
+// Конфигурация питания клиента/точки: что заказывает, по какому графику, по какой цене
+model ClientMealConfig {
+  id               String         @id @default(cuid())
+  clientId         String
+  client           Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationId       String?        // null = на всего клиента; иначе конкретная точка
+  location         ClientLocation? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  mealType         MealType
+  orderType        OrderType
+  deliveryHorizon  DeliveryHorizon @default(NEXT_DAY)
+  scheduleType     ScheduleType
+  scheduleData     Json?          // Гибкие правила: {daysOfWeek: [1,2,3], dates: [...], intervalDays: 14}
+  fixedPortions    Int?           // Если orderType = FIXED
+  pricePerPortion  Decimal        @db.Decimal(10, 2)
+  validFrom        DateTime       @default(now())
+  validTo          DateTime?      // Null = бессрочно
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([clientId, isActive])
+  @@index([locationId])
+  @@index([mealType, orderType])
+}
+
+// ============================================================
+// INGREDIENTS / DISHES / TECH CARDS
+// ============================================================
+
+model Ingredient {
+  id           String         @id @default(cuid())
+  name         String         @unique
+  unit         IngredientUnit
+  pricePerUnit Decimal        @db.Decimal(10, 2) // Текущая цена за единицу
+  notes        String?
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  dishIngredients DishIngredient[]
+  priceHistory    IngredientPriceHistory[]
+
+  @@index([isActive])
+}
+
+// История изменений цен на ингредиенты
+model IngredientPriceHistory {
+  id           String     @id @default(cuid())
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  price        Decimal    @db.Decimal(10, 2)
+  validFrom    DateTime   @default(now())
+  changedBy    String?    // user id
+
+  @@index([ingredientId, validFrom])
+}
+
+model Dish {
+  id          String       @id @default(cuid())
+  name        String
+  category    DishCategory
+  unit        DishUnit     @default(PORTION)
+  portionSize Int?         // Размер порции в граммах/мл (для информации)
+  notes       String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  ingredients   DishIngredient[]
+  menuDayDishes MenuDayDish[]
+
+  @@index([category, isActive])
+}
+
+// Технологическая карта: ингредиенты в составе блюда (на 1 базовую единицу dish.unit)
+model DishIngredient {
+  id           String     @id @default(cuid())
+  dishId       String
+  dish         Dish       @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  bruttoGrams  Decimal    @db.Decimal(10, 2) // Сырой вес (для закупа)
+  nettoGrams   Decimal    @db.Decimal(10, 2) // Чистый вес (для расчёта выхода)
+  notes        String?
+
+  @@unique([dishId, ingredientId])
+  @@index([dishId])
+}
+
+// ============================================================
+// MEAL SETS (типовые наборы: обед/ужин/завтрак)
+// ============================================================
+
+model MealSet {
+  id        String   @id @default(cuid())
+  mealType  MealType
+  name      String   // "Обед стандарт", "Ужин стандарт", "Завтрак стандарт"
+  isDefault Boolean  @default(false) // true для базового набора каждого типа
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    MealSetItem[]
+  menuDays MenuDay[]
+
+  @@index([mealType, isActive])
+}
+
+// Состав набора: какие категории блюд и в каком количестве (например, 1 суп, 2 белых хлеба)
+model MealSetItem {
+  id           String       @id @default(cuid())
+  mealSetId    String
+  mealSet      MealSet      @relation(fields: [mealSetId], references: [id], onDelete: Cascade)
+  dishCategory DishCategory
+  quantity     Int          @default(1) // Сколько штук этой категории в наборе
+
+  @@index([mealSetId])
+}
+
+// ============================================================
+// MENU CYCLE (недельное меню)
+// ============================================================
+
+model MenuCycle {
+  id           String     @id @default(cuid())
+  name         String     // "Меню на неделю 17 (5-11 мая)"
+  validFrom    DateTime   // Начало недели (понедельник)
+  validTo      DateTime   // Конец недели (воскресенье)
+  status       MenuStatus @default(DRAFT)
+  approvedById String?
+  approvedBy   User?      @relation("MenuApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  days MenuDay[]
+
+  @@index([validFrom, validTo])
+  @@index([status])
+}
+
+model MenuDay {
+  id          String    @id @default(cuid())
+  menuCycleId String
+  menuCycle   MenuCycle @relation(fields: [menuCycleId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int       // 1 = Пн, 7 = Вс (ISO 8601)
+  mealType    MealType
+  mealSetId   String?
+  mealSet     MealSet?  @relation(fields: [mealSetId], references: [id])
+
+  dishes MenuDayDish[]
+
+  @@unique([menuCycleId, dayOfWeek, mealType])
+  @@index([menuCycleId])
+}
+
+// Конкретные блюда на этот день в этом типе питания
+model MenuDayDish {
+  id           String       @id @default(cuid())
+  menuDayId    String
+  menuDay      MenuDay      @relation(fields: [menuDayId], references: [id], onDelete: Cascade)
+  dishId       String
+  dish         Dish         @relation(fields: [dishId], references: [id])
+  slotCategory DishCategory // Какой слот в наборе закрывает (суп, горячее...)
+
+  @@index([menuDayId])
+  @@index([dishId])
+}
+
+// ============================================================
+// ORDERS
+// ============================================================
+
+model Order {
+  id              String          @id @default(cuid())
+  clientId        String
+  client          Client          @relation(fields: [clientId], references: [id])
+  locationId      String
+  location        ClientLocation  @relation(fields: [locationId], references: [id])
+  mealType        MealType
+  deliveryDate    DateTime        @db.Date
+  status          OrderStatus     @default(DRAFT)
+  portions        Int
+  pricePerPortion Decimal         @db.Decimal(10, 2) // Зафиксирована на момент создания
+  totalPrice      Decimal         @db.Decimal(10, 2) // = portions * pricePerPortion
+  packaging       PackagingType
+  tags            String[]        @default([]) // Унаследованы от точки + добавочные на конкретный заказ
+  source          OrderSource
+  originalMessage String?         // Если из мессенджера — сырой текст
+  notes           String?
+  createdAt       DateTime        @default(now())
+  confirmedAt     DateTime?
+  lockedAt        DateTime?
+  updatedAt       DateTime        @updatedAt
+
+  delivery Delivery?
+
+  @@index([deliveryDate, status])
+  @@index([clientId, deliveryDate])
+  @@index([locationId, deliveryDate])
+  @@index([status])
+}
+
+// ============================================================
+// DELIVERY (упрощённо для MVP)
+// ============================================================
+
+model Delivery {
+  id            String         @id @default(cuid())
+  orderId       String         @unique
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type          DeliveryType
+  courierName   String?        // Имя курьера (свой) или название службы
+  status        DeliveryStatus @default(ASSIGNED)
+  notes         String?
+  pickedUpAt    DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status])
+}
+
+// ============================================================
+// SETTINGS / LOG
+// ============================================================
+
+// Глобальные настройки системы (key-value)
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// Лог действий (для аудита)
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  userRole   UserRole?
+  action     String   // "ORDER_CREATED", "MENU_APPROVED", etc.
+  entityType String?  // "Order", "Client", "Menu"
+  entityId   String?
+  payload    Json?    // Дополнительные данные
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}

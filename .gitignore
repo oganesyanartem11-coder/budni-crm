@@ -39,3 +39,17 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# Claude Code — локальные настройки и runtime
+.claude/
+
+# IDE / OS — артефакты
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи
+*.log
