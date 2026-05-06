@@ -1,22 +1,51 @@
+import Link from 'next/link'
+import { Plus } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
-import { ComingSoon } from '@/components/layout/coming-soon'
+import { ClientsList } from './clients-list'
+import { requireRole } from '@/lib/auth/current-user'
+import { prisma } from '@/lib/db/prisma'
+import { serialize } from '@/lib/utils/serialize'
 
-export default function ClientsPage() {
+export default async function ClientsPage() {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  const clients = await prisma.client.findMany({
+    orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    include: {
+      locations: {
+        where: { isActive: true },
+        select: { id: true, name: true, packaging: true, tags: true },
+      },
+      mealConfigs: {
+        where: { isActive: true },
+        select: { id: true, mealType: true, orderType: true, fixedPortions: true, pricePerPortion: true },
+      },
+      _count: {
+        select: {
+          orders: true,
+          locations: { where: { isActive: true } },
+          mealConfigs: { where: { isActive: true } },
+        },
+      },
+    },
+  })
+
   return (
     <>
       <PageHeader
         title="Клиенты"
         subtitle="Карточки клиентов, точки, расписания, цены"
         actions={
-          <button className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity">
+          <Link
+            href="/clients/new"
+            className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
             Добавить клиента
-          </button>
+          </Link>
         }
       />
-      <ComingSoon
-        title="Клиенты в разработке"
-        sprint="Спринт 1"
-      />
+      <ClientsList clients={serialize(clients)} />
     </>
   )
 }

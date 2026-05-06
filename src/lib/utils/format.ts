@@ -76,3 +76,43 @@ export function pluralize(n: number, forms: [string, string, string]): string {
 export function formatPortions(n: number): string {
   return `${n} ${pluralize(n, ['порция', 'порции', 'порций'])}`
 }
+
+/**
+ * Маска телефона +7 (999) 999-99-99
+ * На вход — любая строка (с цифрами и мусором).
+ * На выход — отформатированная строка вида +7 (XXX) XXX-XX-XX.
+ * Если цифр недостаточно — возвращает то что есть.
+ */
+export function formatPhoneMask(input: string): string {
+  // Извлекаем только цифры
+  let digits = input.replace(/\D/g, '')
+
+  // Если ввели с 8 в начале (старый формат) — заменяем на 7
+  if (digits.startsWith('8') && digits.length >= 11) {
+    digits = '7' + digits.slice(1)
+  }
+
+  // Если первая цифра не 7 и есть хоть одна цифра — добавляем 7 в начало
+  if (digits.length > 0 && !digits.startsWith('7')) {
+    digits = '7' + digits
+  }
+
+  // Обрезаем до 11 цифр (7 + 10)
+  digits = digits.slice(0, 11)
+
+  // Форматируем
+  if (digits.length === 0) return ''
+  if (digits.length <= 1) return '+7'
+  if (digits.length <= 4) return `+7 (${digits.slice(1)}`
+  if (digits.length <= 7) return `+7 (${digits.slice(1, 4)}) ${digits.slice(4)}`
+  if (digits.length <= 9) return `+7 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`
+  return `+7 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7, 9)}-${digits.slice(9, 11)}`
+}
+
+/**
+ * Проверка что телефон в правильном формате (полностью заполненный +7 (XXX) XXX-XX-XX)
+ */
+export function isValidPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, '')
+  return digits.length === 11 && digits.startsWith('7')
+}

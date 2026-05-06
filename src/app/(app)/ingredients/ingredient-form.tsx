@@ -28,8 +28,6 @@ interface Props {
   onCancel: () => void
 }
 
-const UNIT_LABELS = { KG: 'кг', L: 'л', PCS: 'шт' } as const
-
 export function IngredientForm({ ingredient, onSuccess, onCancel }: Props) {
   const [isPending, startTransition] = useTransition()
 

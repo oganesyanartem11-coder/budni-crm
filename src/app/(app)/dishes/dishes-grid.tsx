@@ -3,14 +3,12 @@
 import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Search, Edit2 } from 'lucide-react'
-import type { Dish, DishCategory, DishIngredient, Ingredient, IngredientUnit, DishUnit } from '@prisma/client'
+import type { Dish, DishCategory, DishIngredient, Ingredient } from '@prisma/client'
 import {
   DISH_CATEGORY_LABELS,
   DISH_CATEGORY_PLURAL,
   DISH_CATEGORY_ICONS,
   DISH_CATEGORY_ORDER,
-  DISH_UNIT_LABELS,
-  INGREDIENT_UNIT_LABELS,
 } from '@/lib/constants/dish-categories'
 import { formatMoney } from '@/lib/utils/format'
 import { calculateDishCost } from '@/lib/utils/dish-cost'

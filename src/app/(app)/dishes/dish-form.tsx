@@ -9,13 +9,12 @@ import { createDish, updateDish, deleteDish, getDishUsage } from './actions'
 import {
   DISH_CATEGORY_LABELS,
   DISH_CATEGORY_ORDER,
-  DISH_UNIT_LABELS,
   INGREDIENT_UNIT_LABELS,
 } from '@/lib/constants/dish-categories'
 import { calculateDishCost } from '@/lib/utils/dish-cost'
 import { formatMoney } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
-import type { Dish, DishCategory, DishIngredient, Ingredient, DishUnit, IngredientUnit } from '@prisma/client'
+import type { Dish, DishCategory, DishUnit, IngredientUnit } from '@prisma/client'
 
 type SerializedIngredient = {
   id: string

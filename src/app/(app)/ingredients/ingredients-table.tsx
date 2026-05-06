@@ -32,7 +32,7 @@ export function IngredientsTable({ ingredients }: Props) {
     open: false,
   })
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [archivePending, startArchive] = useTransition()
+  const [, startArchive] = useTransition()
 
   const filtered = useMemo(() => {
     return ingredients.filter((ing) => {

@@ -1,7 +1,6 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
