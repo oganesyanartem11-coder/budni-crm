@@ -61,6 +61,21 @@ export async function seedIngredients(prisma: PrismaClient): Promise<Map<string,
         pricePerUnit: ing.pricePerUnit,
       },
     })
+
+    // Если истории цен ещё нет — создаём начальную запись
+    const historyCount = await prisma.ingredientPriceHistory.count({
+      where: { ingredientId: result.id },
+    })
+    if (historyCount === 0) {
+      await prisma.ingredientPriceHistory.create({
+        data: {
+          ingredientId: result.id,
+          price: ing.pricePerUnit,
+          validFrom: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        },
+      })
+    }
+
     map.set(ing.name, result.id)
   }
 
