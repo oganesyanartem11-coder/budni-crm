@@ -8,6 +8,7 @@ import {
   Truck,
   BarChart3,
   Settings,
+  CalendarDays,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -24,7 +25,8 @@ export const TOP_NAV_SECTIONS: NavSection[] = [
   { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
   { href: '/orders', label: 'Заказы', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
   { href: '/clients', label: 'Клиенты', icon: Building2, roles: ['ADMIN', 'MANAGER'] },
-  { href: '/menu', label: 'Меню', icon: UtensilsCrossed, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
+  { href: '/dishes', label: 'Блюда', icon: UtensilsCrossed, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
+  { href: '/menu', label: 'Меню', icon: CalendarDays, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
   { href: '/ingredients', label: 'Сырьё', icon: Carrot, roles: ['ADMIN', 'CHEF'] },
   { href: '/production', label: 'Производство', icon: ChefHat, roles: ['ADMIN', 'CHEF'] },
   { href: '/delivery', label: 'Доставка', icon: Truck, roles: ['ADMIN', 'MANAGER', 'COURIER'] },
@@ -52,7 +54,7 @@ export const MOBILE_TABBAR_BY_ROLE = {
   ],
   CHEF: [
     { href: '/production', label: 'Цех', icon: ChefHat },
-    { href: '/menu', label: 'Меню', icon: UtensilsCrossed },
+    { href: '/dishes', label: 'Блюда', icon: UtensilsCrossed },
     { href: '/ingredients', label: 'Сырьё', icon: Carrot },
     { href: '/orders', label: 'Заказы', icon: ClipboardList },
   ],

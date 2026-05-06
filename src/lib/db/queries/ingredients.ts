@@ -27,3 +27,16 @@ export async function getIngredientPriceHistory(id: string) {
     take: 50,
   })
 }
+
+export async function listActiveIngredientsLight() {
+  return prisma.ingredient.findMany({
+    where: { isActive: true },
+    orderBy: { name: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      unit: true,
+      pricePerUnit: true,
+    },
+  })
+}
