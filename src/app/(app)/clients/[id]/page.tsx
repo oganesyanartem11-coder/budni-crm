@@ -6,6 +6,7 @@ import { ClientDetail } from './client-detail'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { serialize } from '@/lib/utils/serialize'
+import { getClientAnalytics } from '@/lib/db/queries/client-analytics'
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole(['ADMIN', 'MANAGER'])
@@ -28,6 +29,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   })
 
   if (!client) notFound()
+
+  const analytics = await getClientAnalytics(client.id)
 
   return (
     <>
@@ -57,7 +60,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           </Link>
         }
       />
-      <ClientDetail client={serialize(client)} />
+      <ClientDetail client={serialize(client)} analytics={serialize(analytics)} />
     </>
   )
 }

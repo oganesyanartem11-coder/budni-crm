@@ -2,10 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
 import { LocationModal } from './location-modal'
 import { MealConfigModal } from './meal-config-modal'
+import { ClientAnalyticsTab } from './client-analytics-tab'
+import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 import { archiveClient, archiveLocation, deleteMealConfig } from '../actions'
 import { formatMoney, formatDeliveryWindow } from '@/lib/utils/format'
 import {
@@ -42,11 +45,12 @@ interface SerializedClientDetail extends Omit<Client, never> {
 
 interface Props {
   client: SerializedClientDetail
+  analytics: ClientAnalytics
 }
 
 type Tab = 'locations' | 'configs' | 'orders' | 'analytics'
 
-export function ClientDetail({ client }: Props) {
+export function ClientDetail({ client, analytics }: Props) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('locations')
   const [, startTransition] = useTransition()
@@ -128,20 +132,23 @@ export function ClientDetail({ client }: Props) {
       )}
 
       {tab === 'orders' && (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-2xl bg-surface border border-border p-8 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
           <ClipboardList className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
           <p className="font-medium text-fg mb-1">{client._count.orders} заказов в истории</p>
-          <p className="text-sm">Реализация — Спринт 2</p>
+          <p className="text-sm text-fg-muted mb-5">
+            Открыть полный список заказов этого клиента в разделе «Заказы».
+          </p>
+          <Link
+            href={`/orders?clientId=${client.id}`}
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Открыть все заказы
+          </Link>
         </div>
       )}
 
-      {tab === 'analytics' && (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <BarChart3 className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p className="font-medium text-fg mb-1">Аналитика клиента</p>
-          <p className="text-sm">Реализация — Спринт 4</p>
-        </div>
-      )}
+      {tab === 'analytics' && <ClientAnalyticsTab analytics={analytics} />}
 
       <div className="pt-4 border-t border-border">
         <button
