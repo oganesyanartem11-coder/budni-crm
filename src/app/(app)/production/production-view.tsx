@@ -1,24 +1,25 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { ChevronLeft, ChevronRight, AlertTriangle, ChefHat, Carrot, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info } from 'lucide-react'
 import { formatDateShort, formatDateNumeric, formatMoney } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
 import { cn } from '@/lib/utils/cn'
-import type { ProductionSummary } from '@/lib/db/queries/production'
+import type { ProductionSummary, IngredientsSummary, IngredientProductionRow } from '@/lib/db/queries/production'
 import type { MealType, DishCategory } from '@prisma/client'
 
 interface Props {
   summary: ProductionSummary
+  ingredientsSummary: IngredientsSummary
   targetDateIso: string
   tab: 'dishes' | 'ingredients'
 }
 
 const MEAL_TYPE_ORDER: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
 
-export function ProductionView({ summary, targetDateIso, tab }: Props) {
+export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const [, startTransition] = useTransition()
@@ -166,13 +167,7 @@ export function ProductionView({ summary, targetDateIso, tab }: Props) {
 
       {/* Контент */}
       {tab === 'dishes' && <DishesTab summary={summary} />}
-      {tab === 'ingredients' && (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <Carrot className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p className="font-medium text-fg mb-1">Сводка по сырью</p>
-          <p className="text-sm">Реализация — Промт 3.2</p>
-        </div>
-      )}
+      {tab === 'ingredients' && <IngredientsTab summary={ingredientsSummary} />}
     </div>
   )
 }
@@ -322,5 +317,144 @@ function TabButton({
       <Icon className="w-4 h-4" />
       {label}
     </button>
+  )
+}
+
+function IngredientsTab({ summary }: { summary: IngredientsSummary }) {
+  if (!summary.hasMenu) {
+    return (
+      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <Carrot className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
+        <p className="font-medium text-fg mb-1">Меню не утверждено</p>
+        <p className="text-sm">Без утверждённого меню невозможно посчитать потребности по сырью.</p>
+      </div>
+    )
+  }
+
+  if (summary.rows.length === 0) {
+    return (
+      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <Carrot className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
+        <p className="font-medium text-fg mb-1">Нет потребностей в сырье</p>
+        <p className="text-sm">На эту дату не нашлось активных заказов или блюд с тех. картами.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Маржа сверху */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <AggregateCard label="Выручка" value={formatMoney(summary.totalRevenue)} tone="info" />
+        <AggregateCard
+          label="Закупка"
+          value={formatMoney(summary.totalCost)}
+          hint={`${summary.rows.length} ингредиентов`}
+        />
+        <AggregateCard
+          label="Маржа (ориентир)"
+          value={formatMoney(summary.estimatedMargin)}
+          tone={summary.estimatedMargin > 0 ? 'info' : 'warning'}
+          hint={
+            summary.totalRevenue > 0
+              ? `${Math.round((summary.estimatedMargin / summary.totalRevenue) * 100)}% от выручки`
+              : undefined
+          }
+        />
+      </div>
+
+      {/* Таблица ингредиентов */}
+      <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-bg/50 text-xs uppercase tracking-wider text-fg-muted">
+              <tr>
+                <th className="text-left px-4 py-3 font-medium w-10"></th>
+                <th className="text-left px-3 py-3 font-medium">Ингредиент</th>
+                <th className="text-right px-3 py-3 font-medium">Нужно</th>
+                <th className="text-right px-3 py-3 font-medium hidden md:table-cell">Цена</th>
+                <th className="text-right px-3 py-3 font-medium">Стоимость</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {summary.rows.map((row) => (
+                <IngredientRow key={row.ingredientId} row={row} />
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-bg/30 border-t-2 border-border">
+                <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold">
+                  Итого закупка:
+                </td>
+                <td className="px-3 py-3 text-right tabular-nums font-bold text-base">
+                  {formatMoney(summary.totalCost)}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <p className="text-xs text-fg-subtle text-center">
+        * Расчёт по тех. картам блюд (брутто). Цены из последней записи в справочнике сырья.
+      </p>
+    </div>
+  )
+}
+
+function IngredientRow({ row }: { row: IngredientProductionRow }) {
+  const [expanded, setExpanded] = useState(false)
+  const unitLabel = row.unit === 'KG' ? 'кг' : row.unit === 'L' ? 'л' : 'шт'
+
+  function formatAmount(value: number): string {
+    if (row.unit === 'PCS') return Math.ceil(value).toString()
+    return value.toFixed(2)
+  }
+
+  return (
+    <>
+      <tr
+        className="hover:bg-bg/30 transition-colors cursor-pointer"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-4 py-3 text-fg-subtle">
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </td>
+        <td className="px-3 py-3 font-medium">{row.ingredientName}</td>
+        <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
+          {formatAmount(row.totalNeeded)} {unitLabel}
+        </td>
+        <td className="px-3 py-3 text-right tabular-nums text-fg-muted hidden md:table-cell whitespace-nowrap">
+          {formatMoney(row.pricePerUnit)} / {unitLabel}
+        </td>
+        <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">
+          {formatMoney(row.totalCost)}
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="bg-bg/20">
+          <td colSpan={5} className="px-12 py-3">
+            <p className="text-xs uppercase tracking-wider text-fg-subtle mb-2">
+              Используется в блюдах
+            </p>
+            <ul className="space-y-1.5 text-xs">
+              {row.usages.map((u, idx) => (
+                <li key={u.dishId + '-' + idx} className="flex items-baseline justify-between gap-3">
+                  <span className="text-fg">
+                    <span className="font-medium">{u.dishName}</span>
+                    <span className="text-fg-muted ml-2">
+                      {u.bruttoPerPortion} {u.unit === 'PCS' ? 'шт' : 'г'} × {u.portions} порций
+                    </span>
+                  </span>
+                  <span className="text-fg-muted tabular-nums whitespace-nowrap">
+                    = {formatAmount(u.totalNeeded)} {unitLabel}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
