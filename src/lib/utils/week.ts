@@ -78,3 +78,32 @@ export function getDateForDayOfWeek(monday: Date, dayOfWeek: number): Date {
   date.setDate(monday.getDate() + (dayOfWeek - 1))
   return date
 }
+
+/**
+ * Финансовая неделя: Пт 00:00 → Чт 23:59 (по ТЗ).
+ */
+export function getFinancialWeek(date: Date): { from: Date; to: Date } {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+
+  const dow = d.getDay()
+  const backToFri = (dow - 5 + 7) % 7
+  const from = new Date(d)
+  from.setDate(d.getDate() - backToFri)
+  from.setHours(0, 0, 0, 0)
+
+  const to = new Date(from)
+  to.setDate(from.getDate() + 6)
+  to.setHours(23, 59, 59, 999)
+
+  return { from, to }
+}
+
+export function getPreviousFinancialWeek(date: Date): { from: Date; to: Date } {
+  const current = getFinancialWeek(date)
+  const from = new Date(current.from)
+  from.setDate(from.getDate() - 7)
+  const to = new Date(current.to)
+  to.setDate(to.getDate() - 7)
+  return { from, to }
+}

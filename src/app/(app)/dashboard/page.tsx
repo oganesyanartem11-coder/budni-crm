@@ -4,6 +4,8 @@ import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { cn } from '@/lib/utils/cn'
+import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
+import { AdminWeekBlock } from './admin-week-block'
 
 export default async function DashboardPage() {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
@@ -45,6 +47,10 @@ export default async function DashboardPage() {
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
   const isAdminOrChef = user.role === 'ADMIN' || user.role === 'CHEF'
 
+  const adminData = isAdminOrManager
+    ? await getAdminDashboardData()
+    : null
+
   return (
     <>
       <PageHeader
@@ -85,12 +91,12 @@ export default async function DashboardPage() {
                   {pendingOrders > 0 ? 'Подтвердить до 16:00 →' : 'Все на сегодня подтверждены'}
                 </p>
               </Link>
-              <ComingSoonCard
-                label="Выручка пт-пт"
-                hint="Спринт 4"
-              />
             </div>
           </section>
+        )}
+
+        {isAdminOrManager && adminData && (
+          <AdminWeekBlock data={adminData} />
         )}
 
         {/* Каталоги */}
