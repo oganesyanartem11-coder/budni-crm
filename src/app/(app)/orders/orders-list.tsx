@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { Search, X, Edit2, Check, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -44,6 +45,7 @@ const ALL_STATUSES: OrderStatus[] = [
 ]
 
 export function OrdersList({ orders, clients, filters, onFilterChange, isPending }: Props) {
+  const router = useRouter()
   const hasFilters = filters.clientId || filters.mealType || filters.status || filters.search
 
   function clearAll() {
@@ -153,7 +155,16 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
               </thead>
               <tbody className="divide-y divide-border">
                 {orders.map((order) => (
-                  <tr key={order.id} className="group hover:bg-bg/30 transition-colors">
+                  <tr
+                    key={order.id}
+                    className="group hover:bg-bg/30 transition-colors cursor-pointer"
+                    onClick={(e) => {
+                      // Не переходим если кликнули по интерактивному элементу внутри строки
+                      const target = e.target as HTMLElement
+                      if (target.closest('a, button, input')) return
+                      router.push(`/orders/${order.id}`)
+                    }}
+                  >
                     <td className="px-4 py-3">
                       <Link href={`/clients/${order.client.id}`} className="hover:underline font-medium">
                         {order.client.name}

@@ -136,3 +136,36 @@ export async function listPendingConfirmation() {
     },
   })
 }
+
+/**
+ * Возвращает заказ со всеми связями для детальной карточки
+ * + историю изменений из ActivityLog по этому orderId.
+ */
+export async function getOrderDetail(orderId: string) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      client: { select: { id: true, name: true, contactName: true, contactPhone: true } },
+      location: { select: { id: true, name: true, address: true, packaging: true, tags: true, deliveryWindowFrom: true, deliveryWindowTo: true } },
+      sourceConfig: { select: { id: true, orderType: true, scheduleType: true, fixedPortions: true } },
+      createdBy: { select: { id: true, name: true, role: true } },
+      delivery: { select: { id: true, status: true, deliveredAt: true, courierName: true } },
+    },
+  })
+
+  if (!order) return null
+
+  const history = await prisma.activityLog.findMany({
+    where: {
+      entityType: 'Order',
+      entityId: orderId,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    include: {
+      user: { select: { id: true, name: true, role: true } },
+    },
+  })
+
+  return { order, history }
+}

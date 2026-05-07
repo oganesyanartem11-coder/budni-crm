@@ -394,3 +394,159 @@ export async function manuallyLockOrders(targetDateIso: string): Promise<ActionR
     },
   }
 }
+
+const cancelOrderSchema = z.object({
+  orderId: z.string().min(1),
+  reason: z.string().max(500).nullable().optional(),
+})
+
+/**
+ * Отменяет заказ. Работает на любом статусе кроме DELIVERED/CANCELLED.
+ * Записывает в ActivityLog с причиной.
+ */
+export async function cancelOrder(
+  formData: z.infer<typeof cancelOrderSchema>
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = cancelOrderSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const { orderId, reason } = parsed.data
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, portions: true, clientId: true },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+  if (order.status === 'CANCELLED') return { ok: false, error: 'Заказ уже отменён' }
+  if (order.status === 'DELIVERED') return { ok: false, error: 'Доставленный заказ нельзя отменить' }
+
+  const wasLocked = ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: 'CANCELLED',
+      ...(wasLocked ? { editedAfterLockAt: new Date() } : {}),
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'ORDER_CANCELLED',
+      entityType: 'Order',
+      entityId: orderId,
+      payload: {
+        previousStatus: order.status,
+        portions: order.portions,
+        reason: reason ?? null,
+        afterLock: wasLocked,
+      },
+    },
+  })
+
+  revalidatePath('/orders')
+  revalidatePath(`/orders/${orderId}`)
+  return { ok: true, data: undefined }
+}
+
+const rescheduleOrderSchema = z.object({
+  orderId: z.string().min(1),
+  newDate: z.string().min(1),
+})
+
+/**
+ * Переносит заказ на другую дату. Не должно создавать дубль —
+ * проверяем что на новой дате нет другого активного заказа
+ * с тем же бизнес-ключом (clientId + locationId + mealType).
+ */
+export async function rescheduleOrder(
+  formData: z.infer<typeof rescheduleOrderSchema>
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = rescheduleOrderSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const { orderId, newDate } = parsed.data
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      status: true,
+      clientId: true,
+      locationId: true,
+      mealType: true,
+      deliveryDate: true,
+    },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+  if (order.status === 'CANCELLED' || order.status === 'DELIVERED') {
+    return { ok: false, error: `Нельзя перенести заказ в статусе ${order.status}` }
+  }
+
+  const target = new Date(newDate)
+  if (isNaN(target.getTime())) {
+    return { ok: false, error: 'Неверная дата' }
+  }
+  target.setHours(0, 0, 0, 0)
+  const targetEnd = new Date(target)
+  targetEnd.setHours(23, 59, 59, 999)
+
+  // Проверка дубля по бизнес-ключу
+  const conflict = await prisma.order.findFirst({
+    where: {
+      clientId: order.clientId,
+      locationId: order.locationId,
+      mealType: order.mealType,
+      deliveryDate: { gte: target, lte: targetEnd },
+      status: { not: 'CANCELLED' },
+      id: { not: orderId },
+    },
+    select: { id: true, status: true },
+  })
+
+  if (conflict) {
+    return {
+      ok: false,
+      error: `На эту дату уже есть заказ (${conflict.status}). Сначала разберитесь с ним.`,
+    }
+  }
+
+  const wasLocked = ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      deliveryDate: target,
+      ...(wasLocked ? { editedAfterLockAt: new Date() } : {}),
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'ORDER_RESCHEDULED',
+      entityType: 'Order',
+      entityId: orderId,
+      payload: {
+        oldDate: order.deliveryDate.toISOString(),
+        newDate: target.toISOString(),
+        afterLock: wasLocked,
+      },
+    },
+  })
+
+  revalidatePath('/orders')
+  revalidatePath(`/orders/${orderId}`)
+  return { ok: true, data: undefined }
+}
