@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/generate-fixed-orders",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/lock-orders",
+      "schedule": "0 15 * * *"
     }
   ]
 }

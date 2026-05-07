@@ -376,6 +376,7 @@ model Order {
   createdAt       DateTime        @default(now())
   confirmedAt     DateTime?
   lockedAt        DateTime?
+  editedAfterLockAt DateTime?
   updatedAt       DateTime        @updatedAt
 
   // Аудит и связи с источником

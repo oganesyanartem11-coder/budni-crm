@@ -289,3 +289,108 @@ export async function confirmDynamicOrder(
   revalidatePath('/dashboard')
   return { ok: true, data: { status: newStatus } }
 }
+
+const editOrderSchema = z.object({
+  orderId: z.string().min(1),
+  portions: z.number().int().nonnegative(),
+})
+
+/**
+ * Редактирует порции существующего заказа.
+ * Если заказ LOCKED — проставляет editedAfterLockAt (визуальный маркер).
+ * Заблокировать редактирование не может — клиент мог позвонить в 18:30
+ * "извините, нас будет 100 а не 80", и менеджер ОБЯЗАН зафиксировать это.
+ *
+ * Не для PENDING_CONFIRMATION — для них есть confirmDynamicOrder.
+ * Не для CANCELLED/DELIVERED — это финальные статусы.
+ */
+export async function editOrderPortions(
+  formData: z.infer<typeof editOrderSchema>
+): Promise<ActionResult<{ editedAfterLock: boolean }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = editOrderSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const { orderId, portions } = parsed.data
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      status: true,
+      portions: true,
+      pricePerPortion: true,
+    },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+
+  if (order.status === 'PENDING_CONFIRMATION') {
+    return { ok: false, error: 'Используйте подтверждение для PENDING-заказов' }
+  }
+  if (order.status === 'CANCELLED' || order.status === 'DELIVERED' || order.status === 'DRAFT') {
+    return { ok: false, error: `Нельзя править заказ в статусе ${order.status}` }
+  }
+
+  if (portions === order.portions) {
+    return { ok: true, data: { editedAfterLock: false } }
+  }
+
+  const isLocked = ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+  const totalPrice = portions * Number(order.pricePerPortion)
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      portions,
+      totalPrice,
+      ...(isLocked ? { editedAfterLockAt: new Date() } : {}),
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'ORDER_PORTIONS_EDITED',
+      entityType: 'Order',
+      entityId: orderId,
+      payload: {
+        oldPortions: order.portions,
+        newPortions: portions,
+        afterLock: isLocked,
+        totalPrice,
+      },
+    },
+  })
+
+  revalidatePath('/orders')
+  return { ok: true, data: { editedAfterLock: isLocked } }
+}
+
+export async function manuallyLockOrders(targetDateIso: string): Promise<ActionResult<{
+  locked: number
+  candidatesTotal: number
+}>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const date = new Date(targetDateIso)
+  if (isNaN(date.getTime())) {
+    return { ok: false, error: 'Неверная дата' }
+  }
+  date.setHours(0, 0, 0, 0)
+
+  const { lockOrdersForDate } = await import('@/lib/orders/lock-orders')
+  const stats = await lockOrdersForDate(date)
+
+  revalidatePath('/orders')
+  return {
+    ok: true,
+    data: {
+      locked: stats.locked,
+      candidatesTotal: stats.candidatesTotal,
+    },
+  }
+}

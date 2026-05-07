@@ -1,8 +1,11 @@
 'use client'
 
-import { Search, X } from 'lucide-react'
+import { useState, useTransition } from 'react'
+import { Search, X, Edit2, Check, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
+import { editOrderPortions } from './actions'
 import { formatMoney } from '@/lib/utils/format'
 import { ORDER_STATUS_LABELS } from '@/lib/constants/order'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
@@ -150,7 +153,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
               </thead>
               <tbody className="divide-y divide-border">
                 {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-bg/30 transition-colors">
+                  <tr key={order.id} className="group hover:bg-bg/30 transition-colors">
                     <td className="px-4 py-3">
                       <Link href={`/clients/${order.client.id}`} className="hover:underline font-medium">
                         {order.client.name}
@@ -161,7 +164,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                       {MEAL_TYPE_LABELS[order.mealType]}
                     </td>
                     <td className="px-3 py-3 text-right tabular-nums font-medium">
-                      {order.portions}
+                      <PortionsCell order={order} />
                     </td>
                     <td className="px-3 py-3 text-right tabular-nums text-fg-muted hidden md:table-cell whitespace-nowrap">
                       {formatMoney(order.pricePerPortion)}
@@ -188,6 +191,99 @@ function AggregateCard({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl bg-surface border border-border p-4" style={{ boxShadow: 'var(--shadow-card)' }}>
       <p className="text-xs text-fg-muted">{label}</p>
       <p className="text-2xl font-bold tabular-nums mt-1">{value}</p>
+    </div>
+  )
+}
+
+function PortionsCell({ order }: { order: SerializedOrder }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(String(order.portions))
+  const [isPending, startTransition] = useTransition()
+
+  // Заказ можно редактировать только в активных статусах (не CANCELLED/DELIVERED/PENDING/DRAFT)
+  const editable = ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+  const wasEditedAfterLock = !!order.editedAfterLockAt
+
+  function handleSubmit() {
+    const num = parseInt(value, 10)
+    if (isNaN(num) || num < 0) {
+      toast.error('Введите корректное число')
+      return
+    }
+
+    startTransition(async () => {
+      const result = await editOrderPortions({ orderId: order.id, portions: num })
+      if (result.ok) {
+        if (result.data.editedAfterLock) {
+          toast.success(`Порций изменено: ${num}. Помечено как правка после lock.`, { icon: '⚠️' })
+        } else {
+          toast.success(`Порций изменено: ${num}`)
+        }
+        setEditing(false)
+      } else {
+        toast.error(result.error)
+        setValue(String(order.portions))
+      }
+    })
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5 justify-end">
+        <input
+          type="number"
+          min="0"
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleSubmit()
+            } else if (e.key === 'Escape') {
+              setEditing(false)
+              setValue(String(order.portions))
+            }
+          }}
+          onBlur={() => {
+            if (parseInt(value, 10) === order.portions) {
+              setEditing(false)
+            }
+          }}
+          disabled={isPending}
+          className="w-20 px-2 py-1 rounded-lg bg-bg border border-accent text-sm text-right tabular-nums focus:outline-none disabled:opacity-50"
+        />
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isPending}
+          aria-label="Сохранить"
+          className="w-7 h-7 rounded-full bg-accent text-accent-fg flex items-center justify-center hover:opacity-90 disabled:opacity-50"
+        >
+          <Check className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 justify-end">
+      {wasEditedAfterLock && (
+        <span title="Правлено после 18:00 — кухню и курьера может задеть" className="text-danger-fg">
+          <AlertTriangle className="w-3.5 h-3.5" />
+        </span>
+      )}
+      <span>{order.portions}</span>
+      {editable && (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          aria-label="Редактировать порции"
+          className="opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full hover:bg-bg flex items-center justify-center text-fg-subtle hover:text-fg transition-all"
+        >
+          <Edit2 className="w-3 h-3" />
+        </button>
+      )}
     </div>
   )
 }
