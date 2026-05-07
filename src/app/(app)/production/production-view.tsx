@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info } from 'lucide-react'
+import Link from 'next/link'
+import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info, Printer } from 'lucide-react'
 import { formatDateShort, formatDateNumeric, formatMoney } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
@@ -80,6 +81,13 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
             >
               Завтра
             </button>
+            <Link
+              href={`/production/print?date=${targetDateIso.slice(0, 10)}`}
+              className="px-3 py-1.5 rounded-pill bg-bg hover:bg-border text-fg-muted hover:text-fg text-xs font-medium transition-colors flex items-center gap-1.5"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Печать</span>
+            </Link>
           </div>
         </div>
 

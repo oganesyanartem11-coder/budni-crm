@@ -340,3 +340,74 @@ export async function getIngredientsSummary(targetDate: Date): Promise<Ingredien
     hasMenu: true,
   }
 }
+
+export interface AssemblyOrder {
+  orderId: string
+  clientName: string
+  clientContactPhone: string | null
+  locationName: string
+  locationAddress: string
+  mealType: MealType
+  portions: number
+  packaging: 'INDIVIDUAL' | 'BULK'
+  tags: string[]
+  notes: string | null
+  deliveryWindowFrom: string | null
+  deliveryWindowTo: string | null
+  status: OrderStatus
+}
+
+/**
+ * Список заказов для листа сборки и для курьера на дату.
+ * Сортировка по окну доставки (раннее окно — раньше едет).
+ */
+export async function getAssemblyOrders(targetDate: Date): Promise<AssemblyOrder[]> {
+  const date = new Date(targetDate)
+  date.setHours(0, 0, 0, 0)
+  const dayEnd = new Date(date)
+  dayEnd.setHours(23, 59, 59, 999)
+
+  const orders = await prisma.order.findMany({
+    where: {
+      deliveryDate: { gte: date, lte: dayEnd },
+      status: { in: PRODUCTION_STATUSES },
+    },
+    include: {
+      client: { select: { name: true, contactPhone: true } },
+      location: {
+        select: {
+          name: true,
+          address: true,
+          packaging: true,
+          tags: true,
+          deliveryWindowFrom: true,
+          deliveryWindowTo: true,
+        },
+      },
+    },
+  })
+
+  // Сортируем: сначала по окну доставки (от раннего к позднему), потом по клиенту
+  return orders
+    .map((o) => ({
+      orderId: o.id,
+      clientName: o.client.name,
+      clientContactPhone: o.client.contactPhone,
+      locationName: o.location.name,
+      locationAddress: o.location.address,
+      mealType: o.mealType,
+      portions: o.portions,
+      packaging: o.location.packaging,
+      tags: o.location.tags,
+      notes: o.notes,
+      deliveryWindowFrom: o.location.deliveryWindowFrom,
+      deliveryWindowTo: o.location.deliveryWindowTo,
+      status: o.status,
+    }))
+    .sort((a, b) => {
+      const aFrom = a.deliveryWindowFrom ?? '99:99'
+      const bFrom = b.deliveryWindowFrom ?? '99:99'
+      if (aFrom !== bFrom) return aFrom.localeCompare(bFrom)
+      return a.clientName.localeCompare(b.clientName, 'ru')
+    })
+}

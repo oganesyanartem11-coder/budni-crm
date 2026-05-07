@@ -198,10 +198,71 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Утилитные классы для печати */
 @media print {
-  .no-print { display: none !important; }
-  body {
+  /* Скрываем навигацию, левый рейл, кнопки печати, всё что не относится к листу */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Распечатка — белый фон без тонкости теней */
+  body, html {
     background: white !important;
     color: black !important;
+  }
+
+  /* Убираем боковые отступы layout'а */
+  main {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Печатаемая область */
+  .print-area {
+    padding: 0 !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Странички A4 */
+  .print-page {
+    page-break-after: always;
+  }
+  .print-page:last-child {
+    page-break-after: auto;
+  }
+
+  /* Тонкие границы вместо толстых, без теней */
+  .print-area * {
+    box-shadow: none !important;
+    border-color: #ccc !important;
+  }
+
+  /* Заголовки — крупнее для читаемости с расстояния */
+  .print-title {
+    font-size: 28pt !important;
+    font-weight: 700 !important;
+    margin-bottom: 8pt !important;
+  }
+  .print-section {
+    font-size: 20pt !important;
+    font-weight: 700 !important;
+    margin-top: 12pt !important;
+    margin-bottom: 6pt !important;
+  }
+
+  /* Таблицы — компактные, чёткие */
+  .print-area table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 11pt !important;
+  }
+  .print-area th, .print-area td {
+    border: 1px solid #ccc !important;
+    padding: 6pt 8pt !important;
+    text-align: left !important;
+  }
+  .print-area th {
+    background: #f5f5f5 !important;
+    font-weight: 700 !important;
   }
 }
 
