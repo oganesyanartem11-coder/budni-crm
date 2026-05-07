@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/generate-fixed-orders",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}

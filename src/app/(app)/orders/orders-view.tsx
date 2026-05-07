@@ -1,10 +1,12 @@
 'use client'
 
-import { useTransition, useMemo } from 'react'
+import { useState, useTransition, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { List, CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
+import { List, CalendarDays, ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react'
+import { toast } from 'sonner'
 import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
+import { regenerateFixedOrders } from './actions'
 import { formatDateShort, formatDateNumeric } from '@/lib/utils/format'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
@@ -134,31 +136,36 @@ export function OrdersView({
             <ViewToggleButton active={view === 'week'} onClick={() => setView('week')} icon={CalendarDays} label="Неделя" />
           </div>
 
-          {/* Быстрые ссылки */}
-          {view === 'list' && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={jumpToToday}
-                className={cn(
-                  'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-                  isToday ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-                )}
-              >
-                Сегодня
-              </button>
-              <button
-                type="button"
-                onClick={jumpToTomorrow}
-                className={cn(
-                  'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-                  isTomorrow ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-                )}
-              >
-                Завтра
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Быстрые ссылки */}
+            {view === 'list' && (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={jumpToToday}
+                  className={cn(
+                    'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
+                    isToday ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
+                  )}
+                >
+                  Сегодня
+                </button>
+                <button
+                  type="button"
+                  onClick={jumpToTomorrow}
+                  className={cn(
+                    'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
+                    isTomorrow ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
+                  )}
+                >
+                  Завтра
+                </button>
+              </div>
+            )}
+
+            {/* Сервисное меню */}
+            <ServiceMenu />
+          </div>
         </div>
 
         {/* Навигация по дате/неделе */}
@@ -259,5 +266,75 @@ function ViewToggleButton({
       <Icon className="w-4 h-4" />
       {label}
     </button>
+  )
+}
+
+function ServiceMenu() {
+  const [open, setOpen] = useState(false)
+  const [isPending, startTransition] = useTransition()
+
+  function handleRegenerate() {
+    setOpen(false)
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    tomorrow.setHours(0, 0, 0, 0)
+
+    startTransition(async () => {
+      const result = await regenerateFixedOrders(tomorrow.toISOString())
+      if (result.ok) {
+        const { created, skippedExisting, matchedSchedule, candidatesTotal } = result.data
+        if (created > 0) {
+          toast.success(`Создано: ${created}${skippedExisting > 0 ? ` · уже было: ${skippedExisting}` : ''}`)
+        } else if (skippedExisting > 0) {
+          toast(`Все ${skippedExisting} конфигов уже имеют заказы на завтра`, { icon: '✓' })
+        } else if (candidatesTotal === 0) {
+          toast('Нет активных FIXED-конфигов', { icon: 'ℹ️' })
+        } else {
+          toast('Нет конфигов с расписанием на завтра', { icon: 'ℹ️' })
+        }
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Сервисные действия"
+        className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+      >
+        <MoreVertical className="w-4 h-4" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div
+            className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-surface border border-border p-2 z-40"
+            style={{ boxShadow: 'var(--shadow-popover)' }}
+          >
+            <div className="px-3 py-2 text-xs uppercase tracking-wider text-fg-subtle">
+              Сервис
+            </div>
+            <button
+              type="button"
+              onClick={handleRegenerate}
+              disabled={isPending}
+              className="w-full text-left px-3 py-2 rounded-xl hover:bg-bg transition-colors disabled:opacity-50"
+            >
+              <div className="text-sm font-medium">
+                {isPending ? 'Генерируем…' : 'Сгенерировать FIXED на завтра'}
+              </div>
+              <div className="text-xs text-fg-subtle mt-0.5">
+                Обычно автоматически в 06:00. Кнопка нужна если cron не сработал или вы только что добавили конфиг.
+              </div>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   )
 }

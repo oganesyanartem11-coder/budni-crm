@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
+import { generateFixedOrdersForDate } from '@/lib/orders/generate-fixed'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -189,5 +190,38 @@ export async function getClientForOrderForm(clientId: string) {
       pricePerPortion: Number(c.pricePerPortion),
       deliveryHorizon: c.deliveryHorizon,
     })),
+  }
+}
+
+/**
+ * Ручной запуск генерации FIXED-заказов из UI (кнопка "Досоздать на завтра").
+ */
+export async function regenerateFixedOrders(targetDateIso: string): Promise<ActionResult<{
+  created: number
+  skippedExisting: number
+  matchedSchedule: number
+  candidatesTotal: number
+}>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const date = new Date(targetDateIso)
+  if (isNaN(date.getTime())) {
+    return { ok: false, error: 'Неверная дата' }
+  }
+  date.setHours(0, 0, 0, 0)
+
+  const stats = await generateFixedOrdersForDate(date, {
+    triggeredByUserId: user.id,
+  })
+
+  revalidatePath('/orders')
+  return {
+    ok: true,
+    data: {
+      created: stats.created,
+      skippedExisting: stats.skippedExisting,
+      matchedSchedule: stats.matchedSchedule,
+      candidatesTotal: stats.candidatesTotal,
+    },
   }
 }
