@@ -225,3 +225,67 @@ export async function regenerateFixedOrders(targetDateIso: string): Promise<Acti
     },
   }
 }
+
+const confirmOrderSchema = z.object({
+  orderId: z.string().min(1),
+  portions: z.number().int().nonnegative(),
+})
+
+/**
+ * Подтверждает DYNAMIC-заказ: проставляет реальное количество порций,
+ * меняет статус с PENDING_CONFIRMATION на CONFIRMED, фиксирует время.
+ *
+ * Если portions = 0 — это явный отказ клиента "сегодня не возим".
+ * В этом случае статус становится CANCELLED, и кухне ничего не идёт.
+ */
+export async function confirmDynamicOrder(
+  formData: z.infer<typeof confirmOrderSchema>
+): Promise<ActionResult<{ status: 'CONFIRMED' | 'CANCELLED' }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = confirmOrderSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const { orderId, portions } = parsed.data
+
+  // Находим заказ — нужна цена для пересчёта totalPrice
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, pricePerPortion: true, clientId: true, locationId: true },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+  if (order.status !== 'PENDING_CONFIRMATION') {
+    return { ok: false, error: `Заказ уже в статусе ${order.status}, подтверждение невозможно` }
+  }
+
+  const newStatus: 'CONFIRMED' | 'CANCELLED' = portions === 0 ? 'CANCELLED' : 'CONFIRMED'
+  const totalPrice = portions * Number(order.pricePerPortion)
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      portions,
+      totalPrice,
+      status: newStatus,
+      confirmedAt: new Date(),
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: portions === 0 ? 'ORDER_DECLINED' : 'ORDER_CONFIRMED',
+      entityType: 'Order',
+      entityId: orderId,
+      payload: { portions, totalPrice, status: newStatus },
+    },
+  })
+
+  revalidatePath('/orders')
+  revalidatePath('/orders/confirm')
+  revalidatePath('/dashboard')
+  return { ok: true, data: { status: newStatus } }
+}

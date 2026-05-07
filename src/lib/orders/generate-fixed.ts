@@ -6,6 +6,8 @@ export interface GenerationStats {
   candidatesTotal: number
   matchedSchedule: number
   created: number
+  createdFixed: number
+  createdDynamic: number
   skippedExisting: number
   skippedNoSchedule: number
   errors: Array<{ configId: string; error: string }>
@@ -86,18 +88,18 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
     candidatesTotal: 0,
     matchedSchedule: 0,
     created: 0,
+    createdFixed: 0,
+    createdDynamic: 0,
     skippedExisting: 0,
     skippedNoSchedule: 0,
     errors: [],
   }
 
-  // Загружаем все активные FIXED-конфиги с привязкой к существующей точке
+  // Загружаем активные FIXED и DYNAMIC конфиги
   const configs = await prisma.clientMealConfig.findMany({
     where: {
       isActive: true,
-      orderType: 'FIXED',
-      fixedPortions: { not: null, gt: 0 },
-      // Только если у клиента активен сам клиент и точка
+      orderType: { in: ['FIXED', 'DYNAMIC'] },
       client: { isActive: true },
       OR: [
         { locationId: null },
@@ -184,23 +186,32 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
     }
 
     try {
+      const isFixed = config.orderType === 'FIXED'
+      const portionsValue = isFixed ? (config.fixedPortions ?? 0) : 0
+      const priceNum = Number(config.pricePerPortion)
+
       const ordersData = newLocations.map((loc) => ({
         clientId: config.clientId,
         locationId: loc.id,
         mealType: config.mealType,
         deliveryDate: date,
-        portions: config.fixedPortions ?? 0,
-        pricePerPortion: Number(config.pricePerPortion),
-        totalPrice: Number(config.pricePerPortion) * (config.fixedPortions ?? 0),
+        portions: portionsValue,
+        pricePerPortion: priceNum,
+        totalPrice: priceNum * portionsValue,
         packaging: loc.packaging,
-        source: 'FIXED_AUTO' as const,
-        status: 'CONFIRMED' as const,
+        source: isFixed ? ('FIXED_AUTO' as const) : ('RECURRING_AUTO' as const),
+        status: isFixed ? ('CONFIRMED' as const) : ('PENDING_CONFIRMATION' as const),
         sourceConfigId: config.id,
-        confirmedAt: new Date(),
+        confirmedAt: isFixed ? new Date() : null,
       }))
 
       await prisma.order.createMany({ data: ordersData })
       stats.created += ordersData.length
+      if (isFixed) {
+        stats.createdFixed += ordersData.length
+      } else {
+        stats.createdDynamic += ordersData.length
+      }
       // Регистрируем что мы только что создали — на случай если ещё один конфиг попал бы в ту же ячейку
       for (const loc of newLocations) {
         existingKeys.add(`${config.clientId}|${loc.id}|${config.mealType}`)
@@ -226,6 +237,8 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
         candidatesTotal: stats.candidatesTotal,
         matchedSchedule: stats.matchedSchedule,
         created: stats.created,
+        createdFixed: stats.createdFixed,
+        createdDynamic: stats.createdDynamic,
         skippedExisting: stats.skippedExisting,
         skippedNoSchedule: stats.skippedNoSchedule,
         errors: stats.errors.length,

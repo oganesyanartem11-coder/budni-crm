@@ -1,3 +1,4 @@
+import { startOfDay, endOfDay } from 'date-fns'
 import { prisma } from '@/lib/db/prisma'
 import type { OrderStatus, MealType, Prisma } from '@prisma/client'
 
@@ -93,5 +94,45 @@ export async function listActiveClientsLight() {
 export async function countPendingConfirmation() {
   return prisma.order.count({
     where: { status: 'PENDING_CONFIRMATION' },
+  })
+}
+
+/**
+ * Подтверждение DYNAMIC до 16:00. Возвращает все заказы со статусом
+ * PENDING_CONFIRMATION на сегодня и завтра.
+ *
+ * Использование:
+ * - countPendingConfirmation для бейджей и шапки
+ * - listPendingConfirmation для экрана быстрого ввода
+ */
+export async function countPendingConfirmationToday() {
+  const today = startOfDay(new Date())
+  const tomorrowEnd = endOfDay(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  return prisma.order.count({
+    where: {
+      status: 'PENDING_CONFIRMATION',
+      deliveryDate: { gte: today, lte: tomorrowEnd },
+    },
+  })
+}
+
+export async function listPendingConfirmation() {
+  const today = startOfDay(new Date())
+  const tomorrowEnd = endOfDay(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  return prisma.order.findMany({
+    where: {
+      status: 'PENDING_CONFIRMATION',
+      deliveryDate: { gte: today, lte: tomorrowEnd },
+    },
+    orderBy: [
+      { deliveryDate: 'asc' },
+      { client: { name: 'asc' } },
+      { mealType: 'asc' },
+    ],
+    include: {
+      client: { select: { id: true, name: true } },
+      location: { select: { id: true, name: true, address: true } },
+      sourceConfig: { select: { id: true, fixedPortions: true } },
+    },
   })
 }

@@ -3,6 +3,7 @@ import { Building2, MapPin, Settings, UtensilsCrossed, Carrot, ClipboardList, Ch
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
+import { cn } from '@/lib/utils/cn'
 
 export default async function DashboardPage() {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
@@ -14,7 +15,6 @@ export default async function DashboardPage() {
     activeMealConfigs,
     activeDishes,
     activeIngredients,
-    pendingOrders,
     todayOrders,
   ] = await Promise.all([
     prisma.client.count({ where: { isActive: true } }),
@@ -22,7 +22,6 @@ export default async function DashboardPage() {
     prisma.clientMealConfig.count({ where: { isActive: true } }),
     prisma.dish.count({ where: { isActive: true } }),
     prisma.ingredient.count({ where: { isActive: true } }),
-    prisma.order.count({ where: { status: 'PENDING_CONFIRMATION' } }),
     prisma.order.count({
       where: {
         deliveryDate: {
@@ -32,6 +31,16 @@ export default async function DashboardPage() {
       },
     }),
   ])
+
+  // Считаем pending только за сегодня + завтра (cut-off релевантен только для ближайших)
+  const pendingOrders = await prisma.order.count({
+    where: {
+      status: 'PENDING_CONFIRMATION',
+      deliveryDate: {
+        lte: (() => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(23,59,59,999); return d })(),
+      },
+    },
+  })
 
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
   const isAdminOrChef = user.role === 'ADMIN' || user.role === 'CHEF'
@@ -57,14 +66,25 @@ export default async function DashboardPage() {
                 hint="заказов с доставкой сегодня"
                 tone={todayOrders > 0 ? 'info' : 'neutral'}
               />
-              <StatCard
-                href="/orders"
-                icon={ClipboardList}
-                label="Ждут подтверждения"
-                value={pendingOrders}
-                hint="требуют действия до 16:00"
-                tone={pendingOrders > 0 ? 'warning' : 'neutral'}
-              />
+              <Link
+                href="/orders/confirm"
+                className={cn(
+                  'block rounded-2xl border p-5 transition-all hover:border-border-strong',
+                  pendingOrders > 0
+                    ? 'bg-warning-bg/40 border-warning/30'
+                    : 'bg-surface border-border'
+                )}
+                style={{ boxShadow: 'var(--shadow-card)' }}
+              >
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <p className="text-sm text-fg-muted">Ждут подтверждения</p>
+                  <ClipboardList className={cn('w-4 h-4', pendingOrders > 0 ? 'text-warning-fg' : 'text-fg-subtle')} strokeWidth={1.75} />
+                </div>
+                <p className={cn('text-3xl font-bold tracking-tight tabular-nums', pendingOrders > 0 && 'text-warning-fg')}>{pendingOrders}</p>
+                <p className="text-xs mt-1 text-fg-subtle">
+                  {pendingOrders > 0 ? 'Подтвердить до 16:00 →' : 'Все на сегодня подтверждены'}
+                </p>
+              </Link>
               <ComingSoonCard
                 label="Выручка пт-пт"
                 hint="Спринт 4"

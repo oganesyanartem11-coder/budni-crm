@@ -4,6 +4,7 @@ import { LeftRail } from '@/components/layout/left-rail'
 import { MobileTabbar } from '@/components/layout/mobile-tabbar'
 import { LogoutButton } from '@/components/layout/logout-button'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 
 export default async function AppLayout({
   children,
@@ -18,6 +19,11 @@ export default async function AppLayout({
     .join('')
     .toUpperCase()
 
+  // Загружаем счётчик pending для бейджа в навигации (только для ролей которые работают с заказами)
+  const pendingCount = (user.role === 'ADMIN' || user.role === 'MANAGER')
+    ? await countPendingConfirmationToday()
+    : 0
+
   return (
     <div className="min-h-screen bg-bg flex">
       <LeftRail />
@@ -27,7 +33,7 @@ export default async function AppLayout({
           <div className="flex items-center gap-6 px-4 md:px-8 py-4">
             <Logo size="md" />
             <div className="flex-1 hidden md:block">
-              <TopNav role={user.role} />
+              <TopNav role={user.role} pendingCount={pendingCount} />
             </div>
             <div className="md:hidden flex items-center gap-2 ml-auto">
               <button
