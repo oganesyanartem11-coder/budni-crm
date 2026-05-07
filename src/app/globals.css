@@ -197,10 +197,21 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Утилитные классы для печати */
+@media screen {
+  .print-only {
+    display: none !important;
+  }
+}
+
 @media print {
   /* Скрываем навигацию, левый рейл, кнопки печати, всё что не относится к листу */
   .no-print {
     display: none !important;
+  }
+
+  /* Элементы видимые ТОЛЬКО при печати */
+  .print-only {
+    display: block !important;
   }
 
   /* Распечатка — белый фон без тонкости теней */

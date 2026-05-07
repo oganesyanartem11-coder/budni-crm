@@ -107,3 +107,75 @@ export function getPreviousFinancialWeek(date: Date): { from: Date; to: Date } {
   to.setDate(to.getDate() - 7)
   return { from, to }
 }
+
+export type ReportPreset =
+  | 'this_week'
+  | 'last_week'
+  | 'this_month'
+  | 'last_month'
+  | 'this_quarter'
+  | 'last_quarter'
+  | 'this_year'
+  | 'custom'
+
+export interface PeriodRange {
+  from: Date
+  to: Date
+  label: string
+}
+
+export function getPresetRange(preset: ReportPreset, customFrom?: string, customTo?: string): PeriodRange {
+  const now = new Date()
+  now.setHours(0, 0, 0, 0)
+
+  switch (preset) {
+    case 'this_week': {
+      const { from, to } = getFinancialWeek(now)
+      return { from, to, label: 'Эта финансовая неделя' }
+    }
+    case 'last_week': {
+      const { from, to } = getPreviousFinancialWeek(now)
+      return { from, to, label: 'Прошлая финансовая неделя' }
+    }
+    case 'this_month': {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1)
+      const to = new Date(now)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Этот месяц' }
+    }
+    case 'last_month': {
+      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const to = new Date(now.getFullYear(), now.getMonth(), 0)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Прошлый месяц' }
+    }
+    case 'this_quarter': {
+      const q = Math.floor(now.getMonth() / 3)
+      const from = new Date(now.getFullYear(), q * 3, 1)
+      const to = new Date(now)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Этот квартал' }
+    }
+    case 'last_quarter': {
+      const q = Math.floor(now.getMonth() / 3)
+      const from = new Date(now.getFullYear(), (q - 1) * 3, 1)
+      const to = new Date(now.getFullYear(), q * 3, 0)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Прошлый квартал' }
+    }
+    case 'this_year': {
+      const from = new Date(now.getFullYear(), 0, 1)
+      const to = new Date(now)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Этот год' }
+    }
+    case 'custom':
+    default: {
+      const from = customFrom ? new Date(customFrom) : now
+      const to = customTo ? new Date(customTo) : now
+      from.setHours(0, 0, 0, 0)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Произвольный период' }
+    }
+  }
+}
