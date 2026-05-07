@@ -133,6 +133,7 @@ model User {
 
   approvedMenus MenuCycle[] @relation("MenuApprovedBy")
   activityLogs  ActivityLog[]
+  ordersCreated Order[]      @relation("OrdersCreated")
 
   @@index([role, isActive])
 }
@@ -199,6 +200,8 @@ model ClientMealConfig {
   isActive         Boolean        @default(true)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+
+  orders           Order[]
 
   @@index([clientId, isActive])
   @@index([locationId])
@@ -374,6 +377,13 @@ model Order {
   confirmedAt     DateTime?
   lockedAt        DateTime?
   updatedAt       DateTime        @updatedAt
+
+  // Аудит и связи с источником
+  sourceConfigId  String?
+  sourceConfig    ClientMealConfig? @relation(fields: [sourceConfigId], references: [id], onDelete: SetNull)
+
+  createdById     String?
+  createdBy       User?     @relation("OrdersCreated", fields: [createdById], references: [id], onDelete: SetNull)
 
   delivery Delivery?
 
