@@ -1,17 +1,41 @@
 import { PageHeader } from '@/components/layout/page-header'
-import { ComingSoon } from '@/components/layout/coming-soon'
+import { ProductionView } from './production-view'
+import { requireRole } from '@/lib/auth/current-user'
+import { getProductionSummary } from '@/lib/db/queries/production'
 
-export default function ProductionPage() {
+interface PageProps {
+  searchParams: Promise<{ date?: string; tab?: string }>
+}
+
+export default async function ProductionPage({ searchParams }: PageProps) {
+  await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
+
+  const params = await searchParams
+
+  // Default дата — завтра
+  const defaultDate = (() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    d.setHours(0, 0, 0, 0)
+    return d
+  })()
+
+  const targetDate = params.date ? new Date(params.date) : defaultDate
+  targetDate.setHours(0, 0, 0, 0)
+
+  const summary = await getProductionSummary(targetDate)
+  const tab: 'dishes' | 'ingredients' = params.tab === 'ingredients' ? 'ingredients' : 'dishes'
+
   return (
     <>
       <PageHeader
         title="Производство"
-        subtitle="Что готовим завтра — сводно и по клиентам"
+        subtitle="Сводка для кухни — что и сколько готовить"
       />
-      <ComingSoon
-        title="Производство в разработке"
-        description="Сводная таблица блюд и сырья, разбивка по клиентам, печатные формы."
-        sprint="Спринт 3"
+      <ProductionView
+        summary={summary}
+        targetDateIso={targetDate.toISOString()}
+        tab={tab}
       />
     </>
   )
