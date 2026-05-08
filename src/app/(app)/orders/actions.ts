@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
-import { generateFixedOrdersForDate } from '@/lib/orders/generate-fixed'
+import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),

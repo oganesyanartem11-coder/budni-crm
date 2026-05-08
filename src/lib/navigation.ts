@@ -44,27 +44,24 @@ export const ADMIN_NAV_SECTIONS: NavSection[] = [
 export const MOBILE_TABBAR_BY_ROLE = {
   COURIER: [
     { href: '/delivery', label: 'Доставка', icon: Truck },
-    { href: '/orders', label: 'Заказы', icon: ClipboardList },
-    { href: '/clients', label: 'Клиенты', icon: Building2 },
-    { href: '/settings', label: 'Профиль', icon: Settings },
   ],
   MANAGER: [
     { href: '/orders', label: 'Заказы', icon: ClipboardList },
     { href: '/clients', label: 'Клиенты', icon: Building2 },
-    { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
     { href: '/delivery', label: 'Доставка', icon: Truck },
+    { href: '/reports', label: 'Отчёты', icon: FileBarChart },
   ],
   CHEF: [
     { href: '/production', label: 'Цех', icon: ChefHat },
     { href: '/dishes', label: 'Блюда', icon: UtensilsCrossed },
     { href: '/ingredients', label: 'Сырьё', icon: Carrot },
-    { href: '/orders', label: 'Заказы', icon: ClipboardList },
+    { href: '/menu', label: 'Меню', icon: CalendarDays },
   ],
   ADMIN: [
     { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
     { href: '/orders', label: 'Заказы', icon: ClipboardList },
     { href: '/production', label: 'Цех', icon: ChefHat },
-    { href: '/analytics', label: 'Аналитика', icon: BarChart3 },
+    { href: '/reports', label: 'Отчёты', icon: FileBarChart },
   ],
 } as const
 

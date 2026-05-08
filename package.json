@@ -13,7 +13,8 @@
     "db:reset": "dotenv -e .env.local -- prisma migrate reset",
     "db:check": "dotenv -e .env.local -- tsx prisma/check-connection.ts",
     "db:seed:users": "dotenv -e .env.local -- tsx prisma/seed-users.ts",
-    "db:seed": "dotenv -e .env.local -- tsx prisma/seed/index.ts"
+    "db:seed": "dotenv -e .env.local -- tsx prisma/seed/index.ts",
+    "db:seed:prod": "tsx scripts/setup-prod.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",

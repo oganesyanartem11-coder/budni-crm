@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { generateFixedOrdersForDate } from '@/lib/orders/generate-fixed'
+import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
 
 export const dynamic = 'force-dynamic'
 
