@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Check, X, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmDynamicOrder } from '../actions'
+import { getCutoffMoment } from '@/lib/orders/cutoff'
 import { formatMoney, formatDateLong } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
@@ -22,18 +23,13 @@ interface Props {
   orders: SerializedPendingOrder[]
 }
 
-const CUTOFF_HOUR = 16
-
 function getCutoffStatus(deliveryDate: Date): {
   isPastCutoff: boolean
   hoursLeft: number | null
   minutesLeft: number | null
 } {
-  // Cut-off — 16:00 ДНЯ ПЕРЕД доставкой (т.е. если deliveryDate = завтра, cutoff сегодня в 16:00)
-  const cutoff = new Date(deliveryDate)
-  cutoff.setDate(cutoff.getDate() - 1)
-  cutoff.setHours(CUTOFF_HOUR, 0, 0, 0)
-
+  // Cut-off привязан к зоне Europe/Moscow (см. lib/orders/cutoff.ts)
+  const cutoff = getCutoffMoment(deliveryDate)
   const now = new Date()
   const diff = cutoff.getTime() - now.getTime()
 

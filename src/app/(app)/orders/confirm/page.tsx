@@ -23,7 +23,7 @@ export default async function ConfirmPage() {
       </div>
       <PageHeader
         title="Подтверждение заказов"
-        subtitle="Cut-off в 16:00. Введите количество порций по каждому клиенту."
+        subtitle="Cut-off в 18:00. Введите количество порций по каждому клиенту."
       />
       <ConfirmList orders={serialize(pending)} />
     </>

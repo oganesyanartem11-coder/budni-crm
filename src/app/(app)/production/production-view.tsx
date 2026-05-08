@@ -136,7 +136,7 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
               На эту дату ещё {summary.pendingPortions} порций ждут подтверждения
             </p>
             <p className="text-xs text-warning-fg/80 mt-0.5">
-              Эти заказы могут увеличить потребности после ввода менеджером. Дождитесь cut-off в 16:00.
+              Эти заказы могут увеличить потребности после ввода менеджером. Дождитесь cut-off в 18:00.
             </p>
           </div>
         </div>

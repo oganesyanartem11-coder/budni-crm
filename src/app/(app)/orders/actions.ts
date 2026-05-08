@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
+import { isPastCutoff } from '@/lib/orders/cutoff'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -297,9 +298,10 @@ const editOrderSchema = z.object({
 
 /**
  * Редактирует порции существующего заказа.
- * Если заказ LOCKED — проставляет editedAfterLockAt (визуальный маркер).
- * Заблокировать редактирование не может — клиент мог позвонить в 18:30
- * "извините, нас будет 100 а не 80", и менеджер ОБЯЗАН зафиксировать это.
+ * Если правка сделана после cut-off дня перед доставкой — проставляет
+ * editedAfterLockAt (визуальный маркер). Заблокировать редактирование
+ * не может: клиент мог позвонить в 18:30 «извините, нас будет 100 а не 80»,
+ * и менеджер ОБЯЗАН зафиксировать это.
  *
  * Не для PENDING_CONFIRMATION — для них есть confirmDynamicOrder.
  * Не для CANCELLED/DELIVERED — это финальные статусы.
@@ -323,6 +325,7 @@ export async function editOrderPortions(
       status: true,
       portions: true,
       pricePerPortion: true,
+      deliveryDate: true,
     },
   })
   if (!order) return { ok: false, error: 'Заказ не найден' }
@@ -338,7 +341,7 @@ export async function editOrderPortions(
     return { ok: true, data: { editedAfterLock: false } }
   }
 
-  const isLocked = ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+  const afterCutoff = isPastCutoff(order.deliveryDate)
   const totalPrice = portions * Number(order.pricePerPortion)
 
   await prisma.order.update({
@@ -346,7 +349,7 @@ export async function editOrderPortions(
     data: {
       portions,
       totalPrice,
-      ...(isLocked ? { editedAfterLockAt: new Date() } : {}),
+      ...(afterCutoff ? { editedAfterLockAt: new Date() } : {}),
     },
   })
 
@@ -360,39 +363,14 @@ export async function editOrderPortions(
       payload: {
         oldPortions: order.portions,
         newPortions: portions,
-        afterLock: isLocked,
+        afterCutoff,
         totalPrice,
       },
     },
   })
 
   revalidatePath('/orders')
-  return { ok: true, data: { editedAfterLock: isLocked } }
-}
-
-export async function manuallyLockOrders(targetDateIso: string): Promise<ActionResult<{
-  locked: number
-  candidatesTotal: number
-}>> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
-
-  const date = new Date(targetDateIso)
-  if (isNaN(date.getTime())) {
-    return { ok: false, error: 'Неверная дата' }
-  }
-  date.setHours(0, 0, 0, 0)
-
-  const { lockOrdersForDate } = await import('@/lib/orders/lock-orders')
-  const stats = await lockOrdersForDate(date)
-
-  revalidatePath('/orders')
-  return {
-    ok: true,
-    data: {
-      locked: stats.locked,
-      candidatesTotal: stats.candidatesTotal,
-    },
-  }
+  return { ok: true, data: { editedAfterLock: afterCutoff } }
 }
 
 const cancelOrderSchema = z.object({
@@ -418,19 +396,19 @@ export async function cancelOrder(
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { id: true, status: true, portions: true, clientId: true },
+    select: { id: true, status: true, portions: true, clientId: true, deliveryDate: true },
   })
   if (!order) return { ok: false, error: 'Заказ не найден' }
   if (order.status === 'CANCELLED') return { ok: false, error: 'Заказ уже отменён' }
   if (order.status === 'DELIVERED') return { ok: false, error: 'Доставленный заказ нельзя отменить' }
 
-  const wasLocked = ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+  const afterCutoff = isPastCutoff(order.deliveryDate)
 
   await prisma.order.update({
     where: { id: orderId },
     data: {
       status: 'CANCELLED',
-      ...(wasLocked ? { editedAfterLockAt: new Date() } : {}),
+      ...(afterCutoff ? { editedAfterLockAt: new Date() } : {}),
     },
   })
 
@@ -445,7 +423,7 @@ export async function cancelOrder(
         previousStatus: order.status,
         portions: order.portions,
         reason: reason ?? null,
-        afterLock: wasLocked,
+        afterCutoff,
       },
     },
   })
@@ -521,13 +499,15 @@ export async function rescheduleOrder(
     }
   }
 
-  const wasLocked = ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
+  // Перенос считается «после cut-off», если ИСХОДНАЯ дата уже за чертой
+  // (правки уже могли уйти на кухню/курьеру).
+  const afterCutoff = isPastCutoff(order.deliveryDate)
 
   await prisma.order.update({
     where: { id: orderId },
     data: {
       deliveryDate: target,
-      ...(wasLocked ? { editedAfterLockAt: new Date() } : {}),
+      ...(afterCutoff ? { editedAfterLockAt: new Date() } : {}),
     },
   })
 
@@ -541,7 +521,7 @@ export async function rescheduleOrder(
       payload: {
         oldDate: order.deliveryDate.toISOString(),
         newDate: target.toISOString(),
-        afterLock: wasLocked,
+        afterCutoff,
       },
     },
   })

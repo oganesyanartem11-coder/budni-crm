@@ -226,7 +226,7 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
       const result = await editOrderPortions({ orderId: order.id, portions: num })
       if (result.ok) {
         if (result.data.editedAfterLock) {
-          toast.success(`Порций изменено: ${num}. Помечено как правка после lock.`, { icon: '⚠️' })
+          toast.success(`Порций изменено: ${num}. Помечено как правка после cut-off.`, { icon: '⚠️' })
         } else {
           toast.success(`Порций изменено: ${num}`)
         }
@@ -280,7 +280,7 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
   return (
     <div className="flex items-center gap-1.5 justify-end">
       {wasEditedAfterLock && (
-        <span title="Правлено после 18:00 — кухню и курьера может задеть" className="text-danger-fg">
+        <span title="Правлено после cut-off — кухню и курьера может задеть" className="text-danger-fg">
           <AlertTriangle className="w-3.5 h-3.5" />
         </span>
       )}

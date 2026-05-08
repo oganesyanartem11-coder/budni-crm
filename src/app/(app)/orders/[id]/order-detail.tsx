@@ -58,7 +58,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PORTIONS_EDITED: 'Изменены порции',
   ORDER_CANCELLED: 'Отменён',
   ORDER_RESCHEDULED: 'Перенесён',
-  ORDERS_LOCKED: 'Залочен (cron)',
+  ORDERS_LOCKED: 'Залочен (cron, legacy)',
   FIXED_ORDERS_GENERATED: 'Сгенерирован (cron)',
 }
 
@@ -93,7 +93,7 @@ export function OrderDetail({ order, history }: Props) {
       const result = await editOrderPortions({ orderId: order.id, portions: num })
       if (result.ok) {
         if (result.data.editedAfterLock) {
-          toast.success(`Порций изменено: ${num}. Помечено как правка после lock.`, { icon: '⚠️' })
+          toast.success(`Порций изменено: ${num}. Помечено как правка после cut-off.`, { icon: '⚠️' })
         } else {
           toast.success(`Порций изменено: ${num}`)
         }
@@ -168,7 +168,7 @@ export function OrderDetail({ order, history }: Props) {
               {wasEditedAfterLock && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-pill bg-danger-bg text-danger-fg text-xs font-medium">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  Правлено после 18:00
+                  Правлено после cut-off
                 </div>
               )}
             </div>
@@ -504,11 +504,11 @@ function PayloadHint({ action, payload }: { action: string; payload: Prisma.Json
   if (action === 'ORDER_PORTIONS_EDITED') {
     const old = data.oldPortions
     const next = data.newPortions
-    const afterLock = data.afterLock
+    const afterCutoff = Boolean(data.afterCutoff ?? data.afterLock)
     return (
       <p className="text-xs text-fg-muted mt-0.5">
         {String(old)} → {String(next)}
-        {afterLock ? ' · после lock' : ''}
+        {afterCutoff ? ' · после cut-off' : ''}
       </p>
     )
   }

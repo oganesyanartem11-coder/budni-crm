@@ -98,7 +98,7 @@ export async function countPendingConfirmation() {
 }
 
 /**
- * Подтверждение DYNAMIC до 16:00. Возвращает все заказы со статусом
+ * Подтверждение DYNAMIC до 18:00. Возвращает все заказы со статусом
  * PENDING_CONFIRMATION на сегодня и завтра.
  *
  * Использование:

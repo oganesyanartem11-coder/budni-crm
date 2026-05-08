@@ -6,7 +6,7 @@ import { List, CalendarDays, ChevronLeft, ChevronRight, MoreVertical } from 'luc
 import { toast } from 'sonner'
 import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
-import { regenerateFixedOrders, manuallyLockOrders } from './actions'
+import { regenerateFixedOrders } from './actions'
 import { formatDateShort, formatDateNumeric } from '@/lib/utils/format'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
@@ -298,28 +298,6 @@ function ServiceMenu() {
     })
   }
 
-  function handleLock() {
-    setOpen(false)
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    tomorrow.setHours(0, 0, 0, 0)
-
-    startTransition(async () => {
-      const result = await manuallyLockOrders(tomorrow.toISOString())
-      if (result.ok) {
-        if (result.data.locked > 0) {
-          toast.success(`Залочено заказов: ${result.data.locked}`)
-        } else if (result.data.candidatesTotal === 0) {
-          toast('Нет CONFIRMED-заказов на завтра', { icon: 'ℹ️' })
-        } else {
-          toast(`Все ${result.data.candidatesTotal} уже залочены`, { icon: '✓' })
-        }
-      } else {
-        toast.error(result.error)
-      }
-    })
-  }
-
   return (
     <div className="relative">
       <button
@@ -352,19 +330,6 @@ function ServiceMenu() {
               </div>
               <div className="text-xs text-fg-subtle mt-0.5">
                 Обычно автоматически в 06:00. Кнопка нужна если cron не сработал или вы только что добавили конфиг.
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={handleLock}
-              disabled={isPending}
-              className="w-full text-left px-3 py-2 rounded-xl hover:bg-bg transition-colors disabled:opacity-50"
-            >
-              <div className="text-sm font-medium">
-                {isPending ? 'Лочим…' : 'Залочить заказы на завтра'}
-              </div>
-              <div className="text-xs text-fg-subtle mt-0.5">
-                Обычно автоматически в 18:00. Переводит CONFIRMED → LOCKED, после этого правки помечаются красным.
               </div>
             </button>
           </div>

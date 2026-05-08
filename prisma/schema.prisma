@@ -131,9 +131,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  approvedMenus MenuCycle[] @relation("MenuApprovedBy")
-  activityLogs  ActivityLog[]
-  ordersCreated Order[]      @relation("OrdersCreated")
+  approvedMenus       MenuCycle[]   @relation("MenuApprovedBy")
+  activityLogs        ActivityLog[]
+  ordersCreated       Order[]       @relation("OrdersCreated")
+  resolvedInboxItems  InboxItem[]
 
   @@index([role, isActive])
 }
@@ -153,9 +154,16 @@ model Client {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  locations    ClientLocation[]
-  mealConfigs  ClientMealConfig[]
-  orders       Order[]
+  // Бот-ассистент в MAX (Спринт 5)
+  maxChatId           String?  @unique
+  maxOnboardingToken  String?  @unique
+  locationAliases     Json?    // {"loc_001": ["первый", "цех", "производство"]}
+  safeAnswerStreak    Int      @default(0)
+
+  locations         ClientLocation[]
+  mealConfigs       ClientMealConfig[]
+  orders            Order[]
+  botConversations  BotConversation[]
 
   @@index([isActive])
   @@index([name])
@@ -439,4 +447,97 @@ model ActivityLog {
 
   @@index([createdAt])
   @@index([entityType, entityId])
+}
+
+// ============================================================
+// BOT ASSISTANT (Спринт 5)
+// ============================================================
+
+enum BotConversationStatus {
+  PENDING
+  AWAITING_MANAGER
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+}
+
+enum BotMessageDirection {
+  IN
+  OUT
+  MANAGER_OUT
+}
+
+enum InboxItemReason {
+  NEW_CLIENT
+  ANOMALY_HISTORICAL
+  ANOMALY_THRESHOLD
+  ANOMALY_LLM_CONFIDENCE
+  NON_NUMERIC
+  CANCELLATION_INTENT
+  POST_CUTOFF
+}
+
+enum InboxItemPriority {
+  NORMAL
+  HIGH
+}
+
+enum InboxItemStatus {
+  OPEN
+  RESOLVED_SENT
+  RESOLVED_IGNORED
+}
+
+model BotConversation {
+  id              String                 @id @default(cuid())
+  client          Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId        String
+  deliveryDate    DateTime
+  status          BotConversationStatus  @default(PENDING)
+  questionVariant String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  messages        BotMessage[]
+  inboxItems      InboxItem[]
+
+  @@unique([clientId, deliveryDate])
+  @@index([deliveryDate])
+  @@index([status])
+}
+
+model BotMessage {
+  id               String              @id @default(cuid())
+  conversation     BotConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId   String
+  direction        BotMessageDirection
+  text             String              @db.Text
+  parsedJson       Json?
+  llmConfidence    Float?
+  llmReason        String?             @db.Text
+  toneLabel        String?
+  createdAt        DateTime            @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model InboxItem {
+  id                  String              @id @default(cuid())
+  conversation        BotConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId      String
+  reason              InboxItemReason
+  priority            InboxItemPriority   @default(NORMAL)
+  status              InboxItemStatus     @default(OPEN)
+  humanReason         String?             @db.Text
+  clientStatsSnapshot Json?
+  draftReply          String?             @db.Text
+  managerReply        String?             @db.Text
+  resolvedBy          User?               @relation(fields: [resolvedById], references: [id])
+  resolvedById        String?
+  createdAt           DateTime            @default(now())
+  resolvedAt          DateTime?
+
+  @@index([status, createdAt])
+  @@index([priority, status])
+  @@index([conversationId])
 }
