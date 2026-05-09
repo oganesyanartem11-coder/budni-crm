@@ -15,11 +15,13 @@
     "db:check": "dotenv -e .env.local -- tsx prisma/check-connection.ts",
     "db:seed:users": "dotenv -e .env.local -- tsx prisma/seed-users.ts",
     "db:seed": "dotenv -e .env.local -- tsx prisma/seed/index.ts",
-    "db:seed:prod": "tsx scripts/setup-prod.ts"
+    "db:seed:prod": "tsx scripts/setup-prod.ts",
+    "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
     "@hookform/resolvers": "^5.2.2",
+    "@maxhub/max-bot-api": "^0.2.2",
     "@prisma/client": "^6.19.3",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-slot": "^1.2.4",
