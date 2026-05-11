@@ -25,7 +25,7 @@ export default async function AppLayout({
   const [pendingCount, inboxCount] = isAdminOrManager
     ? await Promise.all([
         countPendingConfirmationToday(),
-        prisma.inboxItem.count({ where: { status: 'UNREAD' } }),
+        prisma.botMessage.count({ where: { direction: 'IN', readAt: null } }),
       ])
     : [0, 0]
 

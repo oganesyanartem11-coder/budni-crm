@@ -3,12 +3,12 @@
 import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Sparkles, Send, RotateCcw, AlertTriangle, MessageSquare,
-  User2, ExternalLink, Phone, CheckCircle2,
+  Sparkles, Send, AlertTriangle, MessageSquare,
+  User2, ExternalLink, Phone,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  ensureDraftReply, sendReplyAndResolve, reopenInboxItem, fetchInboxItemFresh,
+  ensureDraftReply, sendReplyAndResolve, fetchInboxItemFresh,
 } from '../actions'
 import { formatTime, formatDateShort } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
@@ -126,10 +126,6 @@ export function InboxItemDetail({ item: initialItem }: { item: InboxItemSerializ
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages.length])
 
-  const isRead = item.status === 'READ'
-  const conversationClosed = item.conversation?.status === 'CONFIRMED'
-  const conversationAwaiting = item.conversation?.status === 'AWAITING_MANAGER'
-
   function handleGenerate() {
     const hasUserText = replyText.trim() && replyText.trim() !== (item.draftReply ?? '').trim()
     if (hasUserText && !confirm('Заменить текущий текст в поле ответа на новый draft?')) {
@@ -170,18 +166,6 @@ export function InboxItemDetail({ item: initialItem }: { item: InboxItemSerializ
     })
   }
 
-  function handleReopen() {
-    startTransition(async () => {
-      const r = await reopenInboxItem(item.id)
-      if (r.ok) {
-        toast.success('Открыто заново')
-        router.refresh()
-      } else {
-        toast.error(r.error)
-      }
-    })
-  }
-
   const maxLink = item.client.maxUsername ? `https://max.ru/${item.client.maxUsername}` : null
 
   return (
@@ -193,11 +177,6 @@ export function InboxItemDetail({ item: initialItem }: { item: InboxItemSerializ
         {item.priority === 'HIGH' && (
           <span className="inline-flex items-center px-2.5 py-1 rounded-pill bg-danger-bg text-danger-fg text-xs font-semibold">
             HIGH
-          </span>
-        )}
-        {isRead && (
-          <span className="inline-flex items-center px-2.5 py-1 rounded-pill bg-success-bg text-success-fg text-xs font-medium">
-            Прочитано
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
@@ -226,36 +205,6 @@ export function InboxItemDetail({ item: initialItem }: { item: InboxItemSerializ
 
       {item.humanReason && (
         <p className="text-sm text-fg-muted">{item.humanReason}</p>
-      )}
-
-      {isRead && (
-        <div className="rounded-2xl bg-success-bg/30 border border-success/20 p-4 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-start gap-2">
-            <CheckCircle2 className="w-4 h-4 text-success-fg shrink-0 mt-0.5" />
-            <p className="text-sm text-success-fg">
-              {conversationClosed
-                ? 'Переписка завершена. Новое сообщение клиента создаст новый тред.'
-                : conversationAwaiting
-                  ? 'Прочитано. Клиент может написать ещё — карточка снова станет непрочитанной.'
-                  : 'Прочитано.'}
-              {item.resolvedAt && (
-                <span className="text-success-fg/80">
-                  {' '}· {formatDateShort(new Date(item.resolvedAt))}
-                  {item.resolvedBy ? `, ${item.resolvedBy.name}` : ''}
-                </span>
-              )}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={handleReopen}
-            disabled={isPending}
-            className="px-3 py-1.5 rounded-pill border border-border-strong bg-surface text-fg text-xs font-medium hover:bg-bg transition-colors flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Открыть заново
-          </button>
-        </div>
       )}
 
       {(!!item.clientStatsSnapshot || !!item.parsedJson) && (

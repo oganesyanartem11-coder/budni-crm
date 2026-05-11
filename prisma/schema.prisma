@@ -531,10 +531,12 @@ model BotMessage {
   llmConfidence    Float?
   llmReason        String?             @db.Text
   toneLabel        String?
+  readAt           DateTime?           // null = непрочитано (для IN-сообщений). Для OUT/MANAGER_OUT всегда null.
   createdAt        DateTime            @default(now())
 
   @@index([conversationId, createdAt])
   @@index([clientId, createdAt])
+  @@index([direction, readAt])
 }
 
 model InboxItem {

@@ -11,6 +11,93 @@ export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
+export interface InboxClientCard {
+  clientId: string
+  clientName: string
+  maxUsername: string | null
+  lastMessage: {
+    text: string
+    direction: 'IN' | 'OUT' | 'MANAGER_OUT'
+    createdAt: string
+  } | null
+  unreadCount: number
+  latestInboxItemId: string | null
+}
+
+/**
+ * Список клиентов с историей переписки. Сортировка по времени последнего сообщения.
+ * Используется и в page.tsx (initial render), и в InboxList polling.
+ */
+export async function fetchInboxListData(): Promise<InboxClientCard[]> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  // 1. Уникальные clientId с хотя бы одним BotMessage
+  const distinctClients = await prisma.botMessage.findMany({
+    select: { clientId: true },
+    distinct: ['clientId'],
+  })
+  const clientIds = distinctClients.map((c) => c.clientId)
+  if (clientIds.length === 0) return []
+
+  const clients = await prisma.client.findMany({
+    where: { id: { in: clientIds } },
+    select: { id: true, name: true, maxUsername: true },
+  })
+
+  // 2. Enrich: последнее сообщение + счётчик непрочитанных + последний InboxItem
+  const enriched = await Promise.all(
+    clients.map(async (c) => {
+      const [lastMessage, unreadCount, latestInbox] = await Promise.all([
+        prisma.botMessage.findFirst({
+          where: { clientId: c.id },
+          orderBy: { createdAt: 'desc' },
+          select: { text: true, direction: true, createdAt: true },
+        }),
+        prisma.botMessage.count({
+          where: { clientId: c.id, direction: 'IN', readAt: null },
+        }),
+        prisma.inboxItem.findFirst({
+          where: { clientId: c.id },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        }),
+      ])
+      return {
+        clientId: c.id,
+        clientName: c.name,
+        maxUsername: c.maxUsername,
+        lastMessage: lastMessage
+          ? {
+              text: lastMessage.text,
+              direction: lastMessage.direction,
+              createdAt: lastMessage.createdAt.toISOString(),
+            }
+          : null,
+        unreadCount,
+        latestInboxItemId: latestInbox?.id ?? null,
+      } satisfies InboxClientCard
+    })
+  )
+
+  enriched.sort((a, b) => {
+    const aDate = a.lastMessage ? Date.parse(a.lastMessage.createdAt) : 0
+    const bDate = b.lastMessage ? Date.parse(b.lastMessage.createdAt) : 0
+    return bDate - aDate
+  })
+
+  return enriched
+}
+
+/** Server action wrapper для polling из клиентского компонента. */
+export async function fetchInboxListFresh(): Promise<InboxClientCard[] | null> {
+  try {
+    return await fetchInboxListData()
+  } catch (err) {
+    console.error('[inbox] fetchInboxListFresh failed:', err)
+    return null
+  }
+}
+
 /**
  * Возвращает «свежее» состояние InboxItem + сообщения за последние 7 дней
  * для polling из клиентского компонента. Без revalidation — это read-only.
@@ -52,6 +139,16 @@ export async function fetchInboxItemFresh(
     },
   })
   if (!item) return { ok: false, error: 'Не найден' }
+
+  // Если за время открытой страницы клиент дописал что-то — помечаем как прочитанное
+  await prisma.botMessage.updateMany({
+    where: {
+      clientId: item.clientId,
+      direction: 'IN',
+      readAt: null,
+    },
+    data: { readAt: new Date() },
+  })
 
   return {
     ok: true,
@@ -194,8 +291,8 @@ export async function sendReplyAndResolve(
 }
 
 /**
- * Помечает InboxItem как READ при открытии страницы менеджером.
- * Используется UI карточки (5.4b). BotConversation НЕ закрывает — тред живой.
+ * @deprecated С 5.4d непрочитанность считается по BotMessage.readAt.
+ * Помечает InboxItem как READ — оставлено для совместимости, не вызывается из UI.
  */
 export async function markInboxItemRead(
   inboxItemId: string
@@ -232,10 +329,8 @@ export async function resolveWithoutReply(
 }
 
 /**
- * Возвращает InboxItem в статус UNREAD (если был случайно помечен прочитанным
- * или после отправки ответа менеджер хочет вернуть в работу). Также
- * переоткрывает BotConversation — AWAITING_MANAGER.
- * draftReply не трогаем — менеджер сам решит регенерировать или нет.
+ * @deprecated С 5.4d UI кнопки «Открыть заново» нет — тред живёт постоянно,
+ * читается через polling. Оставлено для совместимости.
  */
 export async function reopenInboxItem(
   inboxItemId: string
