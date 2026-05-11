@@ -21,7 +21,7 @@ export async function createInboxItem(input: CreateInboxItemInput) {
       reason: input.reason,
       humanReason: input.humanReason,
       priority: input.priority,
-      status: 'OPEN',
+      status: 'UNREAD',
       clientMessage: input.clientMessage ?? null,
       parsedJson: input.parsedJson ?? undefined,
       clientStatsSnapshot: input.clientStatsSnapshot ?? undefined,

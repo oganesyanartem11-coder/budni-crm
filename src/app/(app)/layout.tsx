@@ -2,7 +2,7 @@ import { Logo } from '@/components/layout/logo'
 import { TopNav } from '@/components/layout/top-nav'
 import { LeftRail } from '@/components/layout/left-rail'
 import { MobileTabbar } from '@/components/layout/mobile-tabbar'
-import { LogoutButton } from '@/components/layout/logout-button'
+import { ProfileMenu } from '@/components/layout/profile-menu'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 import { prisma } from '@/lib/db/prisma'
@@ -25,7 +25,7 @@ export default async function AppLayout({
   const [pendingCount, inboxCount] = isAdminOrManager
     ? await Promise.all([
         countPendingConfirmationToday(),
-        prisma.inboxItem.count({ where: { status: 'OPEN' } }),
+        prisma.inboxItem.count({ where: { status: 'UNREAD' } }),
       ])
     : [0, 0]
 
@@ -48,22 +48,10 @@ export default async function AppLayout({
               >
                 <SearchIcon />
               </button>
-              <div
-                title={user.name}
-                className="w-9 h-9 rounded-full bg-accent text-accent-fg flex items-center justify-center text-xs font-semibold"
-              >
-                {initials}
-              </div>
-              <LogoutButton className="md:hidden" />
+              <ProfileMenu name={user.name} initials={initials} role={user.role} variant="mobile" />
             </div>
             <div className="hidden md:flex items-center gap-3">
-              <div
-                title={user.name}
-                className="w-9 h-9 rounded-full bg-accent text-accent-fg flex items-center justify-center text-xs font-semibold"
-              >
-                {initials}
-              </div>
-              <span className="text-sm font-medium text-fg">{user.name}</span>
+              <ProfileMenu name={user.name} initials={initials} role={user.role} />
             </div>
           </div>
           <div className="md:hidden px-4 pb-3 -mt-1">

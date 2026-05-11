@@ -12,11 +12,74 @@ export type ActionResult<T = void> =
   | { ok: false; error: string }
 
 /**
+ * Возвращает «свежее» состояние InboxItem + сообщения за последние 7 дней
+ * для polling из клиентского компонента. Без revalidation — это read-only.
+ */
+export async function fetchInboxItemFresh(
+  inboxItemId: string
+): Promise<ActionResult<{
+  item: {
+    id: string
+    status: 'UNREAD' | 'READ'
+    draftReply: string | null
+    clientMessage: string | null
+  }
+  messages: Array<{
+    id: string
+    direction: 'IN' | 'OUT' | 'MANAGER_OUT'
+    text: string
+    createdAt: string
+    toneLabel: string | null
+  }>
+}>> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+  const item = await prisma.inboxItem.findUnique({
+    where: { id: inboxItemId },
+    include: {
+      conversation: {
+        select: {
+          id: true,
+          messages: {
+            where: { createdAt: { gte: sevenDaysAgo } },
+            orderBy: { createdAt: 'asc' },
+            select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
+          },
+        },
+      },
+    },
+  })
+  if (!item) return { ok: false, error: 'Не найден' }
+
+  return {
+    ok: true,
+    data: {
+      item: {
+        id: item.id,
+        status: item.status,
+        draftReply: item.draftReply,
+        clientMessage: item.clientMessage,
+      },
+      messages: (item.conversation?.messages ?? []).map((m) => ({
+        id: m.id,
+        direction: m.direction,
+        text: m.text,
+        createdAt: m.createdAt.toISOString(),
+        toneLabel: m.toneLabel,
+      })),
+    },
+  }
+}
+
+/**
  * Лениво генерирует draftReply (если его ещё нет) и возвращает его.
- * Идемпотентно: повторный вызов вернёт сохранённый draft, не дёргая LLM повторно.
+ * options.force = true — регенерит даже если в БД уже есть draftReply.
  */
 export async function ensureDraftReply(
-  inboxItemId: string
+  inboxItemId: string,
+  options?: { force?: boolean }
 ): Promise<ActionResult<{ draft: string }>> {
   await requireRole(['ADMIN', 'MANAGER'])
 
@@ -36,7 +99,7 @@ export async function ensureDraftReply(
     },
   })
   if (!item) return { ok: false, error: 'Inbox item не найден' }
-  if (item.draftReply) {
+  if (item.draftReply && !options?.force) {
     return { ok: true, data: { draft: item.draftReply } }
   }
 
@@ -71,9 +134,9 @@ export async function ensureDraftReply(
 }
 
 /**
- * Отправляет ответ клиенту в MAX, закрывает InboxItem (RESOLVED_SENT)
- * и BotConversation (CONFIRMED). customText = редактированный текст из textarea
- * (если null — берём draftReply из БД).
+ * Отправляет ответ клиенту в MAX, помечает InboxItem как READ,
+ * закрывает BotConversation (CONFIRMED). draftReply очищается —
+ * следующее сообщение клиента создаст новую UNREAD-карточку.
  */
 export async function sendReplyAndResolve(
   inboxItemId: string,
@@ -110,10 +173,11 @@ export async function sendReplyAndResolve(
   await prisma.inboxItem.update({
     where: { id: inboxItemId },
     data: {
-      status: 'RESOLVED_SENT',
+      status: 'READ',
       resolvedAt: new Date(),
       resolvedById: user.id,
       managerReply: textToSend,
+      draftReply: null,
     },
   })
 
@@ -130,31 +194,26 @@ export async function sendReplyAndResolve(
 }
 
 /**
- * Закрыть без ответа (RESOLVED_IGNORED) — менеджер ответил вне CRM.
+ * Помечает InboxItem как READ при открытии страницы менеджером.
+ * Используется UI карточки (5.4b). BotConversation НЕ закрывает — тред живой.
  */
-export async function resolveWithoutReply(
+export async function markInboxItemRead(
   inboxItemId: string
 ): Promise<ActionResult> {
   const user = await requireRole(['ADMIN', 'MANAGER'])
 
   const item = await prisma.inboxItem.findUnique({ where: { id: inboxItemId } })
   if (!item) return { ok: false, error: 'Не найден' }
+  if (item.status === 'READ') return { ok: true, data: undefined }
 
   await prisma.inboxItem.update({
     where: { id: inboxItemId },
     data: {
-      status: 'RESOLVED_IGNORED',
+      status: 'READ',
       resolvedAt: new Date(),
       resolvedById: user.id,
     },
   })
-
-  if (item.conversationId) {
-    await prisma.botConversation.update({
-      where: { id: item.conversationId },
-      data: { status: 'CONFIRMED' },
-    })
-  }
 
   revalidatePath('/inbox')
   revalidatePath(`/inbox/${inboxItemId}`)
@@ -162,7 +221,21 @@ export async function resolveWithoutReply(
 }
 
 /**
- * Откатить закрытый — снова OPEN.
+ * @deprecated С 5.4a inbox-модель = «непрочитано/прочитано». Закрытие
+ * без ответа сводится к markInboxItemRead. Оставлен для совместимости
+ * до 5.4b, после чего будет удалён вместе с кнопкой в UI.
+ */
+export async function resolveWithoutReply(
+  inboxItemId: string
+): Promise<ActionResult> {
+  return markInboxItemRead(inboxItemId)
+}
+
+/**
+ * Возвращает InboxItem в статус UNREAD (если был случайно помечен прочитанным
+ * или после отправки ответа менеджер хочет вернуть в работу). Также
+ * переоткрывает BotConversation — AWAITING_MANAGER.
+ * draftReply не трогаем — менеджер сам решит регенерировать или нет.
  */
 export async function reopenInboxItem(
   inboxItemId: string
@@ -175,7 +248,7 @@ export async function reopenInboxItem(
   await prisma.inboxItem.update({
     where: { id: inboxItemId },
     data: {
-      status: 'OPEN',
+      status: 'UNREAD',
       resolvedAt: null,
       resolvedById: null,
     },

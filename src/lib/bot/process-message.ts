@@ -100,9 +100,11 @@ export async function processClientMessage(
     text,
   })
 
-  // Дедупим InboxItem по conversation.
+  // Дедупим InboxItem по conversation. Берём ЛЮБОЙ последний item (UNREAD или READ)
+  // — если менеджер уже отвечал, но клиент написал снова, это не новый тред,
+  // а продолжение того же. Возвращаем item в UNREAD и сбрасываем устаревший draft.
   let inboxItem = await prisma.inboxItem.findFirst({
-    where: { conversationId: conversation.id, status: 'OPEN' },
+    where: { conversationId: conversation.id },
     orderBy: { createdAt: 'desc' },
   })
 
@@ -116,11 +118,18 @@ export async function processClientMessage(
       clientMessage: text,
     })
   } else {
-    // Уже открытый — обновляем последний текст для превью в списке.
-    // (Полная переписка читается из BotMessage[].)
+    // Новое сообщение в треде: возвращаем в UNREAD, обновляем превью,
+    // сбрасываем draft и cooldown пушей (это свежее событие).
     await prisma.inboxItem.update({
       where: { id: inboxItem.id },
-      data: { clientMessage: text },
+      data: {
+        clientMessage: text,
+        status: 'UNREAD',
+        draftReply: null,
+        lastPushedAt: null,
+        resolvedAt: null,
+        resolvedById: null,
+      },
     })
   }
 

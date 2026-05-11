@@ -1,16 +1,14 @@
 import Link from 'next/link'
-import { Inbox as InboxIcon } from 'lucide-react'
+import { Inbox as InboxIcon, ArrowLeft } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { formatDateShort } from '@/lib/utils/format'
-import type { InboxItemReason, InboxItemPriority, InboxItemStatus } from '@prisma/client'
+import type { InboxItemReason, InboxItemStatus } from '@prisma/client'
 import { cn } from '@/lib/utils/cn'
 
-type Filter = 'open' | 'all' | 'resolved'
-
 interface PageProps {
-  searchParams: Promise<{ filter?: string }>
+  searchParams: Promise<{ show?: string }>
 }
 
 const REASON_LABELS: Record<InboxItemReason, string> = {
@@ -37,53 +35,54 @@ export default async function InboxPage({ searchParams }: PageProps) {
   await requireRole(['ADMIN', 'MANAGER'])
 
   const params = await searchParams
-  const filter = (params.filter as Filter) ?? 'open'
-
-  const statusFilter =
-    filter === 'all'
-      ? undefined
-      : filter === 'open'
-        ? ['OPEN' as InboxItemStatus]
-        : (['RESOLVED_SENT', 'RESOLVED_IGNORED'] as InboxItemStatus[])
+  const showRead = params.show === 'read'
+  const status: InboxItemStatus = showRead ? 'READ' : 'UNREAD'
 
   const items = await prisma.inboxItem.findMany({
-    where: { status: statusFilter ? { in: statusFilter } : undefined },
+    where: { status },
     include: {
-      client: { select: { id: true, name: true, maxChatId: true } },
+      client: { select: { id: true, name: true, maxChatId: true, maxUsername: true } },
     },
-    orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+    orderBy: { createdAt: 'desc' },
     take: 50,
   })
 
-  const openCount = await prisma.inboxItem.count({ where: { status: 'OPEN' } })
+  const unreadCount = showRead
+    ? await prisma.inboxItem.count({ where: { status: 'UNREAD' } })
+    : items.length
 
   return (
     <>
       <PageHeader
-        title="Inbox"
-        subtitle={`Открыто: ${openCount}`}
+        title={showRead ? 'Прочитанные' : 'Входящие'}
+        subtitle={
+          showRead
+            ? 'История обработанных обращений'
+            : `Непрочитанных: ${unreadCount}`
+        }
       />
 
-      <div className="flex items-center gap-1.5 mb-5">
-        {(['open', 'all', 'resolved'] as Filter[]).map((f) => (
+      {showRead && (
+        <div className="mb-5">
           <Link
-            key={f}
-            href={`/inbox?filter=${f}`}
-            className={cn(
-              'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-              filter === f ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-            )}
+            href="/inbox"
+            className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg transition-colors"
           >
-            {f === 'open' ? 'Открытые' : f === 'all' ? 'Все' : 'Закрытые'}
+            <ArrowLeft className="w-4 h-4" />
+            К непрочитанным
           </Link>
-        ))}
-      </div>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
           <InboxIcon className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p className="font-medium text-fg mb-1">Inbox пуст</p>
-          <p className="text-sm">{filter === 'open' ? 'Все обращения обработаны.' : 'Здесь ничего нет.'}</p>
+          <p className="font-medium text-fg mb-1">
+            {showRead ? 'Прочитанных нет' : 'Все обращения обработаны'}
+          </p>
+          <p className="text-sm">
+            {showRead ? 'История пуста.' : 'Новые сообщения появятся здесь автоматически.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -92,12 +91,26 @@ export default async function InboxPage({ searchParams }: PageProps) {
           ))}
         </div>
       )}
+
+      {!showRead && (
+        <div className="mt-6 text-center">
+          <Link
+            href="/inbox?show=read"
+            className="text-sm text-fg-muted hover:text-fg underline"
+          >
+            Показать прочитанные
+          </Link>
+        </div>
+      )}
     </>
   )
 }
 
-function InboxRow({ item }: { item: Awaited<ReturnType<typeof prisma.inboxItem.findMany>>[number] & { client: { id: string; name: string; maxChatId: string | null } } }) {
-  const isResolved = item.status !== 'OPEN'
+type ItemRow = Awaited<ReturnType<typeof prisma.inboxItem.findMany>>[number] & {
+  client: { id: string; name: string; maxChatId: string | null; maxUsername: string | null }
+}
+
+function InboxRow({ item }: { item: ItemRow }) {
   const isHigh = item.priority === 'HIGH'
 
   return (
@@ -105,14 +118,18 @@ function InboxRow({ item }: { item: Awaited<ReturnType<typeof prisma.inboxItem.f
       href={`/inbox/${item.id}`}
       className={cn(
         'block rounded-2xl bg-surface border p-4 transition-all hover:border-border-strong',
-        isHigh && !isResolved ? 'border-danger/30' : 'border-border',
-        isResolved && 'opacity-70'
+        isHigh ? 'border-danger/30' : 'border-border'
       )}
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
         <div className="min-w-0 flex-1">
-          <p className="font-semibold text-base truncate">{item.client.name}</p>
+          <p className="font-semibold text-base truncate flex items-center gap-1.5">
+            {item.client.name}
+            {item.client.maxUsername && (
+              <span title="Есть MAX-аккаунт" className="text-info-fg text-xs">●</span>
+            )}
+          </p>
           <p className="text-xs text-fg-subtle mt-0.5">{formatDateShort(item.createdAt)}</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -124,11 +141,6 @@ function InboxRow({ item }: { item: Awaited<ReturnType<typeof prisma.inboxItem.f
           <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium', REASON_COLORS[item.reason as InboxItemReason])}>
             {REASON_LABELS[item.reason as InboxItemReason]}
           </span>
-          {isResolved && (
-            <span className="inline-flex items-center px-2 py-0.5 rounded-pill bg-success-bg text-success-fg text-xs font-medium">
-              {item.status === 'RESOLVED_SENT' ? 'Ответил' : 'Закрыт'}
-            </span>
-          )}
         </div>
       </div>
       {item.clientMessage && (
@@ -140,6 +152,3 @@ function InboxRow({ item }: { item: Awaited<ReturnType<typeof prisma.inboxItem.f
     </Link>
   )
 }
-
-const _priorityKeys: InboxItemPriority[] = ['NORMAL', 'HIGH']
-void _priorityKeys

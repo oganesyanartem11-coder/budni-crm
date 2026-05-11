@@ -1,13 +1,31 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useEffect, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Sparkles, Send, X, RotateCcw, AlertTriangle, MessageSquare, User2 } from 'lucide-react'
+import {
+  Sparkles, Send, RotateCcw, AlertTriangle, MessageSquare,
+  User2, ExternalLink, Phone, CheckCircle2,
+} from 'lucide-react'
 import { toast } from 'sonner'
-import { ensureDraftReply, sendReplyAndResolve, resolveWithoutReply, reopenInboxItem } from '../actions'
-import { formatDateShort, formatTime } from '@/lib/utils/format'
+import {
+  ensureDraftReply, sendReplyAndResolve, reopenInboxItem, fetchInboxItemFresh,
+} from '../actions'
+import { formatTime, formatDateShort } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
-import type { BotMessageDirection, InboxItemReason, InboxItemPriority, InboxItemStatus, BotConversationStatus } from '@prisma/client'
+import type {
+  BotMessageDirection, InboxItemReason, InboxItemPriority,
+  InboxItemStatus, BotConversationStatus,
+} from '@prisma/client'
+
+const POLL_INTERVAL_MS = 10_000
+
+interface MessageItem {
+  id: string
+  direction: BotMessageDirection
+  text: string
+  createdAt: Date | string
+  toneLabel: string | null
+}
 
 interface InboxItemSerialized {
   id: string
@@ -22,18 +40,18 @@ interface InboxItemSerialized {
   clientStatsSnapshot: unknown
   createdAt: Date | string
   resolvedAt: Date | string | null
-  client: { id: string; name: string; maxChatId: string | null }
+  client: {
+    id: string
+    name: string
+    contactPhone: string | null
+    maxChatId: string | null
+    maxUsername: string | null
+  }
   conversation: {
     id: string
     deliveryDate: Date | string
     status: BotConversationStatus
-    messages: Array<{
-      id: string
-      direction: BotMessageDirection
-      text: string
-      createdAt: Date | string
-      toneLabel: string | null
-    }>
+    messages: MessageItem[]
   } | null
   resolvedBy: { id: string; name: string } | null
 }
@@ -48,22 +66,81 @@ const REASON_LABELS: Record<InboxItemReason, string> = {
   POST_CUTOFF: 'После cut-off',
 }
 
-export function InboxItemDetail({ item }: { item: InboxItemSerialized }) {
+export function InboxItemDetail({ item: initialItem }: { item: InboxItemSerialized }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [replyText, setReplyText] = useState(item.draftReply ?? '')
+  const [item, setItem] = useState(initialItem)
+  const [messages, setMessages] = useState<MessageItem[]>(initialItem.conversation?.messages ?? [])
+  const [replyText, setReplyText] = useState(initialItem.draftReply ?? '')
   const [contextOpen, setContextOpen] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const isResolved = item.status !== 'OPEN'
-  const messages = item.conversation?.messages ?? []
-  const hasNoConversation = !item.conversation
+  // ─── Polling каждые 10 сек, только при видимой вкладке ───
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const refetch = async () => {
+      const r = await fetchInboxItemFresh(item.id)
+      if (!r.ok) return
+      // Перенесли в setState без startTransition чтобы не блокировать UI ответа
+      setItem((prev) => ({
+        ...prev,
+        status: r.data.item.status,
+        clientMessage: r.data.item.clientMessage,
+        // draftReply из БД подгружаем, но НЕ перетираем то что менеджер уже печатает
+      }))
+      setMessages(r.data.messages.map((m) => ({ ...m, createdAt: m.createdAt })))
+    }
+
+    const startPolling = () => {
+      if (timer) return
+      timer = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          refetch()
+        }
+      }, POLL_INTERVAL_MS)
+    }
+    const stopPolling = () => {
+      if (timer) { clearInterval(timer); timer = null }
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refetch()
+        startPolling()
+      } else {
+        stopPolling()
+      }
+    }
+
+    if (document.visibilityState === 'visible') startPolling()
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      stopPolling()
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id])
+
+  // Скролл к последнему сообщению при изменении
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages.length])
+
+  const isRead = item.status === 'READ'
+  const conversationClosed = item.conversation?.status === 'CONFIRMED'
+  const conversationAwaiting = item.conversation?.status === 'AWAITING_MANAGER'
 
   function handleGenerate() {
+    const hasUserText = replyText.trim() && replyText.trim() !== (item.draftReply ?? '').trim()
+    if (hasUserText && !confirm('Заменить текущий текст в поле ответа на новый draft?')) {
+      return
+    }
     startTransition(async () => {
-      const r = await ensureDraftReply(item.id)
+      const r = await ensureDraftReply(item.id, { force: true })
       if (r.ok) {
         setReplyText(r.data.draft)
-        toast.success('Draft готов — проверь и отправь')
+        setItem((prev) => ({ ...prev, draftReply: r.data.draft }))
+        toast.success('Draft готов')
       } else {
         toast.error(r.error)
       }
@@ -76,25 +153,17 @@ export function InboxItemDetail({ item }: { item: InboxItemSerialized }) {
       toast.error('Текст ответа пуст')
       return
     }
+    if (!item.client.maxChatId) {
+      toast.error('У клиента не задан maxChatId')
+      return
+    }
     if (!confirm(`Отправить клиенту «${item.client.name}»?\n\n${text}`)) return
     startTransition(async () => {
       const r = await sendReplyAndResolve(item.id, text)
       if (r.ok) {
-        toast.success('Отправлено и закрыто')
-        router.push('/inbox')
-      } else {
-        toast.error(r.error)
-      }
-    })
-  }
-
-  function handleClose() {
-    if (!confirm('Закрыть без ответа?')) return
-    startTransition(async () => {
-      const r = await resolveWithoutReply(item.id)
-      if (r.ok) {
-        toast.success('Закрыто')
-        router.push('/inbox')
+        toast.success('Отправлено')
+        setReplyText('')
+        router.refresh()
       } else {
         toast.error(r.error)
       }
@@ -113,9 +182,10 @@ export function InboxItemDetail({ item }: { item: InboxItemSerialized }) {
     })
   }
 
+  const maxLink = item.client.maxUsername ? `https://max.ru/${item.client.maxUsername}` : null
+
   return (
     <div className="space-y-5">
-      
       <div className="flex items-center gap-2 flex-wrap">
         <span className="inline-flex items-center px-2.5 py-1 rounded-pill bg-neutral-bg text-neutral-fg text-xs font-medium">
           {REASON_LABELS[item.reason]}
@@ -125,23 +195,57 @@ export function InboxItemDetail({ item }: { item: InboxItemSerialized }) {
             HIGH
           </span>
         )}
-        {isResolved && (
+        {isRead && (
           <span className="inline-flex items-center px-2.5 py-1 rounded-pill bg-success-bg text-success-fg text-xs font-medium">
-            {item.status === 'RESOLVED_SENT' ? 'Ответили' : 'Закрыто без ответа'}
+            Прочитано
           </span>
         )}
-        {item.humanReason && (
-          <p className="text-xs text-fg-muted">{item.humanReason}</p>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {item.client.contactPhone && (
+            <a
+              href={`tel:${item.client.contactPhone.replace(/\D/g, '')}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border border-border-strong bg-surface text-fg text-xs font-medium hover:bg-bg transition-colors"
+            >
+              <Phone className="w-3.5 h-3.5" />
+              {item.client.contactPhone}
+            </a>
+          )}
+          {maxLink && (
+            <a
+              href={maxLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-info-bg text-info-fg text-xs font-medium hover:opacity-90 transition-opacity"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Открыть в MAX
+            </a>
+          )}
+        </div>
       </div>
 
-      
-      {isResolved && (
+      {item.humanReason && (
+        <p className="text-sm text-fg-muted">{item.humanReason}</p>
+      )}
+
+      {isRead && (
         <div className="rounded-2xl bg-success-bg/30 border border-success/20 p-4 flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-sm text-success-fg">
-            Закрыт {item.resolvedAt ? formatDateShort(new Date(item.resolvedAt)) : ''}
-            {item.resolvedBy ? `, менеджер: ${item.resolvedBy.name}` : ''}
-          </p>
+          <div className="flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 text-success-fg shrink-0 mt-0.5" />
+            <p className="text-sm text-success-fg">
+              {conversationClosed
+                ? 'Переписка завершена. Новое сообщение клиента создаст новый тред.'
+                : conversationAwaiting
+                  ? 'Прочитано. Клиент может написать ещё — карточка снова станет непрочитанной.'
+                  : 'Прочитано.'}
+              {item.resolvedAt && (
+                <span className="text-success-fg/80">
+                  {' '}· {formatDateShort(new Date(item.resolvedAt))}
+                  {item.resolvedBy ? `, ${item.resolvedBy.name}` : ''}
+                </span>
+              )}
+            </p>
+          </div>
           <button
             type="button"
             onClick={handleReopen}
@@ -154,7 +258,6 @@ export function InboxItemDetail({ item }: { item: InboxItemSerialized }) {
         </div>
       )}
 
-      
       {(!!item.clientStatsSnapshot || !!item.parsedJson) && (
         <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
           <button
@@ -191,92 +294,71 @@ export function InboxItemDetail({ item }: { item: InboxItemSerialized }) {
         </div>
       )}
 
-      
       <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <MessageSquare className="w-4 h-4 text-fg-muted" />
-          <h3 className="text-base font-semibold">Переписка</h3>
+        <div className="flex items-center justify-between gap-2 mb-4">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-fg-muted" />
+            <h3 className="text-base font-semibold">Переписка</h3>
+            <span className="text-xs text-fg-subtle">· последние 7 дней</span>
+          </div>
         </div>
 
-        {hasNoConversation ? (
+        {messages.length === 0 ? (
           <div className="rounded-xl bg-bg/40 p-3 text-sm">
             <p className="text-xs text-fg-muted mb-1">{formatDateShort(new Date(item.createdAt))}</p>
             <p>{item.clientMessage ?? '(нет текста)'}</p>
           </div>
-        ) : messages.length === 0 ? (
-          <p className="text-sm text-fg-muted">Сообщений нет</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
             {messages.map((m) => (
               <MessageBubble key={m.id} message={m} clientName={item.client.name} />
             ))}
+            <div ref={messagesEndRef} />
           </div>
         )}
       </div>
 
-      
-      {!isResolved && (
-        <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-            <h3 className="text-base font-semibold">Ответ</h3>
-            {!item.draftReply && (
-              <button
-                type="button"
-                onClick={handleGenerate}
-                disabled={isPending}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border border-border-strong bg-surface text-fg text-xs font-medium hover:bg-bg transition-colors disabled:opacity-50"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                {isPending ? 'Генерируем…' : 'Сгенерировать draft'}
-              </button>
-            )}
-          </div>
-
-          <textarea
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
+      <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h3 className="text-base font-semibold">Ответить</h3>
+          <button
+            type="button"
+            onClick={handleGenerate}
             disabled={isPending}
-            rows={4}
-            placeholder={item.draftReply ? '' : 'Нажми «Сгенерировать draft» или впиши ответ вручную'}
-            className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm resize-y"
-          />
-
-          {!item.client.maxChatId && (
-            <p className="text-xs text-warning-fg mt-2">
-              ⚠️ У клиента не задан maxChatId — отправка не сработает. Привяжите chat_id в карточке клиента.
-            </p>
-          )}
-
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={isPending || !replyText.trim() || !item.client.maxChatId}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90 disabled:opacity-50"
-            >
-              <Send className="w-3.5 h-3.5" />
-              Одобрить и отправить
-            </button>
-            <button
-              type="button"
-              onClick={handleClose}
-              disabled={isPending}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-pill border border-border-strong bg-surface text-fg text-sm hover:bg-bg disabled:opacity-50"
-            >
-              <X className="w-3.5 h-3.5" />
-              Закрыть без ответа
-            </button>
-          </div>
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border border-border-strong bg-surface text-fg text-xs font-medium hover:bg-bg transition-colors disabled:opacity-50"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {isPending ? 'Генерируем…' : item.draftReply ? 'Сгенерировать заново' : 'Сгенерировать draft'}
+          </button>
         </div>
-      )}
 
-      
-      {isResolved && item.managerReply && (
-        <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <p className="text-xs uppercase tracking-wider text-fg-muted mb-2">Отправлено менеджером</p>
-          <p className="text-sm whitespace-pre-wrap">{item.managerReply}</p>
+        <textarea
+          value={replyText}
+          onChange={(e) => setReplyText(e.target.value)}
+          disabled={isPending}
+          rows={4}
+          placeholder="Введите ответ клиенту или нажмите «Сгенерировать draft»"
+          className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm resize-y"
+        />
+
+        {!item.client.maxChatId && (
+          <p className="text-xs text-warning-fg mt-2">
+            ⚠️ У клиента не задан maxChatId — отправка не сработает. Привяжите chat_id в карточке клиента.
+          </p>
+        )}
+
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={isPending || !replyText.trim() || !item.client.maxChatId}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            <Send className="w-3.5 h-3.5" />
+            Отправить
+          </button>
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -285,7 +367,7 @@ function MessageBubble({
   message,
   clientName,
 }: {
-  message: { direction: BotMessageDirection; text: string; createdAt: Date | string; toneLabel: string | null }
+  message: MessageItem
   clientName: string
 }) {
   const isClient = message.direction === 'IN'
@@ -294,7 +376,12 @@ function MessageBubble({
 
   return (
     <div className={cn('flex flex-col', isClient ? 'items-start' : 'items-end')}>
-      <div className={cn('max-w-[80%] rounded-2xl px-3 py-2', isClient ? 'bg-bg/60' : isBot ? 'bg-info-bg/50' : 'bg-accent text-accent-fg')}>
+      <div
+        className={cn(
+          'max-w-[80%] rounded-2xl px-3 py-2',
+          isClient ? 'bg-bg/60' : isBot ? 'bg-info-bg/50' : 'bg-accent text-accent-fg'
+        )}
+      >
         <p className="text-xs opacity-70 mb-0.5 flex items-center gap-1">
           {isClient && <User2 className="w-3 h-3" />}
           {author}

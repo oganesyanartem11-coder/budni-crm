@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { revalidatePath } from 'next/cache'
 import { ArrowLeft } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
@@ -12,19 +13,27 @@ interface PageProps {
 }
 
 export default async function InboxItemPage({ params }: PageProps) {
-  await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'MANAGER'])
 
   const { id } = await params
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
   const item = await prisma.inboxItem.findUnique({
     where: { id },
     include: {
-      client: { select: { id: true, name: true, maxChatId: true } },
+      client: {
+        select: {
+          id: true, name: true, contactPhone: true,
+          maxChatId: true, maxUsername: true,
+        },
+      },
       conversation: {
         select: {
           id: true,
           deliveryDate: true,
           status: true,
           messages: {
+            where: { createdAt: { gte: sevenDaysAgo } },
             orderBy: { createdAt: 'asc' },
             select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
           },
@@ -34,6 +43,17 @@ export default async function InboxItemPage({ params }: PageProps) {
     },
   })
   if (!item) notFound()
+
+  // Авто-mark-as-read при открытии. Делаем здесь чтобы счётчик в навигации
+  // обновился сразу же, без дополнительного round-trip из клиента.
+  if (item.status === 'UNREAD') {
+    await prisma.inboxItem.update({
+      where: { id: item.id },
+      data: { status: 'READ', resolvedAt: new Date(), resolvedById: user.id },
+    })
+    item.status = 'READ'
+    revalidatePath('/inbox')
+  }
 
   return (
     <>

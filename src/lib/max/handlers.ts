@@ -20,6 +20,19 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
 
   console.log(`[bot] incoming: chat=${maxChatId} text=${JSON.stringify(text).slice(0, 200)}`)
 
+  // Back-fill maxUsername для клиентов, привязанных до 5.4a
+  const senderUsername = ctx.message?.sender?.username ?? null
+  if (senderUsername) {
+    try {
+      await prisma.client.updateMany({
+        where: { maxChatId, maxUsername: null },
+        data: { maxUsername: senderUsername },
+      })
+    } catch (err) {
+      console.warn('[bot] back-fill maxUsername failed:', err)
+    }
+  }
+
   try {
     const result = await processClientMessage({ maxChatId, text })
     console.log(`[bot] result: action=${result.action} reply=${result.reply ? 'YES' : 'NO'}${result.inboxItemId ? ` inbox=${result.inboxItemId}` : ''}`)
@@ -52,11 +65,16 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
   }
 
   // 1. Клиент
+  const username = ctx.user?.username ?? null
   const client = await prisma.client.findUnique({ where: { maxOnboardingToken: payload } })
   if (client) {
     await prisma.client.update({
       where: { id: client.id },
-      data: { maxChatId: chatIdStr },
+      data: {
+        maxChatId: chatIdStr,
+        maxUsername: username,
+        // onboardedAt отсутствует в модели Client — фиксируем только chat_id и username
+      },
     })
     const greeting = getBotReplyTemplate('ONBOARDING')
     await ctx.reply(greeting)

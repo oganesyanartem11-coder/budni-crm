@@ -162,6 +162,7 @@ model Client {
 
   // Бот-ассистент в MAX (Спринт 5)
   maxChatId           String?  @unique
+  maxUsername         String?  // username в MAX, для deeplink «https://max.ru/<username>»
   maxOnboardingToken  String?  @unique
   locationAliases     Json?    // {"loc_001": ["первый", "цех", "производство"]}
   safeAnswerStreak    Int      @default(0)
@@ -495,9 +496,8 @@ enum InboxItemPriority {
 }
 
 enum InboxItemStatus {
-  OPEN
-  RESOLVED_SENT
-  RESOLVED_IGNORED
+  UNREAD
+  READ
 }
 
 model BotConversation {
@@ -545,7 +545,7 @@ model InboxItem {
   conversationId      String?
   reason              InboxItemReason
   priority            InboxItemPriority   @default(NORMAL)
-  status              InboxItemStatus     @default(OPEN)
+  status              InboxItemStatus     @default(UNREAD)
   humanReason         String?             @db.Text
   clientMessage       String?             @db.Text
   parsedJson          Json?
