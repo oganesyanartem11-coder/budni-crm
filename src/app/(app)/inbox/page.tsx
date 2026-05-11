@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db/prisma'
 import { formatDateShort } from '@/lib/utils/format'
 import type { InboxItemReason, InboxItemStatus } from '@prisma/client'
 import { cn } from '@/lib/utils/cn'
+import { ClientReadGroup } from './client-read-group'
 
 interface PageProps {
   searchParams: Promise<{ show?: string }>
@@ -31,6 +32,22 @@ const REASON_COLORS: Record<InboxItemReason, string> = {
   POST_CUTOFF: 'bg-neutral-bg text-neutral-fg',
 }
 
+interface InboxItemLite {
+  id: string
+  reason: InboxItemReason
+  priority: 'NORMAL' | 'HIGH'
+  clientMessage: string | null
+  humanReason: string | null
+  createdAt: Date
+}
+
+interface GroupedClient {
+  id: string
+  name: string
+  maxUsername: string | null
+  items: InboxItemLite[]
+}
+
 export default async function InboxPage({ searchParams }: PageProps) {
   await requireRole(['ADMIN', 'MANAGER'])
 
@@ -38,18 +55,42 @@ export default async function InboxPage({ searchParams }: PageProps) {
   const showRead = params.show === 'read'
   const status: InboxItemStatus = showRead ? 'READ' : 'UNREAD'
 
+  // Прямой запрос всех items со статусом + клиентом — потом группируем в JS.
+  // Так проще чем relation-traversal через Client (требует back-reference Client.inboxItems).
   const items = await prisma.inboxItem.findMany({
     where: { status },
-    include: {
-      client: { select: { id: true, name: true, maxChatId: true, maxUsername: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
+    include: { client: { select: { id: true, name: true, maxUsername: true } } },
+    orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+    take: 200,
   })
 
-  const unreadCount = showRead
-    ? await prisma.inboxItem.count({ where: { status: 'UNREAD' } })
-    : items.length
+  // Группируем по клиенту, последнее сообщение наверху
+  const grouped = new Map<string, GroupedClient>()
+  for (const item of items) {
+    const cid = item.clientId
+    let g = grouped.get(cid)
+    if (!g) {
+      g = {
+        id: item.client.id,
+        name: item.client.name,
+        maxUsername: item.client.maxUsername,
+        items: [],
+      }
+      grouped.set(cid, g)
+    }
+    if (g.items.length < 10) {
+      g.items.push({
+        id: item.id,
+        reason: item.reason,
+        priority: item.priority,
+        clientMessage: item.clientMessage,
+        humanReason: item.humanReason,
+        createdAt: item.createdAt,
+      })
+    }
+  }
+
+  const groups = Array.from(grouped.values())
 
   return (
     <>
@@ -57,8 +98,8 @@ export default async function InboxPage({ searchParams }: PageProps) {
         title={showRead ? 'Прочитанные' : 'Входящие'}
         subtitle={
           showRead
-            ? 'История обработанных обращений'
-            : `Непрочитанных: ${unreadCount}`
+            ? `Клиентов: ${groups.length}`
+            : `Непрочитанных клиентов: ${groups.length}`
         }
       />
 
@@ -74,7 +115,7 @@ export default async function InboxPage({ searchParams }: PageProps) {
         </div>
       )}
 
-      {items.length === 0 ? (
+      {groups.length === 0 ? (
         <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
           <InboxIcon className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
           <p className="font-medium text-fg mb-1">
@@ -86,9 +127,23 @@ export default async function InboxPage({ searchParams }: PageProps) {
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map((item) => (
-            <InboxRow key={item.id} item={item} />
-          ))}
+          {groups.map((g) =>
+            showRead ? (
+              <ClientReadGroup
+                key={g.id}
+                client={g}
+                reasonLabels={REASON_LABELS}
+                reasonColors={REASON_COLORS}
+              />
+            ) : (
+              <UnreadClientRow
+                key={g.id}
+                client={g}
+                reasonLabels={REASON_LABELS}
+                reasonColors={REASON_COLORS}
+              />
+            ),
+          )}
         </div>
       )}
 
@@ -106,48 +161,59 @@ export default async function InboxPage({ searchParams }: PageProps) {
   )
 }
 
-type ItemRow = Awaited<ReturnType<typeof prisma.inboxItem.findMany>>[number] & {
-  client: { id: string; name: string; maxChatId: string | null; maxUsername: string | null }
-}
+function UnreadClientRow({
+  client,
+  reasonLabels,
+  reasonColors,
+}: {
+  client: GroupedClient
+  reasonLabels: Record<InboxItemReason, string>
+  reasonColors: Record<InboxItemReason, string>
+}) {
+  const latest = client.items[0]
+  const hasHigh = client.items.some((i) => i.priority === 'HIGH')
 
-function InboxRow({ item }: { item: ItemRow }) {
-  const isHigh = item.priority === 'HIGH'
-
+  // Клик ведёт на ПЕРВЫЙ (самый свежий) UNREAD-item этого клиента
   return (
     <Link
-      href={`/inbox/${item.id}`}
+      href={`/inbox/${latest.id}`}
       className={cn(
         'block rounded-2xl bg-surface border p-4 transition-all hover:border-border-strong',
-        isHigh ? 'border-danger/30' : 'border-border'
+        hasHigh ? 'border-danger/30' : 'border-border',
       )}
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-base truncate flex items-center gap-1.5">
-            {item.client.name}
-            {item.client.maxUsername && (
+            {client.name}
+            {client.maxUsername && (
               <span title="Есть MAX-аккаунт" className="text-info-fg text-xs">●</span>
             )}
           </p>
-          <p className="text-xs text-fg-subtle mt-0.5">{formatDateShort(item.createdAt)}</p>
+          <p className="text-xs text-fg-subtle mt-0.5">{formatDateShort(latest.createdAt)}</p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {isHigh && (
+          {client.items.length > 1 && (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-pill bg-info-bg text-info-fg text-xs font-semibold">
+              {client.items.length} непрочитанных
+            </span>
+          )}
+          {hasHigh && (
             <span className="inline-flex items-center px-2 py-0.5 rounded-pill bg-danger-bg text-danger-fg text-xs font-semibold">
               HIGH
             </span>
           )}
-          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium', REASON_COLORS[item.reason as InboxItemReason])}>
-            {REASON_LABELS[item.reason as InboxItemReason]}
+          <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium', reasonColors[latest.reason])}>
+            {reasonLabels[latest.reason]}
           </span>
         </div>
       </div>
-      {item.clientMessage && (
-        <p className="text-sm text-fg-muted line-clamp-2">{item.clientMessage}</p>
+      {latest.clientMessage && (
+        <p className="text-sm text-fg-muted line-clamp-2">{latest.clientMessage}</p>
       )}
-      {item.humanReason && !item.clientMessage && (
-        <p className="text-sm text-fg-muted line-clamp-2 italic">{item.humanReason}</p>
+      {latest.humanReason && !latest.clientMessage && (
+        <p className="text-sm text-fg-muted line-clamp-2 italic">{latest.humanReason}</p>
       )}
     </Link>
   )

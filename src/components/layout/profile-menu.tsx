@@ -64,15 +64,15 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
           <span className="text-fg-subtle"> · {role}</span>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href="/settings" className="flex items-center gap-2 cursor-pointer">
+        <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
+          <Link href="/settings" className="flex items-center gap-2 cursor-pointer text-fg">
             <SettingsIcon className="w-4 h-4" />
             Настройки
           </Link>
         </DropdownMenuItem>
         {role === 'ADMIN' && (
-          <DropdownMenuItem asChild>
-            <Link href="/settings/users" className="flex items-center gap-2 cursor-pointer">
+          <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
+            <Link href="/settings/users" className="flex items-center gap-2 cursor-pointer text-fg">
               <UsersIcon className="w-4 h-4" />
               Пользователи
             </Link>
@@ -82,7 +82,7 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
         <DropdownMenuItem
           onClick={handleLogout}
           disabled={isPending}
-          className="flex items-center gap-2 text-danger-fg focus:text-danger-fg cursor-pointer"
+          className="flex items-center gap-2 text-danger-fg focus:bg-danger-bg/40 focus:text-danger-fg [&_*]:focus:text-danger-fg cursor-pointer"
         >
           <LogOut className="w-4 h-4" />
           {isPending ? 'Выходим…' : 'Выйти'}

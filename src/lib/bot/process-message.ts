@@ -63,20 +63,23 @@ export async function processClientMessage(
     return { reply: null, action: 'unknown_client' }
   }
 
-  // Активный тред дня: BotConversation за СЕГОДНЯ (UTC midnight) со статусом
-  // PENDING (ждём ответа на cron-вопрос) или AWAITING_MANAGER (спонтанный диалог).
+  // Тред дня: BotConversation за СЕГОДНЯ (UTC midnight).
+  // Schema имеет @@unique([clientId, deliveryDate]) — на (клиент, день) максимум
+  // одна conversation. Поэтому ищем БЕЗ фильтра по статусу, а потом решаем:
+  //  - PENDING → парсер (5.7+)
+  //  - AWAITING_MANAGER → продолжаем тот же inbox-item
+  //  - CONFIRMED/EXPIRED/CANCELLED → conv был закрыт менеджером,
+  //    «reopen» — переводим обратно в AWAITING_MANAGER и СОЗДАЁМ НОВЫЙ inbox-item
+  //    (для менеджера это визуально новый тред).
   const today = new Date()
   today.setUTCHours(0, 0, 0, 0)
 
   let conversation = await prisma.botConversation.findFirst({
-    where: {
-      clientId: client.id,
-      deliveryDate: today,
-      status: { in: ['PENDING', 'AWAITING_MANAGER'] },
-    },
+    where: { clientId: client.id, deliveryDate: today },
     orderBy: { createdAt: 'desc' },
   })
 
+  let isReopenedConversation = false
   if (!conversation) {
     conversation = await prisma.botConversation.create({
       data: {
@@ -85,6 +88,16 @@ export async function processClientMessage(
         status: 'AWAITING_MANAGER',
       },
     })
+  } else if (
+    conversation.status === 'CONFIRMED' ||
+    conversation.status === 'EXPIRED' ||
+    conversation.status === 'CANCELLED'
+  ) {
+    conversation = await prisma.botConversation.update({
+      where: { id: conversation.id },
+      data: { status: 'AWAITING_MANAGER' },
+    })
+    isReopenedConversation = true
   }
 
   // PENDING — ответ на cron-вопрос дня → парсер (5.7+) сам залогирует с parsedJson
@@ -100,13 +113,16 @@ export async function processClientMessage(
     text,
   })
 
-  // Дедупим InboxItem по conversation. Берём ЛЮБОЙ последний item (UNREAD или READ)
-  // — если менеджер уже отвечал, но клиент написал снова, это не новый тред,
-  // а продолжение того же. Возвращаем item в UNREAD и сбрасываем устаревший draft.
-  let inboxItem = await prisma.inboxItem.findFirst({
-    where: { conversationId: conversation.id },
-    orderBy: { createdAt: 'desc' },
-  })
+  // Дедупим InboxItem по conversation. Если conv только что переоткрыт после
+  // закрытия — это НОВЫЙ тред с точки зрения менеджера, создаём новый item.
+  // Иначе берём последний item: открытый продолжаем, прочитанный — возвращаем
+  // в UNREAD и сбрасываем устаревший draft.
+  let inboxItem = isReopenedConversation
+    ? null
+    : await prisma.inboxItem.findFirst({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: 'desc' },
+      })
 
   if (!inboxItem) {
     inboxItem = await createInboxItem({

@@ -338,7 +338,7 @@ export function InboxItemDetail({ item: initialItem }: { item: InboxItemSerializ
           disabled={isPending}
           rows={4}
           placeholder="Введите ответ клиенту или нажмите «Сгенерировать draft»"
-          className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm resize-y"
+          className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-base md:text-sm resize-y"
         />
 
         {!item.client.maxChatId && (
