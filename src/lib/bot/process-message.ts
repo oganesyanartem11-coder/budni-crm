@@ -134,13 +134,13 @@ export async function processClientMessage(
       clientMessage: text,
     })
   } else {
-    // Новое сообщение в треде: возвращаем в UNREAD, обновляем превью,
-    // сбрасываем draft и cooldown пушей (это свежее событие).
+    // Новое сообщение в треде: обновляем превью, сбрасываем draft и cooldown
+    // пушей (это свежее событие). status: 'UNREAD' НЕ ставим — с 5.4d
+    // непрочитанность считается по BotMessage.readAt.
     await prisma.inboxItem.update({
       where: { id: inboxItem.id },
       data: {
         clientMessage: text,
-        status: 'UNREAD',
         draftReply: null,
         lastPushedAt: null,
         resolvedAt: null,
@@ -149,8 +149,10 @@ export async function processClientMessage(
     })
   }
 
-  // Push менеджерам — в фоне, не блокируем ответ MAX'у
-  notifyManagersAboutInboxItem(inboxItem.id).catch((e) => {
+  // Push менеджерам. Раньше был fire-and-forget — но на serverless (Vercel)
+  // функция может завершиться до резолва промиса. С await серверный handler
+  // ждёт отправку перед возвратом MAX-у.
+  await notifyManagersAboutInboxItem(inboxItem.id).catch((e) => {
     console.error('[bot] notifyManagers failed:', e)
   })
 
@@ -230,7 +232,7 @@ async function handleParsed(
       data: { status: 'AWAITING_MANAGER' },
     })
 
-    notifyManagersAboutInboxItem(inbox.id).catch((e) => {
+    await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
       console.error('[bot] notifyManagers failed:', e)
     })
 

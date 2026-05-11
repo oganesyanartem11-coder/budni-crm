@@ -20,6 +20,7 @@ const REASON_RU: Record<InboxItemReason, string> = {
  * Безопасно для параллельных вызовов: ошибка отправки одному менеджеру не падает на остальных.
  */
 export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise<void> {
+  console.log(`[bot] notifyManagers START: inbox=${inboxItemId}`)
   const item = await prisma.inboxItem.findUnique({
     where: { id: inboxItemId },
     include: { client: { select: { id: true, name: true } } },
@@ -78,4 +79,6 @@ export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise
     where: { id: inboxItemId },
     data: { lastPushedAt: new Date() },
   })
+
+  console.log(`[bot] notifyManagers DONE: inbox=${inboxItemId}, recipients=${managers.length}`)
 }
