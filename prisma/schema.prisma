@@ -65,7 +65,8 @@ enum OrderStatus {
 
 enum OrderSource {
   MANUAL          // Вручную через UI
-  MESSENGER       // Из мессенджера (после AI-парсинга)
+  MESSENGER       // Из мессенджера (после AI-парсинга, legacy)
+  BOT             // Из MAX-бота (Спринт 5.3+, через BotConversation)
   FIXED_AUTO      // Автоматически сгенерирован для FIXED-конфига
   RECURRING_AUTO  // Из расписания
 }
@@ -164,6 +165,8 @@ model Client {
   mealConfigs       ClientMealConfig[]
   orders            Order[]
   botConversations  BotConversation[]
+  botMessages       BotMessage[]
+  inboxItems        InboxItem[]
 
   @@index([isActive])
   @@index([name])
@@ -394,6 +397,10 @@ model Order {
   createdById     String?
   createdBy       User?     @relation("OrdersCreated", fields: [createdById], references: [id], onDelete: SetNull)
 
+  // Бот-источник заказа (Спринт 5.3+)
+  sourceConversationId String?
+  sourceConversation   BotConversation? @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
+
   delivery Delivery?
 
   @@index([deliveryDate, status])
@@ -500,6 +507,7 @@ model BotConversation {
 
   messages        BotMessage[]
   inboxItems      InboxItem[]
+  orders          Order[]
 
   @@unique([clientId, deliveryDate])
   @@index([deliveryDate])
@@ -508,8 +516,10 @@ model BotConversation {
 
 model BotMessage {
   id               String              @id @default(cuid())
-  conversation     BotConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  conversationId   String
+  clientId         String
+  client           Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversation     BotConversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversationId   String?
   direction        BotMessageDirection
   text             String              @db.Text
   parsedJson       Json?
@@ -519,16 +529,21 @@ model BotMessage {
   createdAt        DateTime            @default(now())
 
   @@index([conversationId, createdAt])
+  @@index([clientId, createdAt])
 }
 
 model InboxItem {
   id                  String              @id @default(cuid())
-  conversation        BotConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  conversationId      String
+  clientId            String
+  client              Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversation        BotConversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversationId      String?
   reason              InboxItemReason
   priority            InboxItemPriority   @default(NORMAL)
   status              InboxItemStatus     @default(OPEN)
   humanReason         String?             @db.Text
+  clientMessage       String?             @db.Text
+  parsedJson          Json?
   clientStatsSnapshot Json?
   draftReply          String?             @db.Text
   managerReply        String?             @db.Text
@@ -540,4 +555,5 @@ model InboxItem {
   @@index([status, createdAt])
   @@index([priority, status])
   @@index([conversationId])
+  @@index([clientId, status])
 }

@@ -423,3 +423,33 @@ export async function createMealConfigBulk(
     },
   }
 }
+
+
+export async function updateClientMaxChatId(
+  clientId: string,
+  maxChatId: string | null
+): Promise<ActionResult> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  const value = maxChatId?.trim() ?? null
+  if (value !== null) {
+    if (!/^\d+$/.test(value)) {
+      return { ok: false, error: 'chat_id должен состоять только из цифр' }
+    }
+    const existing = await prisma.client.findFirst({
+      where: { maxChatId: value, NOT: { id: clientId } },
+      select: { name: true },
+    })
+    if (existing) {
+      return { ok: false, error: `Этот chat_id уже привязан к клиенту «${existing.name}»` }
+    }
+  }
+
+  await prisma.client.update({
+    where: { id: clientId },
+    data: { maxChatId: value },
+  })
+
+  revalidatePath(`/clients/${clientId}`)
+  return { ok: true, data: undefined }
+}

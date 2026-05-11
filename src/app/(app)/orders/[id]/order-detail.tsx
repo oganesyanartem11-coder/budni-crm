@@ -491,7 +491,8 @@ function SourceLabel({ source }: { source: OrderSource }) {
     MANUAL: 'Создан вручную',
     FIXED_AUTO: 'Авто-генерация (FIXED)',
     RECURRING_AUTO: 'Авто-генерация (DYNAMIC)',
-    MESSENGER: 'Из мессенджера (AI)',
+    MESSENGER: 'Из мессенджера (legacy)',
+    BOT: 'Из MAX-бота',
   }
   return <span className="font-medium">{labels[source]}</span>
 }
