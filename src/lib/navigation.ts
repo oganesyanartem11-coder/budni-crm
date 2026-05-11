@@ -10,6 +10,7 @@ import {
   Settings,
   CalendarDays,
   FileBarChart,
+  Inbox,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -31,6 +32,7 @@ export const TOP_NAV_SECTIONS: NavSection[] = [
   { href: '/ingredients', label: 'Сырьё', icon: Carrot, roles: ['ADMIN', 'CHEF'] },
   { href: '/production', label: 'Производство', icon: ChefHat, roles: ['ADMIN', 'CHEF'] },
   { href: '/delivery', label: 'Доставка', icon: Truck, roles: ['ADMIN', 'MANAGER', 'COURIER'] },
+  { href: '/inbox', label: 'Inbox', icon: Inbox, roles: ['ADMIN', 'MANAGER'] },
   { href: '/reports', label: 'Отчёты', icon: FileBarChart, roles: ['ADMIN', 'MANAGER'] },
   { href: '/analytics', label: 'Аналитика', icon: BarChart3, roles: ['ADMIN'] },
 ]

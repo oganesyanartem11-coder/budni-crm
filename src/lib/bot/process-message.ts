@@ -62,49 +62,72 @@ export async function processClientMessage(
     return { reply: null, action: 'unknown_client' }
   }
 
-  // Ищем активный PENDING-разговор. В 5.3 не будет; в 5.7 будет от cron.
-  const activeConversation = await prisma.botConversation.findFirst({
-    where: { clientId: client.id, status: 'PENDING' },
+  // Активный тред дня: BotConversation за СЕГОДНЯ (UTC midnight) со статусом
+  // PENDING (ждём ответа на cron-вопрос) или AWAITING_MANAGER (спонтанный диалог).
+  const today = new Date()
+  today.setUTCHours(0, 0, 0, 0)
+
+  let conversation = await prisma.botConversation.findFirst({
+    where: {
+      clientId: client.id,
+      deliveryDate: today,
+      status: { in: ['PENDING', 'AWAITING_MANAGER'] },
+    },
     orderBy: { createdAt: 'desc' },
   })
 
-  if (!activeConversation) {
-    return handleSpontaneous(client.id, text)
+  if (!conversation) {
+    conversation = await prisma.botConversation.create({
+      data: {
+        clientId: client.id,
+        deliveryDate: today,
+        status: 'AWAITING_MANAGER',
+      },
+    })
   }
 
-  // ─── Ветка с парсером (для 5.7+, в 5.3 не выполняется) ───
-  return handleParsed(client, activeConversation.id, activeConversation.deliveryDate, text)
-}
+  // PENDING — ответ на cron-вопрос дня → парсер (5.7+) сам залогирует с parsedJson
+  if (conversation.status === 'PENDING') {
+    return handleParsed(client, conversation.id, conversation.deliveryDate, text)
+  }
 
-// ─────────────────────────────────────────────────────────────────────
-// Спонтанное сообщение — нет активного вопроса дня.
-// БотConversation НЕ создаём (после 5.3a поля conversationId опциональны).
-// ─────────────────────────────────────────────────────────────────────
-async function handleSpontaneous(
-  clientId: string,
-  text: string
-): Promise<ProcessMessageResult> {
+  // AWAITING_MANAGER — спонтанное общение. Логируем без parsedJson.
   await logBotMessage({
-    clientId,
-    conversationId: null,
+    clientId: client.id,
+    conversationId: conversation.id,
     direction: 'IN',
     text,
   })
 
-  const inbox = await createInboxItem({
-    clientId,
-    conversationId: null,
-    reason: 'NON_NUMERIC',
-    humanReason: 'Спонтанное сообщение от клиента (нет активного вопроса дня)',
-    priority: 'NORMAL',
-    clientMessage: text,
+  // Дедупим InboxItem по conversation.
+  let inboxItem = await prisma.inboxItem.findFirst({
+    where: { conversationId: conversation.id, status: 'OPEN' },
+    orderBy: { createdAt: 'desc' },
   })
 
-  return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+  if (!inboxItem) {
+    inboxItem = await createInboxItem({
+      clientId: client.id,
+      conversationId: conversation.id,
+      reason: 'NON_NUMERIC',
+      humanReason: 'Спонтанное сообщение от клиента',
+      priority: 'NORMAL',
+      clientMessage: text,
+    })
+  } else {
+    // Уже открытый — обновляем последний текст для превью в списке.
+    // (Полная переписка читается из BotMessage[].)
+    await prisma.inboxItem.update({
+      where: { id: inboxItem.id },
+      data: { clientMessage: text },
+    })
+  }
+
+  return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Парсинг ответа на дневной вопрос (в 5.3 unreachable, готово к 5.7).
+// Парсинг ответа на дневной вопрос (в 5.3-5.4 unreachable, готово к 5.7).
 // ─────────────────────────────────────────────────────────────────────
 async function handleParsed(
   client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,

@@ -5,6 +5,7 @@ import { MobileTabbar } from '@/components/layout/mobile-tabbar'
 import { LogoutButton } from '@/components/layout/logout-button'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
+import { prisma } from '@/lib/db/prisma'
 
 export default async function AppLayout({
   children,
@@ -19,10 +20,14 @@ export default async function AppLayout({
     .join('')
     .toUpperCase()
 
-  // Загружаем счётчик pending для бейджа в навигации (только для ролей которые работают с заказами)
-  const pendingCount = (user.role === 'ADMIN' || user.role === 'MANAGER')
-    ? await countPendingConfirmationToday()
-    : 0
+  // Счётчики для бейджей в навигации (только ADMIN/MANAGER)
+  const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
+  const [pendingCount, inboxCount] = isAdminOrManager
+    ? await Promise.all([
+        countPendingConfirmationToday(),
+        prisma.inboxItem.count({ where: { status: 'OPEN' } }),
+      ])
+    : [0, 0]
 
   return (
     <div className="min-h-screen bg-bg flex">
@@ -33,7 +38,7 @@ export default async function AppLayout({
           <div className="flex items-center gap-6 px-4 md:px-8 py-4">
             <Logo size="md" />
             <div className="flex-1 hidden md:block">
-              <TopNav role={user.role} pendingCount={pendingCount} />
+              <TopNav role={user.role} pendingCount={pendingCount} inboxCount={inboxCount} />
             </div>
             <div className="md:hidden flex items-center gap-2 ml-auto">
               <button
@@ -62,7 +67,7 @@ export default async function AppLayout({
             </div>
           </div>
           <div className="md:hidden px-4 pb-3 -mt-1">
-            <TopNav role={user.role} />
+            <TopNav role={user.role} pendingCount={pendingCount} inboxCount={inboxCount} />
           </div>
         </header>
 
