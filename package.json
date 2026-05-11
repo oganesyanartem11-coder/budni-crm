@@ -16,7 +16,8 @@
     "db:seed:users": "dotenv -e .env.local -- tsx prisma/seed-users.ts",
     "db:seed": "dotenv -e .env.local -- tsx prisma/seed/index.ts",
     "db:seed:prod": "tsx scripts/setup-prod.ts",
-    "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts"
+    "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts",
+    "test:llm": "dotenv -e .env.local -- tsx scripts/test-llm-parser.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
