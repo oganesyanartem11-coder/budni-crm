@@ -132,6 +132,11 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  // MAX-бот: личный чат менеджера для пушей о новых обращениях (Спринт 5.5+5.6)
+  maxChatId           String?   @unique
+  maxOnboardingToken  String?   @unique
+  onboardedAt         DateTime?
+
   approvedMenus       MenuCycle[]   @relation("MenuApprovedBy")
   activityLogs        ActivityLog[]
   ordersCreated       Order[]       @relation("OrdersCreated")
@@ -551,6 +556,7 @@ model InboxItem {
   resolvedById        String?
   createdAt           DateTime            @default(now())
   resolvedAt          DateTime?
+  lastPushedAt        DateTime?           // когда последний раз пушили менеджерам в MAX
 
   @@index([status, createdAt])
   @@index([priority, status])

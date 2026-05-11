@@ -61,7 +61,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           </Link>
         }
       />
-      <MaxChatIdSection clientId={client.id} currentValue={client.maxChatId} />
+      <MaxChatIdSection
+        clientId={client.id}
+        currentValue={client.maxChatId}
+        onboardingToken={client.maxOnboardingToken}
+        onboardedAt={null}
+      />
       <ClientDetail client={serialize(client)} analytics={serialize(analytics)} />
     </>
   )

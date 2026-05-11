@@ -6,6 +6,7 @@ import { getClientStats } from '@/lib/orders/client-stats'
 import { isPastCutoff } from '@/lib/orders/cutoff'
 import { saveBotOrders } from './save-orders'
 import { createInboxItem } from './create-inbox-item'
+import { notifyManagersAboutInboxItem } from './notify-managers'
 import { logBotMessage } from './log-message'
 import { getBotReplyTemplate, type ReplyTemplateKey } from './templates'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
@@ -123,6 +124,11 @@ export async function processClientMessage(
     })
   }
 
+  // Push менеджерам — в фоне, не блокируем ответ MAX'у
+  notifyManagersAboutInboxItem(inboxItem.id).catch((e) => {
+    console.error('[bot] notifyManagers failed:', e)
+  })
+
   return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
 }
 
@@ -197,6 +203,10 @@ async function handleParsed(
     await prisma.botConversation.update({
       where: { id: conversationId },
       data: { status: 'AWAITING_MANAGER' },
+    })
+
+    notifyManagersAboutInboxItem(inbox.id).catch((e) => {
+      console.error('[bot] notifyManagers failed:', e)
     })
 
     return { reply: null, action: 'inbox', inboxItemId: inbox.id }

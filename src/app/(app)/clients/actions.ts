@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
+import { generateOnboardingToken, buildOnboardingDeeplink } from '@/lib/bot/onboarding'
 
 const clientSchema = z.object({
   name: z.string().trim().min(1, 'Название обязательно').max(150),
@@ -452,4 +453,32 @@ export async function updateClientMaxChatId(
 
   revalidatePath(`/clients/${clientId}`)
   return { ok: true, data: undefined }
+}
+
+/**
+ * Возвращает (или генерирует впервые) onboarding-токен и deep-link для клиента.
+ * Идемпотентно: повторный вызов вернёт сохранённый токен.
+ */
+export async function ensureClientOnboardingToken(
+  clientId: string
+): Promise<ActionResult<{ token: string; deeplink: string }>> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { id: true, maxOnboardingToken: true },
+  })
+  if (!client) return { ok: false, error: 'Клиент не найден' }
+
+  let token = client.maxOnboardingToken
+  if (!token) {
+    token = generateOnboardingToken()
+    await prisma.client.update({
+      where: { id: clientId },
+      data: { maxOnboardingToken: token },
+    })
+  }
+
+  revalidatePath(`/clients/${clientId}`)
+  return { ok: true, data: { token, deeplink: buildOnboardingDeeplink(token) } }
 }
