@@ -42,7 +42,14 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
   const isEditing = !!config
   const [isPending, startTransition] = useTransition()
 
-  const [locationId, setLocationId] = useState<string>(config?.locationId ?? '')
+  // При создании, если у клиента ровно одна локация — преселектим её.
+  // При редактировании сохраняем существующий locationId.
+  // Иначе пусто — пользователь обязан выбрать (см. handleSubmit).
+  const [locationId, setLocationId] = useState<string>(() => {
+    if (config?.locationId) return config.locationId
+    if (!config && locations.length === 1) return locations[0].id
+    return ''
+  })
   const [orderType, setOrderType] = useState<OrderType>(config?.orderType ?? 'FIXED')
   const [deliveryHorizon, setDeliveryHorizon] = useState<DeliveryHorizon>(config?.deliveryHorizon ?? 'NEXT_DAY')
   const [scheduleType, setScheduleType] = useState<ScheduleType>(config?.scheduleType ?? 'WEEKDAYS')
@@ -125,6 +132,11 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
+    if (!locationId) {
+      toast.error('Выберите локацию')
+      return
+    }
+
     if (selectedTypes.length === 0) {
       toast.error('Выберите хотя бы один тип питания')
       return
@@ -170,7 +182,8 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
         // Редактирование одного конфига — старый action
         const mt = config.mealType
         const data = {
-          locationId: locationId || null,
+          // handleSubmit гарантирует !!locationId выше — пустую строку action всё равно отклонит.
+          locationId,
           mealType: mt,
           orderType,
           deliveryHorizon,
@@ -200,7 +213,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
         }
 
         const result = await createMealConfigBulk(clientId, {
-          locationId: locationId || null,
+          locationId,
           mealTypes: selectedTypes,
           pricesByType: pricesNumbers,
           orderType,
@@ -244,11 +257,21 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Точка</label>
-            <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors">
-              <option value="">Все точки клиента</option>
+            <label className="text-sm font-medium">
+              Точка <span className="text-danger-fg">*</span>
+            </label>
+            <select
+              value={locationId}
+              onChange={(e) => setLocationId(e.target.value)}
+              required
+              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+            >
+              <option value="" disabled>Выберите локацию…</option>
               {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
+            {!locationId && (
+              <p className="text-xs text-fg-subtle">Конфиг привязывается к конкретной локации клиента.</p>
+            )}
           </div>
 
           {/* Типы питания — чекбоксы при создании, статичный текст при редактировании */}
@@ -401,7 +424,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
             <button type="button" onClick={onClose} disabled={isPending} className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors disabled:opacity-50">
               Отмена
             </button>
-            <button type="submit" disabled={isPending} className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+            <button type="submit" disabled={isPending || !locationId} className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
               {isPending ? 'Сохраняем…' : isEditing ? 'Сохранить' : (selectedTypes.length > 1 ? `Создать ${selectedTypes.length} конфига` : 'Создать конфиг')}
             </button>
           </div>

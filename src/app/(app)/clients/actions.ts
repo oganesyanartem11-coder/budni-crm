@@ -31,7 +31,8 @@ const locationSchema = z.object({
 })
 
 const mealConfigSchema = z.object({
-  locationId: z.string().nullable().optional(),
+  // 5.9b: locationId обязателен. Старые null-конфиги в БД остаются (миграция позже).
+  locationId: z.string().min(1, 'Выберите локацию'),
   mealType: z.enum(['BREAKFAST', 'LUNCH', 'DINNER']),
   orderType: z.enum(['DYNAMIC', 'FIXED']),
   deliveryHorizon: z.enum(['NEXT_DAY', 'SAME_DAY']).default('NEXT_DAY'),
@@ -334,7 +335,8 @@ export async function deleteMealConfig(id: string): Promise<ActionResult> {
 }
 
 const mealConfigBulkSchema = z.object({
-  locationId: z.string().nullable().optional(),
+  // 5.9b: locationId обязателен (см. mealConfigSchema).
+  locationId: z.string().min(1, 'Выберите локацию'),
   mealTypes: z.array(z.enum(['BREAKFAST', 'LUNCH', 'DINNER'])).min(1, 'Выберите хотя бы один тип питания'),
   // Цены отдельно по каждому типу: { BREAKFAST: 200, LUNCH: 380, DINNER: 320 }
   pricesByType: z.record(z.string(), z.number().nonnegative()),
