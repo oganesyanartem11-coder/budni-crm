@@ -36,9 +36,9 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
   try {
     const result = await processClientMessage({ maxChatId, text })
     console.log(`[bot] result: action=${result.action} reply=${result.reply ? 'YES' : 'NO'}${result.inboxItemId ? ` inbox=${result.inboxItemId}` : ''}`)
-    if (result.reply) {
-      await ctx.reply(result.reply)
-    }
+    // NB: НЕ зовём ctx.reply(result.reply) — processClientMessage сам шлёт OUT
+    // через sendBotMessage внутри handleBotResponse (с logBotMessage для треда).
+    // Парный вызов давал дубль-сообщение в MAX (см. аудит 5.7c).
   } catch (err) {
     console.error('[bot] processClientMessage failed:', err)
   }
