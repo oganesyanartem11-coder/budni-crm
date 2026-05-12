@@ -31,7 +31,24 @@ openssl rand -hex 32
 TELEGRAM_BOT_TOKEN=1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TELEGRAM_BOT_USERNAME=budni_crm_bot
 TELEGRAM_WEBHOOK_SECRET=<вывод openssl rand -hex 32>
+
+# 5.8c: групповой чат для производственных сводок (16:05 и 22:00 МСК)
+TELEGRAM_GROUP_CHAT_ID=-1001234567890
+
+# Опционально: базовый URL для кнопок «Открыть инбокс» и т.п.
+# Дефолт: https://budni-crm.vercel.app. Полезно переопределить для preview-окружений.
+# TELEGRAM_APP_BASE_URL=https://budni-crm-pr-42-username.vercel.app
 ```
+
+#### Как узнать TELEGRAM_GROUP_CHAT_ID
+
+1. Создать или открыть существующий групповой чат в Telegram.
+2. Добавить бота в группу как участника (или админа, если хотите чтобы он мог настраивать pinned messages — для отправки сообщений достаточно роли участника).
+3. Отправить в группу любое сообщение от себя (например `/start@budni_crm_bot`).
+4. Получить ID одним из способов:
+   - **Через бота `@getidsbot`**: добавить в группу, он покажет ID, потом удалить.
+   - **Через API getUpdates**: `curl "https://api.telegram.org/bot<TOKEN>/getUpdates"` — в ответе будет `chat: { id: -1001234567890, ... }`.
+5. ID групповых чатов **всегда отрицательный** и начинается с `-100...` для супергрупп.
 
 **НЕ коммитить `.env.local`** — он в `.gitignore`. Если случайно закоммитил — отозвать токен у BotFather (`/revoke`) и перевыпустить.
 
@@ -42,6 +59,8 @@ Project Settings → Environment Variables. Скоупы:
 - `TELEGRAM_BOT_TOKEN` — Production, Preview (Development НЕ нужен — там `.env.local`)
 - `TELEGRAM_BOT_USERNAME` — Production, Preview
 - `TELEGRAM_WEBHOOK_SECRET` — Production, Preview
+- `TELEGRAM_GROUP_CHAT_ID` — Production, Preview (для производственных сводок 5.8c)
+- `TELEGRAM_APP_BASE_URL` — опционально, переопределяет дефолт для preview
 
 После добавления — redeploy (или они подтянутся при следующем деплое).
 

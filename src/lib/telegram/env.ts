@@ -1,4 +1,4 @@
-// Валидация ENV для Telegram-бота (Спринт 5.8a).
+// Валидация ENV для Telegram-бота (Спринт 5.8a+).
 // Все проверки ленивые — кидаются только при первом вызове getTelegramEnv(),
 // чтобы билд и импорт не падали пока переменные не проставлены.
 
@@ -6,11 +6,15 @@ export interface TelegramEnv {
   botToken: string
   botUsername: string
   webhookSecret: string
+  groupChatId: string
+  appBaseUrl: string
 }
 
 const BOT_TOKEN_REGEX = /^[0-9]+:[A-Za-z0-9_-]+$/
 const MIN_BOT_TOKEN_LENGTH = 40
 const MIN_WEBHOOK_SECRET_LENGTH = 16
+const MIN_GROUP_CHAT_ID_LENGTH = 6
+const DEFAULT_APP_BASE_URL = 'https://budni-crm.vercel.app'
 
 function fail(varName: string, reason: string): never {
   throw new Error(
@@ -53,10 +57,36 @@ function readWebhookSecret(): string {
   return v
 }
 
+function readGroupChatId(): string {
+  const v = process.env.TELEGRAM_GROUP_CHAT_ID
+  if (!v) fail('TELEGRAM_GROUP_CHAT_ID', 'not set')
+  if (!v.startsWith('-')) {
+    fail(
+      'TELEGRAM_GROUP_CHAT_ID',
+      'групповой chat_id в Telegram всегда отрицательный (начинается с -). Проверь, что добавил бота в группу и взял chat_id оттуда'
+    )
+  }
+  if (v.length < MIN_GROUP_CHAT_ID_LENGTH) {
+    fail('TELEGRAM_GROUP_CHAT_ID', `too short (${v.length} < ${MIN_GROUP_CHAT_ID_LENGTH})`)
+  }
+  return v
+}
+
+function readAppBaseUrl(): string {
+  const v = process.env.TELEGRAM_APP_BASE_URL?.trim() || DEFAULT_APP_BASE_URL
+  if (!/^https:\/\//.test(v)) {
+    fail('TELEGRAM_APP_BASE_URL', `должен начинаться с https:// (получено: ${v})`)
+  }
+  // Без trailing slash — кнопки сами добавляют /...
+  return v.replace(/\/$/, '')
+}
+
 export function getTelegramEnv(): TelegramEnv {
   return {
     botToken: readBotToken(),
     botUsername: readBotUsername(),
     webhookSecret: readWebhookSecret(),
+    groupChatId: readGroupChatId(),
+    appBaseUrl: readAppBaseUrl(),
   }
 }

@@ -2,6 +2,8 @@ import { toZonedTime } from 'date-fns-tz'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { notifyAllManagersDirect } from '@/lib/telegram/notify'
+import { inboxListButton } from '@/lib/telegram/buttons'
 
 const MSK_TIMEZONE = 'Europe/Moscow'
 
@@ -144,31 +146,21 @@ export interface SummaryOutcome {
   errors: Array<{ managerId: string; reason: string }>
 }
 
-/** Шлёт текст сводки всем активным ADMIN/MANAGER с maxChatId. */
+/**
+ * Шлёт текст сводки всем активным ADMIN/MANAGER в Telegram.
+ *
+ * 5.8c: переехало с MAX на Telegram. Менеджеры без Telegram-онбординга
+ * пропускаются (раньше падало в MAX по User.maxChatId — теперь MAX для
+ * управленческих каналов не используется, см. SPRINT_5.8c).
+ *
+ * Поле `errors` оставлено для совместимости с роутами reminder-1/2:
+ * по-агрегации failed/skipped Telegram-API возвращает счётчики, а не
+ * per-manager ошибки, поэтому массив всегда пуст. sentToManagers
+ * соответствует sentTo из notifyAllManagersDirect.
+ */
 export async function sendSummaryToManagers(text: string): Promise<SummaryOutcome> {
-  const managers = await prisma.user.findMany({
-    where: {
-      role: { in: ['ADMIN', 'MANAGER'] },
-      maxChatId: { not: null },
-      isActive: true,
-    },
-    select: { id: true, maxChatId: true },
-  })
-
-  const outcome: SummaryOutcome = { sentToManagers: 0, errors: [] }
-  for (const m of managers) {
-    if (!m.maxChatId) continue
-    try {
-      await sendBotMessage(m.maxChatId, text)
-      outcome.sentToManagers++
-    } catch (err) {
-      outcome.errors.push({
-        managerId: m.id,
-        reason: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-  return outcome
+  const result = await notifyAllManagersDirect(text, { replyMarkup: inboxListButton() })
+  return { sentToManagers: result.sentTo, errors: [] }
 }
 
 /**

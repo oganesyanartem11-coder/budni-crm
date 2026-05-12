@@ -1,8 +1,9 @@
-import { GrammyError } from 'grammy'
+import { GrammyError, type InlineKeyboard } from 'grammy'
 import { getTelegramBot } from './bot'
 
 export interface SendTelegramMessageOptions {
   parseMode?: 'HTML' | 'MarkdownV2'
+  replyMarkup?: InlineKeyboard
 }
 
 export type SendTelegramMessageResult =
@@ -26,11 +27,10 @@ export async function sendTelegramMessage(
 ): Promise<SendTelegramMessageResult> {
   try {
     const bot = await getTelegramBot()
-    await bot.api.sendMessage(
-      chatId,
-      text,
-      options?.parseMode ? { parse_mode: options.parseMode } : undefined
-    )
+    const apiOptions: { parse_mode?: 'HTML' | 'MarkdownV2'; reply_markup?: InlineKeyboard } = {}
+    if (options?.parseMode) apiOptions.parse_mode = options.parseMode
+    if (options?.replyMarkup) apiOptions.reply_markup = options.replyMarkup
+    await bot.api.sendMessage(chatId, text, apiOptions)
     return { ok: true }
   } catch (err) {
     if (err instanceof GrammyError) {

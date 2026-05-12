@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/db/prisma'
-import { sendBotMessage } from '@/lib/max/send-message'
+import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
+import { inboxListButton } from '@/lib/telegram/buttons'
+import { getTelegramEnv } from '@/lib/telegram/env'
 import type { InboxItemReason } from '@prisma/client'
 
 const COOLDOWN_MINUTES = 15
@@ -15,9 +17,15 @@ const REASON_RU: Record<InboxItemReason, string> = {
 }
 
 /**
- * Шлёт уведомление всем менеджерам (MANAGER+ADMIN) с привязанным maxChatId.
- * Если по этому inbox-item уже пушили <COOLDOWN_MINUTES минут назад — пропускает.
- * Безопасно для параллельных вызовов: ошибка отправки одному менеджеру не падает на остальных.
+ * Шлёт уведомление всем активным менеджерам (ADMIN+MANAGER) с привязанным
+ * Telegram. Менеджеры, у которых не сделан Telegram-онбординг (нет
+ * telegramChatId), пропускаются — в MAX не уходим (см. 5.8c).
+ *
+ * Если по этому inbox-item уже пушили <COOLDOWN_MINUTES минут назад —
+ * пропускает. Cooldown канал-агностичен, оставляем как есть.
+ *
+ * Безопасно для параллельных вызовов: ошибка отправки одному менеджеру
+ * не падает на остальных (см. notifyAllManagersDirect).
  */
 export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise<void> {
   console.log(`[bot] notifyManagers START: inbox=${inboxItemId}`)
@@ -35,50 +43,35 @@ export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise
     }
   }
 
-  const managers = await prisma.user.findMany({
-    where: {
-      role: { in: ['MANAGER', 'ADMIN'] },
-      maxChatId: { not: null },
-      isActive: true,
-    },
-    select: { id: true, maxChatId: true },
-  })
-
-  if (managers.length === 0) {
-    console.warn('[bot] notify: no managers with maxChatId — skipping push')
-    return
-  }
-
   const reasonRu = REASON_RU[item.reason] ?? item.reason
   const messagePreview = item.clientMessage
-    ? `\n\nСообщение: «${item.clientMessage.slice(0, 200)}${item.clientMessage.length > 200 ? '…' : ''}»`
+    ? `\n\nСообщение: «${escapeHtml(item.clientMessage.slice(0, 200))}${
+        item.clientMessage.length > 200 ? '…' : ''
+      }»`
     : ''
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://budni-crm.vercel.app'
-  const link = `${baseUrl}/inbox/${item.id}`
+  const { appBaseUrl } = getTelegramEnv()
+  const link = `${appBaseUrl}/inbox/${item.id}`
   const priorityPrefix = item.priority === 'HIGH' ? '🔴 ' : '🔔 '
-  const text = `${priorityPrefix}Новое в Inbox
 
-Клиент: ${item.client.name}
-Причина: ${reasonRu}${messagePreview}
+  const text =
+    `${priorityPrefix}<b>Новое в Inbox</b>\n\n` +
+    `Клиент: ${escapeHtml(item.client.name)}\n` +
+    `Причина: ${reasonRu}${messagePreview}\n\n` +
+    `Открыть: ${link}`
 
-Открыть: ${link}`
-
-  await Promise.all(
-    managers.map(async (m) => {
-      if (!m.maxChatId) return
-      try {
-        await sendBotMessage(m.maxChatId, text)
-      } catch (e) {
-        console.error(`[bot] failed to push manager ${m.id}:`, (e as Error).message)
-      }
-    })
-  )
+  const result = await notifyAllManagersDirect(text, {
+    parseMode: 'HTML',
+    replyMarkup: inboxListButton(),
+  })
 
   await prisma.inboxItem.update({
     where: { id: inboxItemId },
     data: { lastPushedAt: new Date() },
   })
 
-  console.log(`[bot] notifyManagers DONE: inbox=${inboxItemId}, recipients=${managers.length}`)
+  console.log(
+    `[bot] notifyManagers DONE: inbox=${inboxItemId} sentTo=${result.sentTo} ` +
+      `skippedNoTelegram=${result.skippedNoTelegram} failed=${result.failed}`
+  )
 }
