@@ -7,26 +7,25 @@ export type ReplyTemplateKey = 'ONBOARDING'
 const MSK_TIMEZONE = 'Europe/Moscow'
 
 /**
- * Текст ежедневного вопроса от cron'а 13:00 МСК.
+ * Текст ежедневного вопроса от cron'а 11:00 МСК.
  *
  * Структура: шапка + пустая строка + тело.
  * Шапка по умолчанию — одна строка `Заявка на DD.MM, день_недели`.
  * Если СЕГОДНЯ в МСК понедельник или четверг — добавляется вторая строка
- * `Ожидаем заявку до 18:00` (напоминание о cut-off в начале и середине недели).
+ * `Ожидаем заявку до 16:00` (напоминание о cut-off в начале и середине недели).
  *
  * Тело — одна из 7 формулировок по `deliveryDate.getDate() % 7`. Детерминированно:
  * все клиенты с одинаковым deliveryDate видят одинаковый текст.
  */
 export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): string {
-  const dateNumeric = fnsFormat(deliveryDate, 'dd.MM', { locale: ru }) // "13.05"
-  const weekdayFull = fnsFormat(deliveryDate, 'EEEE', { locale: ru }) // "среда"
+  const dateNumeric = fnsFormat(deliveryDate, 'dd.MM', { locale: ru })
+  const weekdayFull = fnsFormat(deliveryDate, 'EEEE', { locale: ru })
   const line1 = `Заявка на ${dateNumeric}, ${weekdayFull}`
 
-  // День недели «сегодня» в МСК. dow: 0=вс, 1=пн ... 6=сб.
   const mskToday = toZonedTime(todayInMsk, MSK_TIMEZONE)
   const dow = mskToday.getDay()
   const isReminderDay = dow === 1 || dow === 4
-  const header = isReminderDay ? `${line1}\nОжидаем заявку до 18:00` : line1
+  const header = isReminderDay ? `${line1}\nОжидаем заявку до 16:00` : line1
 
   const idx = deliveryDate.getDate() % 7
   const variants = [
@@ -41,8 +40,41 @@ export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): stri
   return `${header}\n\n${variants[idx]}`
 }
 
+/** Напоминание-1 (14:00 МСК) — без шапки, чистый одиночный вопрос. */
+export function getReminder14Text(deliveryDate: Date): string {
+  const idx = deliveryDate.getDate() % 7
+  const variants = [
+    `Напомним о заявке — сколько порций готовим?`,
+    `Подскажете количество порций?`,
+    `Ждём заявку — сколько порций нужно?`,
+    `Уточните, пожалуйста, сколько порций.`,
+    `Сколько порций готовим на завтра?`,
+    `Напоминаем о заявке — какое количество порций?`,
+    `Подскажите, сколько порций понадобится?`,
+  ]
+  return variants[idx]
+}
+
+/** Напоминание-2 (15:30 МСК) — без шапки, акцент на cut-off в 16:00. */
+export function getReminder1530Text(deliveryDate: Date): string {
+  const idx = deliveryDate.getDate() % 7
+  const variants = [
+    `Ждём ваш ответ — заявки принимаем до 16:00.`,
+    `До 16:00 ещё есть время — подскажите количество порций.`,
+    `Не забудьте про заявку — принимаем до 16:00.`,
+    `До закрытия приёма заявок остался час — ждём от вас количество.`,
+    `Заявки принимаем до 16:00 — будем ждать.`,
+    `Напоминаем, заявки принимаем до 16:00.`,
+    `Уточните, пожалуйста, количество — приём до 16:00.`,
+  ]
+  return variants[idx]
+}
+
+/** Cutoff-notice (16:00 МСК) — приём закрыт. */
+export const CUTOFF_NOTICE_TEXT = 'Приём заявок на сегодня закрыт. Менеджер с вами свяжется.'
+
 // ─────────────────────────────────────────────────────────────────────
-// 5.7b: ответы бота после парсинга
+// 5.7b/c: ответы бота после парсинга
 // ─────────────────────────────────────────────────────────────────────
 
 export interface SavedItemForReply {
@@ -50,25 +82,28 @@ export interface SavedItemForReply {
   portions: number
 }
 
-/** Формат «Locationname — N» через запятую, мульти-локейшн. */
 function formatItemsList(items: SavedItemForReply[]): string {
   return items.map((i) => `${i.locationName} — ${i.portions}`).join(', ')
 }
 
-/** Кейс A: первый ответ числом, до 18:00. */
-export function formatAcceptedReply(items: SavedItemForReply[], deliveryDate: Date): string {
-  const dateStr = fnsFormat(deliveryDate, 'dd.MM', { locale: ru })
-  return `Принято на ${dateStr}: ${formatItemsList(items)}.`
+/** Кейс A: первый ответ числом, до 16:00. */
+export function formatAcceptedReply(items: SavedItemForReply[]): string {
+  if (items.length === 1) {
+    return `Принято, ${items[0].portions} порций. Спасибо!`
+  }
+  return `Принято: ${formatItemsList(items)}. Спасибо!`
 }
 
-/** Кейс B: повторный ответ числом (conv уже CONFIRMED), до 18:00. */
-export function formatUpdatedReply(items: SavedItemForReply[], deliveryDate: Date): string {
-  const dateStr = fnsFormat(deliveryDate, 'dd.MM', { locale: ru })
-  return `Принято изменение, теперь на ${dateStr}: ${formatItemsList(items)}.`
+/** Кейс B: повторный ответ числом (conv уже CONFIRMED), до 16:00. */
+export function formatUpdatedReply(items: SavedItemForReply[]): string {
+  if (items.length === 1) {
+    return `Принято, обновили на ${items[0].portions} порций.`
+  }
+  return `Принято, обновили: ${formatItemsList(items)}.`
 }
 
-/** Кейс C: ответ числом после 18:00 МСК. Один текст для первого и повторного. */
-export const POST_CUTOFF_REPLY = 'Заявки принимаем до 18:00, уточняем по возможности.'
+/** Кейс C: ответ числом после 16:00 МСК. Один текст для первого и повторного. */
+export const POST_CUTOFF_REPLY = 'Спасибо! Заявки принимаем до 16:00 — постараемся учесть.'
 
 // ─────────────────────────────────────────────────────────────────────
 // Legacy: используется только при онбординге через handlers.ts

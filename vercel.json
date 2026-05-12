@@ -4,6 +4,9 @@
   "regions": ["fra1"],
   "crons": [
     { "path": "/api/cron/generate-fixed-orders", "schedule": "0 3 * * *" },
-    { "path": "/api/cron/daily-questions", "schedule": "0 10 * * *" }
+    { "path": "/api/cron/daily-questions", "schedule": "0 8 * * *" },
+    { "path": "/api/cron/reminder-and-summary-1", "schedule": "0 11 * * *" },
+    { "path": "/api/cron/reminder-and-summary-2", "schedule": "30 12 * * *" },
+    { "path": "/api/cron/cutoff-notice", "schedule": "0 13 * * *" }
   ]
 }

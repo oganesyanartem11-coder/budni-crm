@@ -11,7 +11,7 @@ const REASON_RU: Record<InboxItemReason, string> = {
   ANOMALY_LLM_CONFIDENCE: 'LLM не уверен в парсинге',
   NON_NUMERIC: 'Не цифровой ответ',
   CANCELLATION_INTENT: 'Клиент хочет отменить',
-  POST_CUTOFF: 'Сообщение после 18:00',
+  POST_CUTOFF: 'Сообщение после 16:00',
 }
 
 /**

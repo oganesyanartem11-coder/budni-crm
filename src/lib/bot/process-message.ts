@@ -199,8 +199,8 @@ async function handleBotResponse(
   }))
 
   if (afterCutoff) {
-    // КЕЙС C — после 18:00 МСК. Заказ создан/обновлён, но клиент должен знать
-    // что это вне cutoff. InboxItem c POST_CUTOFF, push менеджеру.
+    // КЕЙС C — после 16:00 МСК. Заказ создан/обновлён, но клиент должен знать
+    // что это вне cutoff. InboxItem c POST_CUTOFF, push менеджеру (срочно).
     if (conv.status !== 'CONFIRMED') {
       await prisma.botConversation.update({
         where: { id: conv.id },
@@ -220,7 +220,7 @@ async function handleBotResponse(
       clientId: client.id,
       conversationId: conv.id,
       reason: 'POST_CUTOFF',
-      humanReason: 'Клиент ответил после 18:00 — заказ принят, но менеджер может скорректировать',
+      humanReason: 'Клиент ответил после 16:00 — заказ принят, но менеджер может скорректировать',
       priority: 'NORMAL',
       clientMessage: text,
       parsedJson: parsed as unknown as Prisma.InputJsonValue,
@@ -233,13 +233,14 @@ async function handleBotResponse(
   }
 
   if (wasFirstAnswer) {
-    // КЕЙС A — первый ответ до 18:00. Без инбокса.
+    // КЕЙС A — первый ответ до 16:00. Без инбокса, без push'а: клиент попадёт
+    // в сводку cron'ом 14:00 / 15:30 как «принято».
     await prisma.botConversation.update({
       where: { id: conv.id },
       data: { status: 'CONFIRMED' },
     })
 
-    const reply = formatAcceptedReply(itemsForReply, conv.deliveryDate)
+    const reply = formatAcceptedReply(itemsForReply)
     await sendBotMessage(client.maxChatId!, reply)
     await logBotMessage({
       clientId: client.id,
@@ -251,12 +252,12 @@ async function handleBotResponse(
     return { reply, action: 'saved' }
   }
 
-  // КЕЙС B — conv уже CONFIRMED, клиент пишет повторно, до 18:00.
-  // ВАЖНО: схема InboxItemReason не содержит ORDER_UPDATED (см. отчёт 5.7b ШАГ 1).
-  // По решению пользователя переиспользуем ANOMALY_HISTORICAL — семантически
-  // ближе всего («изменение vs историческое значение»). UI-метка в /inbox
-  // будет «Отклонение от нормы» — humanReason поясняет реальную причину.
-  const reply = formatUpdatedReply(itemsForReply, conv.deliveryDate)
+  // КЕЙС B — conv уже CONFIRMED, клиент пишет повторно, до 16:00.
+  // InboxItem создаём (чтобы менеджер видел изменение в /inbox), но БЕЗ push'а
+  // в MAX — повтор не срочный, увидим в следующей сводке.
+  // NB: схема InboxItemReason не содержит ORDER_UPDATED — используем
+  // ANOMALY_HISTORICAL (решение пользователя). UI-метка «Отклонение от нормы».
+  const reply = formatUpdatedReply(itemsForReply)
   await sendBotMessage(client.maxChatId!, reply)
   await logBotMessage({
     clientId: client.id,
@@ -273,9 +274,6 @@ async function handleBotResponse(
     priority: 'NORMAL',
     clientMessage: text,
     parsedJson: parsed as unknown as Prisma.InputJsonValue,
-  })
-  await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
-    console.error('[bot] notifyManagers failed:', e)
   })
 
   return { reply, action: 'updated', inboxItemId: inbox.id }

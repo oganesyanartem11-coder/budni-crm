@@ -31,7 +31,7 @@ export function detectAnomalies(input: DetectInput): AnomalyResult {
     return {
       isAnomaly: true,
       reason: 'POST_CUTOFF',
-      humanReason: 'Сообщение пришло после 18:00',
+      humanReason: 'Сообщение пришло после 16:00',
       priority: 'NORMAL',
     }
   }

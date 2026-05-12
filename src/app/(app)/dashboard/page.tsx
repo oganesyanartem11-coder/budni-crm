@@ -88,7 +88,7 @@ export default async function DashboardPage() {
                 </div>
                 <p className={cn('text-3xl font-bold tracking-tight tabular-nums', pendingOrders > 0 && 'text-warning-fg')}>{pendingOrders}</p>
                 <p className="text-xs mt-1 text-fg-subtle">
-                  {pendingOrders > 0 ? 'Подтвердить до 18:00 →' : 'Все на сегодня подтверждены'}
+                  {pendingOrders > 0 ? 'Подтвердить до 16:00 →' : 'Все на сегодня подтверждены'}
                 </p>
               </Link>
             </div>

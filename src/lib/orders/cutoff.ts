@@ -4,14 +4,14 @@ import { fromZonedTime } from 'date-fns-tz'
  * Cut-off — момент, после которого DYNAMIC-заказы на следующий день
  * считаются «принятыми» и любые правки помечаются как пост-cut-off.
  *
- * Auto-lock в 18:00 отменён в Спринте 5.0a — менеджер может править
+ * Auto-lock в 16:00 отменён в Спринте 5.0a — менеджер может править
  * заказы в CRM без ограничений. Бэдж «правлено после cut-off» теперь
  * показывается по времени правки относительно cut-off дня перед доставкой.
  *
  * Cut-off привязан к зоне Europe/Moscow, чтобы корректно работать
  * на Vercel (UTC) — иначе setHours(18) в UTC даст 21:00 МСК.
  */
-export const CUTOFF_HOUR_MSK = 18
+export const CUTOFF_HOUR_MSK = 16
 export const MSK_TIMEZONE = 'Europe/Moscow'
 
 /**
