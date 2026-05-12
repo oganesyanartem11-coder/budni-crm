@@ -58,7 +58,7 @@ interface InboxItemSerialized {
 
 const REASON_LABELS: Record<InboxItemReason, string> = {
   NEW_CLIENT: 'Новый клиент',
-  ANOMALY_HISTORICAL: 'Отклонение от нормы',
+  ANOMALY_HISTORICAL: 'Изменение от обычного',
   ANOMALY_THRESHOLD: 'Подозрительное число',
   ANOMALY_LLM_CONFIDENCE: 'LLM не уверен',
   NON_NUMERIC: 'Не цифра',

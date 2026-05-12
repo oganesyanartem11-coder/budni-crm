@@ -8,7 +8,7 @@ const COOLDOWN_MINUTES = 15
 
 const REASON_RU: Record<InboxItemReason, string> = {
   NEW_CLIENT: 'Новый клиент',
-  ANOMALY_HISTORICAL: 'Сильное отклонение от обычного',
+  ANOMALY_HISTORICAL: 'Изменение от обычного',
   ANOMALY_THRESHOLD: 'Цифра вне нормы',
   ANOMALY_LLM_CONFIDENCE: 'LLM не уверен в парсинге',
   NON_NUMERIC: 'Не цифровой ответ',

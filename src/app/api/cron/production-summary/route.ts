@@ -7,6 +7,7 @@ import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { productionSummaryButton } from '@/lib/telegram/buttons'
+import { formatPortions } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -139,7 +140,7 @@ export async function GET(request: Request) {
   lines.push(`📦 На завтра, <i>${escapeHtml(dateLabel)}</i>`)
   lines.push('')
   lines.push(
-    `<b>${totalPortions} порций</b> · ${uniqueLocationIds.size} локаций · ${uniqueClientIds.size} клиентов`
+    `<b>${formatPortions(totalPortions)}</b> · ${uniqueLocationIds.size} локаций · ${uniqueClientIds.size} клиентов`
   )
 
   const mealTypeOrder: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
@@ -155,7 +156,7 @@ export async function GET(request: Request) {
     lines.push(`✅ Подтверждено (${dynamicGroups.length}):`)
     for (const g of dynamicGroups) {
       lines.push(
-        `• ${escapeHtml(g.clientName)} (${escapeHtml(g.locationName)}) — ${g.portions} порций`
+        `• ${escapeHtml(g.clientName)} (${escapeHtml(g.locationName)}) — ${formatPortions(g.portions)}`
       )
     }
   }
@@ -165,7 +166,7 @@ export async function GET(request: Request) {
     lines.push(`🔁 Фиксированные (${fixedGroups.length}):`)
     for (const g of fixedGroups) {
       lines.push(
-        `• ${escapeHtml(g.clientName)} (${escapeHtml(g.locationName)}) — ${g.portions} порций`
+        `• ${escapeHtml(g.clientName)} (${escapeHtml(g.locationName)}) — ${formatPortions(g.portions)}`
       )
     }
   }

@@ -26,7 +26,16 @@ export function productionSummaryButton(dateIso: string): InlineKeyboard {
   )
 }
 
-export function reportsButton(): InlineKeyboard {
+/**
+ * Кнопка «Открыть аналитику».
+ *
+ * @param dateIso — YYYY-MM-DD; если передан, добавляется в URL как `?date=<...>`.
+ * Тех-долг 5.9a-debt: страница /reports пока читает только `?preset=&from=&to=`,
+ * параметр `?date=` ей неизвестен и будет проигнорирован. Кнопка ведёт на
+ * общий /reports — фильтр на конкретный день доделаем отдельно.
+ */
+export function reportsButton(dateIso?: string): InlineKeyboard {
   const { appBaseUrl } = getTelegramEnv()
-  return new InlineKeyboard().url('📊 Открыть аналитику', `${appBaseUrl}/reports`)
+  const url = dateIso ? `${appBaseUrl}/reports?date=${dateIso}` : `${appBaseUrl}/reports`
+  return new InlineKeyboard().url('📊 Открыть аналитику', url)
 }

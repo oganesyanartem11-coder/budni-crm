@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db/prisma'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { notifyAllManagersDirect } from '@/lib/telegram/notify'
 import { inboxListButton } from '@/lib/telegram/buttons'
+import { formatPortions } from '@/lib/utils/format'
 
 const MSK_TIMEZONE = 'Europe/Moscow'
 
@@ -130,7 +131,7 @@ export async function buildSummaryText(title: string, now: Date = new Date()): P
   lines.push(`Принято: ${confirmed.length} из ${total}`)
   for (const c of confirmed) {
     const totalPortions = c.orders.reduce((s, o) => s + o.portions, 0)
-    lines.push(`• ${c.client.name} — ${totalPortions} порций`)
+    lines.push(`• ${c.client.name} — ${formatPortions(totalPortions)}`)
   }
   lines.push('')
   lines.push(`Не ответили: ${silent.length}`)

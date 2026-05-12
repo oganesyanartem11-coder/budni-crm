@@ -1,6 +1,7 @@
 import { format as fnsFormat } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { toZonedTime } from 'date-fns-tz'
+import { formatPortions } from '@/lib/utils/format'
 
 export type ReplyTemplateKey = 'ONBOARDING'
 
@@ -89,7 +90,7 @@ function formatItemsList(items: SavedItemForReply[]): string {
 /** Кейс A: первый ответ числом, до 16:00. */
 export function formatAcceptedReply(items: SavedItemForReply[]): string {
   if (items.length === 1) {
-    return `Принято, ${items[0].portions} порций. Спасибо!`
+    return `Принято, ${formatPortions(items[0].portions)}. Спасибо!`
   }
   return `Принято: ${formatItemsList(items)}. Спасибо!`
 }
@@ -97,7 +98,7 @@ export function formatAcceptedReply(items: SavedItemForReply[]): string {
 /** Кейс B: повторный ответ числом (conv уже CONFIRMED), до 16:00. */
 export function formatUpdatedReply(items: SavedItemForReply[]): string {
   if (items.length === 1) {
-    return `Принято, обновили на ${items[0].portions} порций.`
+    return `Принято, обновили на ${formatPortions(items[0].portions)}.`
   }
   return `Принято, обновили: ${formatItemsList(items)}.`
 }

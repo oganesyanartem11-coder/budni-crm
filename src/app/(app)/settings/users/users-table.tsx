@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, KeyRound, Power, PowerOff, CheckCircle2, Copy } from 'lucide-react'
+import { Plus, KeyRound, Power, PowerOff, CheckCircle2, Copy, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { createUser, regenerateUserPin, setUserActive } from './actions'
 import type { UserRole } from '@prisma/client'
@@ -15,6 +15,8 @@ interface UserRow {
   createdAt: string
   maxChatId: string | null
   onboardedAt: string | null
+  telegramChatId: string | null
+  telegramUsername: string | null
 }
 
 interface Props {
@@ -117,6 +119,7 @@ export function UsersTable({ users, currentUserId }: Props) {
               <tr>
                 <th className="text-left px-4 py-3 font-medium">Имя</th>
                 <th className="text-left px-3 py-3 font-medium">Роль</th>
+                <th className="text-left px-3 py-3 font-medium">Telegram</th>
                 <th className="text-left px-3 py-3 font-medium">MAX</th>
                 <th className="text-left px-3 py-3 font-medium hidden md:table-cell">Создан</th>
                 <th className="text-right px-4 py-3 font-medium">Действия</th>
@@ -135,6 +138,16 @@ export function UsersTable({ users, currentUserId }: Props) {
                     <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium', ROLE_COLORS[u.role])}>
                       {ROLE_LABELS[u.role]}
                     </span>
+                  </td>
+                  <td className="px-3 py-3 text-xs text-fg-muted">
+                    {u.telegramChatId ? (
+                      <span className="inline-flex items-center gap-1 text-success-fg">
+                        <Send className="w-3 h-3" />
+                        {u.telegramUsername ? `@${u.telegramUsername}` : 'привязан'}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                   <td className="px-3 py-3 text-xs text-fg-muted">
                     {u.maxChatId ? '✓ привязан' : '—'}

@@ -18,6 +18,8 @@ export default async function UsersPage() {
       createdAt: true,
       maxChatId: true,
       onboardedAt: true,
+      telegramChatId: true,
+      telegramUsername: true,
     },
   })
 

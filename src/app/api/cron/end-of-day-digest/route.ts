@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { reportsButton } from '@/lib/telegram/buttons'
+import { formatPortions } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
     select: { portions: true, status: true, clientId: true },
   })
 
-  const button = reportsButton()
+  const button = reportsButton(todayIso)
   const dateLabel = format(todayMsk, 'EEEEEE, d MMMM', { locale: ru })
 
   if (orders.length === 0) {
@@ -80,7 +81,7 @@ export async function GET(request: Request) {
 
   const text =
     `🌙 День закрыт, <i>${escapeHtml(dateLabel)}</i>\n\n` +
-    `Отгружено: <b>${totalPortions} порций</b>\n` +
+    `Отгружено: <b>${formatPortions(totalPortions)}</b>\n` +
     `Клиентов: ${clientCount}\n` +
     `Доставлено: ${deliveredCount}/${orders.length}\n\n` +
     `ℹ️ Детали и динамика — в аналитике.`

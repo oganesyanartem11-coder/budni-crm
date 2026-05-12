@@ -2,8 +2,6 @@ import Link from 'next/link'
 import { Users as UsersIcon, Send, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { buildOnboardingDeeplink } from '@/lib/bot/onboarding'
-import { MaxNotificationsSection } from './max-notifications-section'
 
 export default async function SettingsPage() {
   const user = await getCurrentUser()
@@ -15,16 +13,6 @@ export default async function SettingsPage() {
       <PageHeader title="Настройки" subtitle={user.name} />
 
       <div className="space-y-5">
-        {isAdminOrManager && (
-          <MaxNotificationsSection
-            currentChatId={user.maxChatId}
-            initialDeeplink={
-              user.maxOnboardingToken ? buildOnboardingDeeplink(user.maxOnboardingToken) : null
-            }
-            onboardedAt={user.onboardedAt}
-          />
-        )}
-
         {isAdminOrManager && (
           <Link
             href="/settings/telegram"
