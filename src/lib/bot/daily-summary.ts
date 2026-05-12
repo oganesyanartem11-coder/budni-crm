@@ -11,7 +11,11 @@ export function mskMidnightUtc(now: Date, dayOffset: number): Date {
   return new Date(Date.UTC(m.getFullYear(), m.getMonth(), m.getDate() + dayOffset, 0, 0, 0, 0))
 }
 
-const REMINDER_COOLDOWN_MINUTES = 60
+// Узкий cooldown — только защита от Vercel cron retry (~5 мин после сбоя).
+// НЕ должен пересекаться с легитимными интервалами между разными cron'ами
+// (daily-questions → reminder-1 = 180 мин, reminder-1 → reminder-2 = 90 мин,
+// reminder-2 → cutoff-notice = 30 мин — все больше 10).
+const REMINDER_COOLDOWN_MINUTES = 10
 
 /**
  * Молчащие PENDING-conv созданные сегодня (созданные cron'ом 11:00 МСК).
