@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "crons": [
-    { "path": "/api/cron/generate-fixed-orders", "schedule": "0 3 * * *" }
+    { "path": "/api/cron/generate-fixed-orders", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/daily-questions", "schedule": "0 10 * * *" }
   ]
 }

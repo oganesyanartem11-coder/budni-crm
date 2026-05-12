@@ -1,8 +1,9 @@
+import { format as fnsFormat } from 'date-fns'
+import { ru } from 'date-fns/locale'
 import { formatDateLong } from '@/lib/utils/format'
 
 export type ReplyTemplateKey =
   | 'ONBOARDING'
-  | 'DAILY_QUESTION'
   | 'ACCEPTED'
   | 'UPDATED'
   | 'ESCALATED_TO_MANAGER'
@@ -15,18 +16,38 @@ interface TemplateContext {
   newPortions?: number
 }
 
-const DAILY_QUESTION_VARIATIONS = [
-  'Добрый день! Уточните, пожалуйста, сколько порций обеда привозить завтра?',
-  'Подскажите по завтрашнему заказу — сколько порций обеда?',
-  'Завтра обедаем — сколько порций нужно?',
-]
+/**
+ * Текст ежедневного вопроса от cron'а 13:00 МСК.
+ *
+ * Структура: шапка `Заявка на DD.MM, день_недели` + пустая строка + тело.
+ * Тело — одна из 7 формулировок по `deliveryDate.getDate() % 7` (детерминированно,
+ * все клиенты с одинаковым deliveryDate видят одинаковый текст).
+ *
+ * todayInMsk — reserved for future use, e.g. сегодня/завтра wording.
+ */
+export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): string {
+  void todayInMsk
+  const dateNumeric = fnsFormat(deliveryDate, 'dd.MM', { locale: ru }) // "13.05"
+  const weekdayFull = fnsFormat(deliveryDate, 'EEEE', { locale: ru }) // "среда"
+  const header = `Заявка на ${dateNumeric}, ${weekdayFull}`
+
+  const idx = deliveryDate.getDate() % 7
+  const variants = [
+    `Добрый день! Сколько порций? Ждём ответ до 16:00.`,
+    `Здравствуйте! Подскажите, пожалуйста, количество порций.`,
+    `Добрый день! Сколько порций готовить?`,
+    `Здравствуйте! Уточните, пожалуйста, сколько порций.`,
+    `Добрый день! Сколько порций нужно? Ответ ждём до 16:00.`,
+    `Здравствуйте! Сообщите, пожалуйста, количество порций.`,
+    `Добрый день! Поделитесь, пожалуйста, количеством порций.`,
+  ]
+  return `${header}\n\n${variants[idx]}`
+}
 
 export function getBotReplyTemplate(key: ReplyTemplateKey, ctx: TemplateContext = {}): string {
   switch (key) {
     case 'ONBOARDING':
       return 'Здравствуйте! Это бот компании «Будни». Через этот чат я буду каждый день уточнять количество порций на следующий день. Если возникнут вопросы — передам менеджеру.'
-    case 'DAILY_QUESTION':
-      return DAILY_QUESTION_VARIATIONS[Math.floor(Math.random() * DAILY_QUESTION_VARIATIONS.length)]
     case 'ACCEPTED': {
       const lines = (ctx.items ?? []).map((i) => `${i.locationName}: ${i.portions} порций`).join(', ')
       const dateStr = ctx.deliveryDate ? `на ${formatDateLong(ctx.deliveryDate)}` : 'на завтра'

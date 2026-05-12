@@ -15,8 +15,11 @@ export interface GenerationStats {
 
 /**
  * Проверяет: должен ли конфиг производить заказ на эту дату по своему расписанию?
+ *
+ * Экспортируется, чтобы DAILY_QUESTION cron (5.7a) использовал ту же логику дней,
+ * что и FIXED-генератор — иначе клиент получит вопрос в день, когда заказ ему не нужен.
  */
-function isScheduledForDate(config: ClientMealConfig, date: Date): boolean {
+export function isScheduledForDate(config: ClientMealConfig, date: Date): boolean {
   // Проверка validFrom/validTo
   if (config.validFrom && date < config.validFrom) return false
   if (config.validTo && date > config.validTo) return false
