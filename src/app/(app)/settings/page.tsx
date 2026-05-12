@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Users as UsersIcon, ChevronRight } from 'lucide-react'
+import { Users as UsersIcon, Send, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { buildOnboardingDeeplink } from '@/lib/bot/onboarding'
@@ -23,6 +23,27 @@ export default async function SettingsPage() {
             }
             onboardedAt={user.onboardedAt}
           />
+        )}
+
+        {isAdminOrManager && (
+          <Link
+            href="/settings/telegram"
+            className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"
+            style={{ boxShadow: 'var(--shadow-card)' }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-bg flex items-center justify-center">
+                  <Send className="w-5 h-5 text-fg-muted" strokeWidth={1.75} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-base">Telegram</h3>
+                  <p className="text-sm text-fg-muted">Привязка аккаунта для уведомлений и сводок</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-fg-subtle" />
+            </div>
+          </Link>
         )}
 
         {user.role === 'ADMIN' && (
