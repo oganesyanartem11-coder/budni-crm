@@ -32,7 +32,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    await getTelegramBot().handleUpdate(update)
+    const bot = await getTelegramBot()
+    await bot.handleUpdate(update)
   } catch (err) {
     // Не пробрасываем 5xx — Telegram начал бы ретраить с экспоненциальным
     // бэкоффом, нам это не нужно: ошибка уже залогирована.

@@ -4,9 +4,15 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { getTelegramEnv } from './env'
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __telegramBot: Bot | undefined
+interface TelegramBotCache {
+  bot: Bot
+  initialized: boolean
+}
+
+// Singleton хранится в globalThis, чтобы переживать перезагрузку модулей
+// в dev и переиспользоваться между запросами в одном serverless-инстансе.
+const globalForBot = globalThis as unknown as {
+  telegramBotCache?: TelegramBotCache
 }
 
 async function handleStart(ctx: CommandContext<Context>): Promise<void> {
@@ -94,26 +100,36 @@ async function handleOtherMessage(ctx: Context): Promise<void> {
   await ctx.reply('Я бот только для отправки уведомлений и сводок. Отвечать пока не умею.')
 }
 
-function createBot(): Bot {
-  const { botToken } = getTelegramEnv()
-  const bot = new Bot(botToken)
+function registerHandlers(bot: Bot): void {
   bot.command('start', handleStart)
   bot.on('message', handleOtherMessage)
-  return bot
 }
 
 /**
- * Singleton-инстанс Telegram-бота. Хранится в globalThis, чтобы переживать
- * перезагрузку модулей в dev и переиспользоваться между запросами в одном
- * serverless-инстансе. В serverless-prod может пересоздаваться на каждом
- * холодном старте — это норма, регистрация хендлеров идемпотентна.
+ * Singleton-инстанс Telegram-бота с гарантированной инициализацией.
  *
- * НЕ вызываем bot.start() и bot.init() — это режим polling, который для
- * Next.js serverless не нужен и сломает запуск.
+ * grammy в режиме webhook требует bot.init() перед первым handleUpdate
+ * (init подгружает getMe — данные о боте, нужны для парсинга команд и id'шек).
+ * Без init получаем «Bot not initialized!» при первом апдейте.
+ *
+ * init() вызывается ровно один раз на инстанс контейнера: первый вызов
+ * выставляет initialized=true, повторные сразу возвращают кэш. Хендлеры
+ * регистрируются ДО init, как требует grammy.
+ *
+ * НЕ вызываем bot.start() — это polling, для Next.js serverless не нужен.
  */
-export function getTelegramBot(): Bot {
-  if (!globalThis.__telegramBot) {
-    globalThis.__telegramBot = createBot()
+export async function getTelegramBot(): Promise<Bot> {
+  if (!globalForBot.telegramBotCache) {
+    const { botToken } = getTelegramEnv()
+    const bot = new Bot(botToken)
+    registerHandlers(bot)
+    globalForBot.telegramBotCache = { bot, initialized: false }
   }
-  return globalThis.__telegramBot
+
+  const cache = globalForBot.telegramBotCache
+  if (!cache.initialized) {
+    await cache.bot.init()
+    cache.initialized = true
+  }
+  return cache.bot
 }

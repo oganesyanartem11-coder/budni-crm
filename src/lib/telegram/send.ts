@@ -25,7 +25,7 @@ export async function sendTelegramMessage(
   options?: SendTelegramMessageOptions
 ): Promise<SendTelegramMessageResult> {
   try {
-    const bot = getTelegramBot()
+    const bot = await getTelegramBot()
     await bot.api.sendMessage(
       chatId,
       text,
