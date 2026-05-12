@@ -125,20 +125,24 @@ export async function fetchInboxItemFresh(
 
   const item = await prisma.inboxItem.findUnique({
     where: { id: inboxItemId },
-    include: {
-      conversation: {
-        select: {
-          id: true,
-          messages: {
-            where: { createdAt: { gte: sevenDaysAgo } },
-            orderBy: { createdAt: 'asc' },
-            select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
-          },
-        },
-      },
+    select: {
+      id: true,
+      clientId: true,
+      status: true,
+      draftReply: true,
+      clientMessage: true,
     },
   })
   if (!item) return { ok: false, error: 'Не найден' }
+
+  // Все BotMessage клиента за 7 дней — см. комментарий в inbox/[id]/page.tsx.
+  // Не фильтруем по conversationId, чтобы захватить OUT-сообщения cron'а
+  // 5.7a, живущие в отдельной PENDING-conv для следующего активного дня.
+  const messages = await prisma.botMessage.findMany({
+    where: { clientId: item.clientId, createdAt: { gte: sevenDaysAgo } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
+  })
 
   // Если за время открытой страницы клиент дописал что-то — помечаем как прочитанное
   await prisma.botMessage.updateMany({
@@ -159,7 +163,7 @@ export async function fetchInboxItemFresh(
         draftReply: item.draftReply,
         clientMessage: item.clientMessage,
       },
-      messages: (item.conversation?.messages ?? []).map((m) => ({
+      messages: messages.map((m) => ({
         id: m.id,
         direction: m.direction,
         text: m.text,
@@ -184,15 +188,6 @@ export async function ensureDraftReply(
     where: { id: inboxItemId },
     include: {
       client: { select: { id: true, name: true } },
-      conversation: {
-        select: {
-          id: true,
-          messages: {
-            orderBy: { createdAt: 'asc' },
-            select: { direction: true, text: true, createdAt: true },
-          },
-        },
-      },
     },
   })
   if (!item) return { ok: false, error: 'Inbox item не найден' }
@@ -200,8 +195,18 @@ export async function ensureDraftReply(
     return { ok: true, data: { draft: item.draftReply } }
   }
 
-  const messages = item.conversation?.messages.length
-    ? item.conversation.messages
+  // Все BotMessage клиента за 7 дней — см. комментарий в inbox/[id]/page.tsx.
+  // LLM должен видеть и наш OUT-вопрос cron'а 5.7a, и спонтанные сообщения клиента,
+  // независимо от того в какой BotConversation они физически живут.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+  const conversationMessages = await prisma.botMessage.findMany({
+    where: { clientId: item.client.id, createdAt: { gte: sevenDaysAgo } },
+    orderBy: { createdAt: 'asc' },
+    select: { direction: true, text: true, createdAt: true },
+  })
+
+  const messages = conversationMessages.length
+    ? conversationMessages
     : item.clientMessage
       ? [{ direction: 'IN' as const, text: item.clientMessage, createdAt: item.createdAt }]
       : []

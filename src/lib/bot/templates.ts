@@ -1,5 +1,6 @@
 import { format as fnsFormat } from 'date-fns'
 import { ru } from 'date-fns/locale'
+import { toZonedTime } from 'date-fns-tz'
 import { formatDateLong } from '@/lib/utils/format'
 
 export type ReplyTemplateKey =
@@ -16,30 +17,39 @@ interface TemplateContext {
   newPortions?: number
 }
 
+const MSK_TIMEZONE = 'Europe/Moscow'
+
 /**
  * Текст ежедневного вопроса от cron'а 13:00 МСК.
  *
- * Структура: шапка `Заявка на DD.MM, день_недели` + пустая строка + тело.
- * Тело — одна из 7 формулировок по `deliveryDate.getDate() % 7` (детерминированно,
- * все клиенты с одинаковым deliveryDate видят одинаковый текст).
+ * Структура: шапка + пустая строка + тело.
+ * Шапка по умолчанию — одна строка `Заявка на DD.MM, день_недели`.
+ * Если СЕГОДНЯ в МСК понедельник или четверг — добавляется вторая строка
+ * `Ожидаем заявку до 18:00` (напоминание о cut-off в начале и середине недели).
  *
- * todayInMsk — reserved for future use, e.g. сегодня/завтра wording.
+ * Тело — одна из 7 формулировок по `deliveryDate.getDate() % 7`. Детерминированно:
+ * все клиенты с одинаковым deliveryDate видят одинаковый текст.
  */
 export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): string {
-  void todayInMsk
   const dateNumeric = fnsFormat(deliveryDate, 'dd.MM', { locale: ru }) // "13.05"
   const weekdayFull = fnsFormat(deliveryDate, 'EEEE', { locale: ru }) // "среда"
-  const header = `Заявка на ${dateNumeric}, ${weekdayFull}`
+  const line1 = `Заявка на ${dateNumeric}, ${weekdayFull}`
+
+  // День недели «сегодня» в МСК. dow: 0=вс, 1=пн ... 6=сб.
+  const mskToday = toZonedTime(todayInMsk, MSK_TIMEZONE)
+  const dow = mskToday.getDay()
+  const isReminderDay = dow === 1 || dow === 4
+  const header = isReminderDay ? `${line1}\nОжидаем заявку до 18:00` : line1
 
   const idx = deliveryDate.getDate() % 7
   const variants = [
-    `Добрый день! Сколько порций? Ждём ответ до 16:00.`,
-    `Здравствуйте! Подскажите, пожалуйста, количество порций.`,
-    `Добрый день! Сколько порций готовить?`,
-    `Здравствуйте! Уточните, пожалуйста, сколько порций.`,
-    `Добрый день! Сколько порций нужно? Ответ ждём до 16:00.`,
-    `Здравствуйте! Сообщите, пожалуйста, количество порций.`,
-    `Добрый день! Поделитесь, пожалуйста, количеством порций.`,
+    `Добрый день! Сколько порций?`,
+    `Здравствуйте! Сколько порций нужно?`,
+    `Приветствую! Подскажите количество порций.`,
+    `Добрый день! Сколько порций готовим?`,
+    `Здравствуйте! Уточните количество порций, пожалуйста.`,
+    `Приветствую! Напишите, пожалуйста, сколько порций.`,
+    `Добрый день! Сколько порций понадобится?`,
   ]
   return `${header}\n\n${variants[idx]}`
 }

@@ -31,17 +31,23 @@ export default async function InboxItemPage({ params }: PageProps) {
           id: true,
           deliveryDate: true,
           status: true,
-          messages: {
-            where: { createdAt: { gte: sevenDaysAgo } },
-            orderBy: { createdAt: 'asc' },
-            select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
-          },
         },
       },
       resolvedBy: { select: { id: true, name: true } },
     },
   })
   if (!item) notFound()
+
+  // Грузим ВСЕ BotMessage клиента за 7 дней — не привязываемся к conversationId
+  // конкретного InboxItem. После 5.7a cron создаёт BotConversation на свой target
+  // date с отдельным id, и его OUT-сообщение живёт в другой conv, чем та, на которую
+  // указывает текущий InboxItem. Тред «как мессенджер» (CURRENT_STATE 5.4) — это
+  // вся переписка клиента, а не одна conversation.
+  const messages = await prisma.botMessage.findMany({
+    where: { clientId: item.client.id, createdAt: { gte: sevenDaysAgo } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
+  })
 
   // Помечаем все непрочитанные IN-сообщения этого клиента как прочитанные.
   // Бэдж в навигации обновится через polling из /inbox (10 сек).
@@ -53,6 +59,11 @@ export default async function InboxItemPage({ params }: PageProps) {
     },
     data: { readAt: new Date() },
   })
+
+  const itemWithMessages = {
+    ...item,
+    conversation: item.conversation ? { ...item.conversation, messages } : null,
+  }
 
   return (
     <>
@@ -66,7 +77,7 @@ export default async function InboxItemPage({ params }: PageProps) {
         </Link>
       </div>
       <PageHeader title={item.client.name} subtitle="Обращение клиента" />
-      <InboxItemDetail item={serialize(item)} />
+      <InboxItemDetail item={serialize(itemWithMessages)} />
     </>
   )
 }

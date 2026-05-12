@@ -2,16 +2,27 @@ import { format as fnsFormat } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { getDailyQuestionText } from '@/lib/bot/templates'
 
-// Старт — вторник 12 мая 2026 (UTC-полночь), 10 дней подряд.
-const start = new Date(Date.UTC(2026, 4, 12, 0, 0, 0, 0))
+// Старт — понедельник 18 мая 2026, далее 7 дней.
+const start = new Date(Date.UTC(2026, 4, 18, 0, 0, 0, 0))
 
-for (let i = 0; i < 10; i++) {
-  const target = new Date(start)
-  target.setUTCDate(target.getUTCDate() + i)
-  const variant = target.getUTCDate() % 7
-  const headerDate = fnsFormat(target, 'dd.MM', { locale: ru })
-  const weekday = fnsFormat(target, 'EEEE', { locale: ru })
-  console.log(`=== target: ${headerDate}, ${weekday} (variant=${variant}) ===`)
-  console.log(getDailyQuestionText(target, start))
+function fmt(d: Date) {
+  return `${fnsFormat(d, 'dd.MM', { locale: ru })} ${fnsFormat(d, 'EEEE', { locale: ru })}`
+}
+
+for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+  const sendDay = new Date(start)
+  sendDay.setUTCDate(sendDay.getUTCDate() + dayOffset)
+
+  const targetA = new Date(sendDay)
+  targetA.setUTCDate(targetA.getUTCDate() + 1) // +1 день
+
+  const targetB = new Date(sendDay)
+  targetB.setUTCDate(targetB.getUTCDate() + 3) // +3 дня
+
+  console.log(`=== SEND: ${fmt(sendDay)} | TARGET: ${fmt(targetA)} ===`)
+  console.log(getDailyQuestionText(targetA, sendDay))
+  console.log('---')
+  console.log(`=== SEND: ${fmt(sendDay)} | TARGET: ${fmt(targetB)} ===`)
+  console.log(getDailyQuestionText(targetB, sendDay))
   console.log('---')
 }
