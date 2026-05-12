@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import { findClientByMaxChatId } from '@/lib/db/queries/bot'
+import { findClientByMaxChatId, findLatestBotConv } from '@/lib/db/queries/bot'
 import { parseClientResponse } from '@/lib/llm/parser'
 import { detectAnomalies } from '@/lib/orders/anomaly-detector'
 import { getClientStats } from '@/lib/orders/client-stats'
@@ -8,9 +8,15 @@ import { saveBotOrders } from './save-orders'
 import { createInboxItem } from './create-inbox-item'
 import { notifyManagersAboutInboxItem } from './notify-managers'
 import { logBotMessage } from './log-message'
-import { getBotReplyTemplate, type ReplyTemplateKey } from './templates'
+import {
+  formatAcceptedReply,
+  formatUpdatedReply,
+  POST_CUTOFF_REPLY,
+  type SavedItemForReply,
+} from './templates'
+import { sendBotMessage } from '@/lib/max/send-message'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
-import type { MealType, Prisma } from '@prisma/client'
+import type { BotConversation, MealType, Prisma } from '@prisma/client'
 
 const MEAL_TYPE_RU: Record<MealType, string> = {
   BREAKFAST: 'завтрака',
@@ -26,6 +32,7 @@ export interface ProcessMessageInput {
 export type ProcessAction =
   | 'saved'
   | 'updated'
+  | 'post_cutoff'
   | 'inbox'
   | 'unknown_client'
   | 'empty_message'
@@ -39,14 +46,11 @@ export interface ProcessMessageResult {
 /**
  * Главный обработчик входящего сообщения от MAX.
  *
- * Логика 5.3:
- * 1. Найти клиента по maxChatId (если нет — молчим, логируем).
- * 2. Найти активную BotConversation (status=PENDING). В 5.3 её никогда нет
- *    (создаётся cron'ом в 5.7), значит ВСЕ сообщения уходят как «спонтанные»
- *    → синтетическая BotConversation на сегодня (status=AWAITING_MANAGER),
- *    InboxItem с reason=NON_NUMERIC, BotMessage(direction=IN), бот молчит.
- *
- * Ветка с парсером (для 5.7+) написана, но не достижима в 5.3.
+ * Логика 5.7b:
+ * 1. Найти клиента по maxChatId. Нет — молчим.
+ * 2. findLatestBotConv: самая свежая PENDING|CONFIRMED conv клиента за 30 дней.
+ *    - Есть → ветка PARSER (handleBotResponse): A/B/C/D.
+ *    - Нет  → ветка SPONTANEOUS (handleSpontaneous): legacy 5.4, кейс E.
  */
 export async function processClientMessage(
   input: ProcessMessageInput
@@ -63,115 +67,24 @@ export async function processClientMessage(
     return { reply: null, action: 'unknown_client' }
   }
 
-  // Тред дня: BotConversation за СЕГОДНЯ (UTC midnight).
-  // Schema имеет @@unique([clientId, deliveryDate]) — на (клиент, день) максимум
-  // одна conversation. Поэтому ищем БЕЗ фильтра по статусу, а потом решаем:
-  //  - PENDING → парсер (5.7+)
-  //  - AWAITING_MANAGER → продолжаем тот же inbox-item
-  //  - CONFIRMED/EXPIRED/CANCELLED → conv был закрыт менеджером,
-  //    «reopen» — переводим обратно в AWAITING_MANAGER и СОЗДАЁМ НОВЫЙ inbox-item
-  //    (для менеджера это визуально новый тред).
-  const today = new Date()
-  today.setUTCHours(0, 0, 0, 0)
-
-  let conversation = await prisma.botConversation.findFirst({
-    where: { clientId: client.id, deliveryDate: today },
-    orderBy: { createdAt: 'desc' },
-  })
-
-  let isReopenedConversation = false
-  if (!conversation) {
-    conversation = await prisma.botConversation.create({
-      data: {
-        clientId: client.id,
-        deliveryDate: today,
-        status: 'AWAITING_MANAGER',
-      },
-    })
-  } else if (
-    conversation.status === 'CONFIRMED' ||
-    conversation.status === 'EXPIRED' ||
-    conversation.status === 'CANCELLED'
-  ) {
-    conversation = await prisma.botConversation.update({
-      where: { id: conversation.id },
-      data: { status: 'AWAITING_MANAGER' },
-    })
-    isReopenedConversation = true
+  const botConv = await findLatestBotConv(client.id)
+  if (botConv) {
+    return handleBotResponse(client, botConv, text)
   }
-
-  // PENDING — ответ на cron-вопрос дня → парсер (5.7+) сам залогирует с parsedJson
-  if (conversation.status === 'PENDING') {
-    return handleParsed(client, conversation.id, conversation.deliveryDate, text)
-  }
-
-  // AWAITING_MANAGER — спонтанное общение. Логируем без parsedJson.
-  await logBotMessage({
-    clientId: client.id,
-    conversationId: conversation.id,
-    direction: 'IN',
-    text,
-  })
-
-  // Дедупим InboxItem по conversation. Если conv только что переоткрыт после
-  // закрытия — это НОВЫЙ тред с точки зрения менеджера, создаём новый item.
-  // Иначе берём последний item: открытый продолжаем, прочитанный — возвращаем
-  // в UNREAD и сбрасываем устаревший draft.
-  let inboxItem = isReopenedConversation
-    ? null
-    : await prisma.inboxItem.findFirst({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'desc' },
-      })
-
-  if (!inboxItem) {
-    inboxItem = await createInboxItem({
-      clientId: client.id,
-      conversationId: conversation.id,
-      reason: 'NON_NUMERIC',
-      humanReason: 'Спонтанное сообщение от клиента',
-      priority: 'NORMAL',
-      clientMessage: text,
-    })
-  } else {
-    // Новое сообщение в треде: обновляем превью, сбрасываем draft и cooldown
-    // пушей (это свежее событие). status: 'UNREAD' НЕ ставим — с 5.4d
-    // непрочитанность считается по BotMessage.readAt.
-    await prisma.inboxItem.update({
-      where: { id: inboxItem.id },
-      data: {
-        clientMessage: text,
-        draftReply: null,
-        lastPushedAt: null,
-        resolvedAt: null,
-        resolvedById: null,
-      },
-    })
-  }
-
-  // Push менеджерам. Раньше был fire-and-forget — но на serverless (Vercel)
-  // функция может завершиться до резолва промиса. С await серверный handler
-  // ждёт отправку перед возвратом MAX-у.
-  await notifyManagersAboutInboxItem(inboxItem.id).catch((e) => {
-    console.error('[bot] notifyManagers failed:', e)
-  })
-
-  return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
+  return handleSpontaneous(client, text)
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Парсинг ответа на дневной вопрос (в 5.3-5.4 unreachable, готово к 5.7).
+// PARSER branch — клиент отвечает на cron-вопрос. Кейсы A/B/C/D.
 // ─────────────────────────────────────────────────────────────────────
-async function handleParsed(
+async function handleBotResponse(
   client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,
-  conversationId: string,
-  deliveryDate: Date,
+  conv: BotConversation,
   text: string
 ): Promise<ProcessMessageResult> {
-  const dayOfWeek = deliveryDate.getUTCDay()
+  const dayOfWeek = conv.deliveryDate.getUTCDay()
   const stats = await getClientStats(client.id, dayOfWeek)
 
-  // Каноническое название первого активного meal-конфига для подсказки LLM
   const firstMealType = client.locations[0]?.mealConfigs[0]?.mealType ?? 'LUNCH'
   const mealTypeRu = MEAL_TYPE_RU[firstMealType] ?? 'обеда'
 
@@ -193,31 +106,48 @@ async function handleParsed(
     })),
   })
 
+  // IN-сообщение пишем сразу с метаданными парсинга — менеджер в /inbox увидит
+  // и сырой текст, и tone/confidence/reason.
+  await logBotMessage({
+    clientId: client.id,
+    conversationId: conv.id,
+    direction: 'IN',
+    text,
+    parsedJson: parsed as unknown as Prisma.InputJsonValue,
+    llmConfidence: parsed.confidence,
+    llmReason: parsed.reason,
+    toneLabel: parsed.toneLabel,
+  })
+
+  // Аномалии содержания (без cutoff — cutoff обрабатываем отдельно как кейс C
+  // с сохранением заказа). isPastCutoff=false внутри detectAnomalies, чтобы
+  // ветвь POST_CUTOFF не перебивала остальные reason'ы.
   const anomaly = detectAnomalies({
     parsed,
     stats,
     isNewClient: client.safeAnswerStreak < NEW_CLIENT_SAFE_STREAK,
-    isPastCutoff: isPastCutoff(deliveryDate),
+    isPastCutoff: false,
   })
 
-  if (anomaly.isAnomaly) {
-    await logBotMessage({
-      clientId: client.id,
-      conversationId,
-      direction: 'IN',
-      text,
-      parsedJson: parsed as unknown as Prisma.InputJsonValue,
-      llmConfidence: parsed.confidence,
-      llmReason: parsed.reason,
-      toneLabel: parsed.toneLabel,
-    })
+  const isNotNumeric = parsed.type !== 'numeric'
+  if (anomaly.isAnomaly || isNotNumeric) {
+    // КЕЙС D — парсер не понял или аномалия по содержанию. Заказ НЕ сохраняем.
+    const reason = anomaly.reason ?? 'NON_NUMERIC'
+    const humanReason = anomaly.humanReason || (parsed.reason || 'Не цифровой ответ')
+
+    if (conv.status !== 'AWAITING_MANAGER') {
+      await prisma.botConversation.update({
+        where: { id: conv.id },
+        data: { status: 'AWAITING_MANAGER' },
+      })
+    }
 
     const inbox = await createInboxItem({
       clientId: client.id,
-      conversationId,
-      reason: anomaly.reason!,
-      humanReason: anomaly.humanReason,
-      priority: anomaly.priority,
+      conversationId: conv.id,
+      reason,
+      humanReason,
+      priority: anomaly.priority ?? 'NORMAL',
       clientMessage: text,
       parsedJson: parsed as unknown as Prisma.InputJsonValue,
       clientStatsSnapshot: {
@@ -227,11 +157,6 @@ async function handleParsed(
       } as Prisma.InputJsonValue,
     })
 
-    await prisma.botConversation.update({
-      where: { id: conversationId },
-      data: { status: 'AWAITING_MANAGER' },
-    })
-
     await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
       console.error('[bot] notifyManagers failed:', e)
     })
@@ -239,7 +164,7 @@ async function handleParsed(
     return { reply: null, action: 'inbox', inboxItemId: inbox.id }
   }
 
-  // Всё ок — сохраняем заказы
+  // Парсер вернул число и аномалий нет — сохраняем заказ.
   const activeMealConfigsByLocation: Record<
     string,
     Array<{ mealType: MealType; pricePerPortion: number; locationName: string }>
@@ -254,8 +179,8 @@ async function handleParsed(
 
   const save = await saveBotOrders({
     clientId: client.id,
-    conversationId,
-    deliveryDate,
+    conversationId: conv.id,
+    deliveryDate: conv.deliveryDate,
     items: parsed.items,
     activeMealConfigsByLocation,
   })
@@ -265,27 +190,177 @@ async function handleParsed(
     data: { safeAnswerStreak: { increment: 1 } },
   })
 
-  await prisma.botConversation.update({
-    where: { id: conversationId },
-    data: { status: 'CONFIRMED' },
+  const afterCutoff = isPastCutoff(conv.deliveryDate)
+  const wasFirstAnswer = conv.status === 'PENDING'
+
+  const itemsForReply: SavedItemForReply[] = save.savedItems.map((s) => ({
+    locationName: s.locationName,
+    portions: s.portions,
+  }))
+
+  if (afterCutoff) {
+    // КЕЙС C — после 18:00 МСК. Заказ создан/обновлён, но клиент должен знать
+    // что это вне cutoff. InboxItem c POST_CUTOFF, push менеджеру.
+    if (conv.status !== 'CONFIRMED') {
+      await prisma.botConversation.update({
+        where: { id: conv.id },
+        data: { status: 'CONFIRMED' },
+      })
+    }
+
+    await sendBotMessage(client.maxChatId!, POST_CUTOFF_REPLY)
+    await logBotMessage({
+      clientId: client.id,
+      conversationId: conv.id,
+      direction: 'OUT',
+      text: POST_CUTOFF_REPLY,
+    })
+
+    const inbox = await createInboxItem({
+      clientId: client.id,
+      conversationId: conv.id,
+      reason: 'POST_CUTOFF',
+      humanReason: 'Клиент ответил после 18:00 — заказ принят, но менеджер может скорректировать',
+      priority: 'NORMAL',
+      clientMessage: text,
+      parsedJson: parsed as unknown as Prisma.InputJsonValue,
+    })
+    await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
+      console.error('[bot] notifyManagers failed:', e)
+    })
+
+    return { reply: POST_CUTOFF_REPLY, action: 'post_cutoff', inboxItemId: inbox.id }
+  }
+
+  if (wasFirstAnswer) {
+    // КЕЙС A — первый ответ до 18:00. Без инбокса.
+    await prisma.botConversation.update({
+      where: { id: conv.id },
+      data: { status: 'CONFIRMED' },
+    })
+
+    const reply = formatAcceptedReply(itemsForReply, conv.deliveryDate)
+    await sendBotMessage(client.maxChatId!, reply)
+    await logBotMessage({
+      clientId: client.id,
+      conversationId: conv.id,
+      direction: 'OUT',
+      text: reply,
+    })
+
+    return { reply, action: 'saved' }
+  }
+
+  // КЕЙС B — conv уже CONFIRMED, клиент пишет повторно, до 18:00.
+  // ВАЖНО: схема InboxItemReason не содержит ORDER_UPDATED (см. отчёт 5.7b ШАГ 1).
+  // По решению пользователя переиспользуем ANOMALY_HISTORICAL — семантически
+  // ближе всего («изменение vs историческое значение»). UI-метка в /inbox
+  // будет «Отклонение от нормы» — humanReason поясняет реальную причину.
+  const reply = formatUpdatedReply(itemsForReply, conv.deliveryDate)
+  await sendBotMessage(client.maxChatId!, reply)
+  await logBotMessage({
+    clientId: client.id,
+    conversationId: conv.id,
+    direction: 'OUT',
+    text: reply,
   })
+
+  const inbox = await createInboxItem({
+    clientId: client.id,
+    conversationId: conv.id,
+    reason: 'ANOMALY_HISTORICAL',
+    humanReason: 'Клиент изменил уже подтверждённый заказ',
+    priority: 'NORMAL',
+    clientMessage: text,
+    parsedJson: parsed as unknown as Prisma.InputJsonValue,
+  })
+  await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
+    console.error('[bot] notifyManagers failed:', e)
+  })
+
+  return { reply, action: 'updated', inboxItemId: inbox.id }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SPONTANEOUS branch — кейс E. Legacy 5.4 логика.
+// ─────────────────────────────────────────────────────────────────────
+async function handleSpontaneous(
+  client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,
+  text: string
+): Promise<ProcessMessageResult> {
+  // Ищем существующую spontaneous conv (НЕ PENDING/CONFIRMED — те мы уже исключили).
+  // Берём последнюю по createdAt: AWAITING_MANAGER продолжаем, EXPIRED/CANCELLED
+  // переоткрываем как новый тред.
+  let conversation = await prisma.botConversation.findFirst({
+    where: { clientId: client.id, status: { notIn: ['PENDING', 'CONFIRMED'] } },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  let isReopenedConversation = false
+  if (!conversation) {
+    const today = new Date()
+    today.setUTCHours(0, 0, 0, 0)
+    try {
+      conversation = await prisma.botConversation.create({
+        data: { clientId: client.id, deliveryDate: today, status: 'AWAITING_MANAGER' },
+      })
+    } catch (err) {
+      // P2002 — race по @@unique([clientId, deliveryDate]). Перечитываем.
+      const existing = await prisma.botConversation.findFirst({
+        where: { clientId: client.id, deliveryDate: today },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (!existing) throw err
+      conversation = existing
+    }
+  } else if (conversation.status !== 'AWAITING_MANAGER') {
+    conversation = await prisma.botConversation.update({
+      where: { id: conversation.id },
+      data: { status: 'AWAITING_MANAGER' },
+    })
+    isReopenedConversation = true
+  }
 
   await logBotMessage({
     clientId: client.id,
-    conversationId,
+    conversationId: conversation.id,
     direction: 'IN',
     text,
-    parsedJson: parsed as unknown as Prisma.InputJsonValue,
-    llmConfidence: parsed.confidence,
-    llmReason: parsed.reason,
-    toneLabel: parsed.toneLabel,
   })
 
-  const replyKey: ReplyTemplateKey = save.wasUpdate ? 'UPDATED' : 'ACCEPTED'
-  const reply = getBotReplyTemplate(replyKey, {
-    items: save.savedItems.map((s) => ({ locationName: s.locationName, portions: s.portions })),
-    deliveryDate,
+  // Дедупим InboxItem по conv. Reopened → новый item.
+  let inboxItem = isReopenedConversation
+    ? null
+    : await prisma.inboxItem.findFirst({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: 'desc' },
+      })
+
+  if (!inboxItem) {
+    inboxItem = await createInboxItem({
+      clientId: client.id,
+      conversationId: conversation.id,
+      reason: 'NON_NUMERIC',
+      humanReason: 'Спонтанное сообщение от клиента',
+      priority: 'NORMAL',
+      clientMessage: text,
+    })
+  } else {
+    await prisma.inboxItem.update({
+      where: { id: inboxItem.id },
+      data: {
+        clientMessage: text,
+        draftReply: null,
+        lastPushedAt: null,
+        resolvedAt: null,
+        resolvedById: null,
+      },
+    })
+  }
+
+  await notifyManagersAboutInboxItem(inboxItem.id).catch((e) => {
+    console.error('[bot] notifyManagers failed:', e)
   })
 
-  return { reply, action: save.wasUpdate ? 'updated' : 'saved' }
+  return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
 }

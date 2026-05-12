@@ -1,21 +1,8 @@
 import { format as fnsFormat } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { toZonedTime } from 'date-fns-tz'
-import { formatDateLong } from '@/lib/utils/format'
 
-export type ReplyTemplateKey =
-  | 'ONBOARDING'
-  | 'ACCEPTED'
-  | 'UPDATED'
-  | 'ESCALATED_TO_MANAGER'
-  | 'POST_CUTOFF'
-
-interface TemplateContext {
-  items?: Array<{ locationName: string; portions: number }>
-  deliveryDate?: Date
-  oldPortions?: number
-  newPortions?: number
-}
+export type ReplyTemplateKey = 'ONBOARDING'
 
 const MSK_TIMEZONE = 'Europe/Moscow'
 
@@ -54,20 +41,42 @@ export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): stri
   return `${header}\n\n${variants[idx]}`
 }
 
-export function getBotReplyTemplate(key: ReplyTemplateKey, ctx: TemplateContext = {}): string {
+// ─────────────────────────────────────────────────────────────────────
+// 5.7b: ответы бота после парсинга
+// ─────────────────────────────────────────────────────────────────────
+
+export interface SavedItemForReply {
+  locationName: string
+  portions: number
+}
+
+/** Формат «Locationname — N» через запятую, мульти-локейшн. */
+function formatItemsList(items: SavedItemForReply[]): string {
+  return items.map((i) => `${i.locationName} — ${i.portions}`).join(', ')
+}
+
+/** Кейс A: первый ответ числом, до 18:00. */
+export function formatAcceptedReply(items: SavedItemForReply[], deliveryDate: Date): string {
+  const dateStr = fnsFormat(deliveryDate, 'dd.MM', { locale: ru })
+  return `Принято на ${dateStr}: ${formatItemsList(items)}.`
+}
+
+/** Кейс B: повторный ответ числом (conv уже CONFIRMED), до 18:00. */
+export function formatUpdatedReply(items: SavedItemForReply[], deliveryDate: Date): string {
+  const dateStr = fnsFormat(deliveryDate, 'dd.MM', { locale: ru })
+  return `Принято изменение, теперь на ${dateStr}: ${formatItemsList(items)}.`
+}
+
+/** Кейс C: ответ числом после 18:00 МСК. Один текст для первого и повторного. */
+export const POST_CUTOFF_REPLY = 'Заявки принимаем до 18:00, уточняем по возможности.'
+
+// ─────────────────────────────────────────────────────────────────────
+// Legacy: используется только при онбординге через handlers.ts
+// ─────────────────────────────────────────────────────────────────────
+
+export function getBotReplyTemplate(key: ReplyTemplateKey): string {
   switch (key) {
     case 'ONBOARDING':
       return 'Здравствуйте! Это бот компании «Будни». Через этот чат я буду каждый день уточнять количество порций на следующий день. Если возникнут вопросы — передам менеджеру.'
-    case 'ACCEPTED': {
-      const lines = (ctx.items ?? []).map((i) => `${i.locationName}: ${i.portions} порций`).join(', ')
-      const dateStr = ctx.deliveryDate ? `на ${formatDateLong(ctx.deliveryDate)}` : 'на завтра'
-      return `Принято: ${lines} ${dateStr}. Спасибо!`
-    }
-    case 'UPDATED':
-      return `Обновлено: было ${ctx.oldPortions ?? '?'} порций, стало ${ctx.newPortions ?? '?'}.`
-    case 'ESCALATED_TO_MANAGER':
-      return 'Передаём вопрос менеджеру — скоро свяжется.'
-    case 'POST_CUTOFF':
-      return 'Приём заказов на завтра уже закрыт. По любым изменениям свяжитесь с менеджером.'
   }
 }

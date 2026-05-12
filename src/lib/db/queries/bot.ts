@@ -64,6 +64,35 @@ export async function getActiveDynamicConfigsForDate(date: Date): Promise<Dynami
     }))
 }
 
+const FIND_CONV_LOOKBACK_DAYS = 30
+
+/**
+ * Самая свежая BotConversation клиента, привязанная к cron-вопросу.
+ * Статусы: PENDING (вопрос задан, ответа нет) или CONFIRMED (ответ принят, но
+ * клиент может ответить ещё раз — это кейс B в 5.7b).
+ *
+ * AWAITING_MANAGER исключаем — это «спонтанный» поток без cron-вопроса.
+ * EXPIRED/CANCELLED исключаем — мёртвые ветки.
+ *
+ * Окно 30 дней — защита: если клиент молчал месяц и старая PENDING-conv
+ * висит, не пытаемся парсить ответ к ней.
+ *
+ * NB: helper назван findLatestBotConv (а не findLatestPendingConv) сознательно —
+ * возвращает и PENDING, и CONFIRMED, чтобы handler сам различал «первый ответ»
+ * vs «повторный». См. process-message.ts case A vs B.
+ */
+export async function findLatestBotConv(clientId: string) {
+  const since = new Date(Date.now() - FIND_CONV_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
+  return prisma.botConversation.findFirst({
+    where: {
+      clientId,
+      status: { in: ['PENDING', 'CONFIRMED'] },
+      createdAt: { gte: since },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+}
+
 const NEXT_ACTIVE_DAY_LOOKAHEAD_DAYS = 14
 
 /**
