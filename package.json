@@ -18,7 +18,8 @@
     "db:seed:prod": "tsx scripts/setup-prod.ts",
     "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts",
     "test:llm": "dotenv -e .env.local -- tsx scripts/test-llm-parser.ts",
-    "telegram:setup-webhook": "dotenv -e .env.local -- tsx scripts/setup-telegram-webhook.ts"
+    "telegram:setup-webhook": "dotenv -e .env.local -- tsx scripts/setup-telegram-webhook.ts",
+    "generate-icons": "tsx scripts/generate-icons.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
@@ -57,7 +58,9 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "dotenv-cli": "^11.0.0",
+    "png-to-ico": "^3.0.1",
     "prisma": "^6.19.3",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"

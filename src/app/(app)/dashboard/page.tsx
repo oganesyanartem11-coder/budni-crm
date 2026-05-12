@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Building2, MapPin, Settings, UtensilsCrossed, Carrot, ClipboardList, ChefHat, type LucideIcon } from 'lucide-react'
+import { ClipboardList, ChefHat, type LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
@@ -10,20 +10,7 @@ import { AdminWeekBlock } from './admin-week-block'
 export default async function DashboardPage() {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
-  // Считаем статистику параллельно
-  const [
-    activeClients,
-    activeLocations,
-    activeMealConfigs,
-    activeDishes,
-    activeIngredients,
-    todayOrders,
-  ] = await Promise.all([
-    prisma.client.count({ where: { isActive: true } }),
-    prisma.clientLocation.count({ where: { isActive: true } }),
-    prisma.clientMealConfig.count({ where: { isActive: true } }),
-    prisma.dish.count({ where: { isActive: true } }),
-    prisma.ingredient.count({ where: { isActive: true } }),
+  const [todayOrders, pendingOrders] = await Promise.all([
     prisma.order.count({
       where: {
         deliveryDate: {
@@ -32,20 +19,18 @@ export default async function DashboardPage() {
         },
       },
     }),
+    // pending только за сегодня + завтра (cut-off релевантен только для ближайших)
+    prisma.order.count({
+      where: {
+        status: 'PENDING_CONFIRMATION',
+        deliveryDate: {
+          lte: (() => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(23,59,59,999); return d })(),
+        },
+      },
+    }),
   ])
 
-  // Считаем pending только за сегодня + завтра (cut-off релевантен только для ближайших)
-  const pendingOrders = await prisma.order.count({
-    where: {
-      status: 'PENDING_CONFIRMATION',
-      deliveryDate: {
-        lte: (() => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(23,59,59,999); return d })(),
-      },
-    },
-  })
-
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
-  const isAdminOrChef = user.role === 'ADMIN' || user.role === 'CHEF'
 
   const adminData = isAdminOrManager
     ? await getAdminDashboardData()
@@ -63,7 +48,7 @@ export default async function DashboardPage() {
         {isAdminOrManager && (
           <section className="space-y-3">
             <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Заказы</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <StatCard
                 href="/orders"
                 icon={ClipboardList}
@@ -98,54 +83,6 @@ export default async function DashboardPage() {
         {isAdminOrManager && adminData && (
           <AdminWeekBlock data={adminData} />
         )}
-
-        {/* Каталоги */}
-        <section className="space-y-3">
-          <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Каталоги</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {isAdminOrManager && (
-              <>
-                <StatCard
-                  href="/clients"
-                  icon={Building2}
-                  label="Клиентов"
-                  value={activeClients}
-                  hint="активных"
-                />
-                <StatCard
-                  href="/clients"
-                  icon={MapPin}
-                  label="Точек"
-                  value={activeLocations}
-                  hint="доставки"
-                />
-                <StatCard
-                  href="/clients"
-                  icon={Settings}
-                  label="Конфигов"
-                  value={activeMealConfigs}
-                  hint="питания"
-                />
-              </>
-            )}
-            <StatCard
-              href="/dishes"
-              icon={UtensilsCrossed}
-              label="Блюд"
-              value={activeDishes}
-              hint="в справочнике"
-            />
-            {isAdminOrChef && (
-              <StatCard
-                href="/ingredients"
-                icon={Carrot}
-                label="Ингредиентов"
-                value={activeIngredients}
-                hint="в справочнике"
-              />
-            )}
-          </div>
-        </section>
 
         {/* Заглушки на будущие фичи */}
         <section className="space-y-3">

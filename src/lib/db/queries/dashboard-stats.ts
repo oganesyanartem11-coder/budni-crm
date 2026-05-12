@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { getFinancialWeek, getPreviousFinancialWeek } from '@/lib/utils/week'
-import type { OrderStatus, MealType } from '@prisma/client'
+import type { OrderStatus } from '@prisma/client'
 
 const REVENUE_STATUSES: OrderStatus[] = [
   'CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY', 'DELIVERED',
@@ -20,12 +20,6 @@ export interface TopClient {
   ordersCount: number
 }
 
-export interface MealTypeDistribution {
-  mealType: MealType
-  portions: number
-  revenue: number
-}
-
 export interface AdminDashboardData {
   weekFrom: string
   weekTo: string
@@ -41,7 +35,6 @@ export interface AdminDashboardData {
   }
   revenueChangePct: number | null
   topClients: TopClient[]
-  mealTypes: MealTypeDistribution[]
 }
 
 const WEEKDAY_NAMES_SHORT_BY_DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
@@ -59,7 +52,6 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
     select: {
       id: true,
       deliveryDate: true,
-      mealType: true,
       portions: true,
       totalPrice: true,
       clientId: true,
@@ -87,7 +79,6 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
   let totalRevenue = 0
   let totalPortions = 0
   const clientMap = new Map<string, TopClient>()
-  const mealTypeMap = new Map<MealType, { portions: number; revenue: number }>()
 
   for (const o of thisWeekOrders) {
     const key = o.deliveryDate.toISOString().slice(0, 10)
@@ -107,14 +98,6 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
     }
     c.revenue += price
     c.ordersCount += 1
-
-    let mt = mealTypeMap.get(o.mealType)
-    if (!mt) {
-      mt = { portions: 0, revenue: 0 }
-      mealTypeMap.set(o.mealType, mt)
-    }
-    mt.portions += o.portions
-    mt.revenue += price
   }
 
   const daily: DailyRevenuePoint[] = []
@@ -127,14 +110,6 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
   const topClients = Array.from(clientMap.values())
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 3)
-
-  const mealTypes: MealTypeDistribution[] = (['BREAKFAST', 'LUNCH', 'DINNER'] as MealType[])
-    .map((mt) => ({
-      mealType: mt,
-      portions: mealTypeMap.get(mt)?.portions ?? 0,
-      revenue: mealTypeMap.get(mt)?.revenue ?? 0,
-    }))
-    .filter((x) => x.portions > 0)
 
   const prevRevenue = Number(prevAgg._sum.totalPrice ?? 0)
   const revenueChangePct = prevRevenue > 0
@@ -156,6 +131,5 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
     },
     revenueChangePct,
     topClients,
-    mealTypes,
   }
 }

@@ -2,20 +2,13 @@
 
 import Link from 'next/link'
 import { TrendingUp, TrendingDown, Minus, Trophy, ChevronRight } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatMoney } from '@/lib/utils/format'
-import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { AdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 
 interface Props {
   data: AdminDashboardData
-}
-
-const MEAL_TYPE_COLORS: Record<string, string> = {
-  BREAKFAST: 'var(--color-warning)',
-  LUNCH: 'var(--color-success)',
-  DINNER: 'var(--color-info)',
 }
 
 export function AdminWeekBlock({ data }: Props) {
@@ -30,110 +23,52 @@ export function AdminWeekBlock({ data }: Props) {
         <span className="text-xs text-fg-subtle">Пт–Чт · {weekLabel}</span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <div className="flex items-baseline justify-between gap-3 flex-wrap mb-4">
-            <div>
-              <p className="text-xs text-fg-muted">Выручка недели</p>
-              <p className="text-3xl font-bold tabular-nums mt-1">{formatMoney(data.thisWeek.totalRevenue)}</p>
-              <p className="text-xs text-fg-muted mt-0.5">
-                {data.thisWeek.totalOrders} заказов · {data.thisWeek.totalPortions} порций
-              </p>
-            </div>
-            <ChangeIndicator
-              changePct={data.revenueChangePct}
-              prevRevenue={data.prevWeek.totalRevenue}
-            />
+      <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-baseline justify-between gap-3 flex-wrap mb-4">
+          <div>
+            <p className="text-xs text-fg-muted">Выручка недели</p>
+            <p className="text-3xl font-bold tabular-nums mt-1">{formatMoney(data.thisWeek.totalRevenue)}</p>
+            <p className="text-xs text-fg-muted mt-0.5">
+              {data.thisWeek.totalOrders} заказов · {data.thisWeek.totalPortions} порций
+            </p>
           </div>
-
-          <div className="h-40 -ml-2 -mr-2">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.thisWeek.daily} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
-                <XAxis
-                  dataKey="dayLabel"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: 'var(--color-fg-muted)', fontSize: 11 }}
-                />
-                <YAxis hide />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    fontSize: '12px',
-                    boxShadow: 'var(--shadow-popover)',
-                  }}
-                  formatter={(value) => [formatMoney(Number(value)), 'Выручка']}
-                  labelStyle={{ color: 'var(--color-fg)', fontWeight: 600 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="revenue"
-                  stroke="var(--color-accent)"
-                  strokeWidth={2.5}
-                  dot={{ fill: 'var(--color-accent)', r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <ChangeIndicator
+            changePct={data.revenueChangePct}
+            prevRevenue={data.prevWeek.totalRevenue}
+          />
         </div>
 
-        <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <p className="text-xs text-fg-muted mb-3">По типам питания</p>
-          {data.mealTypes.length === 0 ? (
-            <div className="text-center text-fg-muted text-sm py-12">Нет данных</div>
-          ) : (
-            <>
-              <div className="h-32">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={data.mealTypes}
-                      dataKey="portions"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={28}
-                      outerRadius={50}
-                      paddingAngle={2}
-                    >
-                      {data.mealTypes.map((entry) => (
-                        <Cell key={entry.mealType} fill={MEAL_TYPE_COLORS[entry.mealType]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        background: 'var(--color-surface)',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                      }}
-                      formatter={(value, _name, item) => {
-                        const payload = (item as { payload?: { mealType?: string } } | undefined)?.payload
-                        const mt = payload?.mealType
-                        return [`${Number(value)} порций`, mt ? MEAL_TYPE_LABELS[mt as keyof typeof MEAL_TYPE_LABELS] : '']
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <ul className="space-y-1.5 mt-3 text-sm">
-                {data.mealTypes.map((mt) => (
-                  <li key={mt.mealType} className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
-                        style={{ background: MEAL_TYPE_COLORS[mt.mealType] }}
-                      />
-                      <span className="truncate">{MEAL_TYPE_LABELS[mt.mealType]}</span>
-                    </span>
-                    <span className="text-fg-muted tabular-nums shrink-0">{mt.portions}</span>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
+        <div className="h-40 -ml-2 -mr-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data.thisWeek.daily} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
+              <XAxis
+                dataKey="dayLabel"
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'var(--color-fg-muted)', fontSize: 11 }}
+              />
+              <YAxis hide />
+              <Tooltip
+                contentStyle={{
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '12px',
+                  fontSize: '12px',
+                  boxShadow: 'var(--shadow-popover)',
+                }}
+                formatter={(value) => [formatMoney(Number(value)), 'Выручка']}
+                labelStyle={{ color: 'var(--color-fg)', fontWeight: 600 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="revenue"
+                stroke="var(--color-accent)"
+                strokeWidth={2.5}
+                dot={{ fill: 'var(--color-accent)', r: 3 }}
+                activeDot={{ r: 5 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
