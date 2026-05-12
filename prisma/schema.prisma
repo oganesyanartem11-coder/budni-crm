@@ -137,6 +137,12 @@ model User {
   maxOnboardingToken  String?   @unique
   onboardedAt         DateTime?
 
+  // Telegram-бот: миграция пушей и сводок с MAX на Telegram (Спринт 5.8+)
+  telegramChatId              String?   @unique
+  telegramUsername            String?
+  telegramOnboardingToken     String?   @unique
+  telegramOnboardingExpiresAt DateTime?
+
   approvedMenus       MenuCycle[]   @relation("MenuApprovedBy")
   activityLogs        ActivityLog[]
   ordersCreated       Order[]       @relation("OrdersCreated")
