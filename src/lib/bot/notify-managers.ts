@@ -51,7 +51,6 @@ export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise
     : ''
 
   const { appBaseUrl } = getTelegramEnv()
-  // Ссылка ведёт на тред клиента; роут /inbox/[id] (item.id) с 6.2 — redirect.
   const link = `${appBaseUrl}/inbox/${item.client.id}`
   const priorityPrefix = item.priority === 'HIGH' ? '🔴 ' : '🔔 '
 

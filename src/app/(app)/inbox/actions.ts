@@ -216,7 +216,7 @@ export async function fetchInboxItemFresh(
   })
   if (!item) return { ok: false, error: 'Не найден' }
 
-  // Все BotMessage клиента за 7 дней — см. комментарий в inbox/[id]/page.tsx.
+  // Все BotMessage клиента за 7 дней — см. комментарий в inbox/[clientId]/page.tsx.
   // Не фильтруем по conversationId, чтобы захватить OUT-сообщения cron'а
   // 5.7a, живущие в отдельной PENDING-conv для следующего активного дня.
   const messages = await prisma.botMessage.findMany({
@@ -276,7 +276,7 @@ export async function ensureDraftReply(
     return { ok: true, data: { draft: item.draftReply } }
   }
 
-  // Все BotMessage клиента за 7 дней — см. комментарий в inbox/[id]/page.tsx.
+  // Все BotMessage клиента за 7 дней — см. комментарий в inbox/[clientId]/page.tsx.
   // LLM должен видеть и наш OUT-вопрос cron'а 5.7a, и спонтанные сообщения клиента,
   // независимо от того в какой BotConversation они физически живут.
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
