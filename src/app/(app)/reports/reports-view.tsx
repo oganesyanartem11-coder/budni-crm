@@ -25,6 +25,8 @@ interface Props {
 }
 
 const PRESETS: Array<{ key: ReportPreset; label: string }> = [
+  { key: 'today', label: 'Сегодня' },
+  { key: 'yesterday', label: 'Вчера' },
   { key: 'this_week', label: 'Эта неделя' },
   { key: 'last_week', label: 'Прошлая' },
   { key: 'this_month', label: 'Этот месяц' },

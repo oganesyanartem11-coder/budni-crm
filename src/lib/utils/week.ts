@@ -109,6 +109,8 @@ export function getPreviousFinancialWeek(date: Date): { from: Date; to: Date } {
 }
 
 export type ReportPreset =
+  | 'today'
+  | 'yesterday'
   | 'this_week'
   | 'last_week'
   | 'this_month'
@@ -129,6 +131,19 @@ export function getPresetRange(preset: ReportPreset, customFrom?: string, custom
   now.setHours(0, 0, 0, 0)
 
   switch (preset) {
+    case 'today': {
+      const from = new Date(now)
+      const to = new Date(now)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Сегодня' }
+    }
+    case 'yesterday': {
+      const from = new Date(now)
+      from.setDate(from.getDate() - 1)
+      const to = new Date(from)
+      to.setHours(23, 59, 59, 999)
+      return { from, to, label: 'Вчера' }
+    }
     case 'this_week': {
       const { from, to } = getFinancialWeek(now)
       return { from, to, label: 'Эта финансовая неделя' }

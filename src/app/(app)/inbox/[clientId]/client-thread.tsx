@@ -29,6 +29,47 @@ const REASON_LABELS: Record<InboxItemReason, string> = {
   POST_CUTOFF: 'После cut-off',
 }
 
+interface ClientStatsSnapshot {
+  averageByDayOfWeek: number | null
+  typicalRange: { min: number; max: number } | null
+  sampleSize: number
+}
+
+interface ParsedItem {
+  locationId: string
+  locationName: string
+  portions: number
+}
+
+interface ParsedJson {
+  type: 'numeric' | 'cancellation_intent' | 'question' | 'noise'
+  items: ParsedItem[]
+  confidence: number
+  reason: string
+  toneLabel: 'neutral' | 'rude' | 'thanks' | 'urgent'
+}
+
+const PARSED_TYPE_LABEL: Record<ParsedJson['type'], string> = {
+  numeric: 'Бот распознал заказ',
+  cancellation_intent: 'Бот понял как отмену',
+  question: 'Бот понял как вопрос — нужен живой ответ',
+  noise: 'Бот не смог понять (шум или общение)',
+}
+
+const TONE_HINT: Partial<Record<ParsedJson['toneLabel'], string>> = {
+  rude: 'Тон сообщения: грубый',
+  urgent: 'Тон сообщения: срочно',
+  thanks: 'Тон сообщения: благодарность',
+}
+
+function isClientStatsSnapshot(v: unknown): v is ClientStatsSnapshot {
+  return !!v && typeof v === 'object' && 'sampleSize' in v
+}
+
+function isParsedJson(v: unknown): v is ParsedJson {
+  return !!v && typeof v === 'object' && 'type' in v && 'items' in v
+}
+
 interface MessageItem {
   id: string
   direction: BotMessageDirection
@@ -256,40 +297,13 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
         <p className="text-sm text-fg-muted">{activeItem.humanReason}</p>
       )}
 
-      {hasContext && (
-        <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <button
-            type="button"
-            onClick={() => setContextOpen((v) => !v)}
-            className="w-full px-4 py-3 flex items-center justify-between hover:bg-bg/30 transition-colors"
-          >
-            <span className="text-sm font-medium flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-fg-muted" />
-              Контекст для менеджера
-            </span>
-            <span className="text-xs text-fg-muted">{contextOpen ? '▲' : '▼'}</span>
-          </button>
-          {contextOpen && activeItem && (
-            <div className="px-4 py-3 border-t border-border space-y-3 text-sm">
-              {activeItem.clientStatsSnapshot ? (
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-fg-muted mb-1">Статистика клиента</p>
-                  <pre className="text-xs bg-bg/40 rounded-xl p-3 overflow-x-auto">
-                    {JSON.stringify(activeItem.clientStatsSnapshot, null, 2)}
-                  </pre>
-                </div>
-              ) : null}
-              {activeItem.parsedJson ? (
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-fg-muted mb-1">Разбор LLM</p>
-                  <pre className="text-xs bg-bg/40 rounded-xl p-3 overflow-x-auto">
-                    {JSON.stringify(activeItem.parsedJson, null, 2)}
-                  </pre>
-                </div>
-              ) : null}
-            </div>
-          )}
-        </div>
+      {hasContext && activeItem && (
+        <ContextBlock
+          stats={activeItem.clientStatsSnapshot}
+          parsed={activeItem.parsedJson}
+          open={contextOpen}
+          onToggle={() => setContextOpen((v) => !v)}
+        />
       )}
 
       <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
@@ -450,4 +464,104 @@ function MessageBubble({
       </p>
     </div>
   )
+}
+
+function ContextBlock({
+  stats,
+  parsed,
+  open,
+  onToggle,
+}: {
+  stats: unknown
+  parsed: unknown
+  open: boolean
+  onToggle: () => void
+}) {
+  const s = isClientStatsSnapshot(stats) ? stats : null
+  const p = isParsedJson(parsed) ? parsed : null
+
+  const statsLines = s ? buildStatsLines(s) : []
+  const parsedLines = p ? buildParsedLines(p) : []
+
+  if (statsLines.length === 0 && parsedLines.length === 0) return null
+
+  return (
+    <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-bg/30 transition-colors"
+      >
+        <span className="text-sm font-medium flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-fg-muted" />
+          Контекст для менеджера
+        </span>
+        <span className="text-xs text-fg-muted">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-4 py-3 border-t border-border space-y-4 text-sm">
+          {statsLines.length > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wider text-fg-muted mb-1.5">Статистика клиента</p>
+              <ul className="space-y-0.5 text-fg">
+                {statsLines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {parsedLines.length > 0 && (
+            <div>
+              <p className="text-xs uppercase tracking-wider text-fg-muted mb-1.5">Что понял бот</p>
+              <ul className="space-y-0.5 text-fg">
+                {parsedLines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function buildStatsLines(s: ClientStatsSnapshot): string[] {
+  const lines: string[] = []
+  if (s.sampleSize === 0) {
+    lines.push('Нет истории заказов на этот день недели')
+  } else if (s.sampleSize < 3) {
+    lines.push(`Мало истории на этот день недели — всего ${s.sampleSize} заказ${s.sampleSize === 1 ? '' : 'а'}`)
+  } else if (s.averageByDayOfWeek !== null) {
+    lines.push(`В среднем на этот день недели — ${s.averageByDayOfWeek} порц. (по ${s.sampleSize} заказам)`)
+  }
+  if (s.typicalRange) {
+    lines.push(`Обычный диапазон за 60 дней: от ${s.typicalRange.min} до ${s.typicalRange.max} порций`)
+  }
+  return lines
+}
+
+function buildParsedLines(p: ParsedJson): string[] {
+  const lines: string[] = []
+  if (p.type === 'numeric' && p.items.length > 0) {
+    lines.push(PARSED_TYPE_LABEL.numeric + ':')
+    for (const it of p.items) {
+      lines.push(`• ${it.locationName} — ${it.portions} порц.`)
+    }
+  } else if (p.type === 'numeric' && p.items.length === 0) {
+    lines.push('Бот видит число, но не нашёл точку доставки в сообщении')
+  } else {
+    lines.push(PARSED_TYPE_LABEL[p.type])
+  }
+  if (typeof p.confidence === 'number' && p.confidence < 0.8) {
+    lines.push(`Уверенность LLM ниже обычной (${Math.round(p.confidence * 100)}%)`)
+  }
+  if (p.reason) {
+    lines.push(`Объяснение: ${p.reason}`)
+  }
+  const tone = TONE_HINT[p.toneLabel]
+  if (tone) {
+    lines.push(tone)
+  }
+  return lines
 }
