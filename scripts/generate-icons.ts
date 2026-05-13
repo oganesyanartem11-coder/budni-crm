@@ -4,17 +4,20 @@ import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
+const V3_PATH = resolve('public/branding/logo-v3.png')
 const V2_PATH = resolve('public/branding/logo-v2.png')
 const PNG_PATH = resolve('public/branding/logo-source.png')
 const JPG_PATH = resolve('public/branding/logo-source.jpg')
 
-// Приоритет: logo-v2.png (актуальный лого), затем legacy logo-source.png/.jpg
-// (оставлены на случай отката).
-const SOURCE_PATH = existsSync(V2_PATH)
-  ? V2_PATH
-  : existsSync(PNG_PATH)
-    ? PNG_PATH
-    : JPG_PATH
+// Приоритет: logo-v3.png (актуальный, белый фон) → logo-v2.png →
+// legacy logo-source.png/.jpg. Старые версии оставлены для отката.
+const SOURCE_PATH = existsSync(V3_PATH)
+  ? V3_PATH
+  : existsSync(V2_PATH)
+    ? V2_PATH
+    : existsSync(PNG_PATH)
+      ? PNG_PATH
+      : JPG_PATH
 
 const ICON_PNG = resolve('src/app/icon.png')
 const APPLE_ICON_PNG = resolve('src/app/apple-icon.png')
