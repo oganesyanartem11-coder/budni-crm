@@ -6,7 +6,7 @@ import { Check, X, Clock, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { confirmDynamicOrder } from '../actions'
 import { getCutoffMoment } from '@/lib/orders/cutoff'
-import { formatMoney, formatDateLong } from '@/lib/utils/format'
+import { formatMoney, formatDateLong, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation } from '@prisma/client'
@@ -148,7 +148,7 @@ function ConfirmRow({
         if (result.data.status === 'CANCELLED') {
           toast.success('Заказ отклонён клиентом — кухне не пойдёт')
         } else {
-          toast.success(`Подтверждено: ${portionsNum} порций`)
+          toast.success(`Подтверждено: ${formatPortions(portionsNum)}`)
         }
         onChanged()
       } else {

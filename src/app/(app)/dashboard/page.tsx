@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { cn } from '@/lib/utils/cn'
+import { pluralize } from '@/lib/utils/format'
 import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import { AdminWeekBlock } from './admin-week-block'
 
@@ -54,7 +55,7 @@ export default async function DashboardPage() {
                 icon={ClipboardList}
                 label="На сегодня"
                 value={todayOrders}
-                hint="заказов с доставкой сегодня"
+                hint={`${pluralize(todayOrders, ['заказ', 'заказа', 'заказов'])} с доставкой сегодня`}
                 tone={todayOrders > 0 ? 'info' : 'neutral'}
               />
               <Link

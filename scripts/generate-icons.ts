@@ -20,13 +20,23 @@ const ICON_PNG = resolve('src/app/icon.png')
 const APPLE_ICON_PNG = resolve('src/app/apple-icon.png')
 const FAVICON_ICO = resolve('src/app/favicon.ico')
 
-async function centerSquare(input: string) {
-  const meta = await sharp(input).metadata()
-  if (!meta.width || !meta.height) throw new Error('source has no dimensions')
-  const side = Math.min(meta.width, meta.height)
-  const left = Math.floor((meta.width - side) / 2)
-  const top = Math.floor((meta.height - side) / 2)
-  return sharp(input).extract({ left, top, width: side, height: side })
+// Inset 8% по краям убирает кремовое поле и золотую рамку logo-v2.png
+// перед resize. На iOS Home Screen иначе получается «двойной бордер»:
+// iOS округляет квадратную плитку поверх лого, который сам по себе уже
+// с закруглённой золотой рамкой и кремовым отступом — между ними остаётся
+// видимая белая полоса.
+const INSET_PCT = 0.08
+
+async function fitSquare(srcMeta: sharp.Metadata, size: number): Promise<Buffer> {
+  const w = srcMeta.width!
+  const h = srcMeta.height!
+  const insetX = Math.round(w * INSET_PCT)
+  const insetY = Math.round(h * INSET_PCT)
+  return sharp(SOURCE_PATH)
+    .extract({ left: insetX, top: insetY, width: w - insetX * 2, height: h - insetY * 2 })
+    .resize(size, size, { fit: 'cover', position: 'center' })
+    .png()
+    .toBuffer()
 }
 
 async function main() {
@@ -35,15 +45,13 @@ async function main() {
   }
   console.log(`source: ${SOURCE_PATH}`)
   const srcMeta = await sharp(SOURCE_PATH).metadata()
-  console.log(`source meta: ${srcMeta.width}x${srcMeta.height}, format=${srcMeta.format}`)
+  console.log(`source meta: ${srcMeta.width}x${srcMeta.height}, format=${srcMeta.format}, inset=${INSET_PCT * 100}%`)
 
-  // 32x32 icon.png
-  const icon32 = await (await centerSquare(SOURCE_PATH)).resize(32, 32).png().toBuffer()
+  const icon32 = await fitSquare(srcMeta, 32)
   await writeFile(ICON_PNG, icon32)
   console.log(`wrote ${ICON_PNG} (${icon32.length} bytes)`)
 
-  // 180x180 apple-icon.png
-  const apple180 = await (await centerSquare(SOURCE_PATH)).resize(180, 180).png().toBuffer()
+  const apple180 = await fitSquare(srcMeta, 180)
   await writeFile(APPLE_ICON_PNG, apple180)
   console.log(`wrote ${APPLE_ICON_PNG} (${apple180.length} bytes)`)
 
@@ -51,8 +59,7 @@ async function main() {
   const sizes = [16, 32, 48]
   const pngBuffers: Buffer[] = []
   for (const size of sizes) {
-    const buf = await (await centerSquare(SOURCE_PATH)).resize(size, size).png().toBuffer()
-    pngBuffers.push(buf)
+    pngBuffers.push(await fitSquare(srcMeta, size))
   }
   const icoBuf = await pngToIco(pngBuffers)
   await writeFile(FAVICON_ICO, icoBuf)

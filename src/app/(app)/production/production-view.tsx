@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info, Printer } from 'lucide-react'
-import { formatDateShort, formatDateNumeric, formatMoney } from '@/lib/utils/format'
+import { formatDateShort, formatDateNumeric, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
 import { cn } from '@/lib/utils/cn'
@@ -133,7 +133,7 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
           <AlertTriangle className="w-5 h-5 text-warning-fg shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0 text-sm">
             <p className="font-medium text-warning-fg">
-              На эту дату ещё {summary.pendingPortions} порций ждут подтверждения
+              На эту дату ещё {formatPortions(summary.pendingPortions)} ждут подтверждения
             </p>
             <p className="text-xs text-warning-fg/80 mt-0.5">
               Эти заказы могут увеличить потребности после ввода менеджером. Дождитесь cut-off в 16:00.
@@ -151,7 +151,7 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
               Меню на эту дату не утверждено
             </p>
             <p className="text-xs text-danger-fg/80 mt-0.5">
-              Заказы есть ({summary.totalPortions} порций), но непонятно какие блюда готовить. Утвердите меню в разделе «Меню».
+              Заказы есть ({formatPortions(summary.totalPortions)}), но непонятно какие блюда готовить. Утвердите меню в разделе «Меню».
             </p>
           </div>
         </div>
@@ -204,7 +204,7 @@ function DishesTab({ summary }: { summary: ProductionSummary }) {
               <h2 className="text-lg font-semibold">
                 {MEAL_TYPE_LABELS[mt]}
                 <span className="ml-2 text-fg-muted text-sm font-normal">
-                  · {data.totalPortions} порций
+                  · {formatPortions(data.totalPortions)}
                 </span>
               </h2>
               {!data.menuApproved && data.totalPortions > 0 && (
@@ -251,7 +251,7 @@ function DishesTab({ summary }: { summary: ProductionSummary }) {
                 ))}
                 <div className="px-4 py-3 bg-bg/30 border-t border-border text-xs text-fg-muted flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5" />
-                  {data.dishes[0]?.ordersCount} заказов · {data.dishes[0]?.locationsCount} точек · сумма {formatMoney(data.totalRevenue)}
+                  {formatOrders(data.dishes[0]?.ordersCount ?? 0)} · {formatLocations(data.dishes[0]?.locationsCount ?? 0)} · сумма {formatMoney(data.totalRevenue)}
                 </div>
               </div>
             )}
@@ -451,7 +451,7 @@ function IngredientRow({ row }: { row: IngredientProductionRow }) {
                   <span className="text-fg">
                     <span className="font-medium">{u.dishName}</span>
                     <span className="text-fg-muted ml-2">
-                      {u.bruttoPerPortion} {u.unit === 'PCS' ? 'шт' : 'г'} × {u.portions} порций
+                      {u.bruttoPerPortion} {u.unit === 'PCS' ? 'шт' : 'г'} × {formatPortions(u.portions)}
                     </span>
                   </span>
                   <span className="text-fg-muted tabular-nums whitespace-nowrap">

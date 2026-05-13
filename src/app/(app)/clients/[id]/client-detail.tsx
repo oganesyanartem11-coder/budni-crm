@@ -10,7 +10,7 @@ import { MealConfigModal } from './meal-config-modal'
 import { ClientAnalyticsTab } from './client-analytics-tab'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 import { archiveClient, archiveLocation, deleteMealConfig } from '../actions'
-import { formatMoney, formatDeliveryWindow } from '@/lib/utils/format'
+import { formatMoney, formatDeliveryWindow, formatOrders } from '@/lib/utils/format'
 import {
   ORDER_TYPE_SHORT,
   SCHEDULE_TYPE_LABELS,
@@ -134,7 +134,7 @@ export function ClientDetail({ client, analytics }: Props) {
       {tab === 'orders' && (
         <div className="rounded-2xl bg-surface border border-border p-8 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
           <ClipboardList className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p className="font-medium text-fg mb-1">{client._count.orders} заказов в истории</p>
+          <p className="font-medium text-fg mb-1">{formatOrders(client._count.orders)} в истории</p>
           <p className="text-sm text-fg-muted mb-5">
             Открыть полный список заказов этого клиента в разделе «Заказы».
           </p>

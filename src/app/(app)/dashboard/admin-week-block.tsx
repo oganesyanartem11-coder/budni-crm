@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { TrendingUp, TrendingDown, Minus, Trophy, ChevronRight } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { formatMoney } from '@/lib/utils/format'
+import { formatMoney, formatOrders, formatPortions } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
 import type { AdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 
@@ -29,7 +29,7 @@ export function AdminWeekBlock({ data }: Props) {
             <p className="text-xs text-fg-muted">Выручка недели</p>
             <p className="text-3xl font-bold tabular-nums mt-1">{formatMoney(data.thisWeek.totalRevenue)}</p>
             <p className="text-xs text-fg-muted mt-0.5">
-              {data.thisWeek.totalOrders} заказов · {data.thisWeek.totalPortions} порций
+              {formatOrders(data.thisWeek.totalOrders)} · {formatPortions(data.thisWeek.totalPortions)}
             </p>
           </div>
           <ChangeIndicator
@@ -97,7 +97,7 @@ export function AdminWeekBlock({ data }: Props) {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium truncate">{c.clientName}</p>
-                    <p className="text-xs text-fg-muted">{c.ordersCount} заказов</p>
+                    <p className="text-xs text-fg-muted">{formatOrders(c.ordersCount)}</p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="font-semibold tabular-nums whitespace-nowrap">{formatMoney(c.revenue)}</p>

@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { Calendar, TrendingUp, ShoppingCart, XCircle, Clock, Printer, Trophy, ChevronRight, type LucideIcon } from 'lucide-react'
-import { formatMoney } from '@/lib/utils/format'
+import { formatMoney, formatPortions, formatOrders } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { FinancialReport } from '@/lib/db/queries/reports'
@@ -131,7 +131,7 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
         <div className="print-area space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <SummaryCard icon={TrendingUp} label="Выручка" value={formatMoney(report.totalRevenue)} tone="info" />
-            <SummaryCard icon={ShoppingCart} label="Заказов" value={report.totalOrders.toString()} hint={`${report.totalPortions} порций`} />
+            <SummaryCard icon={ShoppingCart} label="Заказов" value={report.totalOrders.toString()} hint={formatPortions(report.totalPortions)} />
             <SummaryCard icon={Clock} label="Средний чек" value={formatMoney(report.averageOrder)} hint="за заказ" />
             <SummaryCard icon={Calendar} label="В день в среднем" value={formatMoney(report.averagePerDay)} hint={`${report.daysInPeriod} дн.`} />
             <SummaryCard icon={XCircle} label="Отказы" value={`${report.cancelledRate}%`} hint={`${report.totalCancelled} отменено`} tone={report.cancelledRate > 15 ? 'warning' : 'neutral'} />
@@ -198,7 +198,7 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium truncate text-sm">{c.clientName}</p>
-                          <p className="text-xs text-fg-muted">{c.ordersCount} заказов · {c.portions} порций</p>
+                          <p className="text-xs text-fg-muted">{formatOrders(c.ordersCount)} · {formatPortions(c.portions)}</p>
                         </div>
                         <p className="font-semibold tabular-nums whitespace-nowrap text-sm">{formatMoney(c.revenue)}</p>
                         <ChevronRight className="w-3.5 h-3.5 text-fg-subtle group-hover:text-fg-muted transition-colors no-print" />
@@ -265,7 +265,7 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
                         <span className="truncate font-medium">{MEAL_TYPE_LABELS[mt.mealType]}</span>
                       </span>
                       <span className="text-fg-muted tabular-nums shrink-0 text-xs">
-                        {mt.portions} порций · {formatMoney(mt.revenue)}
+                        {formatPortions(mt.portions)} · {formatMoney(mt.revenue)}
                       </span>
                     </li>
                   ))}

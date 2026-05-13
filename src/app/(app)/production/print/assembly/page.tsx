@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/current-user'
 import { getAssemblyOrders } from '@/lib/db/queries/production'
-import { formatDateLong, formatDeliveryWindow } from '@/lib/utils/format'
+import { formatDateLong, formatDeliveryWindow, formatOrders, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import { PrintButton } from '../print-button'
 
@@ -43,7 +43,7 @@ export default async function AssemblyPrintPage({ searchParams }: PageProps) {
         <div className="print-page">
           <h1 className="print-title text-2xl font-bold mb-1">Лист сборки заказов</h1>
           <p className="text-fg-muted text-sm capitalize mb-6">
-            {formatDateLong(targetDate)} · {orders.length} заказов · {totalPortions} порций
+            {formatDateLong(targetDate)} · {formatOrders(orders.length)} · {formatPortions(totalPortions)}
           </p>
 
           {orders.length === 0 ? (

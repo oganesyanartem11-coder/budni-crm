@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { AlertTriangle, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { createOrder, findDuplicateOrder, getClientForOrderForm } from '../actions'
-import { formatMoney, formatDateLong } from '@/lib/utils/format'
+import { formatMoney, formatDateLong, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, ORDER_TYPE_SHORT, PACKAGING_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { MealType, OrderType, PackagingType } from '@prisma/client'
@@ -287,7 +287,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm text-danger-fg">Заказ на эту дату уже существует</p>
               <p className="text-xs text-danger-fg/80 mt-1">
-                {duplicate.portions} порций · статус: {duplicate.status}. Создание ещё одного приведёт к дублю.
+                {formatPortions(duplicate.portions)} · статус: {duplicate.status}. Создание ещё одного приведёт к дублю.
               </p>
             </div>
           </div>

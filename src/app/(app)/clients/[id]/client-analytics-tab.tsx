@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { TrendingUp, ShoppingCart, Coffee, XCircle, type LucideIcon } from 'lucide-react'
-import { formatMoney } from '@/lib/utils/format'
+import { formatMoney, formatPortions, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
@@ -47,13 +47,13 @@ export function ClientAnalyticsTab({ analytics }: Props) {
           icon={ShoppingCart}
           label="Заказов"
           value={analytics.totalOrders.toString()}
-          hint={`${analytics.totalPortions} порций`}
+          hint={formatPortions(analytics.totalPortions)}
         />
         <SummaryCard
           icon={Coffee}
           label="Средний чек"
           value={formatMoney(analytics.averageOrder)}
-          hint={`~${Math.round(analytics.averagePortions)} порций / заказ`}
+          hint={`~${Math.round(analytics.averagePortions)} ${pluralize(Math.round(analytics.averagePortions), ['порция', 'порции', 'порций'])} / заказ`}
         />
         <SummaryCard
           icon={XCircle}

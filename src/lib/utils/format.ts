@@ -78,6 +78,20 @@ export function formatPortions(n: number): string {
 }
 
 /**
+ * "1 заказ", "2 заказа", "5 заказов"
+ */
+export function formatOrders(n: number): string {
+  return `${n} ${pluralize(n, ['заказ', 'заказа', 'заказов'])}`
+}
+
+/**
+ * "1 точка", "2 точки", "5 точек"
+ */
+export function formatLocations(n: number): string {
+  return `${n} ${pluralize(n, ['точка', 'точки', 'точек'])}`
+}
+
+/**
  * Маска телефона +7 (999) 999-99-99
  * На вход — любая строка (с цифрами и мусором).
  * На выход — отформатированная строка вида +7 (XXX) XXX-XX-XX.

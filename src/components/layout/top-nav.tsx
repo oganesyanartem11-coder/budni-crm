@@ -19,8 +19,9 @@ export function TopNav({ role, pendingCount = 0, inboxCount = 0 }: TopNavProps) 
     (section) => !section.roles || section.roles.includes(role)
   )
 
+  // py-1.5 -my-1.5: overflow-x-auto клипит и Y, прячет бейдж -top-1; padding даёт место, -my возвращает высоту.
   return (
-    <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-none">
+    <nav className="flex items-center gap-0.5 overflow-x-auto scrollbar-none py-1.5 -my-1.5">
       {visibleSections.map((section) => {
         const active = pathname === section.href || pathname.startsWith(section.href + '/')
         const badgeCount =

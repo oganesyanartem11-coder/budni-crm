@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
 import { cancelOrder, rescheduleOrder, editOrderPortions, confirmDynamicOrder } from '../actions'
-import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort } from '@/lib/utils/format'
+import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS, ORDER_TYPE_SHORT } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Client, ClientLocation, User as PrismaUser, MealType, OrderStatus, PackagingType, OrderSource, Prisma } from '@prisma/client'
@@ -114,7 +114,7 @@ export function OrderDetail({ order, history }: Props) {
     startTransition(async () => {
       const result = await confirmDynamicOrder({ orderId: order.id, portions: num })
       if (result.ok) {
-        toast.success(result.data.status === 'CANCELLED' ? 'Заказ отклонён' : `Подтверждено: ${num} порций`)
+        toast.success(result.data.status === 'CANCELLED' ? 'Заказ отклонён' : `Подтверждено: ${formatPortions(num)}`)
         setEditingPortions(false)
         router.refresh()
       } else {

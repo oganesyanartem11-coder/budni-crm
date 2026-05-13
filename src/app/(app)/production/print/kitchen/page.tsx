@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/current-user'
 import { getProductionSummary } from '@/lib/db/queries/production'
-import { formatDateLong } from '@/lib/utils/format'
+import { formatDateLong, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS } from '@/lib/constants/dish-categories'
 import { PrintButton } from '../print-button'
@@ -61,7 +61,7 @@ export default async function KitchenPrintPage({ searchParams }: PageProps) {
               return (
                 <div key={mt} className="mb-8 last:mb-0">
                   <h2 className="print-section text-xl font-bold mb-2">
-                    {MEAL_TYPE_LABELS[mt]} · {data.totalPortions} порций
+                    {MEAL_TYPE_LABELS[mt]} · {formatPortions(data.totalPortions)}
                   </h2>
 
                   {data.dishes.length === 0 ? (

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Check, MapPin, Phone, Clock, AlertTriangle, Tag, Package, Undo2, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
-import { formatDateShort, formatDateNumeric, formatDeliveryWindow } from '@/lib/utils/format'
+import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
 import type { UserRole } from '@prisma/client'
@@ -87,7 +87,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
               {deliveredStops.length} <span className="text-fg-muted text-base font-medium">из {stops.length}</span>
             </p>
             <p className="text-xs text-fg-subtle mt-0.5">
-              {deliveredPortions} / {totalPortions} порций доставлено
+              {deliveredPortions} / {totalPortions} {pluralize(totalPortions, ['порция', 'порции', 'порций'])} доставлено
             </p>
           </div>
           <div className="w-16 h-16 relative">
@@ -119,7 +119,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
             <Check className="w-8 h-8 text-success-fg" strokeWidth={2.5} />
           </div>
           <p className="font-semibold text-success-fg mb-1">Все доставки выполнены!</p>
-          <p className="text-sm text-success-fg/80">{stops.length} точек, {totalPortions} порций.</p>
+          <p className="text-sm text-success-fg/80">{formatLocations(stops.length)}, {formatPortions(totalPortions)}.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -316,7 +316,7 @@ function DeliveredRow({
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium truncate">{stop.clientName}</p>
         <p className="text-xs text-fg-muted truncate">
-          {stop.locationName} · {stop.totalPortions} порций
+          {stop.locationName} · {formatPortions(stop.totalPortions)}
         </p>
       </div>
       {canUndo && (
