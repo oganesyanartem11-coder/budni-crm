@@ -137,3 +137,19 @@ export function isValidPhone(phone: string): boolean {
   const digits = phone.replace(/\D/g, '')
   return digits.length === 11 && digits.startsWith('7')
 }
+
+/**
+ * Нормализует телефон в формат tel: URL с обязательным «+».
+ * Принимает любое из: "+7 (967) 061-99-98", "89670619998", "9670619998".
+ * Возвращает "+79670619998" или null если меньше 10 цифр (валидный E.164 не собрать).
+ * iOS Safari требует «+» в href tel: для корректного автодайла международных.
+ */
+export function formatPhoneLink(phone: string | null | undefined): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length < 10) return null
+  let normalized = digits
+  if (digits.length === 10) normalized = '7' + digits
+  else if (digits.startsWith('8') && digits.length === 11) normalized = '7' + digits.slice(1)
+  return `+${normalized}`
+}

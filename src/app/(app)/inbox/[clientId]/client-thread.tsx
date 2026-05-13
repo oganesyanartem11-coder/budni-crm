@@ -7,6 +7,7 @@ import {
   User2, ExternalLink, Phone, History, CheckCircle2,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { PhoneLink } from '@/components/ui/phone-link'
 import {
   ensureDraftReply, sendReplyAndResolve, fetchClientThreadFresh,
 } from '../actions'
@@ -271,13 +272,13 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
         )}
         <div className="ml-auto flex items-center gap-2">
           {client.contactPhone && (
-            <a
-              href={`tel:${client.contactPhone.replace(/\D/g, '')}`}
+            <PhoneLink
+              phone={client.contactPhone}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill border border-border-strong bg-surface text-fg text-xs font-medium hover:bg-bg transition-colors"
             >
               <Phone className="w-3.5 h-3.5" />
               {client.contactPhone}
-            </a>
+            </PhoneLink>
           )}
           {maxLink && (
             <a

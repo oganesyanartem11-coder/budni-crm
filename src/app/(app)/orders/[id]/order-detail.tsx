@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { PhoneLink } from '@/components/ui/phone-link'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
 import { cancelOrder, rescheduleOrder, editOrderPortions, confirmDynamicOrder } from '../actions'
 import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort, formatPortions } from '@/lib/utils/format'
@@ -198,7 +199,9 @@ export function OrderDetail({ order, history }: Props) {
               <span className="text-fg-muted ml-2">· {order.client.contactName}</span>
             )}
             {order.client.contactPhone && (
-              <span className="text-fg-muted ml-2">· {order.client.contactPhone}</span>
+              <span className="text-fg-muted ml-2">
+                · <PhoneLink phone={order.client.contactPhone} className="text-fg-muted hover:text-fg" />
+              </span>
             )}
           </Row>
 

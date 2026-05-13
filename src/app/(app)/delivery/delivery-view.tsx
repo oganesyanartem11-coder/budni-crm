@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Check, MapPin, Phone, Clock, AlertTriangle, Tag, Package, Undo2, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
-import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, pluralize } from '@/lib/utils/format'
+import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, formatTime, pluralize } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
+import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
 import type { UserRole } from '@prisma/client'
@@ -199,6 +200,9 @@ function DeliveryCard({
   if (isOptimistic) return null
 
   const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(stop.locationAddress)}`
+  const windowState = useWindowState(stop.deliveryWindowFrom, stop.deliveryWindowTo)
+  const isLateState = windowState === 'late'
+  const hasWindow = !!(stop.deliveryWindowFrom || stop.deliveryWindowTo)
 
   return (
     <div
@@ -212,6 +216,12 @@ function DeliveryCard({
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-base truncate">{stop.clientName}</h3>
           <p className="text-sm text-fg-muted truncate">{stop.locationName}</p>
+          {hasWindow && (
+            <p className={cn('text-sm mt-0.5 flex items-center gap-1.5', isLateState ? 'text-danger-fg font-medium' : 'text-fg-muted')}>
+              <Clock className="w-3.5 h-3.5" />
+              Окно: {formatDeliveryWindow(stop.deliveryWindowFrom, stop.deliveryWindowTo)}
+            </p>
+          )}
         </div>
         <div className="text-right shrink-0">
           <div className="text-2xl font-bold tabular-nums">{stop.totalPortions}</div>
@@ -229,23 +239,17 @@ function DeliveryCard({
         <span className="flex-1">{stop.locationAddress}</span>
       </a>
 
-      <div className="flex flex-wrap gap-2 text-xs">
-        {(stop.deliveryWindowFrom || stop.deliveryWindowTo) && (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg text-fg-muted">
-            <Clock className="w-3 h-3" />
-            {formatDeliveryWindow(stop.deliveryWindowFrom, stop.deliveryWindowTo)}
-          </span>
-        )}
-        {stop.clientContactPhone && (
-          <a
-            href={`tel:${stop.clientContactPhone.replace(/\D/g, '')}`}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg text-info-fg hover:bg-border"
+      {stop.clientContactPhone && (
+        <div className="flex flex-wrap gap-2 text-xs">
+          <PhoneLink
+            phone={stop.clientContactPhone}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg text-info-fg"
           >
             <Phone className="w-3 h-3" />
             {stop.clientContactPhone}
-          </a>
-        )}
-      </div>
+          </PhoneLink>
+        </div>
+      )}
 
       <div className="rounded-xl bg-bg/40 px-3 py-2 space-y-1">
         {stop.items.map((item) => (
@@ -283,6 +287,7 @@ function DeliveryCard({
       <DeliveredButton
         stop={stop}
         userRole={userRole}
+        windowState={windowState}
         isPending={isPending}
         onClick={handleDelivered}
       />
@@ -300,15 +305,16 @@ function DeliveryCard({
 function DeliveredButton({
   stop,
   userRole,
+  windowState,
   isPending,
   onClick,
 }: {
   stop: DeliveryStop
   userRole: UserRole
+  windowState: WindowState
   isPending: boolean
   onClick: () => void
 }) {
-  const windowState = useWindowState(stop.deliveryWindowFrom, stop.deliveryWindowTo)
   const isBefore = windowState === 'before' && userRole === 'COURIER'
   const isLate = windowState === 'late'
 
@@ -401,6 +407,14 @@ function DeliveredRow({
     })
   }
 
+  const windowText = (stop.deliveryWindowFrom || stop.deliveryWindowTo)
+    ? `Окно: ${formatDeliveryWindow(stop.deliveryWindowFrom, stop.deliveryWindowTo)}`
+    : null
+  const deliveredText = stop.deliveredAt
+    ? `Доставлено в ${formatTime(new Date(stop.deliveredAt))}`
+    : null
+  const subline = [windowText, deliveredText].filter(Boolean).join(' · ')
+
   return (
     <div className="px-4 py-3 flex items-center gap-3 opacity-70">
       <Check className="w-4 h-4 text-success-fg shrink-0" />
@@ -409,6 +423,9 @@ function DeliveredRow({
         <p className="text-xs text-fg-muted truncate">
           {stop.locationName} · {formatPortions(stop.totalPortions)}
         </p>
+        {subline && (
+          <p className="text-xs text-fg-subtle truncate mt-0.5">{subline}</p>
+        )}
       </div>
       {canUndo && (
         <button
