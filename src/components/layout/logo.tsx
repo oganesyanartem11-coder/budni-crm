@@ -8,16 +8,16 @@ interface LogoProps {
 }
 
 const SIZES = {
-  sm: { dot: 'w-5 h-5', text: 'text-sm font-semibold' },
-  md: { dot: 'w-6 h-6', text: 'text-base font-semibold' },
-  lg: { dot: 'w-10 h-10', text: 'text-2xl font-bold' },
+  sm: { dot: 'w-3.5 h-3.5', text: 'text-sm font-semibold', gap: 'gap-2' },
+  md: { dot: 'w-[18px] h-[18px]', text: 'text-base font-semibold', gap: 'gap-2' },
+  lg: { dot: 'w-7 h-7', text: 'text-2xl font-bold', gap: 'gap-3' },
 } as const
 
 export function Logo({ href = '/dashboard', size = 'md', className }: LogoProps) {
   const s = SIZES[size]
 
   const inner = (
-    <span className={cn('flex items-center gap-2', className)}>
+    <span className={cn('flex items-center', s.gap, className)}>
       <span className={cn(s.dot, 'rounded-full bg-brand shrink-0')} aria-hidden />
       <span className={cn(s.text, 'tracking-tight text-fg')}>Будни</span>
     </span>

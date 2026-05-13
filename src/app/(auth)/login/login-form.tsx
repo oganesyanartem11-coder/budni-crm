@@ -83,9 +83,9 @@ export function LoginForm() {
             className={cn(
               'w-14 h-16 text-center text-2xl font-bold rounded-xl',
               'bg-bg border-2 border-border',
-              'focus:outline-none focus:border-accent transition-colors',
+              'focus:outline-none focus:border-fg focus:ring-2 focus:ring-fg/20 transition-all duration-150',
               'disabled:opacity-50',
-              error && 'border-danger'
+              error && 'border-danger focus:border-danger focus:ring-danger/20'
             )}
             aria-label={`Цифра PIN ${i + 1}`}
           />

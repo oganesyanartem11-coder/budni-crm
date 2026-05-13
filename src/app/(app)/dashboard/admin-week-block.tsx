@@ -39,36 +39,45 @@ export function AdminWeekBlock({ data }: Props) {
         </div>
 
         <div className="h-40 -ml-2 -mr-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data.thisWeek.daily} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
-              <XAxis
-                dataKey="dayLabel"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: 'var(--color-fg-muted)', fontSize: 11 }}
-              />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '12px',
-                  fontSize: '12px',
-                  boxShadow: 'var(--shadow-popover)',
-                }}
-                formatter={(value) => [formatMoney(Number(value)), 'Выручка']}
-                labelStyle={{ color: 'var(--color-fg)', fontWeight: 600 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                stroke="var(--color-accent)"
-                strokeWidth={2.5}
-                dot={{ fill: 'var(--color-accent)', r: 3 }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          {data.thisWeek.daily.filter((d) => d.revenue > 0).length < 3 ? (
+            <div className="h-full flex flex-col items-center justify-center text-center px-4 gap-2">
+              <TrendingUp className="w-12 h-12 text-fg-subtle" strokeWidth={1.25} />
+              <p className="text-xs text-fg-muted max-w-xs">
+                Данные накапливаются — график появится когда будет минимум 3 дня заказов
+              </p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={data.thisWeek.daily} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
+                <XAxis
+                  dataKey="dayLabel"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: 'var(--color-fg-muted)', fontSize: 11 }}
+                />
+                <YAxis hide />
+                <Tooltip
+                  contentStyle={{
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    boxShadow: 'var(--shadow-popover)',
+                  }}
+                  formatter={(value) => [formatMoney(Number(value)), 'Выручка']}
+                  labelStyle={{ color: 'var(--color-fg)', fontWeight: 600 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="var(--color-accent)"
+                  strokeWidth={2.5}
+                  dot={{ fill: 'var(--color-accent)', r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </div>
 
@@ -117,7 +126,7 @@ function ChangeIndicator({ changePct, prevRevenue }: { changePct: number | null;
   if (changePct === null || prevRevenue === 0) {
     return (
       <div className="text-xs text-fg-subtle">
-        Прошлая неделя: нет данных
+        Сравнение появится со следующей недели
       </div>
     )
   }

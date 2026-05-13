@@ -11,7 +11,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: 'Будни — CRM',
-  description: 'CRM-система для B2B-доставки еды',
+  description: 'Внутренняя система Будни',
 }
 
 export default function RootLayout({

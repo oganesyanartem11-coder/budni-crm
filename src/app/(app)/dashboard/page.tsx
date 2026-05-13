@@ -1,9 +1,8 @@
 import Link from 'next/link'
-import { ClipboardList, ChefHat, type LucideIcon } from 'lucide-react'
+import { ChefHat, ArrowRight, type LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
-import { cn } from '@/lib/utils/cn'
 import { pluralize } from '@/lib/utils/format'
 import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import { AdminWeekBlock } from './admin-week-block'
@@ -52,31 +51,34 @@ export default async function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <StatCard
                 href="/orders"
-                icon={ClipboardList}
                 label="На сегодня"
                 value={todayOrders}
-                hint={`${pluralize(todayOrders, ['заказ', 'заказа', 'заказов'])} с доставкой сегодня`}
+                hint={todayOrders === 0 ? 'Заказов на сегодня нет' : `${pluralize(todayOrders, ['заказ', 'заказа', 'заказов'])} с доставкой сегодня`}
                 tone={todayOrders > 0 ? 'info' : 'neutral'}
               />
-              <Link
-                href="/orders/confirm"
-                className={cn(
-                  'block rounded-2xl border p-5 transition-all hover:border-border-strong',
-                  pendingOrders > 0
-                    ? 'bg-warning-bg/40 border-warning/30'
-                    : 'bg-surface border-border'
-                )}
-                style={{ boxShadow: 'var(--shadow-card)' }}
-              >
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <p className="text-sm text-fg-muted">Ждут подтверждения</p>
-                  <ClipboardList className={cn('w-4 h-4', pendingOrders > 0 ? 'text-warning-fg' : 'text-fg-subtle')} strokeWidth={1.75} />
+              {pendingOrders > 0 ? (
+                <Link
+                  href="/orders/confirm"
+                  className="block rounded-2xl border p-5 transition-all bg-warning-bg/40 border-warning/30 hover:shadow-md cursor-pointer"
+                  style={{ boxShadow: 'var(--shadow-card)' }}
+                >
+                  <p className="text-sm text-fg-muted mb-2">Ждут подтверждения</p>
+                  <p className="text-3xl font-bold tracking-tight tabular-nums text-warning-fg">{pendingOrders}</p>
+                  <p className="text-xs mt-1 font-semibold text-[#1A1A1A] inline-flex items-center gap-1">
+                    Подтвердить до 16:00
+                    <ArrowRight className="w-4 h-4" strokeWidth={2} />
+                  </p>
+                </Link>
+              ) : (
+                <div
+                  className="block rounded-2xl border p-5 bg-surface border-border"
+                  style={{ boxShadow: 'var(--shadow-card)' }}
+                >
+                  <p className="text-sm text-fg-muted mb-2">Ждут подтверждения</p>
+                  <p className="text-3xl font-bold tracking-tight tabular-nums">{pendingOrders}</p>
+                  <p className="text-xs mt-1 text-fg-subtle">Все на сегодня подтверждены</p>
                 </div>
-                <p className={cn('text-3xl font-bold tracking-tight tabular-nums', pendingOrders > 0 && 'text-warning-fg')}>{pendingOrders}</p>
-                <p className="text-xs mt-1 text-fg-subtle">
-                  {pendingOrders > 0 ? 'Подтвердить до 16:00 →' : 'Все на сегодня подтверждены'}
-                </p>
-              </Link>
+              )}
             </div>
           </section>
         )}
@@ -107,14 +109,12 @@ export default async function DashboardPage() {
 
 function StatCard({
   href,
-  icon: Icon,
   label,
   value,
   hint,
   tone = 'neutral',
 }: {
   href: string
-  icon: LucideIcon
   label: string
   value: number
   hint?: string
@@ -130,13 +130,10 @@ function StatCard({
   return (
     <Link
       href={href}
-      className={`block rounded-2xl border p-5 transition-all hover:border-border-strong ${toneClasses[tone]}`}
+      className={`block rounded-2xl border p-5 transition-all hover:shadow-md ${toneClasses[tone]}`}
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <p className="text-sm text-fg-muted">{label}</p>
-        <Icon className="w-4 h-4 text-fg-subtle" strokeWidth={1.75} />
-      </div>
+      <p className="text-sm text-fg-muted mb-2">{label}</p>
       <p className="text-3xl font-bold tracking-tight tabular-nums">{value}</p>
       {hint && <p className="text-xs text-fg-subtle mt-1">{hint}</p>}
     </Link>
