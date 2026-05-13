@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { processClientMessage } from '@/lib/bot/process-message'
 import { logBotMessage } from '@/lib/bot/log-message'
 import { getBotReplyTemplate } from '@/lib/bot/templates'
+import { sendBotMessage } from '@/lib/max/send-message'
 
 /**
  * Входящее сообщение от клиента.
@@ -77,7 +78,9 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
       },
     })
     const greeting = getBotReplyTemplate('ONBOARDING')
-    await ctx.reply(greeting)
+    // sendBotMessage даёт естественную задержку 15-30 сек (см. send-message.ts).
+    // Без этого приветствие приходит мгновенно после клика по deep-link.
+    await sendBotMessage(chatIdStr, greeting)
     await logBotMessage({
       clientId: client.id,
       conversationId: null,

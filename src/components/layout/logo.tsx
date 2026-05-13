@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import Link from 'next/link'
 import { cn } from '@/lib/utils/cn'
 
@@ -7,25 +8,30 @@ interface LogoProps {
   className?: string
 }
 
-export function Logo({ href = '/', size = 'md', className }: LogoProps) {
-  const sizes = {
-    sm: { dot: 'w-2 h-2', text: 'text-base' },
-    md: { dot: 'w-2.5 h-2.5', text: 'text-lg' },
-    lg: { dot: 'w-3 h-3', text: 'text-xl' },
-  }
-  const s = sizes[size]
+const SIZES = {
+  sm: { px: 32, rounded: 'rounded-xl', shadow: 'shadow-sm' },
+  md: { px: 48, rounded: 'rounded-2xl', shadow: 'shadow-sm' },
+  lg: { px: 180, rounded: 'rounded-3xl', shadow: 'shadow-lg' },
+} as const
 
-  const inner = (
-    <span className={cn('flex items-center gap-2', className)}>
-      <span className={cn(s.dot, 'rounded-full bg-brand')} aria-hidden />
-      <span className={cn(s.text, 'font-bold tracking-tight text-fg')}>Будни</span>
-    </span>
+export function Logo({ href = '/dashboard', size = 'md', className }: LogoProps) {
+  const s = SIZES[size]
+
+  const img = (
+    <Image
+      src="/branding/logo-v2.png"
+      alt="Будни CRM"
+      width={s.px}
+      height={s.px}
+      priority={size === 'lg'}
+      className={cn(s.rounded, s.shadow, 'block', className)}
+    />
   )
 
-  if (!href) return inner
+  if (!href) return img
   return (
-    <Link href={href} className="hover:opacity-80 transition-opacity">
-      {inner}
+    <Link href={href} className="hover:opacity-80 transition-opacity inline-block">
+      {img}
     </Link>
   )
 }

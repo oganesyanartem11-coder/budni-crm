@@ -77,7 +77,9 @@ export async function sendRemindersToSilentClients(
       }
 
       const text = textFor(conv.deliveryDate)
-      await sendBotMessage(conv.client.maxChatId, text)
+      // Cron-рассылка (reminder-1/2): получателей может быть много, естественная
+      // задержка из sendBotMessage упёрлась бы в timeout Vercel-функции.
+      await sendBotMessage(conv.client.maxChatId, text, { delay: false })
       await prisma.botMessage.create({
         data: {
           clientId: conv.clientId,

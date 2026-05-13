@@ -260,7 +260,10 @@ export async function sendReplyAndResolve(
   }
 
   try {
-    await sendBotMessage(item.client.maxChatId, textToSend)
+    // delay: false — manager уже написал ответ вручную в UI; имитировать
+    // «бот печатает» 15-30 сек нет смысла, а server-action блокировался бы
+    // и упирался в Vercel function timeout (Hobby = 10 сек).
+    await sendBotMessage(item.client.maxChatId, textToSend, { delay: false })
   } catch (e) {
     return { ok: false, error: `Ошибка отправки в MAX: ${(e as Error).message}` }
   }

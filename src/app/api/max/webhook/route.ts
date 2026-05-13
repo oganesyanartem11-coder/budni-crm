@@ -4,6 +4,10 @@ import { getMaxBot } from '@/lib/max/client'
 import { handleMessage, handleBotStarted } from '@/lib/max/handlers'
 
 export const dynamic = 'force-dynamic'
+// 60 сек — потолок Hobby. Нужно из-за задержки 15-30 сек в sendBotMessage:
+// при цепочке бот-OUT (например, escalated + reply) суммарно может уйти до
+// ~50 сек, дефолтные 10 сек на Hobby обрывали бы webhook.
+export const maxDuration = 60
 
 // SDK не экспортирует webhook-хелпер, но в runtime у Bot есть метод handleUpdate
 // (приватный в d.ts, но публично доступный в JS — см. node_modules/@maxhub/max-bot-api/dist/bot.js).

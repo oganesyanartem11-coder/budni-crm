@@ -123,7 +123,7 @@ export async function GET(request: Request) {
         },
       })
 
-      await sendBotMessage(client.maxChatId, text)
+      await sendBotMessage(client.maxChatId, text, { delay: false })
 
       await prisma.botMessage.create({
         data: {
