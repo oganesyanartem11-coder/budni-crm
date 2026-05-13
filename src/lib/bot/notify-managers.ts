@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
-import { inboxListButton } from '@/lib/telegram/buttons'
+import { inboxButton } from '@/lib/telegram/buttons'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import type { InboxItemReason } from '@prisma/client'
 
@@ -51,7 +51,8 @@ export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise
     : ''
 
   const { appBaseUrl } = getTelegramEnv()
-  const link = `${appBaseUrl}/inbox/${item.id}`
+  // Ссылка ведёт на тред клиента; роут /inbox/[id] (item.id) с 6.2 — redirect.
+  const link = `${appBaseUrl}/inbox/${item.client.id}`
   const priorityPrefix = item.priority === 'HIGH' ? '🔴 ' : '🔔 '
 
   const text =
@@ -62,7 +63,7 @@ export async function notifyManagersAboutInboxItem(inboxItemId: string): Promise
 
   const result = await notifyAllManagersDirect(text, {
     parseMode: 'HTML',
-    replyMarkup: inboxListButton(),
+    replyMarkup: inboxButton(item.client.id),
   })
 
   await prisma.inboxItem.update({

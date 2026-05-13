@@ -27,11 +27,13 @@ export interface InboxClientCard {
 /**
  * Список клиентов с историей переписки. Сортировка по времени последнего сообщения.
  * Используется и в page.tsx (initial render), и в InboxList polling.
+ *
+ * 6.2: переписано на 4 batched-запроса вместо 2 + 3×N (N+1 был на 50 клиентах).
+ * Каждый под-запрос идёт по списку clientIds — пагинация в БД, без map+Promise.all.
  */
 export async function fetchInboxListData(): Promise<InboxClientCard[]> {
   await requireRole(['ADMIN', 'MANAGER'])
 
-  // 1. Уникальные clientId с хотя бы одним BotMessage
   const distinctClients = await prisma.botMessage.findMany({
     select: { clientId: true },
     distinct: ['clientId'],
@@ -39,45 +41,52 @@ export async function fetchInboxListData(): Promise<InboxClientCard[]> {
   const clientIds = distinctClients.map((c) => c.clientId)
   if (clientIds.length === 0) return []
 
-  const clients = await prisma.client.findMany({
-    where: { id: { in: clientIds } },
-    select: { id: true, name: true, maxUsername: true },
-  })
+  const [clients, lastMessages, unreadGroups, latestInboxItems] = await Promise.all([
+    prisma.client.findMany({
+      where: { id: { in: clientIds } },
+      select: { id: true, name: true, maxUsername: true },
+    }),
+    // distinct + orderBy(clientId, createdAt desc) — последнее сообщение каждого клиента
+    prisma.botMessage.findMany({
+      where: { clientId: { in: clientIds } },
+      orderBy: [{ clientId: 'asc' }, { createdAt: 'desc' }],
+      distinct: ['clientId'],
+      select: { clientId: true, text: true, direction: true, createdAt: true },
+    }),
+    prisma.botMessage.groupBy({
+      by: ['clientId'],
+      where: { clientId: { in: clientIds }, direction: 'IN', readAt: null },
+      _count: { _all: true },
+    }),
+    prisma.inboxItem.findMany({
+      where: { clientId: { in: clientIds } },
+      orderBy: [{ clientId: 'asc' }, { createdAt: 'desc' }],
+      distinct: ['clientId'],
+      select: { clientId: true, id: true },
+    }),
+  ])
 
-  // 2. Enrich: последнее сообщение + счётчик непрочитанных + последний InboxItem
-  const enriched = await Promise.all(
-    clients.map(async (c) => {
-      const [lastMessage, unreadCount, latestInbox] = await Promise.all([
-        prisma.botMessage.findFirst({
-          where: { clientId: c.id },
-          orderBy: { createdAt: 'desc' },
-          select: { text: true, direction: true, createdAt: true },
-        }),
-        prisma.botMessage.count({
-          where: { clientId: c.id, direction: 'IN', readAt: null },
-        }),
-        prisma.inboxItem.findFirst({
-          where: { clientId: c.id },
-          orderBy: { createdAt: 'desc' },
-          select: { id: true },
-        }),
-      ])
-      return {
-        clientId: c.id,
-        clientName: c.name,
-        maxUsername: c.maxUsername,
-        lastMessage: lastMessage
-          ? {
-              text: lastMessage.text,
-              direction: lastMessage.direction,
-              createdAt: lastMessage.createdAt.toISOString(),
-            }
-          : null,
-        unreadCount,
-        latestInboxItemId: latestInbox?.id ?? null,
-      } satisfies InboxClientCard
-    })
-  )
+  const lastMsgByClient = new Map(lastMessages.map((m) => [m.clientId, m]))
+  const unreadByClient = new Map(unreadGroups.map((g) => [g.clientId, g._count._all]))
+  const latestInboxByClient = new Map(latestInboxItems.map((i) => [i.clientId, i.id]))
+
+  const enriched: InboxClientCard[] = clients.map((c) => {
+    const lm = lastMsgByClient.get(c.id)
+    return {
+      clientId: c.id,
+      clientName: c.name,
+      maxUsername: c.maxUsername,
+      lastMessage: lm
+        ? {
+            text: lm.text,
+            direction: lm.direction,
+            createdAt: lm.createdAt.toISOString(),
+          }
+        : null,
+      unreadCount: unreadByClient.get(c.id) ?? 0,
+      latestInboxItemId: latestInboxByClient.get(c.id) ?? null,
+    }
+  })
 
   enriched.sort((a, b) => {
     const aDate = a.lastMessage ? Date.parse(a.lastMessage.createdAt) : 0
@@ -95,6 +104,78 @@ export async function fetchInboxListFresh(): Promise<InboxClientCard[] | null> {
   } catch (err) {
     console.error('[inbox] fetchInboxListFresh failed:', err)
     return null
+  }
+}
+
+export interface ClientThreadFresh {
+  activeItem: {
+    id: string
+    status: 'UNREAD' | 'READ'
+    draftReply: string | null
+    clientMessage: string | null
+  } | null
+  messages: Array<{
+    id: string
+    direction: 'IN' | 'OUT' | 'MANAGER_OUT'
+    text: string
+    createdAt: string
+    toneLabel: string | null
+  }>
+}
+
+/**
+ * Polling-эндпоинт для /inbox/[clientId]: свежий тред + текущий «активный»
+ * InboxItem (последний UNREAD или просто последний). Помечает входящие
+ * IN-сообщения этого клиента как прочитанные.
+ */
+export async function fetchClientThreadFresh(
+  clientId: string
+): Promise<ActionResult<ClientThreadFresh>> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+  // Активный InboxItem = последний UNREAD; если все READ — самый свежий.
+  const activeItem = await prisma.inboxItem.findFirst({
+    where: { clientId, status: 'UNREAD' },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true, draftReply: true, clientMessage: true },
+  }) ?? await prisma.inboxItem.findFirst({
+    where: { clientId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true, draftReply: true, clientMessage: true },
+  })
+
+  const messages = await prisma.botMessage.findMany({
+    where: { clientId, createdAt: { gte: sevenDaysAgo } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, direction: true, text: true, createdAt: true, toneLabel: true },
+  })
+
+  await prisma.botMessage.updateMany({
+    where: { clientId, direction: 'IN', readAt: null },
+    data: { readAt: new Date() },
+  })
+
+  return {
+    ok: true,
+    data: {
+      activeItem: activeItem
+        ? {
+            id: activeItem.id,
+            status: activeItem.status,
+            draftReply: activeItem.draftReply,
+            clientMessage: activeItem.clientMessage,
+          }
+        : null,
+      messages: messages.map((m) => ({
+        id: m.id,
+        direction: m.direction,
+        text: m.text,
+        createdAt: m.createdAt.toISOString(),
+        toneLabel: m.toneLabel,
+      })),
+    },
   }
 }
 
@@ -226,12 +307,13 @@ export async function ensureDraftReply(
     return { ok: false, error: `LLM error: ${(e as Error).message}` }
   }
 
-  await prisma.inboxItem.update({
+  const updated = await prisma.inboxItem.update({
     where: { id: inboxItemId },
     data: { draftReply: draft },
+    select: { clientId: true },
   })
 
-  revalidatePath(`/inbox/${inboxItemId}`)
+  revalidatePath(`/inbox/${updated.clientId}`)
   return { ok: true, data: { draft } }
 }
 
@@ -294,7 +376,7 @@ export async function sendReplyAndResolve(
   }
 
   revalidatePath('/inbox')
-  revalidatePath(`/inbox/${inboxItemId}`)
+  revalidatePath(`/inbox/${item.clientId}`)
   return { ok: true, data: undefined }
 }
 
@@ -321,7 +403,7 @@ export async function markInboxItemRead(
   })
 
   revalidatePath('/inbox')
-  revalidatePath(`/inbox/${inboxItemId}`)
+  revalidatePath(`/inbox/${item.clientId}`)
   return { ok: true, data: undefined }
 }
 
@@ -354,6 +436,9 @@ export async function reopenInboxItem(
       status: 'UNREAD',
       resolvedAt: null,
       resolvedById: null,
+      // Сброс lastPushedAt — иначе cron-нотификатор считает что мы уже
+      // пушили этот item, и повторное уведомление менеджерам не уходит.
+      lastPushedAt: null,
     },
   })
 
@@ -365,6 +450,6 @@ export async function reopenInboxItem(
   }
 
   revalidatePath('/inbox')
-  revalidatePath(`/inbox/${inboxItemId}`)
+  revalidatePath(`/inbox/${item.clientId}`)
   return { ok: true, data: undefined }
 }

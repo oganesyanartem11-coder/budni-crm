@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Inbox as InboxIcon, MessageSquare } from 'lucide-react'
+import { Inbox as InboxIcon } from 'lucide-react'
 import { formatDateShort, formatTime } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
 import { fetchInboxListFresh, type InboxClientCard } from './actions'
@@ -11,13 +11,37 @@ const POLL_INTERVAL_MS = 10_000
 
 export function InboxList({ initialItems }: { initialItems: InboxClientCard[] }) {
   const [items, setItems] = useState(initialItems)
+  const scrollAnchorRef = useRef<{ y: number; offsetTop: number; cardId: string | null }>({
+    y: 0, offsetTop: 0, cardId: null,
+  })
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null
 
     const refetch = async () => {
+      // Smart-scroll: перед обновлением запоминаем top первой видимой карточки
+      // в окне. После замены items находим её по data-client-id и компенсируем
+      // дельту высоты — пользователь видит ту же карточку на той же позиции.
+      const visibleEl = findFirstVisibleCard()
+      if (visibleEl) {
+        scrollAnchorRef.current = {
+          y: window.scrollY,
+          offsetTop: visibleEl.getBoundingClientRect().top,
+          cardId: visibleEl.dataset.clientId ?? null,
+        }
+      }
       const fresh = await fetchInboxListFresh()
-      if (fresh) setItems(fresh)
+      if (!fresh) return
+      setItems(fresh)
+      requestAnimationFrame(() => {
+        const anchor = scrollAnchorRef.current
+        if (!anchor.cardId) return
+        const el = document.querySelector<HTMLElement>(`[data-client-id="${anchor.cardId}"]`)
+        if (!el) return
+        const newTop = el.getBoundingClientRect().top
+        const delta = newTop - anchor.offsetTop
+        window.scrollBy({ top: delta, left: 0, behavior: 'auto' })
+      })
     }
 
     const startPolling = () => {
@@ -85,57 +109,54 @@ function ClientRow({ card }: { card: InboxClientCard }) {
     ? formatPreview(card.lastMessage.text, card.lastMessage.direction)
     : null
 
-  const href = card.latestInboxItemId ? `/inbox/${card.latestInboxItemId}` : null
-
-  const card_inner = (
-    <div
-      className={cn(
-        'rounded-2xl bg-surface border p-4 transition-all',
-        href && 'hover:border-border-strong cursor-pointer',
-        !href && 'opacity-70 cursor-not-allowed',
-        hasUnread && href ? 'border-info/30' : 'border-border',
-      )}
-      style={{ boxShadow: 'var(--shadow-card)' }}
-    >
-      <div className="flex items-start justify-between gap-3 mb-1">
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-base truncate flex items-center gap-1.5">
-            {card.clientName}
-            {card.maxUsername && (
-              <span title="Есть MAX-аккаунт" className="text-info-fg text-xs">●</span>
-            )}
-            {hasUnread && (
-              <span className="ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold">
-                {card.unreadCount > 9 ? '9+' : card.unreadCount}
-              </span>
-            )}
-          </p>
+  return (
+    <Link href={`/inbox/${card.clientId}`} data-client-id={card.clientId}>
+      <div
+        className={cn(
+          'rounded-2xl bg-surface border p-4 transition-all hover:border-border-strong cursor-pointer',
+          hasUnread ? 'border-info/30' : 'border-border',
+        )}
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-base truncate flex items-center gap-1.5">
+              {card.clientName}
+              {card.maxUsername && (
+                <span title="Есть MAX-аккаунт" className="text-info-fg text-xs">●</span>
+              )}
+              {hasUnread && (
+                <span className="ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold">
+                  {card.unreadCount > 9 ? '9+' : card.unreadCount}
+                </span>
+              )}
+            </p>
+          </div>
+          {lastDate && (
+            <p className="text-xs text-fg-subtle shrink-0">
+              {sameDay ? formatTime(lastDate) : formatDateShort(lastDate)}
+            </p>
+          )}
         </div>
-        {lastDate && (
-          <p className="text-xs text-fg-subtle shrink-0">
-            {sameDay ? formatTime(lastDate) : formatDateShort(lastDate)}
+        {preview ? (
+          <p className={cn('text-sm line-clamp-1', hasUnread ? 'text-fg' : 'text-fg-muted')}>
+            {preview}
           </p>
+        ) : (
+          <p className="text-sm text-fg-subtle italic">Нет сообщений</p>
         )}
       </div>
-      {preview ? (
-        <p className={cn('text-sm line-clamp-1', hasUnread ? 'text-fg' : 'text-fg-muted')}>
-          {preview}
-        </p>
-      ) : (
-        <p className="text-sm text-fg-subtle italic">Нет сообщений</p>
-      )}
-      {!href && (
-        <p className="text-xs text-fg-subtle mt-1 flex items-center gap-1">
-          <MessageSquare className="w-3 h-3" />
-          Нет активного обращения
-        </p>
-      )}
-    </div>
+    </Link>
   )
+}
 
-  if (!href) return card_inner
-
-  return <Link href={href}>{card_inner}</Link>
+function findFirstVisibleCard(): HTMLElement | null {
+  const cards = document.querySelectorAll<HTMLElement>('[data-client-id]')
+  for (const el of cards) {
+    const rect = el.getBoundingClientRect()
+    if (rect.bottom > 0 && rect.top < window.innerHeight) return el
+  }
+  return null
 }
 
 function formatPreview(text: string, direction: 'IN' | 'OUT' | 'MANAGER_OUT'): string {
