@@ -92,6 +92,13 @@ export function formatLocations(n: number): string {
 }
 
 /**
+ * "1 клиент", "2 клиента", "5 клиентов"
+ */
+export function formatClients(n: number): string {
+  return `${n} ${pluralize(n, ['клиент', 'клиента', 'клиентов'])}`
+}
+
+/**
  * Маска телефона +7 (999) 999-99-99
  * На вход — любая строка (с цифрами и мусором).
  * На выход — отформатированная строка вида +7 (XXX) XXX-XX-XX.

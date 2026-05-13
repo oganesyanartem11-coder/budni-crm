@@ -13,6 +13,28 @@ export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
+/**
+ * 6.4: парсит "HH:mm" в Date с привязкой к указанному дню доставки в МСК-таймзоне.
+ * Возвращает null, если строка не задана. Используется для проверки «окно ещё не наступило».
+ *
+ * Сравнения окна — серверное, поэтому собираем Date в той же таймзоне что и now()
+ * (UTC внутри Node; для пилота в МСК сейчас Vercel в UTC+0, поэтому ±3 часа смещения учитываем
+ * вручную). HH:mm в БД задано в МСК, deliveryDate — UTC-полночь МСК-даты.
+ */
+const MSK_OFFSET_HOURS = 3
+
+function parseWindowToDate(hhmm: string | null, deliveryDate: Date): Date | null {
+  if (!hhmm) return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
+  if (!m) return null
+  const hours = Number(m[1])
+  const minutes = Number(m[2])
+  // deliveryDate уже UTC-полночь МСК-даты. Добавляем HH:mm МСК минус 3 часа = UTC.
+  const result = new Date(deliveryDate)
+  result.setUTCHours(hours - MSK_OFFSET_HOURS, minutes, 0, 0)
+  return result
+}
+
 export async function markStopDelivered(
   formData: z.infer<typeof markDeliveredSchema>
 ): Promise<ActionResult<{ updated: number }>> {
@@ -28,11 +50,30 @@ export async function markStopDelivered(
 
   const orders = await prisma.order.findMany({
     where: { id: { in: orderIds } },
-    select: { id: true, status: true, delivery: { select: { id: true } } },
+    select: {
+      id: true, status: true, deliveryDate: true,
+      delivery: { select: { id: true } },
+      location: { select: { deliveryWindowFrom: true } },
+    },
   })
 
   if (orders.length === 0) {
     return { ok: false, error: 'Заказы не найдены' }
+  }
+
+  // Защита: курьер не должен отмечать «Доставлено» раньше начала окна доставки.
+  // Берём минимум из windowFrom по заказам остановки (одна точка → один from).
+  // ADMIN/MANAGER пропускают проверку — для теста и аварийных правок.
+  if (user.role === 'COURIER') {
+    for (const o of orders) {
+      const windowStart = parseWindowToDate(o.location.deliveryWindowFrom, o.deliveryDate)
+      if (windowStart && now < windowStart) {
+        return {
+          ok: false,
+          error: `Окно доставки ещё не началось (с ${o.location.deliveryWindowFrom})`,
+        }
+      }
+    }
   }
 
   const updates = await prisma.$transaction(async (tx) => {

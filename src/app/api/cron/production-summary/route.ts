@@ -7,7 +7,7 @@ import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { productionSummaryButton } from '@/lib/telegram/buttons'
-import { formatPortions } from '@/lib/utils/format'
+import { formatPortions, formatLocations, formatClients } from '@/lib/utils/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
   lines.push(`📦 На завтра, <i>${escapeHtml(dateLabel)}</i>`)
   lines.push('')
   lines.push(
-    `<b>${formatPortions(totalPortions)}</b> · ${uniqueLocationIds.size} локаций · ${uniqueClientIds.size} клиентов`
+    `<b>${formatPortions(totalPortions)}</b> · ${formatLocations(uniqueLocationIds.size)} · ${formatClients(uniqueClientIds.size)}`
   )
 
   const mealTypeOrder: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']

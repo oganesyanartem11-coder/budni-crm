@@ -29,6 +29,10 @@ export interface DeliveryStop {
   deliveredAt: Date | null
   orderIds: string[]
   hasOutForDelivery: boolean
+  // 6.4: hasLateAlert — хоть один Order этой остановки опаздывает > 30 мин и про него
+  // уже ушёл алёрт в групповой Telegram (lateAlertSentAt set). UI подсвечивает
+  // карточку красным.
+  hasLateAlert: boolean
 }
 
 export async function getDeliveriesForDate(targetDate: Date): Promise<DeliveryStop[]> {
@@ -51,6 +55,7 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
           tags: true,
         },
       },
+      delivery: { select: { deliveredAt: true } },
     },
     orderBy: [
       { deliveryDate: 'asc' },
@@ -79,6 +84,7 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
         deliveredAt: null,
         orderIds: [],
         hasOutForDelivery: false,
+        hasLateAlert: false,
       }
       stopsMap.set(key, stop)
     }
@@ -94,6 +100,11 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
 
     if (o.status !== 'DELIVERED') stop.isDelivered = false
     if (o.status === 'OUT_FOR_DELIVERY') stop.hasOutForDelivery = true
+    if (o.lateAlertSentAt) stop.hasLateAlert = true
+    if (o.delivery?.deliveredAt) {
+      const da = o.delivery.deliveredAt
+      if (!stop.deliveredAt || da > stop.deliveredAt) stop.deliveredAt = da
+    }
 
     if (o.notes) {
       stop.notes = stop.notes ? `${stop.notes}\n${o.notes}` : o.notes

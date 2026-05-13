@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Check, MapPin, Phone, Clock, AlertTriangle, Tag, Package, Undo2, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
 import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, pluralize } from '@/lib/utils/format'
+import { cn } from '@/lib/utils/cn'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
 import type { UserRole } from '@prisma/client'
@@ -176,23 +177,37 @@ function DeliveryCard({
   onChanged: () => void
 }) {
   const [isPending, startTransition] = useTransition()
+  const [isOptimistic, setIsOptimistic] = useState(false)
 
   function handleDelivered() {
+    // Оптимистично прячем карточку: пользователь видит «исчезла», server-action
+    // в фоне. router.refresh() в onChanged() реально переместит её в «доставлено».
+    // На ошибке возвращаем карточку обратно с toast.
+    setIsOptimistic(true)
     startTransition(async () => {
       const result = await markStopDelivered({ orderIds: stop.orderIds })
       if (result.ok) {
         toast.success(`✓ ${stop.clientName} — доставлено`)
         onChanged()
       } else {
+        setIsOptimistic(false)
         toast.error(result.error)
       }
     })
   }
 
+  if (isOptimistic) return null
+
   const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(stop.locationAddress)}`
 
   return (
-    <div className="rounded-2xl bg-surface border border-border p-4 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+    <div
+      className={cn(
+        'rounded-2xl bg-surface border p-4 space-y-3',
+        stop.hasLateAlert ? 'border-danger/40' : 'border-border'
+      )}
+      style={{ boxShadow: 'var(--shadow-card)' }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-base truncate">{stop.clientName}</h3>
@@ -265,25 +280,101 @@ function DeliveryCard({
         </div>
       )}
 
-      {userRole === 'COURIER' && (
-        <button
-          type="button"
-          onClick={handleDelivered}
-          disabled={isPending}
-          className="w-full px-5 py-4 rounded-pill bg-success text-accent-fg font-semibold text-base hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98]"
-        >
-          <Check className="w-5 h-5" strokeWidth={2.5} />
-          {isPending ? 'Отмечаем…' : 'Доставлено'}
-        </button>
-      )}
-
-      {userRole !== 'COURIER' && (
-        <div className="text-xs text-fg-subtle text-center">
-          {stop.hasOutForDelivery ? '🚚 В доставке' : 'Готовится / в обработке'}
-        </div>
-      )}
+      <DeliveredButton
+        stop={stop}
+        userRole={userRole}
+        isPending={isPending}
+        onClick={handleDelivered}
+      />
     </div>
   )
+}
+
+/**
+ * Состояния кнопки «Доставлено»:
+ * - before-window: окно ещё не началось → disabled с подсказкой «Окно с HH:mm»
+ * - in-window: активная, брендовый цвет
+ * - late: прошло > 30 мин после конца окна → активная, красная (визуальный сигнал)
+ * COURIER блокируется server-action'ом до начала окна. ADMIN/MANAGER может нажать всегда.
+ */
+function DeliveredButton({
+  stop,
+  userRole,
+  isPending,
+  onClick,
+}: {
+  stop: DeliveryStop
+  userRole: UserRole
+  isPending: boolean
+  onClick: () => void
+}) {
+  const windowState = useWindowState(stop.deliveryWindowFrom, stop.deliveryWindowTo)
+  const isBefore = windowState === 'before' && userRole === 'COURIER'
+  const isLate = windowState === 'late'
+
+  if (isBefore) {
+    return (
+      <button
+        type="button"
+        disabled
+        className="w-full px-5 py-4 rounded-pill bg-bg border border-border text-fg-subtle font-semibold text-base flex items-center justify-center gap-2 cursor-not-allowed"
+        style={{ minHeight: 56 }}
+      >
+        <Clock className="w-5 h-5" />
+        Окно с {stop.deliveryWindowFrom}
+      </button>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={isPending}
+      className={cn(
+        'w-full px-5 py-4 rounded-pill font-semibold text-base transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98]',
+        isLate
+          ? 'bg-danger text-accent-fg hover:opacity-90'
+          : 'bg-success text-accent-fg hover:opacity-90'
+      )}
+      style={{ minHeight: 56 }}
+    >
+      <Check className="w-5 h-5" strokeWidth={2.5} />
+      {isPending ? 'Отмечаем…' : isLate ? 'Доставлено (опоздание)' : 'Доставлено'}
+    </button>
+  )
+}
+
+type WindowState = 'before' | 'in' | 'after' | 'late' | 'unknown'
+
+function useWindowState(fromHHmm: string | null, toHHmm: string | null): WindowState {
+  const [state, setState] = useState<WindowState>(() => computeWindowState(fromHHmm, toHHmm))
+  useEffect(() => {
+    setState(computeWindowState(fromHHmm, toHHmm))
+    const id = setInterval(() => setState(computeWindowState(fromHHmm, toHHmm)), 60_000)
+    return () => clearInterval(id)
+  }, [fromHHmm, toHHmm])
+  return state
+}
+
+function computeWindowState(fromHHmm: string | null, toHHmm: string | null): WindowState {
+  if (!fromHHmm && !toHHmm) return 'unknown'
+  // Окно задано в МСК. Браузер пользователя где угодно — пересчитываем в МСК через UTC+3.
+  const now = new Date()
+  const mskNow = new Date(now.getTime() + (now.getTimezoneOffset() + 180) * 60_000)
+  const fromMins = fromHHmm ? hhmmToMinutes(fromHHmm) : null
+  const toMins = toHHmm ? hhmmToMinutes(toHHmm) : null
+  const nowMins = mskNow.getHours() * 60 + mskNow.getMinutes()
+  if (fromMins !== null && nowMins < fromMins) return 'before'
+  if (toMins !== null && nowMins > toMins + 30) return 'late'
+  if (toMins !== null && nowMins > toMins) return 'after'
+  return 'in'
+}
+
+function hhmmToMinutes(hhmm: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
+  if (!m) return 0
+  return Number(m[1]) * 60 + Number(m[2])
 }
 
 function DeliveredRow({

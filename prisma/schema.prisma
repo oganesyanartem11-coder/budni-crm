@@ -415,6 +415,10 @@ model Order {
 
   delivery Delivery?
 
+  // 6.4: антидубль для cron'а check-late-deliveries.
+  // Ставится при отправке алёрта в групповой Telegram (опоздание > 30 мин).
+  lateAlertSentAt DateTime?
+
   @@index([deliveryDate, status])
   @@index([clientId, deliveryDate])
   @@index([locationId, deliveryDate])
