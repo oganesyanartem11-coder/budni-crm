@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Check, MapPin, Phone, Clock, AlertTriangle, 
 import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
 import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, formatTime, pluralize } from '@/lib/utils/format'
+import { parseWindowToDate } from '@/lib/utils/msk-window'
 import { cn } from '@/lib/utils/cn'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
@@ -156,6 +157,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
                 <DeliveredRow
                   key={`${stop.clientId}-${stop.locationId}`}
                   stop={stop}
+                  targetDateIso={targetDateIso}
                   canUndo={userRole === 'ADMIN' || userRole === 'MANAGER'}
                   onChanged={() => router.refresh()}
                 />
@@ -385,10 +387,12 @@ function hhmmToMinutes(hhmm: string): number {
 
 function DeliveredRow({
   stop,
+  targetDateIso,
   canUndo,
   onChanged,
 }: {
   stop: DeliveryStop
+  targetDateIso: string
   canUndo: boolean
   onChanged: () => void
 }) {
@@ -410,10 +414,13 @@ function DeliveredRow({
   const windowText = (stop.deliveryWindowFrom || stop.deliveryWindowTo)
     ? `Окно: ${formatDeliveryWindow(stop.deliveryWindowFrom, stop.deliveryWindowTo)}`
     : null
-  const deliveredText = stop.deliveredAt
-    ? `Доставлено в ${formatTime(new Date(stop.deliveredAt))}`
-    : null
-  const subline = [windowText, deliveredText].filter(Boolean).join(' · ')
+  const deliveredAt = stop.deliveredAt ? new Date(stop.deliveredAt) : null
+  const windowEnd = parseWindowToDate(stop.deliveryWindowTo, new Date(targetDateIso))
+  const lateMinutes = deliveredAt && windowEnd
+    ? Math.round((deliveredAt.getTime() - windowEnd.getTime()) / 60_000)
+    : 0
+  const isLate = lateMinutes >= 1
+  const deliveredText = deliveredAt ? `Доставлено в ${formatTime(deliveredAt)}` : null
 
   return (
     <div className="px-4 py-3 flex items-center gap-3 opacity-70">
@@ -423,8 +430,20 @@ function DeliveredRow({
         <p className="text-xs text-fg-muted truncate">
           {stop.locationName} · {formatPortions(stop.totalPortions)}
         </p>
-        {subline && (
-          <p className="text-xs text-fg-subtle truncate mt-0.5">{subline}</p>
+        {(windowText || deliveredText) && (
+          <p className="text-xs text-fg-subtle truncate mt-0.5">
+            {windowText && <span>{windowText}</span>}
+            {windowText && deliveredText && <span> · </span>}
+            {deliveredText && (
+              isLate ? (
+                <span className="text-danger-fg font-medium">
+                  {deliveredText} (опоздание {lateMinutes} мин)
+                </span>
+              ) : (
+                <span>{deliveredText}</span>
+              )
+            )}
+          </p>
         )}
       </div>
       {canUndo && (

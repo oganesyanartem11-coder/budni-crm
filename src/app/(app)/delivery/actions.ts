@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
+import { parseWindowToDate } from '@/lib/utils/msk-window'
 
 const markDeliveredSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1, 'Список заказов пуст'),
@@ -12,28 +13,6 @@ const markDeliveredSchema = z.object({
 export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
-
-/**
- * 6.4: парсит "HH:mm" в Date с привязкой к указанному дню доставки в МСК-таймзоне.
- * Возвращает null, если строка не задана. Используется для проверки «окно ещё не наступило».
- *
- * Сравнения окна — серверное, поэтому собираем Date в той же таймзоне что и now()
- * (UTC внутри Node; для пилота в МСК сейчас Vercel в UTC+0, поэтому ±3 часа смещения учитываем
- * вручную). HH:mm в БД задано в МСК, deliveryDate — UTC-полночь МСК-даты.
- */
-const MSK_OFFSET_HOURS = 3
-
-function parseWindowToDate(hhmm: string | null, deliveryDate: Date): Date | null {
-  if (!hhmm) return null
-  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm)
-  if (!m) return null
-  const hours = Number(m[1])
-  const minutes = Number(m[2])
-  // deliveryDate уже UTC-полночь МСК-даты. Добавляем HH:mm МСК минус 3 часа = UTC.
-  const result = new Date(deliveryDate)
-  result.setUTCHours(hours - MSK_OFFSET_HOURS, minutes, 0, 0)
-  return result
-}
 
 export async function markStopDelivered(
   formData: z.infer<typeof markDeliveredSchema>
