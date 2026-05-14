@@ -19,7 +19,7 @@ export type ActionResult<T = void> =
   | { ok: false; error: string; fieldErrors?: Record<string, string[]> }
 
 export async function createIngredient(formData: IngredientFormData): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const parsed = ingredientSchema.safeParse(formData)
   if (!parsed.success) {
@@ -29,6 +29,10 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
       fieldErrors: parsed.error.flatten().fieldErrors,
     }
   }
+
+  // Defense-in-depth: CHEF не должен задавать цены, всегда 0 на сервере
+  // даже если что-то пришло из формы. Финансы — ответственность MANAGER+.
+  const finalPrice = user.role === 'CHEF' ? 0 : parsed.data.pricePerUnit
 
   // Уникальность по имени
   const existing = await prisma.ingredient.findUnique({
@@ -42,7 +46,7 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
     data: {
       name: parsed.data.name,
       unit: parsed.data.unit,
-      pricePerUnit: parsed.data.pricePerUnit,
+      pricePerUnit: finalPrice,
       notes: parsed.data.notes ?? undefined,
     },
   })
@@ -51,7 +55,7 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
   await prisma.ingredientPriceHistory.create({
     data: {
       ingredientId: ingredient.id,
-      price: parsed.data.pricePerUnit,
+      price: finalPrice,
       changedBy: user.id,
     },
   })
@@ -63,7 +67,7 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
       action: 'INGREDIENT_CREATED',
       entityType: 'Ingredient',
       entityId: ingredient.id,
-      payload: { name: ingredient.name, price: Number(parsed.data.pricePerUnit) },
+      payload: { name: ingredient.name, price: finalPrice },
     },
   })
 
@@ -72,7 +76,7 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
 }
 
 export async function updateIngredient(id: string, formData: IngredientFormData): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const parsed = ingredientSchema.safeParse(formData)
   if (!parsed.success) {
@@ -98,19 +102,23 @@ export async function updateIngredient(id: string, formData: IngredientFormData)
     }
   }
 
-  const priceChanged = Number(current.pricePerUnit) !== parsed.data.pricePerUnit
+  // Defense-in-depth: CHEF не меняет цену — сохраняем текущее значение из БД,
+  // игнорируя что пришло из формы. MANAGER/ADMIN — берём из формы.
+  const isChef = user.role === 'CHEF'
+  const effectivePrice = isChef ? Number(current.pricePerUnit) : parsed.data.pricePerUnit
+  const priceChanged = !isChef && Number(current.pricePerUnit) !== parsed.data.pricePerUnit
 
   await prisma.ingredient.update({
     where: { id },
     data: {
       name: parsed.data.name,
       unit: parsed.data.unit,
-      pricePerUnit: parsed.data.pricePerUnit,
+      pricePerUnit: effectivePrice,
       notes: parsed.data.notes ?? null,
     },
   })
 
-  // Если цена изменилась — пишем в историю
+  // Если цена изменилась — пишем в историю (только не-CHEF может)
   if (priceChanged) {
     await prisma.ingredientPriceHistory.create({
       data: {
@@ -141,7 +149,7 @@ export async function updateIngredient(id: string, formData: IngredientFormData)
 }
 
 export async function archiveIngredient(id: string): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const current = await prisma.ingredient.findUnique({ where: { id } })
   if (!current) {

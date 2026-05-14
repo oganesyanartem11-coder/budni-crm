@@ -68,12 +68,14 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
           <span className="text-fg-subtle"> · {ROLE_LABELS[role]}</span>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
-          <Link href="/settings" className="flex items-center gap-2 cursor-pointer text-fg">
-            <SettingsIcon className="w-4 h-4" />
-            Настройки
-          </Link>
-        </DropdownMenuItem>
+        {role === 'ADMIN' && (
+          <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
+            <Link href="/settings" className="flex items-center gap-2 cursor-pointer text-fg">
+              <SettingsIcon className="w-4 h-4" />
+              Настройки
+            </Link>
+          </DropdownMenuItem>
+        )}
         {role === 'ADMIN' && (
           <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
             <Link href="/settings/users" className="flex items-center gap-2 cursor-pointer text-fg">

@@ -27,9 +27,10 @@ interface Props {
   ingredient?: SerializedIngredient
   onSuccess: () => void
   onCancel: () => void
+  canSeePrices: boolean
 }
 
-export function IngredientForm({ ingredient, onSuccess, onCancel }: Props) {
+export function IngredientForm({ ingredient, onSuccess, onCancel, canSeePrices }: Props) {
   const [isPending, startTransition] = useTransition()
 
   const form = useForm<FormValues>({
@@ -106,25 +107,34 @@ export function IngredientForm({ ingredient, onSuccess, onCancel }: Props) {
           />
         </div>
 
-        <div className="space-y-1.5">
-          <label htmlFor="pricePerUnit" className="text-sm font-medium">
-            Цена, ₽ за единицу
-          </label>
-          <input
-            id="pricePerUnit"
-            type="number"
-            min="0"
-            step="0.01"
-            {...form.register('pricePerUnit', { valueAsNumber: true })}
-            className={cn(
-              'w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors',
-              form.formState.errors.pricePerUnit && 'border-danger'
+        {canSeePrices ? (
+          <div className="space-y-1.5">
+            <label htmlFor="pricePerUnit" className="text-sm font-medium">
+              Цена, ₽ за единицу
+            </label>
+            <input
+              id="pricePerUnit"
+              type="number"
+              min="0"
+              step="0.01"
+              {...form.register('pricePerUnit', { valueAsNumber: true })}
+              className={cn(
+                'w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors',
+                form.formState.errors.pricePerUnit && 'border-danger'
+              )}
+            />
+            {form.formState.errors.pricePerUnit && (
+              <p className="text-xs text-danger">{form.formState.errors.pricePerUnit.message}</p>
             )}
-          />
-          {form.formState.errors.pricePerUnit && (
-            <p className="text-xs text-danger">{form.formState.errors.pricePerUnit.message}</p>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-fg-muted">Цена</label>
+            <div className="w-full px-3 py-2 rounded-xl bg-bg/40 border border-dashed border-border text-sm text-fg-subtle">
+              Заполнит менеджер
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-1.5">

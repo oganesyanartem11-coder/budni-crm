@@ -11,7 +11,7 @@ interface PageProps {
 }
 
 export default async function CourierPrintPage({ searchParams }: PageProps) {
-  await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
+  await requireRole(['ADMIN', 'MANAGER'])
 
   const params = await searchParams
   const targetDate = params.date ? new Date(params.date) : (() => {

@@ -1,13 +1,13 @@
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
-import { getCurrentUser } from '@/lib/auth/current-user'
+import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import { TelegramSettingsClient } from './_components/telegram-settings-client'
 
 export default async function TelegramSettingsPage() {
-  const me = await getCurrentUser()
+  const me = await requireRole(['ADMIN'])
 
   // Тянем свежие данные напрямую из БД — состояние могло обновиться webhook'ом
   // после redirect'а из onboarding.

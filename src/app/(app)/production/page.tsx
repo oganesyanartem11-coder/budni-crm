@@ -9,7 +9,7 @@ interface PageProps {
 }
 
 export default async function ProductionPage({ searchParams }: PageProps) {
-  await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
 
   const params = await searchParams
 
@@ -35,6 +35,34 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     ? `Завтра, ${formatDateShort(targetDate)}`
     : formatDateShort(targetDate)
 
+  const canSeePrices = user.role !== 'CHEF'
+
+  // Defense-in-depth: для CHEF зануляем финансовые поля. UI всё равно их скрывает.
+  const safeSummary = canSeePrices
+    ? summary
+    : {
+        ...summary,
+        totalRevenue: 0,
+        mealTypes: {
+          BREAKFAST: { ...summary.mealTypes.BREAKFAST, totalRevenue: 0 },
+          LUNCH: { ...summary.mealTypes.LUNCH, totalRevenue: 0 },
+          DINNER: { ...summary.mealTypes.DINNER, totalRevenue: 0 },
+        },
+      }
+  const safeIngredientsSummary = canSeePrices
+    ? ingredientsSummary
+    : {
+        ...ingredientsSummary,
+        totalCost: 0,
+        totalRevenue: 0,
+        estimatedMargin: 0,
+        rows: ingredientsSummary.rows.map((r) => ({
+          ...r,
+          pricePerUnit: 0,
+          totalCost: 0,
+        })),
+      }
+
   return (
     <>
       <PageHeader
@@ -42,10 +70,11 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         subtitle={dateLabel}
       />
       <ProductionView
-        summary={summary}
-        ingredientsSummary={ingredientsSummary}
+        summary={safeSummary}
+        ingredientsSummary={safeIngredientsSummary}
         targetDateIso={targetDate.toISOString()}
         tab={tab}
+        canSeePrices={canSeePrices}
       />
     </>
   )

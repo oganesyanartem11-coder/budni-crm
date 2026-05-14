@@ -31,7 +31,7 @@ export type ActionResult<T = void> =
   | { ok: false; error: string; fieldErrors?: Record<string, string[]> }
 
 export async function createDish(formData: DishFormData): Promise<ActionResult<{ id: string }>> {
-  const user = await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const parsed = dishSchema.safeParse(formData)
   if (!parsed.success) {
@@ -87,7 +87,7 @@ export async function createDish(formData: DishFormData): Promise<ActionResult<{
 }
 
 export async function updateDish(id: string, formData: DishFormData): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const parsed = dishSchema.safeParse(formData)
   if (!parsed.success) {
@@ -164,7 +164,7 @@ export async function getDishUsage(id: string): Promise<{
   menuCount: number
   menus: Array<{ id: string; name: string; status: string }>
 }> {
-  await requireRole(['ADMIN', 'CHEF'])
+  await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const menuDayDishes = await prisma.menuDayDish.findMany({
     where: { dishId: id },
@@ -192,7 +192,7 @@ export async function getDishUsage(id: string): Promise<{
 }
 
 export async function deleteDish(id: string, force = false): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const dish = await prisma.dish.findUnique({ where: { id } })
   if (!dish) {

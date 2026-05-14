@@ -1,10 +1,10 @@
 import Link from 'next/link'
 import { Users as UsersIcon, Send, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
-import { getCurrentUser } from '@/lib/auth/current-user'
+import { requireRole } from '@/lib/auth/current-user'
 
 export default async function SettingsPage() {
-  const user = await getCurrentUser()
+  const user = await requireRole(['ADMIN'])
 
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
 

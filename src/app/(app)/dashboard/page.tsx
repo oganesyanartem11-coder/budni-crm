@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ArrowRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
@@ -13,6 +14,11 @@ export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
+
+  // CHEF не имеет дашборд-содержимого (только ADMIN+MANAGER блоки) — отправляем на свой home.
+  if (user.role === 'CHEF') {
+    redirect('/production')
+  }
 
   const todayStart = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
   const todayEnd = (() => { const d = new Date(); d.setHours(23,59,59,999); return d })()

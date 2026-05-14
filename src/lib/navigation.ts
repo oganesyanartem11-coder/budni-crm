@@ -54,7 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'production',
     title: 'Производство',
     items: [
-      { href: '/production', label: 'Производство', icon: ChefHat,      roles: ['ADMIN', 'CHEF'] },
+      { href: '/production', label: 'Производство', icon: ChefHat,      roles: ['ADMIN', 'CHEF', 'MANAGER'] },
       { href: '/menu',       label: 'Меню недели',     icon: CalendarDays, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
     ],
   },

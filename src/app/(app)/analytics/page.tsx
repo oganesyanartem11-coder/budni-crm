@@ -1,7 +1,10 @@
 import { PageHeader } from '@/components/layout/page-header'
 import { ComingSoon } from '@/components/layout/coming-soon'
+import { requireRole } from '@/lib/auth/current-user'
 
-export default function AnalyticsPage() {
+export default async function AnalyticsPage() {
+  await requireRole(['ADMIN'])
+
   return (
     <>
       <PageHeader

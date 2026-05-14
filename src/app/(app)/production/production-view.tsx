@@ -16,11 +16,12 @@ interface Props {
   ingredientsSummary: IngredientsSummary
   targetDateIso: string
   tab: 'dishes' | 'ingredients'
+  canSeePrices: boolean
 }
 
 const MEAL_TYPE_ORDER: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
 
-export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab }: Props) {
+export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab, canSeePrices }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const [, startTransition] = useTransition()
@@ -111,9 +112,9 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
       </div>
 
       {/* Агрегаты + табы */}
-      <div className="flex flex-row gap-2 lg:grid lg:grid-cols-3 lg:gap-3">
+      <div className={cn('flex flex-row gap-2 lg:grid lg:gap-3', canSeePrices ? 'lg:grid-cols-3' : 'lg:grid-cols-2')}>
         <AggregateCard label="Всего порций" value={summary.totalPortions.toString()} />
-        <AggregateCard label="Сумма" value={formatMoney(summary.totalRevenue)} />
+        {canSeePrices && <AggregateCard label="Сумма" value={formatMoney(summary.totalRevenue)} />}
         <AggregateCard
           label="В ожидании подтверждения"
           value={summary.pendingPortions > 0 ? `+${summary.pendingPortions}` : '—'}
@@ -169,13 +170,13 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
       </div>
 
       {/* Контент */}
-      {tab === 'dishes' && <DishesTab summary={summary} />}
-      {tab === 'ingredients' && <IngredientsTab summary={ingredientsSummary} />}
+      {tab === 'dishes' && <DishesTab summary={summary} canSeePrices={canSeePrices} />}
+      {tab === 'ingredients' && <IngredientsTab summary={ingredientsSummary} canSeePrices={canSeePrices} />}
     </div>
   )
 }
 
-function DishesTab({ summary }: { summary: ProductionSummary }) {
+function DishesTab({ summary, canSeePrices }: { summary: ProductionSummary; canSeePrices: boolean }) {
   const hasAnyOrders = summary.totalPortions > 0
   if (!hasAnyOrders) {
     return (
@@ -246,7 +247,8 @@ function DishesTab({ summary }: { summary: ProductionSummary }) {
                 ))}
                 <div className="px-4 py-3 bg-bg/30 border-t border-border text-xs text-fg-muted flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5" />
-                  {formatOrders(data.dishes[0]?.ordersCount ?? 0)} · {formatLocations(data.dishes[0]?.locationsCount ?? 0)} · сумма {formatMoney(data.totalRevenue)}
+                  {formatOrders(data.dishes[0]?.ordersCount ?? 0)} · {formatLocations(data.dishes[0]?.locationsCount ?? 0)}
+                  {canSeePrices && ` · сумма ${formatMoney(data.totalRevenue)}`}
                 </div>
               </div>
             )}
@@ -328,7 +330,7 @@ function TabButton({
   )
 }
 
-function IngredientsTab({ summary }: { summary: IngredientsSummary }) {
+function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary; canSeePrices: boolean }) {
   if (!summary.hasMenu) {
     return (
       <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
@@ -352,24 +354,26 @@ function IngredientsTab({ summary }: { summary: IngredientsSummary }) {
   return (
     <div className="space-y-4">
       {/* Маржа сверху */}
-      <div className="flex flex-row gap-2 lg:grid lg:grid-cols-3 lg:gap-3">
-        <AggregateCard label="Выручка" value={formatMoney(summary.totalRevenue)} tone="info" />
-        <AggregateCard
-          label="Закупка"
-          value={formatMoney(summary.totalCost)}
-          hint={`${summary.rows.length} ингредиентов`}
-        />
-        <AggregateCard
-          label="Маржа (ориентир)"
-          value={formatMoney(summary.estimatedMargin)}
-          tone={summary.estimatedMargin > 0 ? 'info' : 'warning'}
-          hint={
-            summary.totalRevenue > 0
-              ? `${Math.round((summary.estimatedMargin / summary.totalRevenue) * 100)}% от выручки`
-              : undefined
-          }
-        />
-      </div>
+      {canSeePrices && (
+        <div className="flex flex-row gap-2 lg:grid lg:grid-cols-3 lg:gap-3">
+          <AggregateCard label="Выручка" value={formatMoney(summary.totalRevenue)} tone="info" />
+          <AggregateCard
+            label="Закупка"
+            value={formatMoney(summary.totalCost)}
+            hint={`${summary.rows.length} ингредиентов`}
+          />
+          <AggregateCard
+            label="Маржа (ориентир)"
+            value={formatMoney(summary.estimatedMargin)}
+            tone={summary.estimatedMargin > 0 ? 'info' : 'warning'}
+            hint={
+              summary.totalRevenue > 0
+                ? `${Math.round((summary.estimatedMargin / summary.totalRevenue) * 100)}% от выручки`
+                : undefined
+            }
+          />
+        </div>
+      )}
 
       {/* Таблица ингредиентов */}
       <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
@@ -377,42 +381,45 @@ function IngredientsTab({ summary }: { summary: IngredientsSummary }) {
           <table className="w-full text-sm">
             <thead className="bg-bg/50 text-xs uppercase tracking-wider text-fg-muted">
               <tr>
-                <th className="text-left px-4 py-3 font-medium w-10"></th>
+                {canSeePrices && <th className="text-left px-4 py-3 font-medium w-10"></th>}
                 <th className="text-left px-3 py-3 font-medium">Ингредиент</th>
                 <th className="text-right px-3 py-3 font-medium">Нужно</th>
-                <th className="text-right px-3 py-3 font-medium hidden md:table-cell">Цена</th>
-                <th className="text-right px-3 py-3 font-medium">Стоимость</th>
+                {canSeePrices && <th className="text-right px-3 py-3 font-medium hidden md:table-cell">Цена</th>}
+                {canSeePrices && <th className="text-right px-3 py-3 font-medium">Стоимость</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {summary.rows.map((row) => (
-                <IngredientRow key={row.ingredientId} row={row} />
+                <IngredientRow key={row.ingredientId} row={row} canSeePrices={canSeePrices} />
               ))}
             </tbody>
-            <tfoot>
-              <tr className="bg-bg/30 border-t-2 border-border">
-                <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold">
-                  Итого закупка:
-                </td>
-                <td className="px-3 py-3 text-right tabular-nums font-bold text-base">
-                  {formatMoney(summary.totalCost)}
-                </td>
-              </tr>
-            </tfoot>
+            {canSeePrices && (
+              <tfoot>
+                <tr className="bg-bg/30 border-t-2 border-border">
+                  <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold">
+                    Итого закупка:
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums font-bold text-base">
+                    {formatMoney(summary.totalCost)}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
 
       <p className="text-xs text-fg-subtle text-center">
-        * Расчёт по тех. картам блюд (брутто). Цены из последней записи в справочнике сырья.
+        * Расчёт по тех. картам блюд (брутто).{canSeePrices && ' Цены из последней записи в справочнике сырья.'}
       </p>
     </div>
   )
 }
 
-function IngredientRow({ row }: { row: IngredientProductionRow }) {
+function IngredientRow({ row, canSeePrices }: { row: IngredientProductionRow; canSeePrices: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const unitLabel = row.unit === 'KG' ? 'кг' : row.unit === 'L' ? 'л' : 'шт'
+  const totalCols = 2 + (canSeePrices ? 3 : 0)
 
   function formatAmount(value: number): string {
     if (row.unit === 'PCS') return Math.ceil(value).toString()
@@ -425,23 +432,29 @@ function IngredientRow({ row }: { row: IngredientProductionRow }) {
         className="hover:bg-bg/30 transition-colors cursor-pointer"
         onClick={() => setExpanded((v) => !v)}
       >
-        <td className="px-4 py-3 text-fg-subtle">
-          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-        </td>
+        {canSeePrices && (
+          <td className="px-4 py-3 text-fg-subtle">
+            {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </td>
+        )}
         <td className="px-3 py-3 font-medium">{row.ingredientName}</td>
         <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
           {formatAmount(row.totalNeeded)} {unitLabel}
         </td>
-        <td className="px-3 py-3 text-right tabular-nums text-fg-muted hidden md:table-cell whitespace-nowrap">
-          {formatMoney(row.pricePerUnit)} / {unitLabel}
-        </td>
-        <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">
-          {formatMoney(row.totalCost)}
-        </td>
+        {canSeePrices && (
+          <td className="px-3 py-3 text-right tabular-nums text-fg-muted hidden md:table-cell whitespace-nowrap">
+            {formatMoney(row.pricePerUnit)} / {unitLabel}
+          </td>
+        )}
+        {canSeePrices && (
+          <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">
+            {formatMoney(row.totalCost)}
+          </td>
+        )}
       </tr>
-      {expanded && (
+      {expanded && canSeePrices && (
         <tr className="bg-bg/20">
-          <td colSpan={5} className="px-12 py-3">
+          <td colSpan={totalCols} className="px-12 py-3">
             <p className="text-xs uppercase tracking-wider text-fg-subtle mb-2">
               Используется в блюдах
             </p>

@@ -5,7 +5,7 @@ import { prisma } from '@/lib/db/prisma'
 import { serialize } from '@/lib/utils/serialize'
 
 export default async function IngredientsPage() {
-  await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   const ingredients = await prisma.ingredient.findMany({
     orderBy: { name: 'asc' },
@@ -19,6 +19,13 @@ export default async function IngredientsPage() {
 
   // Decimal → number, чтобы передать в Client Component без warnings
   const serialized = serialize(ingredients)
+  const canSeePrices = user.role !== 'CHEF'
+  const canEdit = user.role === 'ADMIN' || user.role === 'MANAGER' || user.role === 'CHEF'
+
+  // Defense-in-depth: даже если UI забудет скрыть цены — для CHEF поля занулены.
+  const safeIngredients = canSeePrices
+    ? serialized
+    : serialized.map((ing) => ({ ...ing, pricePerUnit: 0, priceHistory: [] }))
 
   return (
     <>
@@ -26,7 +33,7 @@ export default async function IngredientsPage() {
         title="Сырьё"
         subtitle="Справочник ингредиентов и цен"
       />
-      <IngredientsTable ingredients={serialized} />
+      <IngredientsTable ingredients={safeIngredients} canSeePrices={canSeePrices} canEdit={canEdit} />
     </>
   )
 }

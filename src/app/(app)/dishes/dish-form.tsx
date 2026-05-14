@@ -45,9 +45,10 @@ interface IngredientLine {
 interface Props {
   dish?: SerializedDishWithIngredients
   ingredients: SerializedIngredient[]
+  canSeePrices: boolean
 }
 
-export function DishForm({ dish, ingredients }: Props) {
+export function DishForm({ dish, ingredients, canSeePrices }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [deletePending, startDelete] = useTransition()
@@ -300,12 +301,14 @@ export function DishForm({ dish, ingredients }: Props) {
                 {unit === 'PIECE' && 'Расчёт на 1 штуку'}
               </p>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-fg-muted">Себестоимость</p>
-              <p className="text-xl font-bold tabular-nums">
-                {formatMoney(cost, { withKopecks: true })}
-              </p>
-            </div>
+            {canSeePrices && (
+              <div className="text-right">
+                <p className="text-xs text-fg-muted">Себестоимость</p>
+                <p className="text-xl font-bold tabular-nums">
+                  {formatMoney(cost, { withKopecks: true })}
+                </p>
+              </div>
+            )}
           </div>
 
           {errors.duplicates && (
@@ -328,6 +331,7 @@ export function DishForm({ dish, ingredients }: Props) {
                   onRemove={() => removeLine(line.key)}
                   errors={errors}
                   canRemove={lines.length > 1}
+                  canSeePrices={canSeePrices}
                 />
               )
             })}
@@ -403,6 +407,7 @@ function IngredientRow({
   onRemove,
   errors,
   canRemove,
+  canSeePrices,
 }: {
   index: number
   line: IngredientLine
@@ -412,6 +417,7 @@ function IngredientRow({
   onRemove: () => void
   errors: Record<string, string>
   canRemove: boolean
+  canSeePrices: boolean
 }) {
   const lineCost = useMemo(() => {
     if (!ingredient || line.bruttoGrams <= 0) return 0
@@ -504,7 +510,7 @@ function IngredientRow({
       </div>
 
       {/* Цена строки */}
-      {ingredient && line.bruttoGrams > 0 && (
+      {canSeePrices && ingredient && line.bruttoGrams > 0 && (
         <div className="col-span-12 text-xs text-fg-subtle text-right tabular-nums">
           {formatMoney(lineCost, { withKopecks: true })} в этой строке
         </div>

@@ -10,7 +10,7 @@ import {
   DISH_CATEGORY_ICONS,
   DISH_CATEGORY_ORDER,
 } from '@/lib/constants/dish-categories'
-import { formatMoney } from '@/lib/utils/format'
+import { formatMoney, formatDishes } from '@/lib/utils/format'
 import { calculateDishCost } from '@/lib/utils/dish-cost'
 import { cn } from '@/lib/utils/cn'
 
@@ -28,11 +28,12 @@ type SerializedDish = Dish & {
 interface Props {
   dishes: SerializedDish[]
   canEdit: boolean
+  canSeePrices: boolean
 }
 
 type FilterCategory = DishCategory | 'ALL'
 
-export function DishesGrid({ dishes, canEdit }: Props) {
+export function DishesGrid({ dishes, canEdit, canSeePrices }: Props) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterCategory>('ALL')
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -128,14 +129,17 @@ export function DishesGrid({ dishes, canEdit }: Props) {
               expanded={expandedId === dish.id}
               onToggle={() => setExpandedId(expandedId === dish.id ? null : dish.id)}
               canEdit={canEdit}
+              canSeePrices={canSeePrices}
             />
           ))}
         </div>
       )}
 
-      <p className="text-xs text-fg-subtle text-center">
-        Показано: {filtered.length} из {dishes.length}
-      </p>
+      {(search.length > 0 || filter !== 'ALL') && (
+        <p className="text-xs text-fg-subtle text-center">
+          {formatDishes(filtered.length)} из {dishes.length}
+        </p>
+      )}
     </div>
   )
 }
@@ -168,11 +172,13 @@ function DishCard({
   expanded,
   onToggle,
   canEdit,
+  canSeePrices,
 }: {
   dish: SerializedDish
   expanded: boolean
   onToggle: () => void
   canEdit: boolean
+  canSeePrices: boolean
 }) {
   const [scale, setScale] = useState<1 | 10>(1) // 1 порция или 10 порций
 
@@ -208,10 +214,12 @@ function DishCard({
               </p>
             </div>
           </div>
-          <div className="text-right shrink-0">
-            <p className="text-xs text-fg-muted">Себестоимость</p>
-            <p className="font-semibold text-sm">{formatMoney(cost, { withKopecks: true })}</p>
-          </div>
+          {canSeePrices && (
+            <div className="text-right shrink-0">
+              <p className="text-xs text-fg-muted">Себестоимость</p>
+              <p className="font-semibold text-sm">{formatMoney(cost, { withKopecks: true })}</p>
+            </div>
+          )}
         </div>
 
         {!expanded && (
@@ -266,16 +274,18 @@ function DishCard({
                   </tr>
                 ))}
               </tbody>
-              <tfoot className="bg-bg/30">
-                <tr>
-                  <td className="px-3 py-2 text-xs text-fg-muted">
-                    Себестоимость на {scale === 1 ? '1 порцию' : '10 порций'}
-                  </td>
-                  <td className="px-3 py-2 text-right font-semibold" colSpan={2}>
-                    {formatMoney(cost * scale, { withKopecks: true })}
-                  </td>
-                </tr>
-              </tfoot>
+              {canSeePrices && (
+                <tfoot className="bg-bg/30">
+                  <tr>
+                    <td className="px-3 py-2 text-xs text-fg-muted">
+                      Себестоимость на {scale === 1 ? '1 порцию' : '10 порций'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-semibold" colSpan={2}>
+                      {formatMoney(cost * scale, { withKopecks: true })}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
 

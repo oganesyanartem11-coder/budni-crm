@@ -13,9 +13,10 @@ interface Props {
   ingredient?: SerializedIngredient
   open: boolean
   onClose: () => void
+  canSeePrices: boolean
 }
 
-export function IngredientModal({ ingredient, open, onClose }: Props) {
+export function IngredientModal({ ingredient, open, onClose, canSeePrices }: Props) {
   // ESC закрывает modal
   useEffect(() => {
     if (!open) return
@@ -61,6 +62,7 @@ export function IngredientModal({ ingredient, open, onClose }: Props) {
           ingredient={ingredient}
           onSuccess={onClose}
           onCancel={onClose}
+          canSeePrices={canSeePrices}
         />
       </div>
     </div>

@@ -21,7 +21,20 @@ export default async function DishesPage() {
   })
 
   const serialized = serialize(dishes)
-  const canEdit = user.role === 'ADMIN' || user.role === 'CHEF'
+  const canSeePrices = user.role !== 'CHEF'
+  const canEdit = user.role === 'ADMIN' || user.role === 'MANAGER' || user.role === 'CHEF'
+
+  // Defense-in-depth: для CHEF зануляем цены ингредиентов — себестоимость
+  // считается клиентом из этих чисел, без них даст 0 (которое UI всё равно скрывает).
+  const safeDishes = canSeePrices
+    ? serialized
+    : serialized.map((d) => ({
+        ...d,
+        ingredients: d.ingredients.map((line) => ({
+          ...line,
+          ingredient: { ...line.ingredient, pricePerUnit: 0 },
+        })),
+      }))
 
   return (
     <>
@@ -40,7 +53,7 @@ export default async function DishesPage() {
           ) : undefined
         }
       />
-      <DishesGrid dishes={serialized} canEdit={canEdit} />
+      <DishesGrid dishes={safeDishes} canEdit={canEdit} canSeePrices={canSeePrices} />
     </>
   )
 }
