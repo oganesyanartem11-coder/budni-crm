@@ -7,6 +7,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 import { Calendar, TrendingUp, ShoppingCart, XCircle, Clock, Printer, Trophy, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, formatOrders } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
+import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils/cn'
 import {
   DropdownMenu,
@@ -138,11 +139,11 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
       </div>
 
       {!hasData ? (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <Calendar className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p className="font-medium text-fg mb-1">Нет данных в этом периоде</p>
-          <p className="text-sm">Попробуйте другой диапазон.</p>
-        </div>
+        <EmptyState
+          icon={Calendar}
+          title="Нет данных в этом периоде"
+          description="Попробуйте другой диапазон."
+        />
       ) : (
         <div className="print-area space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

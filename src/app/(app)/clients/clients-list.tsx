@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Search, Building2, MapPin, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
-import { formatMoney } from '@/lib/utils/format'
+import { formatMoney, formatClients } from '@/lib/utils/format'
 import { ORDER_TYPE_SHORT, MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import type { Client, ClientLocation, ClientMealConfig, MealType, OrderType } from '@prisma/client'
 
@@ -82,9 +82,11 @@ export function ClientsList({ clients }: Props) {
         </div>
       )}
 
-      <p className="text-xs text-fg-subtle text-center">
-        Показано: {filtered.length} из {clients.length}
-      </p>
+      {(search.length > 0 || showArchived) && (
+        <p className="text-xs text-fg-subtle text-center">
+          {formatClients(filtered.length)} из {clients.length}
+        </p>
+      )}
     </div>
   )
 }

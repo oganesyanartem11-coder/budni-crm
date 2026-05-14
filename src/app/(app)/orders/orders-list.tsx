@@ -187,7 +187,16 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
       {orders.length === 0 ? (
         <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
           <p>Заказов на эту дату не найдено</p>
-          {hasFilters && <p className="text-sm mt-2">Попробуйте сбросить фильтры</p>}
+          {hasFilters && (
+            <button
+              type="button"
+              onClick={clearAll}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill text-sm text-fg-muted hover:text-fg hover:bg-bg transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+              Сбросить фильтры
+            </button>
+          )}
         </div>
       ) : (
         <div className={cn('rounded-2xl bg-surface border border-border overflow-hidden transition-opacity', isPending && 'opacity-50')} style={{ boxShadow: 'var(--shadow-card)' }}>

@@ -99,6 +99,20 @@ export function formatClients(n: number): string {
 }
 
 /**
+ * "1 блюдо", "2 блюда", "5 блюд"
+ */
+export function formatDishes(n: number): string {
+  return `${n} ${pluralize(n, ['блюдо', 'блюда', 'блюд'])}`
+}
+
+/**
+ * "1 ингредиент", "2 ингредиента", "5 ингредиентов"
+ */
+export function formatIngredients(n: number): string {
+  return `${n} ${pluralize(n, ['ингредиент', 'ингредиента', 'ингредиентов'])}`
+}
+
+/**
  * Маска телефона +7 (999) 999-99-99
  * На вход — любая строка (с цифрами и мусором).
  * На выход — отформатированная строка вида +7 (XXX) XXX-XX-XX.

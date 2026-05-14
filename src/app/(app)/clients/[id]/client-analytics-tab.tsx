@@ -5,6 +5,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, 
 import { TrendingUp, ShoppingCart, Coffee, XCircle, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
+import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils/cn'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 
@@ -26,11 +27,11 @@ export function ClientAnalyticsTab({ analytics }: Props) {
 
   if (!hasData) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <TrendingUp className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-        <p className="font-medium text-fg mb-1">Нет данных за последний год</p>
-        <p className="text-sm">Аналитика появится когда у клиента будут заказы.</p>
-      </div>
+      <EmptyState
+        icon={TrendingUp}
+        title="Нет данных за последний год"
+        description="Аналитика появится когда у клиента будут заказы."
+      />
     )
   }
 
