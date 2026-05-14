@@ -4,7 +4,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   DRAFT: 'Черновик',
   PENDING_CONFIRMATION: 'Ждёт подтверждения',
   CONFIRMED: 'Подтверждён',
-  LOCKED: 'Залочен',
+  LOCKED: 'Зафиксирован',
   IN_PRODUCTION: 'На производстве',
   OUT_FOR_DELIVERY: 'В доставке',
   DELIVERED: 'Доставлен',

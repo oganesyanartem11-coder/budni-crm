@@ -1,10 +1,11 @@
 import Link from 'next/link'
-import { Plus, Sparkles } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { OrdersView } from './orders-view'
 import { requireRole } from '@/lib/auth/current-user'
 import { listOrders, listOrdersForWeek, listActiveClientsLight } from '@/lib/db/queries/orders'
 import { getMondayOfWeek } from '@/lib/utils/week'
+import { formatDateShort } from '@/lib/utils/format'
 import { serialize } from '@/lib/utils/serialize'
 import type { OrderStatus, MealType } from '@prisma/client'
 
@@ -62,30 +63,28 @@ export default async function OrdersPage({ searchParams }: PageProps) {
     weekOrdersData = await listOrdersForWeek(weekStartDate)
   }
 
+  // Подзаголовок с датой для list-view: «Завтра, Чт, 15 мая» по умолчанию,
+  // иначе просто формат даты выбранной даты. Для week-view дата меняется
+  // в самом WeekView, на уровне страницы не нужна.
+  const isDefaultTomorrow = view === 'list'
+    && selectedDate.getTime() === defaultDate.getTime()
+  const dateLabel = view === 'list'
+    ? (isDefaultTomorrow ? `Завтра, ${formatDateShort(selectedDate)}` : formatDateShort(selectedDate))
+    : 'Все заказы по датам, статусам и клиентам'
+
   return (
     <>
       <PageHeader
         title="Заказы"
-        subtitle="Все заказы по датам, статусам и клиентам"
+        subtitle={dateLabel}
         actions={
-          <>
-            <button
-              type="button"
-              disabled
-              title="Будет доступно в Спринте 5"
-              className="px-4 py-2 rounded-pill border border-border bg-surface text-fg-subtle font-medium text-sm flex items-center gap-2 cursor-not-allowed"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span className="hidden sm:inline">Из мессенджера</span>
-            </button>
-            <Link
-              href="/orders/new"
-              className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              <span className="hidden sm:inline">Создать заказ</span>
-            </Link>
-          </>
+          <Link
+            href="/orders/new"
+            className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">Создать заказ</span>
+          </Link>
         }
       />
 

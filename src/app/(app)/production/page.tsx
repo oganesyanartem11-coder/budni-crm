@@ -2,6 +2,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { ProductionView } from './production-view'
 import { requireRole } from '@/lib/auth/current-user'
 import { getProductionSummary, getIngredientsSummary } from '@/lib/db/queries/production'
+import { formatDateShort } from '@/lib/utils/format'
 
 interface PageProps {
   searchParams: Promise<{ date?: string; tab?: string }>
@@ -29,11 +30,16 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   ])
   const tab: 'dishes' | 'ingredients' = params.tab === 'ingredients' ? 'ingredients' : 'dishes'
 
+  const isDefaultTomorrow = targetDate.getTime() === defaultDate.getTime()
+  const dateLabel = isDefaultTomorrow
+    ? `Завтра, ${formatDateShort(targetDate)}`
+    : formatDateShort(targetDate)
+
   return (
     <>
       <PageHeader
         title="Производство"
-        subtitle="Сводка для кухни — что и сколько готовить"
+        subtitle={dateLabel}
       />
       <ProductionView
         summary={summary}

@@ -43,7 +43,7 @@ const ORDER_STATUS_MAP: Record<OrderStatus, { variant: StatusVariant; label: str
   DRAFT: { variant: 'neutral', label: 'Черновик' },
   PENDING_CONFIRMATION: { variant: 'warning', label: 'Ждём подтверждения' },
   CONFIRMED: { variant: 'success', label: 'Подтверждён' },
-  LOCKED: { variant: 'info', label: 'Залочен' },
+  LOCKED: { variant: 'info', label: 'Зафиксирован' },
   IN_PRODUCTION: { variant: 'info', label: 'На производстве' },
   OUT_FOR_DELIVERY: { variant: 'info', label: 'В доставке' },
   DELIVERED: { variant: 'success', label: 'Доставлен' },

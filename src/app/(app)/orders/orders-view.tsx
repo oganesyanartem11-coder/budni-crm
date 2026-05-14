@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
 import { regenerateFixedOrders } from './actions'
-import { formatDateShort, formatDateNumeric } from '@/lib/utils/format'
+import { formatDateShort } from '@/lib/utils/format'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation } from '@prisma/client'
@@ -127,99 +127,41 @@ export function OrdersView({
 
   return (
     <div className="space-y-5">
-      {/* Шапка с переключателем режимов и навигацией */}
-      <div className="rounded-2xl bg-surface border border-border p-4 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          {/* Переключатель режимов */}
-          <div className="flex gap-1 p-1 bg-bg rounded-pill">
-            <ViewToggleButton active={view === 'list'} onClick={() => setView('list')} icon={List} label="Список" />
-            <ViewToggleButton active={view === 'week'} onClick={() => setView('week')} icon={CalendarDays} label="Неделя" />
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Быстрые ссылки */}
-            {view === 'list' && (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={jumpToToday}
-                  className={cn(
-                    'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-                    isToday ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-                  )}
-                >
-                  Сегодня
-                </button>
-                <button
-                  type="button"
-                  onClick={jumpToTomorrow}
-                  className={cn(
-                    'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-                    isTomorrow ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-                  )}
-                >
-                  Завтра
-                </button>
-              </div>
-            )}
-
-            {/* Сервисное меню */}
-            <ServiceMenu />
-          </div>
+      {/* Единая панель управления: режим + навигация по датам.
+          ServiceMenu (⋮) abs-positioned в правом верхнем углу карточки —
+          не толкается DateNav'ом и не вылезает за край при wrap. pr-12 на
+          основном flex даёт зазор справа под кнопку. */}
+      <div
+        className="relative rounded-2xl bg-surface border border-border p-3 pr-12 flex items-center gap-3 flex-wrap"
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
+        <div className="flex gap-1 p-1 bg-bg rounded-pill">
+          <ViewToggleButton active={view === 'list'} onClick={() => setView('list')} icon={List} label="Список" />
+          <ViewToggleButton active={view === 'week'} onClick={() => setView('week')} icon={CalendarDays} label="Неделя" />
         </div>
 
-        {/* Навигация по дате/неделе */}
         {view === 'list' ? (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => shiftDate(-1)}
-              aria-label="Предыдущий день"
-              className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <div className="px-3 flex-1 text-center">
-              <p className="font-semibold text-base capitalize">
-                {formatDateShort(selectedDate)}
-              </p>
-              <p className="text-xs text-fg-muted">{formatDateNumeric(selectedDate)}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => shiftDate(1)}
-              aria-label="Следующий день"
-              className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+          <DateNav
+            onPrev={() => shiftDate(-1)}
+            onNext={() => shiftDate(1)}
+            label={formatDateShort(selectedDate)}
+            isToday={isToday}
+            isTomorrow={isTomorrow}
+            onJumpToday={jumpToToday}
+            onJumpTomorrow={jumpToTomorrow}
+          />
         ) : weekStart && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => shiftWeekDate(-1)}
-              aria-label="Предыдущая неделя"
-              className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <div className="px-3 flex-1 text-center">
-              <p className="font-semibold text-base">{formatWeekRange(weekStart)}</p>
-              {isCurrentWeek(weekStart) && (
-                <p className="text-xs text-info-fg">Текущая неделя</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => shiftWeekDate(1)}
-              aria-label="Следующая неделя"
-              className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+          <WeekNav
+            onPrev={() => shiftWeekDate(-1)}
+            onNext={() => shiftWeekDate(1)}
+            label={formatWeekRange(weekStart)}
+            isCurrent={isCurrentWeek(weekStart)}
+          />
         )}
+
+        <div className="absolute top-3 right-3">
+          <ServiceMenu />
+        </div>
       </div>
 
       {/* Контент режима */}
@@ -239,6 +181,104 @@ export function OrdersView({
           weekStart={weekStart}
         />
       )}
+    </div>
+  )
+}
+
+function DateNav({
+  onPrev,
+  onNext,
+  label,
+  isToday,
+  isTomorrow,
+  onJumpToday,
+  onJumpTomorrow,
+}: {
+  onPrev: () => void
+  onNext: () => void
+  label: string
+  isToday: boolean
+  isTomorrow: boolean
+  onJumpToday: () => void
+  onJumpTomorrow: () => void
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={onPrev}
+        aria-label="Предыдущий день"
+        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      <button
+        type="button"
+        onClick={onJumpToday}
+        className={cn(
+          'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
+          isToday ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+        )}
+      >
+        Сегодня
+      </button>
+      <button
+        type="button"
+        onClick={onJumpTomorrow}
+        className={cn(
+          'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
+          isTomorrow ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+        )}
+      >
+        Завтра
+      </button>
+      <span className="px-2 text-sm text-fg-muted">·</span>
+      <p className="font-semibold text-sm capitalize whitespace-nowrap">{label}</p>
+      <button
+        type="button"
+        onClick={onNext}
+        aria-label="Следующий день"
+        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    </div>
+  )
+}
+
+function WeekNav({
+  onPrev,
+  onNext,
+  label,
+  isCurrent,
+}: {
+  onPrev: () => void
+  onNext: () => void
+  label: string
+  isCurrent: boolean
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={onPrev}
+        aria-label="Предыдущая неделя"
+        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      <div className="px-3">
+        <p className="font-semibold text-sm whitespace-nowrap">{label}</p>
+        {isCurrent && <p className="text-[10px] text-info-fg leading-none mt-0.5">Текущая</p>}
+      </div>
+      <button
+        type="button"
+        onClick={onNext}
+        aria-label="Следующая неделя"
+        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
     </div>
   )
 }
@@ -304,7 +344,7 @@ function ServiceMenu() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="Сервисные действия"
-        className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
       >
         <MoreVertical className="w-4 h-4" />
       </button>

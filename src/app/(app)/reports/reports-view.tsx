@@ -4,10 +4,16 @@ import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import { Calendar, TrendingUp, ShoppingCart, XCircle, Clock, Printer, Trophy, ChevronRight, type LucideIcon } from 'lucide-react'
+import { Calendar, TrendingUp, ShoppingCart, XCircle, Clock, Printer, Trophy, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, formatOrders } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 import type { FinancialReport } from '@/lib/db/queries/reports'
 import type { ReportPreset } from '@/lib/utils/week'
 
@@ -24,15 +30,18 @@ interface Props {
   report: FinancialReport
 }
 
-const PRESETS: Array<{ key: ReportPreset; label: string }> = [
+const MAIN_PRESETS: Array<{ key: ReportPreset; label: string }> = [
   { key: 'today', label: 'Сегодня' },
-  { key: 'yesterday', label: 'Вчера' },
   { key: 'this_week', label: 'Эта неделя' },
-  { key: 'last_week', label: 'Прошлая' },
   { key: 'this_month', label: 'Этот месяц' },
-  { key: 'last_month', label: 'Прошлый' },
-  { key: 'this_quarter', label: 'Квартал' },
   { key: 'this_year', label: 'Год' },
+]
+
+const SECONDARY_PRESETS: Array<{ key: ReportPreset; label: string }> = [
+  { key: 'yesterday', label: 'Вчера' },
+  { key: 'last_week', label: 'Прошлая неделя' },
+  { key: 'last_month', label: 'Прошлый месяц' },
+  { key: 'this_quarter', label: 'Квартал' },
   { key: 'custom', label: 'Произвольно' },
 ]
 
@@ -70,7 +79,7 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
       <div className="rounded-2xl bg-surface border border-border p-4 space-y-3 no-print" style={{ boxShadow: 'var(--shadow-card)' }}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex flex-wrap gap-1.5">
-            {PRESETS.map((p) => (
+            {MAIN_PRESETS.map((p) => (
               <button
                 key={p.key}
                 type="button"
@@ -84,6 +93,11 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
                 {p.label}
               </button>
             ))}
+            <SecondaryPresetMenu
+              preset={preset}
+              onSelect={applyPreset}
+              disabled={isPending}
+            />
           </div>
           <button
             type="button"
@@ -282,6 +296,49 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
         </div>
       )}
     </div>
+  )
+}
+
+function SecondaryPresetMenu({
+  preset,
+  onSelect,
+  disabled,
+}: {
+  preset: ReportPreset
+  onSelect: (p: ReportPreset) => void
+  disabled: boolean
+}) {
+  const activeSecondary = SECONDARY_PRESETS.find((p) => p.key === preset)
+  const label = activeSecondary?.label ?? 'Другой период'
+  const isActive = !!activeSecondary
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className={cn(
+            'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors disabled:opacity-50 flex items-center gap-1',
+            isActive ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
+          )}
+        >
+          {label}
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-44">
+        {SECONDARY_PRESETS.map((p) => (
+          <DropdownMenuItem
+            key={p.key}
+            onClick={() => onSelect(p.key)}
+            className={cn('cursor-pointer', preset === p.key && 'font-semibold')}
+          >
+            {p.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

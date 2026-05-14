@@ -10,7 +10,7 @@ export default function AnalyticsPage() {
       />
       <ComingSoon
         title="Аналитика в разработке"
-        sprint="Спринт 4"
+        sprint="В планах после пилота"
       />
     </>
   )

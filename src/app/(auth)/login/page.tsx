@@ -1,17 +1,10 @@
 import { LoginForm } from './login-form'
 import { Logo } from '@/components/layout/logo'
+import { getGreeting } from '@/lib/utils/greeting'
 
 // force-dynamic: getGreeting() читает текущий час; при статическом SSG
 // приветствие застывало бы навсегда. Дёшево (страница без БД-запросов).
 export const dynamic = 'force-dynamic'
-
-function getGreeting(): string {
-  const hour = new Date().getHours()
-  if (hour >= 5 && hour < 12) return 'Доброе утро'
-  if (hour >= 12 && hour < 17) return 'Добрый день'
-  if (hour >= 17 && hour < 23) return 'Добрый вечер'
-  return 'Доброй ночи'
-}
 
 export default function LoginPage() {
   const greeting = getGreeting()

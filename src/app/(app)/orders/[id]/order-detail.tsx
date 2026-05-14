@@ -59,7 +59,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PORTIONS_EDITED: 'Изменены порции',
   ORDER_CANCELLED: 'Отменён',
   ORDER_RESCHEDULED: 'Перенесён',
-  ORDERS_LOCKED: 'Залочен (cron, legacy)',
+  ORDERS_LOCKED: 'Зафиксирован (cron, legacy)',
   FIXED_ORDERS_GENERATED: 'Сгенерирован (cron)',
 }
 

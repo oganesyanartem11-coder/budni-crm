@@ -1,76 +1,131 @@
 import {
   LayoutDashboard,
   ClipboardList,
-  Building2,
-  UtensilsCrossed,
-  Carrot,
+  Users,
+  Utensils,
+  CalendarDays,
+  Wheat,
   ChefHat,
   Truck,
-  BarChart3,
-  Settings,
-  CalendarDays,
   FileBarChart,
+  TrendingUp,
   Inbox,
+  Menu,
   type LucideIcon,
 } from 'lucide-react'
+import type { UserRole } from '@prisma/client'
 
-export type NavSection = {
+export type NavBadgeKey = 'pendingCount' | 'inboxCount'
+
+export interface NavItem {
   href: string
   label: string
   icon: LucideIcon
-  // Кому показывать раздел (если undefined — показываем всем)
-  roles?: Array<'ADMIN' | 'MANAGER' | 'CHEF' | 'COURIER'>
+  roles: UserRole[]
+  badge?: NavBadgeKey
 }
 
-// Главное меню в топ-навигации
-export const TOP_NAV_SECTIONS: NavSection[] = [
-  { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
-  { href: '/orders', label: 'Заказы', icon: ClipboardList, roles: ['ADMIN', 'MANAGER'] },
-  { href: '/clients', label: 'Клиенты', icon: Building2, roles: ['ADMIN', 'MANAGER'] },
-  { href: '/dishes', label: 'Блюда', icon: UtensilsCrossed, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
-  { href: '/menu', label: 'Меню', icon: CalendarDays, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
-  { href: '/ingredients', label: 'Сырьё', icon: Carrot, roles: ['ADMIN', 'CHEF'] },
-  { href: '/production', label: 'Производство', icon: ChefHat, roles: ['ADMIN', 'CHEF'] },
-  { href: '/delivery', label: 'Доставка', icon: Truck, roles: ['ADMIN', 'MANAGER', 'COURIER'] },
-  { href: '/inbox', label: 'Inbox', icon: Inbox, roles: ['ADMIN', 'MANAGER'] },
-  { href: '/reports', label: 'Отчёты', icon: FileBarChart, roles: ['ADMIN', 'MANAGER'] },
-  { href: '/analytics', label: 'Аналитика', icon: BarChart3, roles: ['ADMIN'] },
+export type NavGroupId = 'daily' | 'production' | 'directory' | 'analytics'
+
+export interface NavGroup {
+  id: NavGroupId
+  title: string
+  items: NavItem[]
+}
+
+/**
+ * Группы навигации для Sidebar (десктоп) и MobileDrawer.
+ * Порядок групп = вертикальный порядок в Sidebar.
+ * Внутри группы видны только пункты, чья roles содержит текущую роль —
+ * пустая после фильтрации группа в Sidebar/Drawer не рендерится.
+ */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    id: 'daily',
+    title: 'Ежедневно',
+    items: [
+      { href: '/dashboard', label: 'Дашборд',  icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
+      { href: '/inbox',     label: 'Inbox',    icon: Inbox,           roles: ['ADMIN', 'MANAGER'], badge: 'inboxCount' },
+      { href: '/orders',    label: 'Заказы',   icon: ClipboardList,   roles: ['ADMIN', 'MANAGER'], badge: 'pendingCount' },
+      { href: '/delivery',  label: 'Доставка', icon: Truck,           roles: ['ADMIN', 'MANAGER', 'COURIER'] },
+    ],
+  },
+  {
+    id: 'production',
+    title: 'Производство',
+    items: [
+      { href: '/production', label: 'Производство', icon: ChefHat,      roles: ['ADMIN', 'CHEF'] },
+      { href: '/menu',       label: 'Меню недели',     icon: CalendarDays, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
+    ],
+  },
+  {
+    id: 'directory',
+    title: 'Справочники',
+    items: [
+      { href: '/clients',     label: 'Клиенты', icon: Users,    roles: ['ADMIN', 'MANAGER'] },
+      { href: '/dishes',      label: 'Блюда',   icon: Utensils, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
+      { href: '/ingredients', label: 'Сырьё',   icon: Wheat,    roles: ['ADMIN', 'CHEF'] },
+    ],
+  },
+  {
+    id: 'analytics',
+    title: 'Аналитика',
+    items: [
+      { href: '/reports',   label: 'Отчёты',    icon: FileBarChart, roles: ['ADMIN', 'MANAGER'] },
+      { href: '/analytics', label: 'Аналитика', icon: TrendingUp,   roles: ['ADMIN'] },
+    ],
+  },
 ]
 
-// Только для админа в выпадашке профиля
-export const ADMIN_NAV_SECTIONS: NavSection[] = [
-  { href: '/settings', label: 'Настройки', icon: Settings, roles: ['ADMIN'] },
-]
+/**
+ * Mobile-tabbar. Спец-маркер '__more__' рендерится как кнопка, открывающая
+ * MobileDrawer со всеми NAV_GROUPS. Если у роли только один пункт (COURIER) —
+ * 'more' не нужен, tabbar показывает одну плитку.
+ */
+export const MORE_HREF = '__more__'
 
-// Мобильный таббар — приоритет роли курьера на главные функции
-export const MOBILE_TABBAR_BY_ROLE = {
+export interface TabbarItem {
+  href: string
+  label: string
+  icon: LucideIcon
+}
+
+export const MOBILE_TABBAR_BY_ROLE: Record<UserRole, TabbarItem[]> = {
+  ADMIN: [
+    { href: '/dashboard', label: 'Дашборд',  icon: LayoutDashboard },
+    { href: '/inbox',     label: 'Inbox',    icon: Inbox },
+    { href: '/orders',    label: 'Заказы',   icon: ClipboardList },
+    { href: MORE_HREF,    label: 'Ещё',      icon: Menu },
+  ],
+  MANAGER: [
+    { href: '/inbox',    label: 'Inbox',    icon: Inbox },
+    { href: '/orders',   label: 'Заказы',   icon: ClipboardList },
+    { href: '/delivery', label: 'Доставка', icon: Truck },
+    { href: MORE_HREF,   label: 'Ещё',      icon: Menu },
+  ],
+  CHEF: [
+    { href: '/production', label: 'Цех',    icon: ChefHat },
+    { href: '/menu',       label: 'Меню',   icon: CalendarDays },
+    { href: '/dishes',     label: 'Блюда',  icon: Utensils },
+    { href: MORE_HREF,     label: 'Ещё',    icon: Menu },
+  ],
   COURIER: [
     { href: '/delivery', label: 'Доставка', icon: Truck },
   ],
-  MANAGER: [
-    { href: '/orders', label: 'Заказы', icon: ClipboardList },
-    { href: '/clients', label: 'Клиенты', icon: Building2 },
-    { href: '/delivery', label: 'Доставка', icon: Truck },
-    { href: '/reports', label: 'Отчёты', icon: FileBarChart },
-  ],
-  CHEF: [
-    { href: '/production', label: 'Цех', icon: ChefHat },
-    { href: '/dishes', label: 'Блюда', icon: UtensilsCrossed },
-    { href: '/ingredients', label: 'Сырьё', icon: Carrot },
-    { href: '/menu', label: 'Меню', icon: CalendarDays },
-  ],
-  ADMIN: [
-    { href: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
-    { href: '/orders', label: 'Заказы', icon: ClipboardList },
-    { href: '/production', label: 'Цех', icon: ChefHat },
-    { href: '/reports', label: 'Отчёты', icon: FileBarChart },
-  ],
-} as const
+}
 
-// Стартовая страница после логина — по роли
-export const HOME_BY_ROLE = {
+/** Стартовая страница после логина по роли. */
+export const HOME_BY_ROLE: Record<UserRole, string> = {
   ADMIN: '/dashboard',
   MANAGER: '/orders',
   CHEF: '/production',
   COURIER: '/delivery',
-} as const
+}
+
+/** Человеческие лейблы для роли — UI вывод (Sidebar profile, ProfileMenu). */
+export const ROLE_LABELS: Record<UserRole, string> = {
+  ADMIN: 'Администратор',
+  MANAGER: 'Менеджер',
+  CHEF: 'Шеф',
+  COURIER: 'Курьер',
+}

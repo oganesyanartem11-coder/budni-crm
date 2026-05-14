@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info, Printer } from 'lucide-react'
-import { formatDateShort, formatDateNumeric, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
+import { formatDateShort, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
 import { cn } from '@/lib/utils/cn'
@@ -57,66 +57,61 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
 
   return (
     <div className="space-y-5">
-      {/* Шапка с навигацией по дате */}
-      <div className="rounded-2xl bg-surface border border-border p-4 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => jumpTo(today)}
-              className={cn(
-                'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-                isToday ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-              )}
-            >
-              Сегодня
-            </button>
-            <button
-              type="button"
-              onClick={() => jumpTo(tomorrow)}
-              className={cn(
-                'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-                isTomorrow ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-              )}
-            >
-              Завтра
-            </button>
-            <Link
-              href={`/production/print?date=${targetDateIso.slice(0, 10)}`}
-              className="px-3 py-1.5 rounded-pill bg-bg hover:bg-border text-fg-muted hover:text-fg text-xs font-medium transition-colors flex items-center gap-1.5"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Печать</span>
-            </Link>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
+      {/* Единая панель: навигация по дате + кнопка печати */}
+      <div className="rounded-2xl bg-surface border border-border p-3 flex items-center gap-3 flex-wrap" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => shiftDate(-1)}
             aria-label="Предыдущий день"
-            className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+            className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <div className="px-3 flex-1 text-center">
-            <p className="font-semibold text-base capitalize">{formatDateShort(targetDate)}</p>
-            <p className="text-xs text-fg-muted">{formatDateNumeric(targetDate)}</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => jumpTo(today)}
+            className={cn(
+              'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
+              isToday ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+            )}
+          >
+            Сегодня
+          </button>
+          <button
+            type="button"
+            onClick={() => jumpTo(tomorrow)}
+            className={cn(
+              'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
+              isTomorrow ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+            )}
+          >
+            Завтра
+          </button>
+          <span className="px-2 text-sm text-fg-muted">·</span>
+          <p className="font-semibold text-sm capitalize whitespace-nowrap">{formatDateShort(targetDate)}</p>
           <button
             type="button"
             onClick={() => shiftDate(1)}
             aria-label="Следующий день"
-            className="w-9 h-9 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+            className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+        <div className="ml-auto">
+          <Link
+            href={`/production/print?date=${targetDateIso.slice(0, 10)}`}
+            className="px-3 py-1.5 rounded-pill bg-bg hover:bg-border text-fg-muted hover:text-fg text-xs font-medium transition-colors flex items-center gap-1.5"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Печать</span>
+          </Link>
+        </div>
       </div>
 
       {/* Агрегаты + табы */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="flex flex-row gap-2 lg:grid lg:grid-cols-3 lg:gap-3">
         <AggregateCard label="Всего порций" value={summary.totalPortions.toString()} />
         <AggregateCard label="Сумма" value={formatMoney(summary.totalRevenue)} />
         <AggregateCard
@@ -294,10 +289,15 @@ function AggregateCard({
     info: 'bg-info-bg/30 border-info/20',
   }
   return (
-    <div className={cn('rounded-2xl border p-4', toneClasses[tone])} style={{ boxShadow: 'var(--shadow-card)' }}>
-      <p className="text-xs text-fg-muted">{label}</p>
-      <p className="text-2xl font-bold tabular-nums mt-1">{value}</p>
-      {hint && <p className="text-xs text-fg-subtle mt-0.5">{hint}</p>}
+    <div
+      className={cn('flex-1 rounded-2xl border p-3 lg:p-4', toneClasses[tone])}
+      style={{ boxShadow: 'var(--shadow-card)' }}
+    >
+      <p className="text-[10px] uppercase tracking-wider text-fg-muted lg:text-xs lg:normal-case lg:tracking-normal truncate">
+        {label}
+      </p>
+      <p className="text-xl font-bold tabular-nums mt-1 lg:text-2xl">{value}</p>
+      {hint && <p className="text-[10px] text-fg-subtle mt-0.5 lg:text-xs truncate">{hint}</p>}
     </div>
   )
 }
@@ -352,7 +352,7 @@ function IngredientsTab({ summary }: { summary: IngredientsSummary }) {
   return (
     <div className="space-y-4">
       {/* Маржа сверху */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="flex flex-row gap-2 lg:grid lg:grid-cols-3 lg:gap-3">
         <AggregateCard label="Выручка" value={formatMoney(summary.totalRevenue)} tone="info" />
         <AggregateCard
           label="Закупка"

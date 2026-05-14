@@ -320,36 +320,50 @@ function DeliveredButton({
   const isBefore = windowState === 'before' && userRole === 'COURIER'
   const isLate = windowState === 'late'
 
+  // Используем max-lg:* и lg:* как взаимоисключающие медиа-режимы, чтобы
+  // не было гонки w-full vs lg:w-fit в одном правиле (предыдущие попытки
+  // в 6.5-fix-4 не сработали — w-full побеждал на десктопе).
+  // max-lg:w-full применяется только < 1024px, lg:w-fit — только >= 1024px.
+  const sizeClasses =
+    'max-lg:w-full max-lg:min-h-14 max-lg:px-5 max-lg:py-4 max-lg:text-base ' +
+    'lg:w-fit lg:min-h-10 lg:py-2 lg:px-6 lg:text-sm'
+
   if (isBefore) {
     return (
-      <button
-        type="button"
-        disabled
-        className="w-full px-5 py-4 rounded-pill bg-bg border border-border text-fg-subtle font-semibold text-base flex items-center justify-center gap-2 cursor-not-allowed"
-        style={{ minHeight: 56 }}
-      >
-        <Clock className="w-5 h-5" />
-        Окно с {stop.deliveryWindowFrom}
-      </button>
+      <div className="w-full lg:flex lg:justify-end">
+        <button
+          type="button"
+          disabled
+          className={cn(
+            sizeClasses,
+            'rounded-pill bg-bg border border-border text-fg-subtle font-semibold flex items-center justify-center gap-2 cursor-not-allowed'
+          )}
+        >
+          <Clock className="w-5 h-5 lg:w-4 lg:h-4" />
+          Окно с {stop.deliveryWindowFrom}
+        </button>
+      </div>
     )
   }
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={isPending}
-      className={cn(
-        'w-full px-5 py-4 rounded-pill font-semibold text-base transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98]',
-        isLate
-          ? 'bg-danger text-accent-fg hover:opacity-90'
-          : 'bg-success text-accent-fg hover:opacity-90'
-      )}
-      style={{ minHeight: 56 }}
-    >
-      <Check className="w-5 h-5" strokeWidth={2.5} />
-      {isPending ? 'Отмечаем…' : isLate ? 'Доставлено (опоздание)' : 'Доставлено'}
-    </button>
+    <div className="w-full lg:flex lg:justify-end">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={isPending}
+        className={cn(
+          sizeClasses,
+          'rounded-pill font-semibold transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98]',
+          isLate
+            ? 'bg-danger text-accent-fg hover:opacity-90'
+            : 'bg-success text-accent-fg hover:opacity-90'
+        )}
+      >
+        <Check className="w-5 h-5 lg:w-4 lg:h-4" strokeWidth={2.5} />
+        {isPending ? 'Отмечаем…' : isLate ? 'Доставлено (опоздание)' : 'Доставлено'}
+      </button>
+    </div>
   )
 }
 

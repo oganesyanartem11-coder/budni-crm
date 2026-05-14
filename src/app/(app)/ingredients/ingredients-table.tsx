@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition } from 'react'
-import { Search, Plus, Edit2, Archive, ArchiveRestore, ChevronDown } from 'lucide-react'
+import { Search, Plus, Edit2, Archive, ArchiveRestore, ChevronDown, Wheat } from 'lucide-react'
 import { toast } from 'sonner'
 import { IngredientModal } from './ingredient-modal'
 import { archiveIngredient } from './actions'
@@ -51,6 +51,36 @@ export function IngredientsTable({ ingredients }: Props) {
         toast.error(result.error)
       }
     })
+  }
+
+  // Если в базе ингредиентов вообще нет — empty state без поиска/чекбокса.
+  if (ingredients.length === 0) {
+    return (
+      <>
+        <div
+          className="w-full rounded-3xl bg-surface border border-border p-12 flex flex-col items-center justify-center text-center min-h-[400px]"
+          style={{ boxShadow: 'var(--shadow-card)' }}
+        >
+          <Wheat className="w-12 h-12 text-fg-subtle mb-4" strokeWidth={1.5} />
+          <p className="font-medium text-fg mb-1">Сырья пока нет</p>
+          <p className="text-sm text-fg-muted max-w-sm mb-5">Добавьте первый ингредиент в справочник.</p>
+          <button
+            type="button"
+            onClick={() => setModalState({ open: true })}
+            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity"
+          >
+            <Plus className="w-4 h-4" />
+            Добавить ингредиент
+          </button>
+        </div>
+
+        <IngredientModal
+          open={modalState.open}
+          ingredient={modalState.ingredient}
+          onClose={() => setModalState({ open: false })}
+        />
+      </>
+    )
   }
 
   return (

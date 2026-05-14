@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, Check, Sparkles } from 'lucide-react'
+import { ChevronLeft, ChevronRight, CalendarDays, Plus, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { DayEditor } from './day-editor'
@@ -196,17 +196,8 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
               </span>
             )}
 
-            {!menu && canEdit && (
-              <button
-                type="button"
-                onClick={handleCreateDraft}
-                disabled={isPending}
-                className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-                Создать меню
-              </button>
-            )}
+            {/* Кнопка «Создать меню» переехала внутрь EmptyState (см. ниже),
+                чтобы CTA был в визуальном центре пустого экрана. */}
 
             {menu?.status === 'DRAFT' && canApprove && (
               <button
@@ -231,24 +222,15 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
               </button>
             )}
 
-            {menu?.status === 'DRAFT' && canEdit && (
-              <button
-                type="button"
-                disabled
-                title="Будет доступно в Спринте 5"
-                className="px-4 py-2 rounded-pill border border-border bg-surface text-fg-subtle font-medium text-sm flex items-center gap-2 cursor-not-allowed"
-              >
-                <Sparkles className="w-4 h-4" />
-                AI-помощник
-              </button>
-            )}
+            {/* TODO: восстановить в Спринте 9 — AI-помощник для меню. Кнопка скрыта,
+                чтобы не вводить менеджеров в заблуждение заглушкой. */}
           </div>
         </div>
       </div>
 
       {/* Сетка меню */}
       {!menu ? (
-        <EmptyState canCreate={canEdit} />
+        <EmptyState canCreate={canEdit} onCreate={handleCreateDraft} isPending={isPending} />
       ) : (
         <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
           <div className="overflow-x-auto">
@@ -370,18 +352,38 @@ function DaySlotCell({
   )
 }
 
-function EmptyState({ canCreate }: { canCreate: boolean }) {
+function EmptyState({
+  canCreate,
+  onCreate,
+  isPending,
+}: {
+  canCreate: boolean
+  onCreate: () => void
+  isPending: boolean
+}) {
   return (
-    <div className="rounded-2xl bg-surface border border-border p-12 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
-      <div className="w-16 h-16 mx-auto rounded-full bg-bg flex items-center justify-center mb-5">
-        <CalendarDays className="w-7 h-7 text-fg-muted" strokeWidth={1.5} />
-      </div>
-      <h2 className="text-xl font-semibold mb-2">Меню на эту неделю не создано</h2>
-      <p className="text-fg-muted max-w-sm mx-auto">
+    <div
+      className="w-full rounded-3xl bg-surface border border-border p-12 flex flex-col items-center justify-center text-center min-h-[400px]"
+      style={{ boxShadow: 'var(--shadow-card)' }}
+    >
+      <CalendarDays className="w-12 h-12 text-fg-subtle mb-4" strokeWidth={1.5} />
+      <p className="font-medium text-fg mb-1">Меню на эту неделю не создано</p>
+      <p className="text-sm text-fg-muted max-w-sm mb-5">
         {canCreate
-          ? 'Создайте черновик меню — вы сможете заполнить его блюдами и затем отправить на утверждение.'
+          ? 'Создайте черновик меню — вы сможете заполнить его блюдами и отправить на утверждение.'
           : 'Шеф ещё не создал меню на эту неделю.'}
       </p>
+      {canCreate && (
+        <button
+          type="button"
+          onClick={onCreate}
+          disabled={isPending}
+          className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+        >
+          <Plus className="w-4 h-4" />
+          {isPending ? 'Создаём…' : 'Создать меню'}
+        </button>
+      )}
     </div>
   )
 }

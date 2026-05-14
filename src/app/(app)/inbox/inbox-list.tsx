@@ -72,10 +72,13 @@ export function InboxList({ initialItems }: { initialItems: InboxClientCard[] })
 
   if (items.length === 0) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <InboxIcon className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
+      <div
+        className="w-full rounded-3xl bg-surface border border-border p-12 flex flex-col items-center justify-center text-center text-fg-muted min-h-[400px]"
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
+        <InboxIcon className="w-12 h-12 text-fg-subtle mb-4" strokeWidth={1.5} />
         <p className="font-medium text-fg mb-1">Переписки нет</p>
-        <p className="text-sm">Когда клиенты начнут писать боту, они появятся здесь.</p>
+        <p className="text-sm max-w-sm">Когда клиенты начнут писать боту, они появятся здесь.</p>
       </div>
     )
   }

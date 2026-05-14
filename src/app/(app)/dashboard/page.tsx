@@ -1,34 +1,44 @@
 import Link from 'next/link'
-import { ChefHat, ArrowRight, type LucideIcon } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { pluralize } from '@/lib/utils/format'
+import { getGreeting } from '@/lib/utils/greeting'
 import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import { AdminWeekBlock } from './admin-week-block'
+
+// force-dynamic: приветствие зависит от текущего часа.
+export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
-  const [todayOrders, pendingOrders] = await Promise.all([
-    prisma.order.count({
-      where: {
-        deliveryDate: {
-          gte: (() => { const d = new Date(); d.setHours(0,0,0,0); return d })(),
-          lt: (() => { const d = new Date(); d.setHours(23,59,59,999); return d })(),
-        },
-      },
-    }),
+  const todayStart = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
+  const todayEnd = (() => { const d = new Date(); d.setHours(23,59,59,999); return d })()
+  const tomorrowStart = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0); return d })()
+  const tomorrowEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(23,59,59,999); return d })()
+  const pendingUntil = (() => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(23,59,59,999); return d })()
+
+  const [todayOrders, tomorrowOrders, pendingOrders] = await Promise.all([
+    prisma.order.count({ where: { deliveryDate: { gte: todayStart, lt: todayEnd } } }),
+    prisma.order.count({ where: { deliveryDate: { gte: tomorrowStart, lt: tomorrowEnd } } }),
     // pending только за сегодня + завтра (cut-off релевантен только для ближайших)
     prisma.order.count({
-      where: {
-        status: 'PENDING_CONFIRMATION',
-        deliveryDate: {
-          lte: (() => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(23,59,59,999); return d })(),
-        },
-      },
+      where: { status: 'PENDING_CONFIRMATION', deliveryDate: { lte: pendingUntil } },
     }),
   ])
+
+  // Fallback: если на сегодня заказов нет, но завтра есть — карточка переключается
+  // на «На завтра», чтобы менеджер сразу видел работу, а не пустой ноль.
+  const showTomorrow = todayOrders === 0 && tomorrowOrders > 0
+  const primaryLabel = showTomorrow ? 'На завтра' : 'На сегодня'
+  const primaryValue = showTomorrow ? tomorrowOrders : todayOrders
+  const primaryHint = showTomorrow
+    ? 'Заказов на сегодня нет'
+    : todayOrders === 0
+      ? 'Заказов на сегодня нет'
+      : `${pluralize(todayOrders, ['заказ', 'заказа', 'заказов'])} с доставкой сегодня`
 
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
 
@@ -39,7 +49,7 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader
-        title={`Здравствуйте, ${user.name.split(' ')[0]}`}
+        title={`${getGreeting()}, ${user.name.split(' ')[0]}`}
         subtitle="Сводка по системе"
       />
 
@@ -51,10 +61,10 @@ export default async function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <StatCard
                 href="/orders"
-                label="На сегодня"
-                value={todayOrders}
-                hint={todayOrders === 0 ? 'Заказов на сегодня нет' : `${pluralize(todayOrders, ['заказ', 'заказа', 'заказов'])} с доставкой сегодня`}
-                tone={todayOrders > 0 ? 'info' : 'neutral'}
+                label={primaryLabel}
+                value={primaryValue}
+                hint={primaryHint}
+                tone={primaryValue > 0 ? 'info' : 'neutral'}
               />
               {pendingOrders > 0 ? (
                 <Link
@@ -86,22 +96,6 @@ export default async function DashboardPage() {
         {isAdminOrManager && adminData && (
           <AdminWeekBlock data={adminData} />
         )}
-
-        {/* Заглушки на будущие фичи */}
-        <section className="space-y-3">
-          <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">В разработке</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <ComingSoonCard
-              label="Производство и сводка по сырью"
-              hint="Спринт 3"
-              icon={ChefHat}
-            />
-            <ComingSoonCard
-              label="AI-помощник: парсинг заказов из мессенджера"
-              hint="Спринт 5"
-            />
-          </div>
-        </section>
       </div>
     </>
   )
@@ -140,24 +134,3 @@ function StatCard({
   )
 }
 
-function ComingSoonCard({
-  label,
-  hint,
-  icon: Icon,
-}: {
-  label: string
-  hint: string
-  icon?: LucideIcon
-}) {
-  return (
-    <div
-      className="rounded-2xl bg-surface border border-border border-dashed p-5 opacity-70"
-    >
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <p className="text-sm text-fg-muted">{label}</p>
-        {Icon && <Icon className="w-4 h-4 text-fg-subtle" strokeWidth={1.75} />}
-      </div>
-      <p className="text-xs text-fg-subtle mt-1">Появится в {hint}</p>
-    </div>
-  )
-}
