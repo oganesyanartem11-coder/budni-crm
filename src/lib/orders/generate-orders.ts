@@ -98,16 +98,14 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
     errors: [],
   }
 
-  // Загружаем активные FIXED и DYNAMIC конфиги
+  // Загружаем активные FIXED и DYNAMIC конфиги. 6.8a: locationId NOT NULL,
+  // поэтому fallback "конфиг на всего клиента → expand по локациям" удалён.
   const configs = await prisma.clientMealConfig.findMany({
     where: {
       isActive: true,
       orderType: { in: ['FIXED', 'DYNAMIC'] },
       client: { isActive: true },
-      OR: [
-        { locationId: null },
-        { location: { isActive: true } },
-      ],
+      location: { isActive: true },
     },
     include: {
       client: { select: { id: true, isActive: true } },
@@ -134,26 +132,6 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
     existingOrders.map((o) => `${o.clientId}|${o.locationId}|${o.mealType}`)
   )
 
-  // Нужны клиентские точки для конфигов с locationId=null (надо создать заказ для каждой активной точки клиента)
-  const clientLocationsMap = new Map<string, Array<{ id: string; packaging: 'INDIVIDUAL' | 'BULK' }>>()
-  const clientIdsForFallback = configs
-    .filter((c) => c.locationId === null)
-    .map((c) => c.clientId)
-  if (clientIdsForFallback.length > 0) {
-    const allLocations = await prisma.clientLocation.findMany({
-      where: {
-        clientId: { in: clientIdsForFallback },
-        isActive: true,
-      },
-      select: { id: true, clientId: true, packaging: true },
-    })
-    for (const loc of allLocations) {
-      const arr = clientLocationsMap.get(loc.clientId) ?? []
-      arr.push({ id: loc.id, packaging: loc.packaging })
-      clientLocationsMap.set(loc.clientId, arr)
-    }
-  }
-
   // Обрабатываем каждый конфиг
   for (const config of configs) {
     if (!isScheduledForDate(config, date)) {
@@ -163,19 +141,10 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
 
     stats.matchedSchedule++
 
-    // Определяем целевые точки
-    const targetLocations: Array<{ id: string; packaging: 'INDIVIDUAL' | 'BULK' }> = []
-    if (config.locationId && config.location) {
-      targetLocations.push({ id: config.location.id, packaging: config.location.packaging })
-    } else if (config.locationId === null) {
-      const list = clientLocationsMap.get(config.clientId) ?? []
-      targetLocations.push(...list)
-    }
-
-    if (targetLocations.length === 0) {
-      stats.errors.push({ configId: config.id, error: 'Нет активных точек' })
-      continue
-    }
+    // Конфиг всегда привязан к конкретной точке (locationId NOT NULL).
+    const targetLocations: Array<{ id: string; packaging: 'INDIVIDUAL' | 'BULK' }> = [
+      { id: config.location.id, packaging: config.location.packaging },
+    ]
 
     // Фильтруем точки: оставляем только те для которых ещё нет заказа на эту дату с этим mealType
     const newLocations = targetLocations.filter((loc) => {

@@ -16,7 +16,6 @@ export default async function UsersPage() {
       role: true,
       isActive: true,
       createdAt: true,
-      maxChatId: true,
       onboardedAt: true,
       telegramChatId: true,
       telegramUsername: true,

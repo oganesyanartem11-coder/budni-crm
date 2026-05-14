@@ -99,7 +99,7 @@ export async function GET(request: Request) {
       isActive: true,
       orderType: 'DYNAMIC',
       client: { isActive: true },
-      OR: [{ locationId: null }, { location: { isActive: true } }],
+      location: { isActive: true },
     },
     include: {
       client: { select: { name: true } },
@@ -178,7 +178,7 @@ export async function GET(request: Request) {
     // точке не дублировали строку.
     const seen = new Set<string>()
     for (const c of unconfirmed) {
-      const locName = c.location?.name ?? '—'
+      const locName = c.location.name
       const key = `${c.client.name}::${locName}`
       if (seen.has(key)) continue
       seen.add(key)

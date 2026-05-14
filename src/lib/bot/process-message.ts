@@ -186,27 +186,8 @@ async function handleBotResponse(
     clientMessage: text,
   })
 
-  // 5.9b: orphan-конфиги у клиента с 2+ адресами — saveBotOrders уже завёл
-  // InboxItem HIGH и пушнул менеджеру. Order не создаём, безопасно
-  // отвечаем клиенту нейтрально и переводим conv в AWAITING_MANAGER.
-  // safeAnswerStreak НЕ инкрементим — заявка не закрыта.
-  if (save.escalated) {
-    if (conv.status !== 'AWAITING_MANAGER') {
-      await prisma.botConversation.update({
-        where: { id: conv.id },
-        data: { status: 'AWAITING_MANAGER' },
-      })
-    }
-    const reply = 'Спасибо, передали менеджеру. Он свяжется с вами.'
-    await sendBotMessage(client.maxChatId!, reply)
-    await logBotMessage({
-      clientId: client.id,
-      conversationId: conv.id,
-      direction: 'OUT',
-      text: reply,
-    })
-    return { reply, action: 'inbox', inboxItemId: save.escalatedInboxItemId }
-  }
+  // 6.8a: orphan-config escalation удалён — после NOT NULL миграции
+  // ClientMealConfig.locationId конфиги без локации больше невозможны.
 
   await prisma.client.update({
     where: { id: client.id },

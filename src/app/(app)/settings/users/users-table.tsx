@@ -14,7 +14,6 @@ interface UserRow {
   role: UserRole
   isActive: boolean
   createdAt: string
-  maxChatId: string | null
   onboardedAt: string | null
   telegramChatId: string | null
   telegramUsername: string | null
@@ -121,7 +120,6 @@ export function UsersTable({ users, currentUserId }: Props) {
                 <th className="text-left px-4 py-3 font-medium">Имя</th>
                 <th className="text-left px-3 py-3 font-medium">Роль</th>
                 <th className="text-left px-3 py-3 font-medium">Telegram</th>
-                <th className="text-left px-3 py-3 font-medium">MAX</th>
                 <th className="text-left px-3 py-3 font-medium hidden md:table-cell">Создан</th>
                 <th className="text-right px-4 py-3 font-medium">Действия</th>
               </tr>
@@ -149,9 +147,6 @@ export function UsersTable({ users, currentUserId }: Props) {
                     ) : (
                       '—'
                     )}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-fg-muted">
-                    {u.maxChatId ? '✓ привязан' : '—'}
                   </td>
                   <td className="px-3 py-3 text-xs text-fg-muted hidden md:table-cell">
                     {new Date(u.createdAt).toLocaleDateString('ru-RU')}

@@ -29,7 +29,7 @@ export interface DynamicConfigForDate {
   configId: string
   clientId: string
   clientName: string
-  locationId: string | null
+  locationId: string
   mealType: MealType
   fixedPortions: number | null
 }
@@ -45,7 +45,7 @@ export async function getActiveDynamicConfigsForDate(date: Date): Promise<Dynami
       isActive: true,
       orderType: 'DYNAMIC',
       client: { isActive: true },
-      OR: [{ locationId: null }, { location: { isActive: true } }],
+      location: { isActive: true },
     },
     include: {
       client: { select: { id: true, name: true } },
@@ -113,7 +113,7 @@ export async function getNextActiveDayForClient(
       isActive: true,
       orderType: 'DYNAMIC',
       client: { isActive: true },
-      OR: [{ locationId: null }, { location: { isActive: true } }],
+      location: { isActive: true },
     },
     include: {
       client: { select: { id: true, name: true } },

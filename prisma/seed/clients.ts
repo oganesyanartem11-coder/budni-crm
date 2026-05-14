@@ -27,8 +27,6 @@ interface ClientSeed {
   contactMessenger?: string
   notes?: string
   locations: LocationSeed[]
-  // Конфиги на уровне всего клиента (без привязки к точке)
-  globalConfigs?: ConfigSeed[]
 }
 
 const CLIENTS: ClientSeed[] = [
@@ -315,22 +313,8 @@ export async function seedClients(prisma: PrismaClient): Promise<{
       }
     }
 
-    // Глобальные конфиги (на уровне клиента)
-    for (const cfg of c.globalConfigs ?? []) {
-      await prisma.clientMealConfig.create({
-        data: {
-          clientId,
-          mealType: cfg.mealType,
-          orderType: cfg.orderType,
-          deliveryHorizon: cfg.deliveryHorizon ?? 'NEXT_DAY',
-          scheduleType: cfg.scheduleType,
-          scheduleData: cfg.scheduleData ?? undefined,
-          fixedPortions: cfg.fixedPortions,
-          pricePerPortion: cfg.pricePerPortion,
-        },
-      })
-      configCount++
-    }
+    // 6.8a: глобальные конфиги без locationId удалены — после миграции
+    // ClientMealConfig.locationId NOT NULL.
   }
 
   return { clientCount, locationCount, configCount }

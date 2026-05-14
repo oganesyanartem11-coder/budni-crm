@@ -90,15 +90,18 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
     return
   }
 
-  // 2. Менеджер
+  // 2. Менеджер. 6.8a: User.maxChatId дропнут — пуши менеджерам идут через
+  // Telegram. Onboarding-токен оставлен для backward compat, но реальной
+  // привязки больше не делаем. Просто отмечаем onboardedAt и сообщаем,
+  // что канал устарел.
   const user = await prisma.user.findUnique({ where: { maxOnboardingToken: payload } })
   if (user) {
     await prisma.user.update({
       where: { id: user.id },
-      data: { maxChatId: chatIdStr, onboardedAt: new Date() },
+      data: { onboardedAt: new Date() },
     })
     await ctx.reply(
-      `Здравствуйте, ${user.name}! Подключение MAX выполнено. Вы будете получать уведомления о новых обращениях клиентов.`
+      `Здравствуйте, ${user.name}! MAX-канал для менеджеров больше не используется — все уведомления приходят в Telegram. Привяжите Telegram в /settings.`
     )
     return
   }

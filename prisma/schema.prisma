@@ -132,8 +132,8 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  // MAX-бот: личный чат менеджера для пушей о новых обращениях (Спринт 5.5+5.6)
-  maxChatId           String?   @unique
+  // MAX-онбординг для менеджера (Спринт 5.5+5.6) — оставлены для legacy токенов;
+  // личный chat дропнут в 6.8a (пуши менеджерам идут через Telegram).
   maxOnboardingToken  String?   @unique
   onboardedAt         DateTime?
 
@@ -209,8 +209,8 @@ model ClientMealConfig {
   id               String         @id @default(cuid())
   clientId         String
   client           Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  locationId       String?        // null = на всего клиента; иначе конкретная точка
-  location         ClientLocation? @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  locationId       String         // 6.8a: NOT NULL — конфиг всегда привязан к конкретной точке клиента
+  location         ClientLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
   mealType         MealType
   orderType        OrderType
   deliveryHorizon  DeliveryHorizon @default(NEXT_DAY)
