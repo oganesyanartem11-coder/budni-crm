@@ -10,6 +10,8 @@ export interface DeliveryOrderItem {
   mealType: MealType
   portions: number
   packaging: PackagingType
+  // 6.8b: optimistic lock — UI пробрасывает в markStopDelivered.
+  updatedAt: Date
 }
 
 export interface DeliveryStop {
@@ -103,6 +105,7 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
       mealType: o.mealType,
       portions: o.portions,
       packaging: o.packaging,
+      updatedAt: o.updatedAt,
     })
     stop.orderIds.push(o.id)
 

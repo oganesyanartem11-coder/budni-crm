@@ -8,6 +8,7 @@ import { confirmDynamicOrder } from '../actions'
 import { getCutoffMoment } from '@/lib/orders/cutoff'
 import { formatMoney, formatDateLong, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
+import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation } from '@prisma/client'
 
@@ -143,7 +144,11 @@ function ConfirmRow({
       return
     }
     startTransition(async () => {
-      const result = await confirmDynamicOrder({ orderId: order.id, portions: portionsNum })
+      const result = await confirmDynamicOrder({
+        orderId: order.id,
+        portions: portionsNum,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
+      })
       if (result.ok) {
         if (result.data.status === 'CANCELLED') {
           toast.success('Заказ отклонён клиентом — кухне не пойдёт')
@@ -152,7 +157,7 @@ function ConfirmRow({
         }
         onChanged()
       } else {
-        toast.error(result.error)
+        showActionError(result.error, onChanged)
       }
     })
   }
@@ -160,12 +165,16 @@ function ConfirmRow({
   function handleDecline() {
     setPortions('0')
     startTransition(async () => {
-      const result = await confirmDynamicOrder({ orderId: order.id, portions: 0 })
+      const result = await confirmDynamicOrder({
+        orderId: order.id,
+        portions: 0,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
+      })
       if (result.ok) {
         toast.success('Заказ отклонён клиентом — кухне не пойдёт')
         onChanged()
       } else {
-        toast.error(result.error)
+        showActionError(result.error, onChanged)
       }
     })
   }

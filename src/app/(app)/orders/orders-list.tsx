@@ -11,6 +11,7 @@ import { LockedEditConfirmDialog, requiresLockedEditConfirm } from './_component
 import { editOrderPortions } from './actions'
 import { formatMoney } from '@/lib/utils/format'
 import { ORDER_STATUS_LABELS, ORDER_STATUS_VARIANT, portionsEditedToast } from '@/lib/constants/order'
+import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation, OrderStatus } from '@prisma/client'
@@ -298,6 +299,7 @@ function AggregateCard({ label, value }: { label: string; value: string }) {
 }
 
 function PortionsCell({ order }: { order: SerializedOrder }) {
+  const router = useRouter()
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(String(order.portions))
   const [isPending, startTransition] = useTransition()
@@ -309,14 +311,19 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
 
   function doSubmit(num: number) {
     startTransition(async () => {
-      const result = await editOrderPortions({ orderId: order.id, portions: num })
+      const result = await editOrderPortions({
+        orderId: order.id,
+        portions: num,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
+      })
       if (result.ok) {
         const opts = result.data.editedAfterLock ? { icon: '⚠️' } : undefined
         toast.success(portionsEditedToast(num, result.data.editedAfterLock), opts)
         setEditing(false)
       } else {
-        toast.error(result.error)
-        setValue(String(order.portions))
+        const wasLock = showActionError(result.error, () => router.refresh())
+        if (!wasLock) setValue(String(order.portions))
+        else setEditing(false) // на конфликте закрываем edit — после refresh откроется снова
       }
     })
   }

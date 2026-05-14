@@ -18,6 +18,7 @@ import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/co
 import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS, ORDER_TYPE_SHORT } from '@/lib/constants/client'
 import { portionsEditedToast } from '@/lib/constants/order'
+import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { cn } from '@/lib/utils/cn'
 import type { Client, ClientLocation, User as PrismaUser, MealType, OrderStatus, PackagingType, OrderSource, Prisma } from '@prisma/client'
 
@@ -33,6 +34,7 @@ interface OrderData {
   packaging: PackagingType
   notes: string | null
   createdAt: Date | string
+  updatedAt: Date | string
   confirmedAt: Date | string | null
   lockedAt: Date | string | null
   editedAfterLockAt: Date | string | null
@@ -117,14 +119,18 @@ export function OrderDetail({ order, history }: Props) {
 
   function doEditPortions(num: number) {
     startTransition(async () => {
-      const result = await editOrderPortions({ orderId: order.id, portions: num })
+      const result = await editOrderPortions({
+        orderId: order.id,
+        portions: num,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
+      })
       if (result.ok) {
         const opts = result.data.editedAfterLock ? { icon: '⚠️' } : undefined
         toast.success(portionsEditedToast(num, result.data.editedAfterLock), opts)
         setEditingPortions(false)
         router.refresh()
       } else {
-        toast.error(result.error)
+        showActionError(result.error, () => router.refresh())
       }
     })
   }
@@ -153,13 +159,17 @@ export function OrderDetail({ order, history }: Props) {
       return
     }
     startTransition(async () => {
-      const result = await confirmDynamicOrder({ orderId: order.id, portions: num })
+      const result = await confirmDynamicOrder({
+        orderId: order.id,
+        portions: num,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
+      })
       if (result.ok) {
         toast.success(result.data.status === 'CANCELLED' ? 'Заказ отклонён' : `Подтверждено: ${formatPortions(num)}`)
         setEditingPortions(false)
         router.refresh()
       } else {
-        toast.error(result.error)
+        showActionError(result.error, () => router.refresh())
       }
     })
   }
@@ -169,6 +179,7 @@ export function OrderDetail({ order, history }: Props) {
       const result = await cancelOrder({
         orderId: order.id,
         reason: cancelReason.trim() || null,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
       })
       if (result.ok) {
         toast.success('Заказ отменён')
@@ -176,7 +187,7 @@ export function OrderDetail({ order, history }: Props) {
         setCancelReason('')
         router.refresh()
       } else {
-        toast.error(result.error)
+        showActionError(result.error, () => router.refresh())
       }
     })
   }

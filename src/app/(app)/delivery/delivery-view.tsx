@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils/cn'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
+import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
 import type { UserRole } from '@prisma/client'
 
@@ -191,14 +192,21 @@ function DeliveryCard({
     // в фоне. router.refresh() в onChanged() реально переместит её в «доставлено».
     // На ошибке возвращаем карточку обратно с toast.
     setIsOptimistic(true)
+    // 6.8b: optimistic lock — отдаём map orderId→updatedAt. Если менеджер
+    // отменил/правил какой-то Order пока курьер ехал — markStopDelivered
+    // откажет, не затирая чужие правки.
+    const expectedUpdatedAts: Record<string, string> = {}
+    for (const item of stop.items) {
+      expectedUpdatedAts[item.orderId] = new Date(item.updatedAt).toISOString()
+    }
     startTransition(async () => {
-      const result = await markStopDelivered({ orderIds: stop.orderIds })
+      const result = await markStopDelivered({ orderIds: stop.orderIds, expectedUpdatedAts })
       if (result.ok) {
         toast.success(`✓ ${stop.clientName} — доставлено`)
         onChanged()
       } else {
         setIsOptimistic(false)
-        toast.error(result.error)
+        showActionError(result.error, onChanged)
       }
     })
   }

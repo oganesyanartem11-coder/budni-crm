@@ -7,6 +7,7 @@ import { requireRole } from '@/lib/auth/current-user'
 import { parseWindowToDate } from '@/lib/utils/msk-window'
 import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
 import { orderDetailButton } from '@/lib/telegram/buttons'
+import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
 import {
   DELIVERY_ISSUE_REASONS,
   DELIVERY_ISSUE_REASON_LABELS,
@@ -16,6 +17,9 @@ import { formatDeliveryWindow } from '@/lib/utils/format'
 
 const markDeliveredSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1, 'Список заказов пуст'),
+  // 6.8b: optimistic lock — map orderId → updatedAt ISO. Если не передан или
+  // нет ключа для какого-то orderId — для этого id проверка скипается.
+  expectedUpdatedAts: z.record(z.string(), z.string()).optional(),
 })
 
 export type ActionResult<T = void> =
@@ -32,8 +36,22 @@ export async function markStopDelivered(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
 
-  const { orderIds } = parsed.data
+  const { orderIds, expectedUpdatedAts } = parsed.data
   const now = new Date()
+
+  // 6.8b: optimistic lock — проверяем каждый Order до начала транзакции.
+  // Если хоть один заказ изменён другим юзером (менеджер успел отменить
+  // пока курьер ехал) — отказываем целиком, чтобы не доставить отменённое.
+  if (expectedUpdatedAts) {
+    try {
+      for (const id of orderIds) {
+        await assertOrderUpdatedAt(id, expectedUpdatedAts[id])
+      }
+    } catch (e) {
+      if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+      throw e
+    }
+  }
 
   const orders = await prisma.order.findMany({
     where: { id: { in: orderIds } },

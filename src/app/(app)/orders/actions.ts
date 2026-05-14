@@ -10,6 +10,7 @@ import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { orderDetailButton } from '@/lib/telegram/buttons'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { formatDateShort } from '@/lib/utils/format'
+import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -234,6 +235,7 @@ export async function regenerateFixedOrders(targetDateIso: string): Promise<Acti
 const confirmOrderSchema = z.object({
   orderId: z.string().min(1),
   portions: z.number().int().nonnegative(),
+  expectedUpdatedAt: z.string().optional(),
 })
 
 /**
@@ -253,7 +255,14 @@ export async function confirmDynamicOrder(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
 
-  const { orderId, portions } = parsed.data
+  const { orderId, portions, expectedUpdatedAt } = parsed.data
+
+  try {
+    await assertOrderUpdatedAt(orderId, expectedUpdatedAt)
+  } catch (e) {
+    if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+    throw e
+  }
 
   // Находим заказ — нужна цена для пересчёта totalPrice
   const order = await prisma.order.findUnique({
@@ -298,6 +307,7 @@ export async function confirmDynamicOrder(
 const editOrderSchema = z.object({
   orderId: z.string().min(1),
   portions: z.number().int().nonnegative(),
+  expectedUpdatedAt: z.string().optional(),
 })
 
 /**
@@ -320,7 +330,14 @@ export async function editOrderPortions(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
 
-  const { orderId, portions } = parsed.data
+  const { orderId, portions, expectedUpdatedAt } = parsed.data
+
+  try {
+    await assertOrderUpdatedAt(orderId, expectedUpdatedAt)
+  } catch (e) {
+    if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+    throw e
+  }
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -417,6 +434,7 @@ export async function editOrderPortions(
 const cancelOrderSchema = z.object({
   orderId: z.string().min(1),
   reason: z.string().max(500).nullable().optional(),
+  expectedUpdatedAt: z.string().optional(),
 })
 
 /**
@@ -433,7 +451,14 @@ export async function cancelOrder(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
 
-  const { orderId, reason } = parsed.data
+  const { orderId, reason, expectedUpdatedAt } = parsed.data
+
+  try {
+    await assertOrderUpdatedAt(orderId, expectedUpdatedAt)
+  } catch (e) {
+    if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+    throw e
+  }
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
