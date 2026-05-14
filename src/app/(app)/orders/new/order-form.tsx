@@ -62,7 +62,14 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
   const [matchedConfig, setMatchedConfig] = useState<MealConfigLight | null>(null)
   const [notes, setNotes] = useState('')
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null)
+  const [dupAcknowledged, setDupAcknowledged] = useState(false)
   const [overridePrice, setOverridePrice] = useState(false)
+
+  // При смене любого ключа дубль-проверки сбрасываем подтверждение —
+  // нельзя залипшим чекбоксом обойти warning на следующем дубле.
+  useEffect(() => {
+    setDupAcknowledged(false)
+  }, [duplicate?.id])
 
   useEffect(() => {
     if (!clientId) {
@@ -233,7 +240,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
             <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-info-bg/40 border border-info/20">
               <Sparkles className="w-4 h-4 text-info-fg shrink-0 mt-0.5" />
               <p className="text-xs text-info-fg">
-                Найден конфиг · тип <strong>{ORDER_TYPE_SHORT[matchedConfig.orderType]}</strong> · цена и порции подставлены автоматически
+                Найдено питание · тип <strong>{ORDER_TYPE_SHORT[matchedConfig.orderType]}</strong> · цена и порции подставлены автоматически
               </p>
             </div>
           )}
@@ -242,7 +249,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
             <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-warning-bg/40 border border-warning/20">
               <AlertTriangle className="w-4 h-4 text-warning-fg shrink-0 mt-0.5" />
               <p className="text-xs text-warning-fg">
-                У клиента нет конфига для этой точки/типа. Введите цену вручную.
+                У клиента нет питания для этой точки/типа. Введите цену вручную.
               </p>
             </div>
           )}
@@ -259,7 +266,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
             </Field>
             <Field
               label="Цена за порцию, ₽ *"
-              hint={matchedConfig && !overridePrice ? 'Из конфига' : undefined}
+              hint={matchedConfig && !overridePrice ? 'Из питания клиента' : undefined}
             >
               <input
                 type="number"
@@ -294,6 +301,15 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
               <p className="text-xs text-danger-fg/80 mt-1">
                 {formatPortions(duplicate.portions)} · статус: {duplicate.status}. Создание ещё одного приведёт к дублю.
               </p>
+              <label className="mt-3 flex items-center gap-2 text-xs text-danger-fg cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={dupAcknowledged}
+                  onChange={(e) => setDupAcknowledged(e.target.checked)}
+                  className="rounded border-danger/40"
+                />
+                Понимаю, всё равно создать
+              </label>
             </div>
           </div>
         )}
@@ -327,8 +343,8 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
           <div className="mt-5 space-y-2">
             <button
               type="submit"
-              disabled={isPending || !clientId || !locationId || portionsNum <= 0}
-              className="w-full px-5 py-3 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+              disabled={isPending || !clientId || !locationId || portionsNum <= 0 || (!!duplicate && !dupAcknowledged)}
+              className="w-full px-5 py-3 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isPending ? 'Создаём…' : 'Создать заказ'}
             </button>

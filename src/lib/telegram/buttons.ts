@@ -38,3 +38,13 @@ export function reportsButton(dateIso?: string): InlineKeyboard {
   const url = dateIso ? `${appBaseUrl}/reports?date=${dateIso}` : `${appBaseUrl}/reports`
   return new InlineKeyboard().url('📊 Открыть аналитику', url)
 }
+
+/**
+ * Кнопка «Открыть заказ» — ведёт на детальную карточку /orders/{id}.
+ * Используется в push'ах привязанных к конкретному заказу
+ * (например, правка порций после 16:00).
+ */
+export function orderDetailButton(orderId: string, label = '📋 Открыть заказ'): InlineKeyboard {
+  const { appBaseUrl } = getTelegramEnv()
+  return new InlineKeyboard().url(label, `${appBaseUrl}/orders/${orderId}`)
+}

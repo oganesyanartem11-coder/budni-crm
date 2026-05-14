@@ -132,7 +132,7 @@ function ClientCard({ client }: { client: SerializedClient }) {
 
       <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
         <Stat icon={MapPin} label="Точек" value={client._count.locations} />
-        <Stat icon={Building2} label="Конфигов" value={client._count.mealConfigs} />
+        <Stat icon={Building2} label="Питаний" value={client._count.mealConfigs} />
         <Stat icon={ClipboardList} label="Заказов" value={client._count.orders} />
       </div>
 

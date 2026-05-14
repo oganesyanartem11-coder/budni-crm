@@ -17,6 +17,7 @@ type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
   location: Pick<ClientLocation, 'id' | 'name' | 'address'>
+  delivery: { issueReportedAt: Date | string | null } | null
 }
 
 type SerializedWeekOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
@@ -326,11 +327,11 @@ function ServiceMenu() {
         if (created > 0) {
           toast.success(`Создано: ${created}${skippedExisting > 0 ? ` · уже было: ${skippedExisting}` : ''}`)
         } else if (skippedExisting > 0) {
-          toast(`Все ${skippedExisting} конфигов уже имеют заказы на завтра`, { icon: '✓' })
+          toast(`Все ${skippedExisting} питаний уже имеют заказы на завтра`, { icon: '✓' })
         } else if (candidatesTotal === 0) {
-          toast('Нет активных FIXED-конфигов', { icon: 'ℹ️' })
+          toast('Нет активного фиксированного питания', { icon: 'ℹ️' })
         } else {
-          toast('Нет конфигов с расписанием на завтра', { icon: 'ℹ️' })
+          toast('Нет питания с расписанием на завтра', { icon: 'ℹ️' })
         }
       } else {
         toast.error(result.error)
@@ -366,10 +367,10 @@ function ServiceMenu() {
               className="w-full text-left px-3 py-2 rounded-xl hover:bg-bg transition-colors disabled:opacity-50"
             >
               <div className="text-sm font-medium">
-                {isPending ? 'Генерируем…' : 'Сгенерировать FIXED на завтра'}
+                {isPending ? 'Генерируем…' : 'Сгенерировать заказы на завтра'}
               </div>
               <div className="text-xs text-fg-subtle mt-0.5">
-                Обычно автоматически в 06:00. Кнопка нужна если cron не сработал или вы только что добавили конфиг.
+                Обычно автоматически в 06:00. Кнопка нужна если автогенерация не сработала или вы только что добавили питание.
               </div>
             </button>
           </div>

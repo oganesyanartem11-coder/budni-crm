@@ -27,7 +27,7 @@ const REASON_LABELS: Record<InboxItemReason, string> = {
   ANOMALY_LLM_CONFIDENCE: 'LLM не уверен',
   NON_NUMERIC: 'Не цифра',
   CANCELLATION_INTENT: 'Отмена',
-  POST_CUTOFF: 'После cut-off',
+  POST_CUTOFF: 'После 16:00',
 }
 
 interface ClientStatsSnapshot {

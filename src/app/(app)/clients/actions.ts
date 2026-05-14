@@ -261,7 +261,7 @@ export async function createMealConfig(
   const parsed = mealConfigSchema.safeParse(formData)
   if (!parsed.success) {
     const firstError = parsed.error.issues[0]
-    return { ok: false, error: firstError?.message ?? 'Неверные данные конфига' }
+    return { ok: false, error: firstError?.message ?? 'Неверные данные питания' }
   }
 
   if (parsed.data.orderType === 'FIXED' && !parsed.data.fixedPortions) {
@@ -297,7 +297,7 @@ export async function updateMealConfig(
   const parsed = mealConfigSchema.safeParse(formData)
   if (!parsed.success) {
     const firstError = parsed.error.issues[0]
-    return { ok: false, error: firstError?.message ?? 'Неверные данные конфига' }
+    return { ok: false, error: firstError?.message ?? 'Неверные данные питания' }
   }
 
   const config = await prisma.clientMealConfig.update({
@@ -323,7 +323,7 @@ export async function updateMealConfig(
 export async function deleteMealConfig(id: string): Promise<ActionResult> {
   await requireRole(['ADMIN', 'MANAGER'])
   const config = await prisma.clientMealConfig.findUnique({ where: { id } })
-  if (!config) return { ok: false, error: 'Конфиг не найден' }
+  if (!config) return { ok: false, error: 'Питание не найдено' }
 
   await prisma.clientMealConfig.update({
     where: { id },

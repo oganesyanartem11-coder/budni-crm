@@ -31,6 +31,10 @@ export async function listOrders(filter: OrderListFilter, limit = 200) {
     where.OR = [
       { client: { name: { contains: q, mode: 'insensitive' } } },
       { location: { name: { contains: q, mode: 'insensitive' } } },
+      { client: { contactName: { contains: q, mode: 'insensitive' } } },
+      // contactPhone хранится в формате '+7 (999) 999-99-99' — case не важен,
+      // но пробелы/скобки в search'е сломают match. Менеджер вводит как видит.
+      { client: { contactPhone: { contains: q } } },
     ]
   }
 
@@ -45,6 +49,7 @@ export async function listOrders(filter: OrderListFilter, limit = 200) {
     include: {
       client: { select: { id: true, name: true } },
       location: { select: { id: true, name: true, address: true } },
+      delivery: { select: { issueReportedAt: true } },
     },
   })
 }
@@ -149,7 +154,7 @@ export async function getOrderDetail(orderId: string) {
       location: { select: { id: true, name: true, address: true, packaging: true, tags: true, deliveryWindowFrom: true, deliveryWindowTo: true } },
       sourceConfig: { select: { id: true, orderType: true, scheduleType: true, fixedPortions: true } },
       createdBy: { select: { id: true, name: true, role: true } },
-      delivery: { select: { id: true, status: true, deliveredAt: true, courierName: true } },
+      delivery: { select: { id: true, status: true, deliveredAt: true, courierName: true, issueReportedAt: true, issueReason: true, issueComment: true, issueReportedById: true } },
     },
   })
 

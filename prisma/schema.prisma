@@ -442,7 +442,18 @@ model Delivery {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
+  // 6.7: курьер сообщает «не смог доставить» с причиной из enum-like-набора
+  // (ADDRESS_WRONG / CLIENT_UNAVAILABLE / ACCESS_DENIED / WEATHER / OTHER).
+  // Статус Order не меняется — менеджер видит метку и решает что делать.
+  // issueReportedById — id курьера (User.id) для аудита, без relation чтобы
+  // не лезть в User-модель.
+  issueReportedAt    DateTime?
+  issueReason        String?
+  issueComment       String?
+  issueReportedById  String?
+
   @@index([status])
+  @@index([issueReportedAt])
 }
 
 // ============================================================

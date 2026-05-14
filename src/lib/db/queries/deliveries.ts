@@ -33,6 +33,11 @@ export interface DeliveryStop {
   // уже ушёл алёрт в групповой Telegram (lateAlertSentAt set). UI подсвечивает
   // карточку красным.
   hasLateAlert: boolean
+  // 6.7: курьер сообщил о проблеме с доставкой (issueReportedAt set на любой
+  // Delivery остановки). Берём самые свежие данные (max issueReportedAt).
+  issueReportedAt: Date | null
+  issueReason: string | null
+  issueComment: string | null
 }
 
 export async function getDeliveriesForDate(targetDate: Date): Promise<DeliveryStop[]> {
@@ -55,7 +60,7 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
           tags: true,
         },
       },
-      delivery: { select: { deliveredAt: true } },
+      delivery: { select: { deliveredAt: true, issueReportedAt: true, issueReason: true, issueComment: true } },
     },
     orderBy: [
       { deliveryDate: 'asc' },
@@ -85,6 +90,9 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
         orderIds: [],
         hasOutForDelivery: false,
         hasLateAlert: false,
+        issueReportedAt: null,
+        issueReason: null,
+        issueComment: null,
       }
       stopsMap.set(key, stop)
     }
@@ -104,6 +112,14 @@ export async function getDeliveriesForDate(targetDate: Date): Promise<DeliverySt
     if (o.delivery?.deliveredAt) {
       const da = o.delivery.deliveredAt
       if (!stop.deliveredAt || da > stop.deliveredAt) stop.deliveredAt = da
+    }
+    if (o.delivery?.issueReportedAt) {
+      const ra = o.delivery.issueReportedAt
+      if (!stop.issueReportedAt || ra > stop.issueReportedAt) {
+        stop.issueReportedAt = ra
+        stop.issueReason = o.delivery.issueReason
+        stop.issueComment = o.delivery.issueComment
+      }
     }
 
     if (o.notes) {

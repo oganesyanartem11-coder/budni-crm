@@ -52,7 +52,7 @@ export function ConfirmList({ orders }: Props) {
           <Check className="w-8 h-8 text-success-fg" />
         </div>
         <h2 className="text-xl font-semibold mb-2">Все заказы подтверждены</h2>
-        <p className="text-fg-muted">Никаких ожидающих DYNAMIC-заказов на ближайшие дни.</p>
+        <p className="text-fg-muted">Нет заказов, ожидающих подтверждения, на ближайшие дни.</p>
       </div>
     )
   }

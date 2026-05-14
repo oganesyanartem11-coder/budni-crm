@@ -11,9 +11,13 @@ import {
 import { toast } from 'sonner'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
+import { LockedEditConfirmDialog, requiresLockedEditConfirm } from '../_components/locked-edit-confirm'
 import { cancelOrder, rescheduleOrder, editOrderPortions, confirmDynamicOrder } from '../actions'
+import { clearDeliveryIssue } from '../../delivery/actions'
+import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
 import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS, ORDER_TYPE_SHORT } from '@/lib/constants/client'
+import { portionsEditedToast } from '@/lib/constants/order'
 import { cn } from '@/lib/utils/cn'
 import type { Client, ClientLocation, User as PrismaUser, MealType, OrderStatus, PackagingType, OrderSource, Prisma } from '@prisma/client'
 
@@ -36,7 +40,16 @@ interface OrderData {
   location: Pick<ClientLocation, 'id' | 'name' | 'address' | 'packaging' | 'tags' | 'deliveryWindowFrom' | 'deliveryWindowTo'>
   sourceConfig: { id: string; orderType: string; scheduleType: string; fixedPortions: number | null } | null
   createdBy: Pick<PrismaUser, 'id' | 'name' | 'role'> | null
-  delivery: { id: string; status: string; deliveredAt: Date | string | null; courierName: string | null } | null
+  delivery: {
+    id: string
+    status: string
+    deliveredAt: Date | string | null
+    courierName: string | null
+    issueReportedAt: Date | string | null
+    issueReason: string | null
+    issueComment: string | null
+    issueReportedById: string | null
+  } | null
 }
 
 interface HistoryEntry {
@@ -59,8 +72,8 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_PORTIONS_EDITED: 'Изменены порции',
   ORDER_CANCELLED: 'Отменён',
   ORDER_RESCHEDULED: 'Перенесён',
-  ORDERS_LOCKED: 'Зафиксирован (cron, legacy)',
-  FIXED_ORDERS_GENERATED: 'Сгенерирован (cron)',
+  ORDERS_LOCKED: 'Зафиксирован автоматически',
+  FIXED_ORDERS_GENERATED: 'Сгенерирован автоматически',
 }
 
 export function OrderDetail({ order, history }: Props) {
@@ -69,6 +82,7 @@ export function OrderDetail({ order, history }: Props) {
 
   const [editingPortions, setEditingPortions] = useState(false)
   const [portionsValue, setPortionsValue] = useState(String(order.portions))
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false)
 
   const [cancelOpen, setCancelOpen] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
@@ -79,10 +93,41 @@ export function OrderDetail({ order, history }: Props) {
   )
 
   const wasEditedAfterLock = !!order.editedAfterLockAt
+  const issueReportedAt = order.delivery?.issueReportedAt ?? null
+  const issueReason = order.delivery?.issueReason ?? null
+  const issueComment = order.delivery?.issueComment ?? null
+  const deliveryId = order.delivery?.id ?? null
+
+  function handleClearIssue() {
+    if (!deliveryId) return
+    startTransition(async () => {
+      const result = await clearDeliveryIssue({ deliveryId })
+      if (result.ok) {
+        toast.success('Метка снята')
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
   const isEditable = ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
   const isPending_ = order.status === 'PENDING_CONFIRMATION'
   const isCancellable = !['CANCELLED', 'DELIVERED'].includes(order.status)
   const isReschedulable = !['CANCELLED', 'DELIVERED'].includes(order.status)
+
+  function doEditPortions(num: number) {
+    startTransition(async () => {
+      const result = await editOrderPortions({ orderId: order.id, portions: num })
+      if (result.ok) {
+        const opts = result.data.editedAfterLock ? { icon: '⚠️' } : undefined
+        toast.success(portionsEditedToast(num, result.data.editedAfterLock), opts)
+        setEditingPortions(false)
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
 
   function handleEditPortions() {
     const num = parseInt(portionsValue, 10)
@@ -90,20 +135,15 @@ export function OrderDetail({ order, history }: Props) {
       toast.error('Введите корректное число')
       return
     }
-    startTransition(async () => {
-      const result = await editOrderPortions({ orderId: order.id, portions: num })
-      if (result.ok) {
-        if (result.data.editedAfterLock) {
-          toast.success(`Порций изменено: ${num}. Помечено как правка после cut-off.`, { icon: '⚠️' })
-        } else {
-          toast.success(`Порций изменено: ${num}`)
-        }
-        setEditingPortions(false)
-        router.refresh()
-      } else {
-        toast.error(result.error)
-      }
-    })
+    if (num === order.portions) {
+      setEditingPortions(false)
+      return
+    }
+    if (requiresLockedEditConfirm(order.status)) {
+      setEditConfirmOpen(true)
+      return
+    }
+    doEditPortions(num)
   }
 
   function handleConfirm() {
@@ -169,7 +209,7 @@ export function OrderDetail({ order, history }: Props) {
               {wasEditedAfterLock && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-pill bg-danger-bg text-danger-fg text-xs font-medium">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  Правлено после cut-off
+                  Правлено после 16:00
                 </div>
               )}
             </div>
@@ -177,6 +217,31 @@ export function OrderDetail({ order, history }: Props) {
               ID: <span className="font-mono">{order.id.slice(0, 8)}</span>
             </div>
           </div>
+
+          {issueReportedAt && (
+            <div className="mt-4 rounded-xl bg-danger-bg/40 border border-danger/30 p-3 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-danger-fg shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-danger-fg">
+                  🚨 Курьер сообщил о проблеме: {issueReason ? DELIVERY_ISSUE_REASON_LABELS[issueReason as DeliveryIssueReason] : '—'}
+                </p>
+                {issueComment && (
+                  <p className="text-sm text-danger-fg/90 mt-1 italic">«{issueComment}»</p>
+                )}
+                <p className="text-xs text-danger-fg/70 mt-1">
+                  {formatDateShort(new Date(issueReportedAt))} · статус заказа не изменён, нужно решение менеджера
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClearIssue}
+                disabled={isPending}
+                className="shrink-0 text-xs text-danger-fg hover:text-fg underline underline-offset-2 disabled:opacity-50"
+              >
+                Снять метку
+              </button>
+            </div>
+          )}
 
           {order.notes && (
             <div className="mt-4 rounded-xl bg-warning-bg/30 border border-warning/20 p-3">
@@ -463,6 +528,16 @@ export function OrderDetail({ order, history }: Props) {
           </div>
         </Modal>
       )}
+
+      <LockedEditConfirmDialog
+        open={editConfirmOpen}
+        status={order.status}
+        onConfirm={() => {
+          setEditConfirmOpen(false)
+          doEditPortions(parseInt(portionsValue, 10))
+        }}
+        onCancel={() => setEditConfirmOpen(false)}
+      />
     </div>
   )
 }
@@ -492,9 +567,9 @@ function Row({
 function SourceLabel({ source }: { source: OrderSource }) {
   const labels: Record<OrderSource, string> = {
     MANUAL: 'Создан вручную',
-    FIXED_AUTO: 'Авто-генерация (FIXED)',
-    RECURRING_AUTO: 'Авто-генерация (DYNAMIC)',
-    MESSENGER: 'Из мессенджера (legacy)',
+    FIXED_AUTO: 'Авто-генерация (постоянное число)',
+    RECURRING_AUTO: 'Авто-генерация (по запросу)',
+    MESSENGER: 'Из мессенджера',
     BOT: 'Из MAX-бота',
   }
   return <span className="font-medium">{labels[source]}</span>
@@ -512,7 +587,7 @@ function PayloadHint({ action, payload }: { action: string; payload: Prisma.Json
     return (
       <p className="text-xs text-fg-muted mt-0.5">
         {String(old)} → {String(next)}
-        {afterCutoff ? ' · после cut-off' : ''}
+        {afterCutoff ? ' · после 16:00' : ''}
       </p>
     )
   }

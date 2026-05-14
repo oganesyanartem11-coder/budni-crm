@@ -88,7 +88,7 @@ export function ClientDetail({ client, analytics }: Props) {
     startTransition(async () => {
       const result = await deleteMealConfig(id)
       if (result.ok) {
-        toast.success(isActive ? 'Конфиг отключён' : 'Конфиг восстановлен')
+        toast.success(isActive ? 'Питание отключено' : 'Питание восстановлено')
         router.refresh()
       } else {
         toast.error(result.error)
@@ -316,21 +316,21 @@ function ConfigsTab({
     <div className="space-y-3">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <p className="text-sm text-fg-muted">
-          Конфиги питания определяют что и как заказывает клиент: тип, график, цену.
+          Питание определяет, что и куда поставлять клиенту: тип, график, цену.
         </p>
         <button type="button" onClick={onAdd} disabled={locations.length === 0} className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50">
-          <Plus className="w-4 h-4" /> Добавить конфиг
+          <Plus className="w-4 h-4" /> Добавить питание
         </button>
       </div>
 
       {locations.length === 0 ? (
         <div className="rounded-2xl bg-warning-bg/30 border border-warning/20 px-5 py-4 text-sm text-warning-fg">
-          Сначала добавьте хотя бы одну точку — конфиг привязывается к ней.
+          Сначала добавьте хотя бы одну точку — питание привязывается к ней.
         </div>
       ) : configs.length === 0 ? (
         <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
           <Settings className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p>Нет конфигов питания. Добавьте первый.</p>
+          <p>Питание не настроено. Добавьте первое.</p>
         </div>
       ) : (
         <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>

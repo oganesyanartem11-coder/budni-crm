@@ -5,11 +5,13 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Check, MapPin, Phone, Clock, AlertTriangle, Tag, Package, Undo2, ChevronDown, ChevronUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
+import { IssueDialog } from './_components/issue-dialog'
 import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, formatTime, pluralize } from '@/lib/utils/format'
 import { parseWindowToDate } from '@/lib/utils/msk-window'
 import { cn } from '@/lib/utils/cn'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
+import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
 import type { UserRole } from '@prisma/client'
 
@@ -181,6 +183,8 @@ function DeliveryCard({
 }) {
   const [isPending, startTransition] = useTransition()
   const [isOptimistic, setIsOptimistic] = useState(false)
+  const [issueOpen, setIssueOpen] = useState(false)
+  const hasIssue = !!stop.issueReportedAt
 
   function handleDelivered() {
     // Оптимистично прячем карточку: пользователь видит «исчезла», server-action
@@ -286,12 +290,51 @@ function DeliveryCard({
         </div>
       )}
 
-      <DeliveredButton
-        stop={stop}
-        userRole={userRole}
-        windowState={windowState}
-        isPending={isPending}
-        onClick={handleDelivered}
+      {hasIssue && (
+        <button
+          type="button"
+          onClick={() => setIssueOpen(true)}
+          className="w-full rounded-xl bg-danger-bg/40 border border-danger/30 px-3 py-2 flex items-start gap-2 text-left hover:bg-danger-bg/50 transition-colors"
+        >
+          <AlertTriangle className="w-4 h-4 text-danger-fg shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-danger-fg">
+              Сообщено о проблеме: {stop.issueReason ? DELIVERY_ISSUE_REASON_LABELS[stop.issueReason as DeliveryIssueReason] : '—'}
+            </p>
+            {stop.issueComment && (
+              <p className="text-xs text-danger-fg/80 mt-0.5 italic">«{stop.issueComment}»</p>
+            )}
+            <p className="text-[10px] text-danger-fg/60 mt-0.5">Нажмите чтобы изменить причину</p>
+          </div>
+        </button>
+      )}
+
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+        {!hasIssue && (
+          <button
+            type="button"
+            onClick={() => setIssueOpen(true)}
+            className="text-sm text-fg-muted hover:text-danger-fg transition-colors underline underline-offset-2 self-start lg:self-auto py-2"
+          >
+            Не смог доставить
+          </button>
+        )}
+        <DeliveredButton
+          stop={stop}
+          userRole={userRole}
+          windowState={windowState}
+          isPending={isPending}
+          onClick={handleDelivered}
+        />
+      </div>
+
+      <IssueDialog
+        open={issueOpen}
+        orderIds={stop.orderIds}
+        initialReason={stop.issueReason as DeliveryIssueReason | null}
+        initialComment={stop.issueComment}
+        onClose={() => setIssueOpen(false)}
+        onReported={onChanged}
       />
     </div>
   )

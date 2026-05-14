@@ -45,3 +45,14 @@ export const MEAL_TYPE_FILTER_LABELS = {
   LUNCH: 'Обед',
   DINNER: 'Ужин',
 } as const
+
+/**
+ * Toast при успешной правке порций — используется в orders-list (PortionsCell)
+ * и в /orders/[id] (handleEditPortions). Если правка попала «после cut-off»
+ * (lock-этап) — отдельная формулировка с предупреждением.
+ */
+export function portionsEditedToast(num: number, afterLock: boolean): string {
+  return afterLock
+    ? `Сохранено: ${num}. Правка после 16:00 — кухню и курьера предупредят.`
+    : `Порций изменено: ${num}`
+}

@@ -6,6 +6,10 @@ import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
 import { isPastCutoff } from '@/lib/orders/cutoff'
+import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
+import { orderDetailButton } from '@/lib/telegram/buttons'
+import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
+import { formatDateShort } from '@/lib/utils/format'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -326,6 +330,9 @@ export async function editOrderPortions(
       portions: true,
       pricePerPortion: true,
       deliveryDate: true,
+      mealType: true,
+      client: { select: { name: true } },
+      location: { select: { name: true } },
     },
   })
   if (!order) return { ok: false, error: 'Заказ не найден' }
@@ -368,6 +375,40 @@ export async function editOrderPortions(
       },
     },
   })
+
+  // Push в групповой чат «Будни — Команда» — только при правке после lock.
+  // Кухня и курьер должны узнать что их данные устарели. Если push упал —
+  // НЕ блокируем save: менеджер уже сохранил, мы только пишем в лог.
+  if (afterCutoff) {
+    const text =
+      `⚠️ <b>Правка заказа после 16:00</b>\n\n` +
+      `${escapeHtml(order.client.name)} · ${escapeHtml(order.location.name)}\n` +
+      `${MEAL_TYPE_LABELS[order.mealType]} на ${formatDateShort(order.deliveryDate)}\n\n` +
+      `Было: <b>${order.portions}</b> → Стало: <b>${portions}</b>\n` +
+      `Правил: ${escapeHtml(user.name)}\n\n` +
+      `Кухня и курьер: учтите изменения.`
+
+    const pushResult = await notifyGroup(text, {
+      parseMode: 'HTML',
+      replyMarkup: orderDetailButton(orderId),
+    })
+
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'ORDER_PORTIONS_EDITED_AFTER_LOCK',
+        entityType: 'Order',
+        entityId: orderId,
+        payload: {
+          oldPortions: order.portions,
+          newPortions: portions,
+          notifiedGroup: pushResult.ok,
+          pushError: pushResult.ok ? null : (pushResult.error ?? 'unknown'),
+        },
+      },
+    })
+  }
 
   revalidatePath('/orders')
   return { ok: true, data: { editedAfterLock: afterCutoff } }

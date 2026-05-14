@@ -7,9 +7,10 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { LockedEditConfirmDialog, requiresLockedEditConfirm } from './_components/locked-edit-confirm'
 import { editOrderPortions } from './actions'
 import { formatMoney } from '@/lib/utils/format'
-import { ORDER_STATUS_LABELS, ORDER_STATUS_VARIANT } from '@/lib/constants/order'
+import { ORDER_STATUS_LABELS, ORDER_STATUS_VARIANT, portionsEditedToast } from '@/lib/constants/order'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation, OrderStatus } from '@prisma/client'
@@ -19,6 +20,7 @@ type SerializedOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
   location: Pick<ClientLocation, 'id' | 'name' | 'address'>
+  delivery: { issueReportedAt: Date | string | null } | null
 }
 
 interface Props {
@@ -256,7 +258,17 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                       {formatMoney(order.totalPrice)}
                     </td>
                     <td className="px-2 py-3 lg:px-3 align-middle hidden md:table-cell">
-                      <OrderStatusBadge status={order.status} />
+                      <div className="flex items-center gap-1.5">
+                        <OrderStatusBadge status={order.status} />
+                        {order.delivery?.issueReportedAt && (
+                          <AlertTriangle
+                            className="w-3.5 h-3.5 text-danger-fg shrink-0"
+                            aria-label="Курьер сообщил о проблеме"
+                          >
+                            <title>Курьер сообщил о проблеме</title>
+                          </AlertTriangle>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -289,10 +301,25 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(String(order.portions))
   const [isPending, startTransition] = useTransition()
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   // Заказ можно редактировать только в активных статусах (не CANCELLED/DELIVERED/PENDING/DRAFT)
   const editable = ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(order.status)
   const wasEditedAfterLock = !!order.editedAfterLockAt
+
+  function doSubmit(num: number) {
+    startTransition(async () => {
+      const result = await editOrderPortions({ orderId: order.id, portions: num })
+      if (result.ok) {
+        const opts = result.data.editedAfterLock ? { icon: '⚠️' } : undefined
+        toast.success(portionsEditedToast(num, result.data.editedAfterLock), opts)
+        setEditing(false)
+      } else {
+        toast.error(result.error)
+        setValue(String(order.portions))
+      }
+    })
+  }
 
   function handleSubmit() {
     const num = parseInt(value, 10)
@@ -300,21 +327,15 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
       toast.error('Введите корректное число')
       return
     }
-
-    startTransition(async () => {
-      const result = await editOrderPortions({ orderId: order.id, portions: num })
-      if (result.ok) {
-        if (result.data.editedAfterLock) {
-          toast.success(`Порций изменено: ${num}. Помечено как правка после cut-off.`, { icon: '⚠️' })
-        } else {
-          toast.success(`Порций изменено: ${num}`)
-        }
-        setEditing(false)
-      } else {
-        toast.error(result.error)
-        setValue(String(order.portions))
-      }
-    })
+    if (num === order.portions) {
+      setEditing(false)
+      return
+    }
+    if (requiresLockedEditConfirm(order.status)) {
+      setConfirmOpen(true)
+      return
+    }
+    doSubmit(num)
   }
 
   if (editing) {
@@ -358,27 +379,47 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
 
   // Цифра в центре, иконки (warning + edit) absolute по краям — чтобы
   // их наличие/отсутствие не сдвигало позицию числа от строки к строке.
+  // На мобиле добавляем подпись «правка» под цифрой, потому что title
+  // на тач-устройствах не работает и иконка одна непонятна.
   return (
-    <div className="relative flex items-center justify-center">
-      {wasEditedAfterLock && (
-        <span
-          title="Правлено после cut-off — кухню и курьера может задеть"
-          className="absolute right-full mr-1 text-danger-fg"
-        >
-          <AlertTriangle className="w-3.5 h-3.5" />
-        </span>
-      )}
-      <span>{order.portions}</span>
-      {editable && (
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          aria-label="Редактировать порции"
-          className="absolute left-full ml-1 opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full hover:bg-bg flex items-center justify-center text-fg-subtle hover:text-fg transition-all"
-        >
-          <Edit2 className="w-3 h-3" />
-        </button>
-      )}
-    </div>
+    <>
+      <div className="flex flex-col items-center gap-0.5">
+        <div className="relative flex items-center justify-center">
+          {wasEditedAfterLock && (
+            <span
+              title="Правлено после 16:00 — кухню и курьера может задеть"
+              className="absolute right-full mr-1 text-danger-fg"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+            </span>
+          )}
+          <span>{order.portions}</span>
+          {editable && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              aria-label="Редактировать порции"
+              className="absolute left-full ml-1 opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full hover:bg-bg flex items-center justify-center text-fg-subtle hover:text-fg transition-all"
+            >
+              <Edit2 className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+        {wasEditedAfterLock && (
+          <span className="md:hidden text-[10px] leading-none text-danger-fg font-medium">
+            правка
+          </span>
+        )}
+      </div>
+      <LockedEditConfirmDialog
+        open={confirmOpen}
+        status={order.status}
+        onConfirm={() => {
+          setConfirmOpen(false)
+          doSubmit(parseInt(value, 10))
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </>
   )
 }
