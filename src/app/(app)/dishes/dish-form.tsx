@@ -13,6 +13,7 @@ import {
 } from '@/lib/constants/dish-categories'
 import { calculateDishCost } from '@/lib/utils/dish-cost'
 import { formatMoney } from '@/lib/utils/format'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
 import type { Dish, DishCategory, DishUnit, IngredientUnit } from '@prisma/client'
 
@@ -228,33 +229,33 @@ export function DishForm({ dish, ingredients }: Props) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
               <label htmlFor="category" className="text-sm font-medium">Категория</label>
-              <select
-                id="category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value as DishCategory)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
-              >
-                {DISH_CATEGORY_ORDER.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {DISH_CATEGORY_LABELS[cat]}
-                  </option>
-                ))}
-              </select>
+              <Select value={category} onValueChange={(v) => setCategory(v as DishCategory)}>
+                <SelectTrigger id="category" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DISH_CATEGORY_ORDER.map((cat) => (
+                    <SelectItem key={cat} value={cat}>
+                      {DISH_CATEGORY_LABELS[cat]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
               <label htmlFor="unit" className="text-sm font-medium">Базовая единица</label>
-              <select
-                id="unit"
-                value={unit}
-                onChange={(e) => setUnit(e.target.value as DishUnit)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
-              >
-                <option value="PORTION">порция</option>
-                <option value="LITER">литр</option>
-                <option value="KG">килограмм</option>
-                <option value="PIECE">штука</option>
-              </select>
+              <Select value={unit} onValueChange={(v) => setUnit(v as DishUnit)}>
+                <SelectTrigger id="unit" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PORTION">порция</SelectItem>
+                  <SelectItem value="LITER">литр</SelectItem>
+                  <SelectItem value="KG">килограмм</SelectItem>
+                  <SelectItem value="PIECE">штука</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
@@ -428,21 +429,23 @@ function IngredientRow({
     <div className="grid grid-cols-12 gap-2 items-start bg-bg/40 rounded-xl p-2.5">
       {/* Ингредиент */}
       <div className="col-span-12 md:col-span-5">
-        <select
-          value={line.ingredientId}
-          onChange={(e) => onUpdate({ ingredientId: e.target.value })}
-          className={cn(
-            'w-full px-3 py-2 rounded-lg bg-surface border border-border focus:outline-none focus:border-accent transition-colors text-sm',
-            errors[`line-${index}-ingredient`] && 'border-danger'
-          )}
-        >
-          <option value="">— выберите ингредиент —</option>
-          {ingredients.map((ing) => (
-            <option key={ing.id} value={ing.id}>
-              {ing.name} ({INGREDIENT_UNIT_LABELS[ing.unit]})
-            </option>
-          ))}
-        </select>
+        <Select value={line.ingredientId || undefined} onValueChange={(v) => onUpdate({ ingredientId: v })}>
+          <SelectTrigger
+            className={cn(
+              'w-full !h-auto px-3 py-2 rounded-lg bg-surface border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted',
+              errors[`line-${index}-ingredient`] && 'border-danger'
+            )}
+          >
+            <SelectValue placeholder="— выберите ингредиент —" />
+          </SelectTrigger>
+          <SelectContent>
+            {ingredients.map((ing) => (
+              <SelectItem key={ing.id} value={ing.id}>
+                {ing.name} ({INGREDIENT_UNIT_LABELS[ing.unit]})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Брутто */}

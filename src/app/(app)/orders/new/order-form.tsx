@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { createOrder, findDuplicateOrder, getClientForOrderForm } from '../actions'
 import { formatMoney, formatDateLong, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, ORDER_TYPE_SHORT, PACKAGING_LABELS } from '@/lib/constants/client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
 import type { MealType, OrderType, PackagingType } from '@prisma/client'
 
@@ -176,30 +177,33 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
           <h2 className="text-base font-semibold">Параметры заказа</h2>
 
           <Field label="Клиент *">
-            <select
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
-            >
-              <option value="">— выберите —</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            <Select value={clientId || undefined} onValueChange={(v) => setClientId(v)}>
+              <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectValue placeholder="— выберите —" />
+              </SelectTrigger>
+              <SelectContent>
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
 
           <Field label="Точка *" hint={isLoadingClient ? 'Загрузка точек...' : undefined}>
-            <select
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
-              disabled={!client || isLoadingClient}
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors disabled:opacity-50"
-            >
-              <option value="">— выберите —</option>
-              {client?.locations.map((l) => (
-                <option key={l.id} value={l.id}>{l.name} · {l.address}</option>
-              ))}
-            </select>
+            <Select value={locationId || undefined} onValueChange={(v) => setLocationId(v)}>
+              <SelectTrigger
+                aria-required="true"
+                disabled={!client || isLoadingClient}
+                className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted disabled:opacity-50"
+              >
+                <SelectValue placeholder={!client ? 'Сначала выберите клиента' : '— выберите —'} />
+              </SelectTrigger>
+              <SelectContent>
+                {client?.locations.map((l) => (
+                  <SelectItem key={l.id} value={l.id}>{l.name} · {l.address}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
 
           <div className="grid grid-cols-2 gap-3">
@@ -212,15 +216,16 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
               />
             </Field>
             <Field label="Тип питания *">
-              <select
-                value={mealType}
-                onChange={(e) => setMealType(e.target.value as MealType)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
-              >
-                <option value="BREAKFAST">{MEAL_TYPE_LABELS.BREAKFAST}</option>
-                <option value="LUNCH">{MEAL_TYPE_LABELS.LUNCH}</option>
-                <option value="DINNER">{MEAL_TYPE_LABELS.DINNER}</option>
-              </select>
+              <Select value={mealType} onValueChange={(v) => setMealType(v as MealType)}>
+                <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BREAKFAST">{MEAL_TYPE_LABELS.BREAKFAST}</SelectItem>
+                  <SelectItem value="LUNCH">{MEAL_TYPE_LABELS.LUNCH}</SelectItem>
+                  <SelectItem value="DINNER">{MEAL_TYPE_LABELS.DINNER}</SelectItem>
+                </SelectContent>
+              </Select>
             </Field>
           </div>
 

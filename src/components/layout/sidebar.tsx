@@ -63,7 +63,7 @@ export function NavGroupList({
         if (visible.length === 0) return null
         return (
           <div key={group.id} className="space-y-0.5">
-            <p className="px-3 mb-1 text-[10px] uppercase tracking-wider text-fg-subtle font-semibold">
+            <p className="px-3 mb-1 text-xs lg:text-[10px] uppercase tracking-wider text-fg-subtle font-semibold">
               {group.title}
             </p>
             {visible.map((item) => (
@@ -100,13 +100,13 @@ function NavLinkRow({
       href={item.href}
       onClick={onClick}
       className={cn(
-        'flex items-center gap-3 px-3 py-2 rounded-xl text-sm transition-colors',
+        'flex items-center gap-3 px-3 py-2 rounded-xl text-base lg:text-sm transition-colors',
         active
           ? 'bg-fg/5 text-fg font-medium'
           : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
       )}
     >
-      <Icon className="w-4 h-4 shrink-0" strokeWidth={active ? 2 : 1.75} />
+      <Icon className="w-5 h-5 lg:w-4 lg:h-4 shrink-0" strokeWidth={active ? 2 : 1.75} />
       <span className="flex-1 truncate">{item.label}</span>
       {showBadge && (
         <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold tabular-nums">

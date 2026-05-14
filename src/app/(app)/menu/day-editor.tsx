@@ -5,6 +5,7 @@ import { X, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { saveDayDishes } from './actions'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS } from '@/lib/constants/dish-categories'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
 import type { Dish, DishCategory } from '@prisma/client'
 
@@ -174,24 +175,25 @@ export function DayEditor({ day, dishes, dayLabel, onClose, onSaved }: Props) {
                       </span>
                     )}
                   </label>
-                  <select
-                    value={slot.dishId ?? ''}
-                    onChange={(e) => updateSlot(i, e.target.value || null)}
-                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+                  <Select
+                    value={slot.dishId ?? '__none__'}
+                    onValueChange={(v) => updateSlot(i, v === '__none__' ? null : v)}
                   >
-                    <option value="">— не выбрано —</option>
-                    {availableDishes.length === 0 ? (
-                      <option value="" disabled>
-                        Нет блюд в категории «{DISH_CATEGORY_LABELS[slot.slotCategory]}»
-                      </option>
-                    ) : (
-                      availableDishes.map((d) => (
-                        <option key={d.id} value={d.id}>
+                    <SelectTrigger
+                      disabled={availableDishes.length === 0}
+                      className="w-full !h-auto px-3 py-2 rounded-lg bg-surface border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted disabled:opacity-50"
+                    >
+                      <SelectValue placeholder={`Нет блюд в категории «${DISH_CATEGORY_LABELS[slot.slotCategory]}»`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— не выбрано —</SelectItem>
+                      {availableDishes.map((d) => (
+                        <SelectItem key={d.id} value={d.id}>
                           {d.name}
-                        </option>
-                      ))
-                    )}
-                  </select>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )
             })

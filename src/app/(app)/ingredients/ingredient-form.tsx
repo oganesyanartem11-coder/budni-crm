@@ -1,11 +1,12 @@
 'use client'
 
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useTransition } from 'react'
 import { toast } from 'sonner'
 import { createIngredient, updateIngredient } from './actions'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
 import type { Ingredient } from '@prisma/client'
 
@@ -87,15 +88,22 @@ export function IngredientForm({ ingredient, onSuccess, onCancel }: Props) {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <label htmlFor="unit" className="text-sm font-medium">Единица</label>
-          <select
-            id="unit"
-            {...form.register('unit')}
-            className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent"
-          >
-            <option value="KG">килограммы (кг)</option>
-            <option value="L">литры (л)</option>
-            <option value="PCS">штуки (шт)</option>
-          </select>
+          <Controller
+            control={form.control}
+            name="unit"
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={field.onChange}>
+                <SelectTrigger id="unit" className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="KG">килограммы (кг)</SelectItem>
+                  <SelectItem value="L">литры (л)</SelectItem>
+                  <SelectItem value="PCS">штуки (шт)</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
 
         <div className="space-y-1.5">

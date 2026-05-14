@@ -11,6 +11,7 @@ import {
   DELIVERY_HORIZON_LABELS,
   WEEKDAY_NAMES_SHORT,
 } from '@/lib/constants/client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
 import type { ClientLocation, MealType, OrderType, ScheduleType, DeliveryHorizon, Prisma } from '@prisma/client'
 
@@ -260,15 +261,14 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
             <label className="text-sm font-medium">
               Точка <span className="text-danger-fg">*</span>
             </label>
-            <select
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
-              required
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
-            >
-              <option value="" disabled>Выберите локацию…</option>
-              {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </select>
+            <Select value={locationId || undefined} onValueChange={(v) => setLocationId(v)}>
+              <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectValue placeholder="Выберите локацию…" />
+              </SelectTrigger>
+              <SelectContent>
+                {locations.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
             {!locationId && (
               <p className="text-xs text-fg-subtle">Конфиг привязывается к конкретной локации клиента.</p>
             )}
@@ -308,10 +308,15 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Тип заказа</label>
-            <select value={orderType} onChange={(e) => setOrderType(e.target.value as OrderType)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors">
-              <option value="FIXED">{ORDER_TYPE_LABELS.FIXED}</option>
-              <option value="DYNAMIC">{ORDER_TYPE_LABELS.DYNAMIC}</option>
-            </select>
+            <Select value={orderType} onValueChange={(v) => setOrderType(v as OrderType)}>
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="FIXED">{ORDER_TYPE_LABELS.FIXED}</SelectItem>
+                <SelectItem value="DYNAMIC">{ORDER_TYPE_LABELS.DYNAMIC}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Поля цены и порций — по каждому выбранному типу */}
@@ -359,22 +364,32 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Доставка</label>
-            <select value={deliveryHorizon} onChange={(e) => setDeliveryHorizon(e.target.value as DeliveryHorizon)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors">
-              <option value="NEXT_DAY">{DELIVERY_HORIZON_LABELS.NEXT_DAY}</option>
-              <option value="SAME_DAY">{DELIVERY_HORIZON_LABELS.SAME_DAY}</option>
-            </select>
+            <Select value={deliveryHorizon} onValueChange={(v) => setDeliveryHorizon(v as DeliveryHorizon)}>
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="NEXT_DAY">{DELIVERY_HORIZON_LABELS.NEXT_DAY}</SelectItem>
+                <SelectItem value="SAME_DAY">{DELIVERY_HORIZON_LABELS.SAME_DAY}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-1.5">
             <label className="text-sm font-medium">График</label>
-            <select value={scheduleType} onChange={(e) => setScheduleType(e.target.value as ScheduleType)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors">
-              <option value="DAILY">{SCHEDULE_TYPE_LABELS.DAILY}</option>
-              <option value="WEEKDAYS">{SCHEDULE_TYPE_LABELS.WEEKDAYS}</option>
-              <option value="WEEKENDS">{SCHEDULE_TYPE_LABELS.WEEKENDS}</option>
-              <option value="CUSTOM_DAYS">{SCHEDULE_TYPE_LABELS.CUSTOM_DAYS}</option>
-              <option value="INTERVAL">{SCHEDULE_TYPE_LABELS.INTERVAL}</option>
-              <option value="ONE_TIME">{SCHEDULE_TYPE_LABELS.ONE_TIME}</option>
-            </select>
+            <Select value={scheduleType} onValueChange={(v) => setScheduleType(v as ScheduleType)}>
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DAILY">{SCHEDULE_TYPE_LABELS.DAILY}</SelectItem>
+                <SelectItem value="WEEKDAYS">{SCHEDULE_TYPE_LABELS.WEEKDAYS}</SelectItem>
+                <SelectItem value="WEEKENDS">{SCHEDULE_TYPE_LABELS.WEEKENDS}</SelectItem>
+                <SelectItem value="CUSTOM_DAYS">{SCHEDULE_TYPE_LABELS.CUSTOM_DAYS}</SelectItem>
+                <SelectItem value="INTERVAL">{SCHEDULE_TYPE_LABELS.INTERVAL}</SelectItem>
+                <SelectItem value="ONE_TIME">{SCHEDULE_TYPE_LABELS.ONE_TIME}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {scheduleType === 'CUSTOM_DAYS' && (

@@ -6,6 +6,7 @@ import { Search, X, Edit2, Check, AlertTriangle, Filter, ChevronDown, ChevronUp 
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { editOrderPortions } from './actions'
 import { formatMoney } from '@/lib/utils/format'
 import { ORDER_STATUS_LABELS, ORDER_STATUS_VARIANT } from '@/lib/constants/order'
@@ -125,39 +126,51 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
               />
             </div>
 
-            <select
-              value={filters.clientId}
-              onChange={(e) => onFilterChange({ clientId: e.target.value || null })}
-              className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+            <Select
+              value={filters.clientId || '__all__'}
+              onValueChange={(v) => onFilterChange({ clientId: v === '__all__' ? null : v })}
             >
-              <option value="">Все клиенты</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Все клиенты</SelectItem>
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
-            <select
-              value={filters.mealType}
-              onChange={(e) => onFilterChange({ mealType: e.target.value || null })}
-              className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+            <Select
+              value={filters.mealType || '__all__'}
+              onValueChange={(v) => onFilterChange({ mealType: v === '__all__' ? null : v })}
             >
-              <option value="">Все типы</option>
-              <option value="BREAKFAST">{MEAL_TYPE_LABELS.BREAKFAST}</option>
-              <option value="LUNCH">{MEAL_TYPE_LABELS.LUNCH}</option>
-              <option value="DINNER">{MEAL_TYPE_LABELS.DINNER}</option>
-            </select>
+              <SelectTrigger className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">Все типы</SelectItem>
+                <SelectItem value="BREAKFAST">{MEAL_TYPE_LABELS.BREAKFAST}</SelectItem>
+                <SelectItem value="LUNCH">{MEAL_TYPE_LABELS.LUNCH}</SelectItem>
+                <SelectItem value="DINNER">{MEAL_TYPE_LABELS.DINNER}</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          <select
-            value={filters.status}
-            onChange={(e) => onFilterChange({ status: e.target.value || null })}
-            className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm w-full md:w-auto"
+          <Select
+            value={filters.status || '__all__'}
+            onValueChange={(v) => onFilterChange({ status: v === '__all__' ? null : v })}
           >
-            <option value="">Все статусы</option>
-            {ALL_STATUSES.map((s) => (
-              <option key={s} value={s}>{ORDER_STATUS_LABELS[s]}</option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full md:w-auto !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Все статусы</SelectItem>
+              {ALL_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>{ORDER_STATUS_LABELS[s]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       )}
 

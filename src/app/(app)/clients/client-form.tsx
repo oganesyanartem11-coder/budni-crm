@@ -7,6 +7,7 @@ import { ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient, updateClient } from './actions'
 import { PhoneInput } from '@/components/ui/phone-input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { isValidPhone } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
 import type { Client } from '@prisma/client'
@@ -204,14 +205,15 @@ export function ClientForm({ client, isNew = false }: Props) {
                 />
               </Field>
               <Field label="Упаковка">
-                <select
-                  value={locPackaging}
-                  onChange={(e) => setLocPackaging(e.target.value as 'INDIVIDUAL' | 'BULK')}
-                  className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
-                >
-                  <option value="INDIVIDUAL">Порционно</option>
-                  <option value="BULK">Коробками</option>
-                </select>
+                <Select value={locPackaging} onValueChange={(v) => setLocPackaging(v as 'INDIVIDUAL' | 'BULK')}>
+                  <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="INDIVIDUAL">Порционно</SelectItem>
+                    <SelectItem value="BULK">Коробками</SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
           </div>

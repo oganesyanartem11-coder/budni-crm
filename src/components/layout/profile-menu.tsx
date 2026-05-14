@@ -44,7 +44,7 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
           {initials}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-fg truncate leading-tight">{name}</p>
+          <p className="text-base lg:text-sm font-medium text-fg truncate leading-tight">{name}</p>
           <p className="text-xs text-fg-subtle truncate leading-tight mt-0.5">{ROLE_LABELS[role]}</p>
         </div>
       </button>

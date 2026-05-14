@@ -5,6 +5,7 @@ import { Plus, KeyRound, Power, PowerOff, CheckCircle2, Copy, Send } from 'lucid
 import { toast } from 'sonner'
 import { createUser, regenerateUserPin, setUserActive } from './actions'
 import type { UserRole } from '@prisma/client'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
 
 interface UserRow {
@@ -215,17 +216,17 @@ export function UsersTable({ users, currentUserId }: Props) {
 
             <div>
               <label className="block text-xs uppercase tracking-wider text-fg-muted mb-1">Роль</label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                disabled={isPending}
-                className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent text-sm"
-              >
-                <option value="MANAGER">{ROLE_LABELS.MANAGER}</option>
-                <option value="ADMIN">{ROLE_LABELS.ADMIN}</option>
-                <option value="CHEF">{ROLE_LABELS.CHEF}</option>
-                <option value="COURIER">{ROLE_LABELS.COURIER}</option>
-              </select>
+              <Select value={role} onValueChange={(v) => setRole(v as UserRole)} disabled={isPending}>
+                <SelectTrigger className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="MANAGER">{ROLE_LABELS.MANAGER}</SelectItem>
+                  <SelectItem value="ADMIN">{ROLE_LABELS.ADMIN}</SelectItem>
+                  <SelectItem value="CHEF">{ROLE_LABELS.CHEF}</SelectItem>
+                  <SelectItem value="COURIER">{ROLE_LABELS.COURIER}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <p className="text-xs text-fg-muted">
