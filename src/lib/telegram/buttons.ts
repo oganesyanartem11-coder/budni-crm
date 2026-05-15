@@ -48,3 +48,15 @@ export function orderDetailButton(orderId: string, label = '📋 Открыть 
   const { appBaseUrl } = getTelegramEnv()
   return new InlineKeyboard().url(label, `${appBaseUrl}/orders/${orderId}`)
 }
+
+/**
+ * Кнопка «Открыть меню» — ведёт на /menu?cycle={id}.
+ * Используется в push'ах PENDING_APPROVAL / APPROVED / REJECTED workflow.
+ */
+export function menuButton(
+  menuCycleId: string,
+  label = '📋 Открыть меню в CRM'
+): InlineKeyboard {
+  const { appBaseUrl } = getTelegramEnv()
+  return new InlineKeyboard().url(label, `${appBaseUrl}/menu?cycle=${menuCycleId}`)
+}

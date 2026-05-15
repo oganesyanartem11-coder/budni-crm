@@ -5,6 +5,11 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { getMondayOfWeek, getSundayOfWeek } from '@/lib/utils/week'
+import {
+  notifyAdminsAboutPendingMenu,
+  notifyGroupAboutApprovedMenu,
+  notifyChefsAboutRejectedMenu,
+} from '@/lib/bot/notify-menu'
 import type { DishCategory, MealType, MenuStatus } from '@prisma/client'
 
 const createMenuSchema = z.object({
@@ -195,6 +200,13 @@ export async function submitMenuForApproval(cycleId: string): Promise<ActionResu
   ])
 
   revalidatePath('/menu')
+
+  await notifyAdminsAboutPendingMenu({
+    menuCycleId: cycleId,
+    menuName: cycle.name,
+    chefName: user.name,
+  })
+
   return { ok: true, data: undefined }
 }
 
@@ -234,6 +246,12 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
   })
 
   revalidatePath('/menu')
+
+  await notifyGroupAboutApprovedMenu({
+    menuCycleId: cycleId,
+    menuName: cycle.name,
+  })
+
   return { ok: true, data: undefined }
 }
 
@@ -289,6 +307,13 @@ export async function rejectMenu(
   ])
 
   revalidatePath('/menu')
+
+  await notifyChefsAboutRejectedMenu({
+    menuCycleId: cycleId,
+    menuName: cycle.name,
+    comment: normalizedComment,
+  })
+
   return { ok: true, data: undefined }
 }
 
