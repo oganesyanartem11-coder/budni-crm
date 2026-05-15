@@ -40,6 +40,11 @@ interface SerializedConfig {
 interface SerializedClientDetail extends Omit<Client, never> {
   locations: ClientLocation[]
   mealConfigs: SerializedConfig[]
+  defaultOurLegalEntity: {
+    id: string
+    shortName: string
+    entityType: 'INDIVIDUAL_ENTREPRENEUR' | 'LLC'
+  } | null
   _count: { orders: number }
 }
 
@@ -96,6 +101,13 @@ export function ClientDetail({ client, analytics }: Props) {
     })
   }
 
+  const hasRequisites =
+    !!client.inn ||
+    !!client.legalName ||
+    !!client.bankName ||
+    !!client.contractNumber ||
+    !!client.defaultOurLegalEntity
+
   return (
     <div className="space-y-5">
       {client.notes && (
@@ -104,6 +116,8 @@ export function ClientDetail({ client, analytics }: Props) {
           <p className="text-sm text-fg whitespace-pre-line">{client.notes}</p>
         </div>
       )}
+
+      {hasRequisites && <RequisitesBlock client={client} />}
 
       <div className="flex items-center gap-1 p-1 bg-bg rounded-pill w-fit overflow-x-auto">
         <TabButton active={tab === 'locations'} onClick={() => setTab('locations')} icon={MapPin} label={`Точки · ${activeLocations.length}`} />
@@ -380,6 +394,93 @@ function ConfigsTab({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function RequisitesBlock({ client }: { client: SerializedClientDetail }) {
+  const contractDateStr = client.contractDate
+    ? new Date(client.contractDate).toLocaleDateString('ru-RU')
+    : null
+
+  return (
+    <div
+      className="rounded-2xl bg-surface border border-border p-5 space-y-4"
+      style={{ boxShadow: 'var(--shadow-card)' }}
+    >
+      <h3 className="text-sm font-semibold uppercase tracking-wider text-fg-muted">
+        Реквизиты
+      </h3>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+        {/* Юр.реквизиты */}
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-wider text-fg-subtle">Юридические</p>
+          <RequisitesRow label="Название" value={client.legalName} />
+          <RequisitesRow label="ИНН" value={client.inn} mono />
+          <RequisitesRow label="КПП" value={client.kpp} mono />
+          <RequisitesRow label="ОГРН/ОГРНИП" value={client.ogrn} mono />
+          <RequisitesRow label="Юр. адрес" value={client.legalAddress} multiline />
+        </div>
+
+        {/* Банк */}
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-wider text-fg-subtle">Банк</p>
+          <RequisitesRow label="Наименование" value={client.bankName} />
+          <RequisitesRow label="БИК" value={client.bankBic} mono />
+          <RequisitesRow label="Р/с" value={client.bankAccount} mono />
+          <RequisitesRow label="Корр. счёт" value={client.bankCorrAccount} mono />
+        </div>
+
+        {/* Договор */}
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-wider text-fg-subtle">Договор</p>
+          <RequisitesRow label="Номер" value={client.contractNumber} />
+          <RequisitesRow label="Дата" value={contractDateStr} />
+        </div>
+
+        {/* Наше юрлицо */}
+        <div className="space-y-2">
+          <p className="text-xs uppercase tracking-wider text-fg-subtle">Отгрузка от нас</p>
+          <RequisitesRow
+            label="Наше юрлицо"
+            value={
+              client.defaultOurLegalEntity
+                ? `${client.defaultOurLegalEntity.shortName} (${
+                    client.defaultOurLegalEntity.entityType === 'LLC' ? 'ООО' : 'ИП'
+                  })`
+                : null
+            }
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RequisitesRow({
+  label,
+  value,
+  mono,
+  multiline,
+}: {
+  label: string
+  value: string | null | undefined
+  mono?: boolean
+  multiline?: boolean
+}) {
+  return (
+    <div className="flex gap-2 text-sm">
+      <span className="text-fg-muted shrink-0 w-28">{label}:</span>
+      <span
+        className={cn(
+          'flex-1 min-w-0',
+          mono && 'font-mono tabular-nums',
+          multiline ? 'whitespace-pre-line break-words' : 'truncate'
+        )}
+      >
+        {value && value !== '' ? value : <span className="text-fg-subtle">—</span>}
+      </span>
     </div>
   )
 }

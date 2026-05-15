@@ -5,21 +5,152 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { generateOnboardingToken, buildOnboardingDeeplink } from '@/lib/bot/onboarding'
+import {
+  validateInn,
+  validateOgrn,
+  validateBic,
+  validateAccount,
+  validateCorrAccount,
+} from '@/lib/validation/russian-requisites'
 
-const clientSchema = z.object({
-  name: z.string().trim().min(1, 'Название обязательно').max(150),
-  contactName: z.string().max(100).nullable().optional(),
-  contactPhone: z.string().max(50).nullable().optional().refine(
-    (v) => {
-      if (!v) return true
-      const digits = v.replace(/\D/g, '')
-      return digits.length === 11 && digits.startsWith('7')
-    },
-    { message: 'Телефон должен быть в формате +7 (999) 999-99-99' }
-  ),
-  contactMessenger: z.string().max(100).nullable().optional(),
-  notes: z.string().max(2000).nullable().optional(),
-})
+const clientSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Название обязательно').max(150),
+    contactName: z.string().max(100).nullable().optional(),
+    contactPhone: z.string().max(50).nullable().optional().refine(
+      (v) => {
+        if (!v) return true
+        const digits = v.replace(/\D/g, '')
+        return digits.length === 11 && digits.startsWith('7')
+      },
+      { message: 'Телефон должен быть в формате +7 (999) 999-99-99' }
+    ),
+    contactMessenger: z.string().max(100).nullable().optional(),
+    notes: z.string().max(2000).nullable().optional(),
+
+    // === Юр.реквизиты (7b) — все опционально на уровне типа,
+    // обязательность связана с inn через superRefine ниже.
+    legalName: z.string().max(500).optional().or(z.literal('')),
+    inn: z.string().optional().or(z.literal('')),
+    kpp: z.string().regex(/^\d{9}$/, 'КПП — 9 цифр').optional().or(z.literal('')),
+    ogrn: z.string().optional().or(z.literal('')),
+    legalAddress: z.string().max(500).optional().or(z.literal('')),
+
+    bankName: z.string().max(200).optional().or(z.literal('')),
+    bankBic: z.string().optional().or(z.literal('')),
+    bankAccount: z.string().optional().or(z.literal('')),
+    bankCorrAccount: z.string().optional().or(z.literal('')),
+
+    contractNumber: z.string().max(50).optional().or(z.literal('')),
+    contractDate: z.string().optional().or(z.literal('')), // ISO date string YYYY-MM-DD
+
+    defaultOurLegalEntityId: z.string().optional().or(z.literal('')),
+  })
+  .superRefine((data, ctx) => {
+    const innFilled = !!data.inn && data.inn !== ''
+
+    // Юрлицо: если inn заполнен — требуем полный набор + ИНН валиден
+    if (innFilled) {
+      if (!validateInn(data.inn!)) {
+        ctx.addIssue({ code: 'custom', path: ['inn'], message: 'Некорректный ИНН (контрольная сумма не сошлась)' })
+      }
+      if (!data.legalName || data.legalName === '') {
+        ctx.addIssue({ code: 'custom', path: ['legalName'], message: 'Укажите полное юридическое название' })
+      }
+      if (!data.ogrn || data.ogrn === '') {
+        ctx.addIssue({ code: 'custom', path: ['ogrn'], message: 'Укажите ОГРН/ОГРНИП' })
+      }
+      if (!data.legalAddress || data.legalAddress === '') {
+        ctx.addIssue({ code: 'custom', path: ['legalAddress'], message: 'Укажите юридический адрес' })
+      }
+      if (!data.defaultOurLegalEntityId || data.defaultOurLegalEntityId === '') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['defaultOurLegalEntityId'],
+          message: 'Выберите наше юрлицо для отгрузки',
+        })
+      }
+
+      // КПП: для 10-значного ИНН обязателен, для 12-значного — запрещён
+      if (data.inn!.length === 10) {
+        if (!data.kpp || data.kpp === '') {
+          ctx.addIssue({ code: 'custom', path: ['kpp'], message: 'КПП обязателен для организации' })
+        }
+      } else if (data.inn!.length === 12) {
+        if (data.kpp && data.kpp !== '') {
+          ctx.addIssue({ code: 'custom', path: ['kpp'], message: 'КПП не используется для ИП — оставьте пустым' })
+        }
+      }
+
+      // ОГРН: контрольная сумма + длина под тип ИНН
+      if (data.ogrn && data.ogrn !== '') {
+        if (!validateOgrn(data.ogrn)) {
+          ctx.addIssue({ code: 'custom', path: ['ogrn'], message: 'Некорректный ОГРН/ОГРНИП (контрольная сумма)' })
+        } else {
+          if (data.inn!.length === 10 && data.ogrn.length !== 13) {
+            ctx.addIssue({ code: 'custom', path: ['ogrn'], message: 'Для организации — ОГРН должен быть 13 цифр' })
+          }
+          if (data.inn!.length === 12 && data.ogrn.length !== 15) {
+            ctx.addIssue({ code: 'custom', path: ['ogrn'], message: 'Для ИП — ОГРНИП должен быть 15 цифр' })
+          }
+        }
+      }
+    } else {
+      // Если inn пустой — все юр.поля должны быть пустыми (нельзя «частично юрлицо»)
+      const juridicalFields: Array<keyof typeof data> = [
+        'legalName',
+        'kpp',
+        'ogrn',
+        'legalAddress',
+        'defaultOurLegalEntityId',
+      ]
+      for (const field of juridicalFields) {
+        const v = data[field] as string | undefined
+        if (v && v !== '') {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['inn'],
+            message: 'Если заполнены юр.поля — обязательно укажите ИНН (или очистите остальные поля)',
+          })
+          break
+        }
+      }
+    }
+
+    // Банк.реквизиты — всё или ничего
+    const bankValues = [data.bankName, data.bankBic, data.bankAccount, data.bankCorrAccount]
+    const filledBank = bankValues.filter((f) => f && f !== '').length
+    if (filledBank > 0 && filledBank < 4) {
+      if (!data.bankName) ctx.addIssue({ code: 'custom', path: ['bankName'], message: 'Заполните все банковские реквизиты или оставьте все пустыми' })
+      if (!data.bankBic) ctx.addIssue({ code: 'custom', path: ['bankBic'], message: 'Заполните все банковские реквизиты или оставьте все пустыми' })
+      if (!data.bankAccount) ctx.addIssue({ code: 'custom', path: ['bankAccount'], message: 'Заполните все банковские реквизиты или оставьте все пустыми' })
+      if (!data.bankCorrAccount) ctx.addIssue({ code: 'custom', path: ['bankCorrAccount'], message: 'Заполните все банковские реквизиты или оставьте все пустыми' })
+    }
+    if (filledBank === 4) {
+      if (!validateBic(data.bankBic!)) {
+        ctx.addIssue({ code: 'custom', path: ['bankBic'], message: 'Некорректный БИК' })
+      } else {
+        if (!validateAccount(data.bankAccount!, data.bankBic!)) {
+          ctx.addIssue({ code: 'custom', path: ['bankAccount'], message: 'Расчётный счёт: контрольная сумма не сходится с БИК' })
+        }
+        if (!validateCorrAccount(data.bankCorrAccount!, data.bankBic!)) {
+          ctx.addIssue({ code: 'custom', path: ['bankCorrAccount'], message: 'Корр. счёт: контрольная сумма не сходится с БИК' })
+        }
+      }
+    }
+
+    // Договор: оба поля или ни одного
+    const hasContractNumber = !!data.contractNumber && data.contractNumber !== ''
+    const hasContractDate = !!data.contractDate && data.contractDate !== ''
+    if (hasContractNumber !== hasContractDate) {
+      if (!hasContractNumber) {
+        ctx.addIssue({ code: 'custom', path: ['contractNumber'], message: 'Укажите номер договора или очистите дату' })
+      }
+      if (!hasContractDate) {
+        ctx.addIssue({ code: 'custom', path: ['contractDate'], message: 'Укажите дату договора или очистите номер' })
+      }
+    }
+  })
 
 const locationSchema = z.object({
   name: z.string().trim().min(1, 'Название точки обязательно').max(150),
@@ -52,6 +183,43 @@ export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
+// Нормализация: '' / undefined / null → null; не-пустая строка остаётся как есть.
+function s(v: string | null | undefined): string | null {
+  if (v === undefined || v === null) return null
+  const trimmed = v.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+/**
+ * Собирает payload для Prisma из ClientFormData, нормализуя пустые строки в null.
+ * Включает все юр.поля Спринта 7b. Для contactPhone/Messenger/notes используется
+ * тот же `s()` хелпер вместо старого `?? null` — поведение идентичное.
+ */
+function toClientRequisitesPayload(data: ClientFormData) {
+  return {
+    contactName: s(data.contactName),
+    contactPhone: s(data.contactPhone),
+    contactMessenger: s(data.contactMessenger),
+    notes: s(data.notes),
+
+    legalName: s(data.legalName),
+    inn: s(data.inn),
+    kpp: s(data.kpp),
+    ogrn: s(data.ogrn),
+    legalAddress: s(data.legalAddress),
+
+    bankName: s(data.bankName),
+    bankBic: s(data.bankBic),
+    bankAccount: s(data.bankAccount),
+    bankCorrAccount: s(data.bankCorrAccount),
+
+    contractNumber: s(data.contractNumber),
+    contractDate: data.contractDate ? new Date(data.contractDate) : null,
+
+    defaultOurLegalEntityId: s(data.defaultOurLegalEntityId),
+  }
+}
+
 // CLIENT ============================================================
 
 export async function createClient(
@@ -75,13 +243,12 @@ export async function createClient(
     locationData = locParsed.data
   }
 
+  const requisites = toClientRequisitesPayload(parsed.data)
+
   const client = await prisma.client.create({
     data: {
       name: parsed.data.name,
-      contactName: parsed.data.contactName ?? null,
-      contactPhone: parsed.data.contactPhone ?? null,
-      contactMessenger: parsed.data.contactMessenger ?? null,
-      notes: parsed.data.notes ?? null,
+      ...requisites,
       ...(locationData && {
         locations: {
           create: {
@@ -104,7 +271,11 @@ export async function createClient(
       action: 'CLIENT_CREATED',
       entityType: 'Client',
       entityId: client.id,
-      payload: { name: client.name },
+      payload: {
+        name: client.name,
+        inn: requisites.inn,
+        defaultOurLegalEntityId: requisites.defaultOurLegalEntityId,
+      },
     },
   })
 
@@ -124,16 +295,44 @@ export async function updateClient(
     return { ok: false, error: firstError?.message ?? 'Неверные данные клиента' }
   }
 
+  // Diff: фиксируем для лога какие юр./связь-поля поменялись
+  const before = await prisma.client.findUnique({
+    where: { id },
+    select: {
+      inn: true,
+      defaultOurLegalEntityId: true,
+      contractNumber: true,
+    },
+  })
+
+  const requisites = toClientRequisitesPayload(parsed.data)
+
   await prisma.client.update({
     where: { id },
     data: {
       name: parsed.data.name,
-      contactName: parsed.data.contactName ?? null,
-      contactPhone: parsed.data.contactPhone ?? null,
-      contactMessenger: parsed.data.contactMessenger ?? null,
-      notes: parsed.data.notes ?? null,
+      ...requisites,
     },
   })
+
+  const changed: Record<string, { from: string | null; to: string | null }> = {}
+  if (before) {
+    if ((before.inn ?? null) !== (requisites.inn ?? null)) {
+      changed.inn = { from: before.inn ?? null, to: requisites.inn ?? null }
+    }
+    if ((before.defaultOurLegalEntityId ?? null) !== (requisites.defaultOurLegalEntityId ?? null)) {
+      changed.defaultOurLegalEntityId = {
+        from: before.defaultOurLegalEntityId ?? null,
+        to: requisites.defaultOurLegalEntityId ?? null,
+      }
+    }
+    if ((before.contractNumber ?? null) !== (requisites.contractNumber ?? null)) {
+      changed.contractNumber = {
+        from: before.contractNumber ?? null,
+        to: requisites.contractNumber ?? null,
+      }
+    }
+  }
 
   await prisma.activityLog.create({
     data: {
@@ -142,7 +341,10 @@ export async function updateClient(
       action: 'CLIENT_UPDATED',
       entityType: 'Client',
       entityId: id,
-      payload: { name: parsed.data.name },
+      payload: {
+        name: parsed.data.name,
+        ...(Object.keys(changed).length > 0 ? { changed } : {}),
+      },
     },
   })
 
@@ -418,6 +620,23 @@ export async function updateClientMaxChatId(
 
   revalidatePath(`/clients/${clientId}`)
   return { ok: true, data: undefined }
+}
+
+/**
+ * Список активных наших юрлиц для Select в форме клиента.
+ * Доступен ADMIN и MANAGER (менеджеры заполняют реквизиты клиентов).
+ * settings/legal-entities/actions.ts.listLegalEntities — ADMIN-only и тянет
+ * все юрлица; здесь нам нужен только активный срез нужных полей.
+ */
+export async function listActiveOurLegalEntitiesForClientForm(): Promise<
+  Array<{ id: string; shortName: string; entityType: 'INDIVIDUAL_ENTREPRENEUR' | 'LLC' }>
+> {
+  await requireRole(['ADMIN', 'MANAGER'])
+  return prisma.ourLegalEntity.findMany({
+    where: { isActive: true },
+    orderBy: { shortName: 'asc' },
+    select: { id: true, shortName: true, entityType: true },
+  })
 }
 
 /**

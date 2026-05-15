@@ -23,6 +23,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           location: { select: { id: true, name: true } },
         },
       },
+      defaultOurLegalEntity: {
+        select: { id: true, shortName: true, entityType: true },
+      },
       _count: {
         select: { orders: true },
       },

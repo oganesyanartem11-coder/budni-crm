@@ -184,6 +184,27 @@ model Client {
   locationAliases     Json?    // {"loc_001": ["первый", "цех", "производство"]}
   safeAnswerStreak    Int      @default(0)
 
+  // === Юридические реквизиты (Спринт 7b, опционально) ===
+  legalName        String?   // Полное юридическое название (для УПД)
+  inn              String?
+  kpp              String?
+  ogrn             String?
+  legalAddress     String?
+
+  // === Банковские реквизиты клиента (опционально) ===
+  bankName         String?
+  bankBic          String?
+  bankAccount      String?
+  bankCorrAccount  String?
+
+  // === Договор (опционально) ===
+  contractNumber   String?
+  contractDate     DateTime? @db.Date
+
+  // === Наше юрлицо для отгрузки (опционально, обязательно если есть inn) ===
+  defaultOurLegalEntityId String?
+  defaultOurLegalEntity   OurLegalEntity? @relation("ClientDefaultLegalEntity", fields: [defaultOurLegalEntityId], references: [id], onDelete: SetNull)
+
   locations         ClientLocation[]
   mealConfigs       ClientMealConfig[]
   orders            Order[]
@@ -193,6 +214,7 @@ model Client {
 
   @@index([isActive])
   @@index([name])
+  @@index([defaultOurLegalEntityId])
 }
 
 model ClientLocation {
@@ -639,6 +661,8 @@ model OurLegalEntity {
   isActive            Boolean  @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  defaultForClients   Client[] @relation("ClientDefaultLegalEntity")
 
   @@index([isActive])
 }
