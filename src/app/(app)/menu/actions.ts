@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { getMondayOfWeek, getSundayOfWeek } from '@/lib/utils/week'
-import type { DishCategory, MealType } from '@prisma/client'
+import type { DishCategory, MealType, MenuStatus } from '@prisma/client'
 
 const createMenuSchema = z.object({
   weekStartIso: z.string(), // ISO date string понедельника недели
@@ -102,6 +102,13 @@ const saveDayDishesSchema = z.object({
   })),
 })
 
+const SAVE_BLOCKED_REASON: Partial<Record<MenuStatus, string>> = {
+  PENDING_APPROVAL:
+    'Меню на согласовании. Сначала верните его в черновик или дождитесь решения администратора.',
+  APPROVED: 'Меню утверждено. Снимите утверждение для редактирования.',
+  ARCHIVED: 'Меню архивировано. Редактирование невозможно.',
+}
+
 export async function saveDayDishes(
   menuDayId: string,
   dishes: Array<{ dishId: string; slotCategory: DishCategory }>
@@ -113,7 +120,7 @@ export async function saveDayDishes(
     return { ok: false, error: 'Неверные данные' }
   }
 
-  // Проверим что меню в DRAFT (нельзя редактировать утверждённое)
+  // Проверим что меню в DRAFT (нельзя редактировать утверждённое / на согласовании)
   const menuDay = await prisma.menuDay.findUnique({
     where: { id: menuDayId },
     include: { menuCycle: true },
@@ -124,7 +131,8 @@ export async function saveDayDishes(
   }
 
   if (menuDay.menuCycle.status !== 'DRAFT') {
-    return { ok: false, error: 'Можно редактировать только черновик' }
+    const reason = SAVE_BLOCKED_REASON[menuDay.menuCycle.status]
+    return { ok: false, error: reason ?? 'Можно редактировать только черновик' }
   }
 
   // Транзакция: удалить старые, создать новые
@@ -146,7 +154,53 @@ export async function saveDayDishes(
 }
 
 /**
- * Утверждает меню. Только ADMIN.
+ * Отправляет меню на согласование (DRAFT → PENDING_APPROVAL). CHEF или ADMIN.
+ * Сбрасывает rejectionComment — это новая итерация.
+ */
+export async function submitMenuForApproval(cycleId: string): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'CHEF'])
+
+  const cycle = await prisma.menuCycle.findUnique({
+    where: { id: cycleId },
+    include: { days: { include: { dishes: true } } },
+  })
+  if (!cycle) return { ok: false, error: 'Меню не найдено' }
+  if (cycle.status !== 'DRAFT') {
+    return { ok: false, error: 'Можно отправить на согласование только черновик' }
+  }
+
+  const dishCount = cycle.days.reduce((acc, d) => acc + d.dishes.length, 0)
+  if (dishCount === 0) {
+    return {
+      ok: false,
+      error: 'Нельзя отправить на согласование пустое меню. Добавьте хотя бы одно блюдо.',
+    }
+  }
+
+  await prisma.$transaction([
+    prisma.menuCycle.update({
+      where: { id: cycleId },
+      data: { status: 'PENDING_APPROVAL', rejectionComment: null },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'MENU_SUBMITTED_FOR_APPROVAL',
+        entityType: 'MenuCycle',
+        entityId: cycleId,
+        payload: { menuCycleId: cycleId, menuName: cycle.name },
+      },
+    }),
+  ])
+
+  revalidatePath('/menu')
+  return { ok: true, data: undefined }
+}
+
+/**
+ * Утверждает меню (PENDING_APPROVAL → APPROVED). Только ADMIN.
+ * Проверку «пустое меню» здесь не делаем — в PENDING_APPROVAL не попадает пустое.
  */
 export async function approveMenu(cycleId: string): Promise<ActionResult> {
   const user = await requireRole(['ADMIN'])
@@ -155,20 +209,8 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
   if (!cycle) {
     return { ok: false, error: 'Меню не найдено' }
   }
-  if (cycle.status !== 'DRAFT') {
-    return { ok: false, error: 'Утвердить можно только черновик' }
-  }
-
-  // Проверяем что в меню есть хотя бы одно блюдо
-  const dishCount = await prisma.menuDayDish.count({
-    where: {
-      menuDay: {
-        menuCycleId: cycleId,
-      },
-    },
-  })
-  if (dishCount === 0) {
-    return { ok: false, error: 'Нельзя утвердить пустое меню. Добавьте блюда хотя бы в один день.' }
+  if (cycle.status !== 'PENDING_APPROVAL') {
+    return { ok: false, error: 'Утвердить можно только меню на согласовании' }
   }
 
   await prisma.menuCycle.update({
@@ -195,8 +237,64 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
   return { ok: true, data: undefined }
 }
 
+const rejectMenuSchema = z.object({
+  comment: z.string().trim().max(500, 'Комментарий слишком длинный (макс 500 символов)').optional(),
+})
+
 /**
- * Отзывает утверждение меню — APPROVED → DRAFT. Только ADMIN.
+ * Возвращает меню на доработку (PENDING_APPROVAL → DRAFT). Только ADMIN.
+ * Опционально сохраняет комментарий шефу.
+ */
+export async function rejectMenu(
+  cycleId: string,
+  comment?: string
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN'])
+
+  const parsed = rejectMenuSchema.safeParse({ comment })
+  if (!parsed.success) {
+    const firstError = parsed.error.issues[0]
+    return { ok: false, error: firstError?.message ?? 'Неверный комментарий' }
+  }
+  const normalizedComment = parsed.data.comment && parsed.data.comment.length > 0
+    ? parsed.data.comment
+    : null
+
+  const cycle = await prisma.menuCycle.findUnique({ where: { id: cycleId } })
+  if (!cycle) return { ok: false, error: 'Меню не найдено' }
+  if (cycle.status !== 'PENDING_APPROVAL') {
+    return { ok: false, error: 'Вернуть на доработку можно только меню на согласовании' }
+  }
+
+  await prisma.$transaction([
+    prisma.menuCycle.update({
+      where: { id: cycleId },
+      data: {
+        status: 'DRAFT',
+        rejectionComment: normalizedComment,
+        approvedById: null,
+        approvedAt: null,
+      },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'MENU_REJECTED',
+        entityType: 'MenuCycle',
+        entityId: cycleId,
+        payload: { menuCycleId: cycleId, menuName: cycle.name, comment: normalizedComment },
+      },
+    }),
+  ])
+
+  revalidatePath('/menu')
+  return { ok: true, data: undefined }
+}
+
+/**
+ * Отзывает утверждение меню (APPROVED → DRAFT). Только ADMIN.
+ * rejectionComment сбрасываем — снимаемое утверждение != возврат с комментарием.
  */
 export async function unapproveMenu(cycleId: string): Promise<ActionResult> {
   const user = await requireRole(['ADMIN'])
@@ -215,6 +313,7 @@ export async function unapproveMenu(cycleId: string): Promise<ActionResult> {
       status: 'DRAFT',
       approvedById: null,
       approvedAt: null,
+      rejectionComment: null,
     },
   })
 
@@ -234,15 +333,43 @@ export async function unapproveMenu(cycleId: string): Promise<ActionResult> {
 }
 
 /**
- * Архивирует меню — APPROVED → ARCHIVED. Только ADMIN.
+ * Архивирует меню. Разрешено из DRAFT или APPROVED.
+ * Из PENDING_APPROVAL — отказ (сначала ADMIN должен утвердить или вернуть).
+ * Из ARCHIVED — идемпотентный отказ.
  */
 export async function archiveMenu(cycleId: string): Promise<ActionResult> {
-  await requireRole(['ADMIN'])
+  const user = await requireRole(['ADMIN'])
 
-  await prisma.menuCycle.update({
-    where: { id: cycleId },
-    data: { status: 'ARCHIVED' },
-  })
+  const cycle = await prisma.menuCycle.findUnique({ where: { id: cycleId } })
+  if (!cycle) return { ok: false, error: 'Меню не найдено' }
+  if (cycle.status === 'PENDING_APPROVAL') {
+    return {
+      ok: false,
+      error: 'Сначала утвердите или верните меню на доработку, прежде чем архивировать',
+    }
+  }
+  if (cycle.status === 'ARCHIVED') {
+    return { ok: false, error: 'Меню уже архивировано' }
+  }
+
+  const fromStatus = cycle.status
+
+  await prisma.$transaction([
+    prisma.menuCycle.update({
+      where: { id: cycleId },
+      data: { status: 'ARCHIVED' },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'MENU_ARCHIVED',
+        entityType: 'MenuCycle',
+        entityId: cycleId,
+        payload: { menuCycleId: cycleId, menuName: cycle.name, fromStatus },
+      },
+    }),
+  ])
 
   revalidatePath('/menu')
   return { ok: true, data: undefined }

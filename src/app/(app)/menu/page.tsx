@@ -19,8 +19,10 @@ export default async function MenuPage({ searchParams }: PageProps) {
 
   const menu = await getMenuForWeek(monday)
 
-  // Загружаем все активные блюда — для редактора слотов (нужен только если есть DRAFT)
-  const dishes = menu?.status === 'DRAFT'
+  // Загружаем все активные блюда. Редактор открывается только в DRAFT
+  // (isEditable считается в menu-view), но для просмотра меню в других
+  // статусах список блюд тоже нужен — каталог может быть полезен в read-only.
+  const dishes = menu
     ? await prisma.dish.findMany({
         where: { isActive: true },
         orderBy: [{ category: 'asc' }, { name: 'asc' }],

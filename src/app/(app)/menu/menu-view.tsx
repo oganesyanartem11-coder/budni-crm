@@ -2,11 +2,29 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, CalendarDays, Plus, Check } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  CalendarDays,
+  Plus,
+  Check,
+  Clock,
+  Send,
+  Archive,
+  Undo2,
+  AlertCircle,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { StatusBadge } from '@/components/ui/status-badge'
 import { DayEditor } from './day-editor'
-import { createDraftMenu, approveMenu, unapproveMenu } from './actions'
+import {
+  createDraftMenu,
+  submitMenuForApproval,
+  approveMenu,
+  rejectMenu,
+  unapproveMenu,
+  archiveMenu,
+} from './actions'
 import {
   formatWeekRange,
   shiftWeek,
@@ -17,8 +35,26 @@ import {
 } from '@/lib/utils/week'
 import { MENU_STATUS_LABELS, MENU_STATUS_VARIANT } from '@/lib/constants/menu-status'
 import { DISH_CATEGORY_ICONS } from '@/lib/constants/dish-categories'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils/cn'
-import type { Dish, MealType, DishCategory, UserRole } from '@prisma/client'
+import type { Dish, MealType, DishCategory, UserRole, MenuStatus } from '@prisma/client'
 
 const MEAL_TYPE_LABELS: Record<MealType, string> = {
   BREAKFAST: 'Завтрак',
@@ -27,6 +63,8 @@ const MEAL_TYPE_LABELS: Record<MealType, string> = {
 }
 
 const MEAL_TYPE_ORDER: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
+
+const REJECT_COMMENT_MAX = 500
 
 interface MenuDayDish {
   id: string
@@ -57,9 +95,10 @@ interface MenuData {
   name: string
   validFrom: Date
   validTo: Date
-  status: 'DRAFT' | 'APPROVED' | 'ARCHIVED'
+  status: MenuStatus
   approvedAt: Date | null
   approvedBy: { id: string; name: string } | null
+  rejectionComment: string | null
   days: MenuDayData[]
 }
 
@@ -74,11 +113,17 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [editingDay, setEditingDay] = useState<MenuDayData | null>(null)
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectComment, setRejectComment] = useState('')
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [unapproveOpen, setUnapproveOpen] = useState(false)
 
   const monday = new Date(weekStartIso)
   const isCurrent = isCurrentWeek(monday)
   const canEdit = userRole === 'ADMIN' || userRole === 'CHEF'
-  const canApprove = userRole === 'ADMIN'
+  const isAdmin = userRole === 'ADMIN'
+  const isChef = userRole === 'CHEF'
+  const isEditable = !!menu && menu.status === 'DRAFT' && canEdit
 
   function navigateWeek(weeks: number) {
     const newWeek = shiftWeek(monday, weeks)
@@ -101,6 +146,19 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
     })
   }
 
+  function handleSubmitForApproval() {
+    if (!menu) return
+    startTransition(async () => {
+      const result = await submitMenuForApproval(menu.id)
+      if (result.ok) {
+        toast.success('Меню отправлено на согласование')
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
+
   function handleApprove() {
     if (!menu) return
     startTransition(async () => {
@@ -114,12 +172,43 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
     })
   }
 
+  function handleReject() {
+    if (!menu) return
+    const commentToSend = rejectComment.trim() || undefined
+    startTransition(async () => {
+      const result = await rejectMenu(menu.id, commentToSend)
+      if (result.ok) {
+        toast.success('Меню возвращено шефу')
+        setRejectOpen(false)
+        setRejectComment('')
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
+
   function handleUnapprove() {
     if (!menu) return
     startTransition(async () => {
       const result = await unapproveMenu(menu.id)
       if (result.ok) {
         toast.success('Утверждение отозвано')
+        setUnapproveOpen(false)
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
+
+  function handleArchive() {
+    if (!menu) return
+    startTransition(async () => {
+      const result = await archiveMenu(menu.id)
+      if (result.ok) {
+        toast.success('Меню архивировано')
+        setArchiveOpen(false)
         router.refresh()
       } else {
         toast.error(result.error)
@@ -138,8 +227,30 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
     }
   }
 
+  const showRejectionBanner =
+    !!menu && menu.status === 'DRAFT' && !!menu.rejectionComment
+
   return (
     <div className="space-y-5">
+      {showRejectionBanner && menu && (
+        <div className="rounded-2xl border-l-4 border-warning bg-warning-bg/30 p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-warning-fg shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0 space-y-1">
+            <p className="font-semibold text-sm text-warning-fg">
+              Возвращено на доработку
+            </p>
+            {menu.rejectionComment && (
+              <p className="text-sm text-warning-fg whitespace-pre-wrap break-words">
+                {menu.rejectionComment}
+              </p>
+            )}
+            <p className="text-xs text-fg-muted">
+              После того как внесёте правки, отправьте меню снова на согласование.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Шапка недели */}
       <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -196,34 +307,93 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
               </span>
             )}
 
-            {/* Кнопка «Создать меню» переехала внутрь EmptyState (см. ниже),
-                чтобы CTA был в визуальном центре пустого экрана. */}
+            {menu?.status === 'PENDING_APPROVAL' && isChef && (
+              <span className="text-xs text-fg-muted flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                Меню на согласовании у администратора. Редактирование заблокировано.
+              </span>
+            )}
 
-            {menu?.status === 'DRAFT' && canApprove && (
+            {menu?.status === 'DRAFT' && canEdit && (
               <button
                 type="button"
-                onClick={handleApprove}
+                onClick={handleSubmitForApproval}
                 disabled={isPending}
-                className="px-4 py-2 rounded-pill bg-success text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+                className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
               >
-                <Check className="w-4 h-4" />
-                Утвердить
+                <Send className="w-4 h-4" />
+                Отправить на согласование
               </button>
             )}
 
-            {menu?.status === 'APPROVED' && canApprove && (
+            {menu?.status === 'DRAFT' && isAdmin && (
               <button
                 type="button"
-                onClick={handleUnapprove}
+                onClick={() => setArchiveOpen(true)}
                 disabled={isPending}
                 className="px-4 py-2 rounded-pill border border-border-strong bg-surface text-fg-muted hover:text-fg hover:bg-bg font-medium text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                Отозвать
+                <Archive className="w-4 h-4" />
+                Архивировать
               </button>
             )}
 
-            {/* TODO: восстановить в Спринте 9 — AI-помощник для меню. Кнопка скрыта,
-                чтобы не вводить менеджеров в заблуждение заглушкой. */}
+            {menu?.status === 'PENDING_APPROVAL' && isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={isPending}
+                  className="px-4 py-2 rounded-pill bg-success text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  Утвердить
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectComment('')
+                    setRejectOpen(true)
+                  }}
+                  disabled={isPending}
+                  className="px-4 py-2 rounded-pill border border-border-strong bg-surface text-fg hover:bg-bg font-medium text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Undo2 className="w-4 h-4" />
+                  Вернуть на доработку
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setArchiveOpen(true)}
+                  disabled={isPending}
+                  className="px-4 py-2 rounded-pill border border-border bg-surface text-fg-muted hover:text-danger-fg hover:bg-danger-bg/40 font-medium text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Archive className="w-4 h-4" />
+                  Архивировать
+                </button>
+              </>
+            )}
+
+            {menu?.status === 'APPROVED' && isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setUnapproveOpen(true)}
+                  disabled={isPending}
+                  className="px-4 py-2 rounded-pill border border-border-strong bg-surface text-fg-muted hover:text-fg hover:bg-bg font-medium text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  Снять утверждение
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setArchiveOpen(true)}
+                  disabled={isPending}
+                  className="px-4 py-2 rounded-pill border border-border bg-surface text-fg-muted hover:text-fg hover:bg-bg font-medium text-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Archive className="w-4 h-4" />
+                  Архивировать
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -266,7 +436,7 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
                           <td key={mt} className="px-3 py-3 align-top min-w-[200px]">
                             <DaySlotCell
                               day={day}
-                              canEdit={canEdit && menu.status === 'DRAFT'}
+                              canEdit={isEditable}
                               onEdit={() => day && setEditingDay(day)}
                             />
                           </td>
@@ -281,7 +451,7 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
         </div>
       )}
 
-      {/* Редактор дня (модалка) */}
+      {/* Редактор дня (модалка) — открывается только если isEditable */}
       {editingDay && (
         <DayEditor
           day={editingDay}
@@ -294,6 +464,126 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
           }}
         />
       )}
+
+      {/* Диалог: вернуть на доработку с опциональным комментарием */}
+      <Dialog
+        open={rejectOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setRejectOpen(false)
+            setRejectComment('')
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Вернуть меню {menu ? `«${menu.name}»` : ''} на доработку?
+            </DialogTitle>
+            <DialogDescription>
+              Меню вернётся в черновик. Шеф получит уведомление и сможет внести правки.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs uppercase tracking-wider text-fg-muted">
+              Комментарий шефу (необязательно)
+            </label>
+            <textarea
+              value={rejectComment}
+              onChange={(e) => setRejectComment(e.target.value.slice(0, REJECT_COMMENT_MAX))}
+              placeholder="Опишите что нужно поправить — это поможет шефу."
+              maxLength={REJECT_COMMENT_MAX}
+              rows={4}
+              disabled={isPending}
+              className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent text-sm resize-none"
+            />
+            <div className="text-right text-xs text-fg-muted">
+              {rejectComment.length}/{REJECT_COMMENT_MAX}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => {
+                setRejectOpen(false)
+                setRejectComment('')
+              }}
+              disabled={isPending}
+              className="px-4 py-2 rounded-pill text-fg-muted text-sm hover:text-fg disabled:opacity-50"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              onClick={handleReject}
+              disabled={isPending}
+              className="px-4 py-2 rounded-pill bg-danger text-accent-fg font-medium text-sm hover:opacity-90 disabled:opacity-50"
+            >
+              Вернуть
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={archiveOpen}
+        onOpenChange={(o) => {
+          if (!o) setArchiveOpen(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Архивировать меню?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Это действие можно отменить только вручную через БД. Меню перестанет
+              отображаться в активных списках.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={(e) => {
+                e.preventDefault()
+                handleArchive()
+              }}
+              disabled={isPending}
+            >
+              Архивировать
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={unapproveOpen}
+        onOpenChange={(o) => {
+          if (!o) setUnapproveOpen(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Снять утверждение и вернуть в черновик?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Меню снова станет редактируемым. Поля «Кто утвердил» и «Когда» обнулятся.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleUnapprove()
+              }}
+              disabled={isPending}
+            >
+              Снять утверждение
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

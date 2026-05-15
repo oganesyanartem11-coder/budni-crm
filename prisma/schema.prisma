@@ -114,6 +114,7 @@ enum DishUnit {
 
 enum MenuStatus {
   DRAFT
+  PENDING_APPROVAL
   APPROVED
   ARCHIVED
 }
@@ -338,6 +339,7 @@ model MenuCycle {
   approvedById String?
   approvedBy   User?      @relation("MenuApprovedBy", fields: [approvedById], references: [id])
   approvedAt   DateTime?
+  rejectionComment String? // Комментарий от ADMIN при возврате на доработку
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
