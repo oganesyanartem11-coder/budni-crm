@@ -1,11 +1,44 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Plus, KeyRound, Power, PowerOff, CheckCircle2, Copy, Send } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import {
+  Plus,
+  KeyRound,
+  Power,
+  PowerOff,
+  CheckCircle2,
+  Copy,
+  Send,
+  Link2,
+} from 'lucide-react'
 import { toast } from 'sonner'
-import { createUser, regenerateUserPin, setUserActive } from './actions'
+import {
+  createUser,
+  regenerateUserPin,
+  setUserActive,
+  generateOnboardingTokenForUser,
+  unlinkTelegramFromUser,
+} from './actions'
 import type { UserRole } from '@prisma/client'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils/cn'
 
 interface UserRow {
@@ -38,12 +71,52 @@ const ROLE_COLORS: Record<UserRole, string> = {
   COURIER: 'bg-neutral-bg text-neutral-fg',
 }
 
+function defaultLinkTelegramFor(role: UserRole): boolean {
+  return role === 'MANAGER' || role === 'ADMIN'
+}
+
+// Состояние «после успешного действия» — модалка с готовым текстом и
+// раскладкой по отдельности. Используется и для создания, и для перевыдачи
+// доступа Telegram (тогда pin === null), и для регенерации PIN (тогда
+// deepLink === null и loginUrl === null — показываем только PIN).
+interface Credentials {
+  title: string
+  pin: string | null
+  loginUrl: string | null
+  deepLink: string | null
+  messageTemplate: string
+}
+
 export function UsersTable({ users, currentUserId }: Props) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
+
+  // Форма создания
   const [showCreate, setShowCreate] = useState(false)
   const [name, setName] = useState('')
   const [role, setRole] = useState<UserRole>('MANAGER')
-  const [shownPin, setShownPin] = useState<{ name: string; pin: string } | null>(null)
+  const [linkTelegram, setLinkTelegram] = useState<boolean>(
+    defaultLinkTelegramFor('MANAGER')
+  )
+
+  // Модалка результата
+  const [shownCreds, setShownCreds] = useState<Credentials | null>(null)
+  const [showDetails, setShowDetails] = useState(false)
+
+  // Подтверждение перевыдачи для уже привязанного юзера
+  const [reissueTarget, setReissueTarget] = useState<UserRow | null>(null)
+
+  function handleRoleChange(v: UserRole) {
+    setRole(v)
+    setLinkTelegram(defaultLinkTelegramFor(v))
+  }
+
+  function copy(text: string, okMessage: string) {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast.success(okMessage))
+      .catch(() => toast.error('Не удалось скопировать'))
+  }
 
   function handleCreate() {
     if (!name.trim()) {
@@ -51,12 +124,21 @@ export function UsersTable({ users, currentUserId }: Props) {
       return
     }
     startTransition(async () => {
-      const r = await createUser({ name, role })
+      const r = await createUser({ name, role, linkTelegram })
       if (r.ok) {
-        setShownPin({ name: r.data.name, pin: r.data.pin })
+        setShownCreds({
+          title: `Пользователь создан: ${r.data.name}`,
+          pin: r.data.pin,
+          loginUrl: r.data.loginUrl,
+          deepLink: r.data.deepLink,
+          messageTemplate: r.data.messageTemplate,
+        })
+        setShowDetails(false)
         setName('')
         setRole('MANAGER')
+        setLinkTelegram(defaultLinkTelegramFor('MANAGER'))
         setShowCreate(false)
+        router.refresh()
       } else {
         toast.error(r.error)
       }
@@ -68,7 +150,14 @@ export function UsersTable({ users, currentUserId }: Props) {
     startTransition(async () => {
       const r = await regenerateUserPin(userId)
       if (r.ok) {
-        setShownPin({ name: userName, pin: r.data.pin })
+        setShownCreds({
+          title: `Новый PIN: ${userName}`,
+          pin: r.data.pin,
+          loginUrl: null,
+          deepLink: null,
+          messageTemplate: `Новый PIN для входа в CRM «Будни»: ${r.data.pin}`,
+        })
+        setShowDetails(false)
       } else {
         toast.error(r.error)
       }
@@ -88,11 +177,46 @@ export function UsersTable({ users, currentUserId }: Props) {
     })
   }
 
-  function copyPin() {
-    if (!shownPin) return
-    navigator.clipboard.writeText(shownPin.pin)
-      .then(() => toast.success('PIN скопирован'))
-      .catch(() => toast.error('Не удалось скопировать'))
+  function doReissue(u: UserRow) {
+    startTransition(async () => {
+      const r = await generateOnboardingTokenForUser(u.id)
+      if (r.ok) {
+        setShownCreds({
+          title: `Новая ссылка для Telegram: ${r.data.name}`,
+          pin: null,
+          loginUrl: r.data.loginUrl,
+          deepLink: r.data.deepLink,
+          messageTemplate: r.data.messageTemplate,
+        })
+        setShowDetails(false)
+        setReissueTarget(null)
+        router.refresh()
+      } else {
+        toast.error(r.error)
+        setReissueTarget(null)
+      }
+    })
+  }
+
+  function doUnlink(u: UserRow) {
+    startTransition(async () => {
+      const r = await unlinkTelegramFromUser(u.id)
+      if (r.ok) {
+        toast.success(`Telegram отвязан у «${u.name}»`)
+        setReissueTarget(null)
+        router.refresh()
+      } else {
+        toast.error(r.error)
+      }
+    })
+  }
+
+  function handleTelegramClick(u: UserRow) {
+    if (!u.telegramChatId) {
+      doReissue(u)
+    } else {
+      setReissueTarget(u)
+    }
   }
 
   return (
@@ -112,7 +236,10 @@ export function UsersTable({ users, currentUserId }: Props) {
         </button>
       </div>
 
-      <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div
+        className="rounded-2xl bg-surface border border-border overflow-hidden"
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-bg/50 text-xs uppercase tracking-wider text-fg-muted">
@@ -134,7 +261,12 @@ export function UsersTable({ users, currentUserId }: Props) {
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium', ROLE_COLORS[u.role])}>
+                    <span
+                      className={cn(
+                        'inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium',
+                        ROLE_COLORS[u.role]
+                      )}
+                    >
                       {ROLE_LABELS[u.role]}
                     </span>
                   </td>
@@ -155,6 +287,20 @@ export function UsersTable({ users, currentUserId }: Props) {
                     <div className="inline-flex items-center gap-1.5">
                       <button
                         type="button"
+                        onClick={() => handleTelegramClick(u)}
+                        disabled={isPending || !u.isActive}
+                        title={
+                          u.telegramChatId
+                            ? 'Перевыдать доступ Telegram'
+                            : 'Сгенерировать ссылку для Telegram-бота'
+                        }
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-pill bg-bg hover:bg-border text-xs disabled:opacity-50"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        Telegram
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleRegenerate(u.id, u.name)}
                         disabled={isPending || !u.isActive}
                         title="Сгенерировать новый PIN"
@@ -167,13 +313,25 @@ export function UsersTable({ users, currentUserId }: Props) {
                         type="button"
                         onClick={() => handleToggleActive(u)}
                         disabled={isPending || u.id === currentUserId}
-                        title={u.id === currentUserId ? 'Нельзя отключить себя' : u.isActive ? 'Отключить' : 'Включить'}
+                        title={
+                          u.id === currentUserId
+                            ? 'Нельзя отключить себя'
+                            : u.isActive
+                              ? 'Отключить'
+                              : 'Включить'
+                        }
                         className={cn(
                           'inline-flex items-center px-2.5 py-1 rounded-pill text-xs disabled:opacity-50',
-                          u.isActive ? 'bg-bg hover:bg-danger-bg/40 hover:text-danger-fg' : 'bg-success-bg/40 text-success-fg hover:bg-success-bg'
+                          u.isActive
+                            ? 'bg-bg hover:bg-danger-bg/40 hover:text-danger-fg'
+                            : 'bg-success-bg/40 text-success-fg hover:bg-success-bg'
                         )}
                       >
-                        {u.isActive ? <PowerOff className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
+                        {u.isActive ? (
+                          <PowerOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Power className="w-3.5 h-3.5" />
+                        )}
                       </button>
                     </div>
                   </td>
@@ -197,7 +355,9 @@ export function UsersTable({ users, currentUserId }: Props) {
             <h2 className="text-lg font-semibold">Новый пользователь</h2>
 
             <div>
-              <label className="block text-xs uppercase tracking-wider text-fg-muted mb-1">Имя</label>
+              <label className="block text-xs uppercase tracking-wider text-fg-muted mb-1">
+                Имя
+              </label>
               <input
                 type="text"
                 value={name}
@@ -210,8 +370,10 @@ export function UsersTable({ users, currentUserId }: Props) {
             </div>
 
             <div>
-              <label className="block text-xs uppercase tracking-wider text-fg-muted mb-1">Роль</label>
-              <Select value={role} onValueChange={(v) => setRole(v as UserRole)} disabled={isPending}>
+              <label className="block text-xs uppercase tracking-wider text-fg-muted mb-1">
+                Роль
+              </label>
+              <Select value={role} onValueChange={(v) => handleRoleChange(v as UserRole)} disabled={isPending}>
                 <SelectTrigger className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
                   <SelectValue />
                 </SelectTrigger>
@@ -223,6 +385,22 @@ export function UsersTable({ users, currentUserId }: Props) {
                 </SelectContent>
               </Select>
             </div>
+
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <Checkbox
+                checked={linkTelegram}
+                onCheckedChange={(c) => setLinkTelegram(c === true)}
+                disabled={isPending}
+                className="mt-0.5"
+              />
+              <div className="space-y-0.5">
+                <div className="text-sm">Привязать к Telegram-боту</div>
+                <div className="text-xs text-fg-muted">
+                  Пользователь получит ссылку для бота вместе с PIN. Без этого
+                  уведомления приходить не будут.
+                </div>
+              </div>
+            </label>
 
             <p className="text-xs text-fg-muted">
               PIN будет сгенерирован автоматически (4 цифры) и показан один раз после создания.
@@ -250,46 +428,181 @@ export function UsersTable({ users, currentUserId }: Props) {
         </div>
       )}
 
-      {shownPin && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
-          onClick={() => setShownPin(null)}
-        >
+      {shownCreds && (
+        // НИКАКОГО onClick на overlay — закрытие только по кнопке «Готово»,
+        // потому что PIN после закрытия восстановить нельзя.
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div
-            className="bg-surface rounded-2xl border border-border max-w-md w-full p-6 space-y-4 text-center"
+            className="bg-surface rounded-2xl border border-border max-w-lg w-full p-6 space-y-4"
             style={{ boxShadow: 'var(--shadow-popover)' }}
-            onClick={(e) => e.stopPropagation()}
           >
-            <CheckCircle2 className="w-10 h-10 mx-auto text-success-fg" />
-            <h2 className="text-lg font-semibold">PIN для «{shownPin.name}»</h2>
-            <div className="text-5xl font-mono font-bold tracking-widest tabular-nums">
-              {shownPin.pin}
+            <div className="text-center space-y-1">
+              <CheckCircle2 className="w-10 h-10 mx-auto text-success-fg" />
+              <h2 className="text-lg font-semibold">{shownCreds.title}</h2>
             </div>
-            <p className="text-xs text-warning-fg bg-warning-bg/30 rounded-xl p-3">
-              ⚠️ Запишите или сразу передайте сотруднику.
-              <br />
-              PIN больше не будет показан — только полная регенерация.
-            </p>
-            <div className="flex items-center justify-center gap-2">
+
+            <div className="space-y-2">
+              <label className="block text-xs uppercase tracking-wider text-fg-muted">
+                Готовый текст для отправки
+              </label>
+              <textarea
+                readOnly
+                value={shownCreds.messageTemplate}
+                rows={Math.min(
+                  10,
+                  Math.max(6, shownCreds.messageTemplate.split('\n').length + 1)
+                )}
+                className="w-full px-3 py-2 rounded-xl bg-bg border border-border text-xs font-mono resize-none focus:outline-none focus:border-accent"
+              />
               <button
                 type="button"
-                onClick={copyPin}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-pill border border-border-strong bg-surface text-fg text-sm hover:bg-bg"
+                onClick={() => copy(shownCreds.messageTemplate, 'Текст скопирован')}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90"
               >
                 <Copy className="w-3.5 h-3.5" />
-                Скопировать
+                Скопировать текст
               </button>
+            </div>
+
+            <details
+              open={showDetails}
+              onToggle={(e) =>
+                setShowDetails((e.target as HTMLDetailsElement).open)
+              }
+              className="text-sm"
+            >
+              <summary className="cursor-pointer text-xs text-fg-muted hover:text-fg select-none">
+                По отдельности
+              </summary>
+              <div className="mt-3 space-y-2 pl-1">
+                {shownCreds.pin && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-fg-muted shrink-0 w-16">PIN:</span>
+                    <code className="flex-1 font-mono tabular-nums text-base">
+                      {shownCreds.pin}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copy(shownCreds.pin!, 'PIN скопирован')}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg hover:bg-border text-xs"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Копировать
+                    </button>
+                  </div>
+                )}
+                {shownCreds.loginUrl && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-fg-muted shrink-0 w-16">Вход:</span>
+                    <code
+                      className="flex-1 font-mono text-xs truncate"
+                      title={shownCreds.loginUrl}
+                    >
+                      {shownCreds.loginUrl}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copy(shownCreds.loginUrl!, 'Ссылка скопирована')}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg hover:bg-border text-xs"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Копировать
+                    </button>
+                  </div>
+                )}
+                {shownCreds.deepLink && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-fg-muted shrink-0 w-16">Бот:</span>
+                    <code
+                      className="flex-1 font-mono text-xs truncate"
+                      title={shownCreds.deepLink}
+                    >
+                      {shownCreds.deepLink}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copy(shownCreds.deepLink!, 'Deep-link скопирован')}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg hover:bg-border text-xs"
+                    >
+                      <Copy className="w-3 h-3" />
+                      Копировать
+                    </button>
+                  </div>
+                )}
+              </div>
+            </details>
+
+            {shownCreds.pin && (
+              <p className="text-xs text-warning-fg bg-warning-bg/30 rounded-xl p-3">
+                ⚠️ PIN больше не будет показан — только полная регенерация.
+              </p>
+            )}
+            {shownCreds.deepLink && !shownCreds.pin && (
+              <p className="text-xs text-info-fg bg-info-bg/30 rounded-xl p-3">
+                Ссылка для бота действует 30 минут.
+              </p>
+            )}
+
+            <div className="flex items-center justify-end">
               <button
                 type="button"
-                onClick={() => setShownPin(null)}
-                className="px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90"
+                onClick={() => setShownCreds(null)}
+                className="px-5 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90"
               >
-                Запомнил
+                Готово
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={!!reissueTarget}
+        onOpenChange={(o) => {
+          if (!o) setReissueTarget(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {reissueTarget?.name ?? ''} уже привязан к Telegram
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              У этого пользователя уже работает Telegram-бот
+              {' '}
+              {reissueTarget?.telegramUsername
+                ? `(@${reissueTarget.telegramUsername})`
+                : '(без username)'}
+              . Перевыдача создаст новую ссылку — старая привязка перестанет
+              получать уведомления только после того, как пользователь нажмёт
+              новую ссылку. Если хотите сначала отвязать существующий аккаунт —
+              нажмите «Отвязать».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                if (reissueTarget) doUnlink(reissueTarget)
+              }}
+            >
+              Отвязать
+            </AlertDialogAction>
+            <AlertDialogAction
+              disabled={isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                if (reissueTarget) doReissue(reissueTarget)
+              }}
+            >
+              Перевыдать
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
