@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Users as UsersIcon, Send, ChevronRight } from 'lucide-react'
+import { Users as UsersIcon, Send, Building2, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 
@@ -48,6 +48,27 @@ export default async function SettingsPage() {
                 <div>
                   <h3 className="font-semibold text-base">Пользователи</h3>
                   <p className="text-sm text-fg-muted">Создание и управление учётками сотрудников</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-fg-subtle" />
+            </div>
+          </Link>
+        )}
+
+        {user.role === 'ADMIN' && (
+          <Link
+            href="/settings/legal-entities"
+            className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"
+            style={{ boxShadow: 'var(--shadow-card)' }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-bg flex items-center justify-center">
+                  <Building2 className="w-5 h-5 text-fg-muted" strokeWidth={1.75} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-base">Юридические лица</h3>
+                  <p className="text-sm text-fg-muted">Наши ИП и ООО для отгрузки клиентам</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-fg-subtle" />

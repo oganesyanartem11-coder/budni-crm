@@ -119,6 +119,16 @@ enum MenuStatus {
   ARCHIVED
 }
 
+enum LegalEntityType {
+  INDIVIDUAL_ENTREPRENEUR
+  LLC
+}
+
+enum VatMode {
+  NONE
+  VAT_10_INCLUSIVE
+}
+
 // ============================================================
 // USERS / AUTH
 // ============================================================
@@ -587,4 +597,48 @@ model InboxItem {
   @@index([priority, status])
   @@index([conversationId])
   @@index([clientId, status])
+}
+
+// ============================================================
+// OUR LEGAL ENTITIES (Спринт 7)
+// Наши юрлица для отгрузки. Используется в УПД (7c).
+// ============================================================
+
+model OurLegalEntity {
+  id                  String   @id @default(cuid())
+
+  shortName           String   // "ИП Акопов"
+  fullName            String   // "Индивидуальный предприниматель Акопов Олег Армаисович"
+
+  entityType          LegalEntityType
+
+  inn                 String   @unique
+  kpp                 String?
+  ogrn                String   @unique // ОГРНИП у ИП (15 цифр), ОГРН у ООО (13 цифр)
+
+  legalAddress        String
+
+  phone               String?
+  email               String?
+
+  bankName            String
+  bankBic             String
+  bankAccount         String
+  bankCorrAccount     String
+
+  directorName        String
+  directorPosition    String   @default("Директор")
+
+  vatMode             VatMode  @default(NONE)
+  vatRate             Decimal? @db.Decimal(5, 2)
+
+  // Счётчик документов УПД с ресетом 1 января. Заполняется в Спринте 7c.
+  lastDocumentNumber  Int      @default(0)
+  lastDocumentYear    Int      @default(0)
+
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([isActive])
 }
