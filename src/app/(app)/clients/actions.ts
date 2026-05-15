@@ -251,43 +251,6 @@ export async function archiveLocation(id: string): Promise<ActionResult> {
 
 // MEAL CONFIG =======================================================
 
-/** @deprecated Use createMealConfigBulk for new code */
-export async function createMealConfig(
-  clientId: string,
-  formData: MealConfigFormData
-): Promise<ActionResult<{ id: string }>> {
-  await requireRole(['ADMIN', 'MANAGER'])
-
-  const parsed = mealConfigSchema.safeParse(formData)
-  if (!parsed.success) {
-    const firstError = parsed.error.issues[0]
-    return { ok: false, error: firstError?.message ?? 'Неверные данные питания' }
-  }
-
-  if (parsed.data.orderType === 'FIXED' && !parsed.data.fixedPortions) {
-    return { ok: false, error: 'Для FIXED укажите количество порций' }
-  }
-
-  const config = await prisma.clientMealConfig.create({
-    data: {
-      clientId,
-      locationId: parsed.data.locationId ?? null,
-      mealType: parsed.data.mealType,
-      orderType: parsed.data.orderType,
-      deliveryHorizon: parsed.data.deliveryHorizon,
-      scheduleType: parsed.data.scheduleType,
-      scheduleData: parsed.data.scheduleData ?? undefined,
-      fixedPortions: parsed.data.fixedPortions ?? null,
-      pricePerPortion: parsed.data.pricePerPortion,
-      validFrom: parsed.data.validFrom ? new Date(parsed.data.validFrom) : new Date(),
-      validTo: parsed.data.validTo ? new Date(parsed.data.validTo) : null,
-    },
-  })
-
-  revalidatePath(`/clients/${clientId}`)
-  return { ok: true, data: { id: config.id } }
-}
-
 export async function updateMealConfig(
   id: string,
   formData: MealConfigFormData
