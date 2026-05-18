@@ -49,6 +49,9 @@ export default async function UpdViewPage({ searchParams }: PageProps) {
 
   return (
     <>
+      {/* Scoped @page: landscape только когда смонтирован этот route (UPD print-view).
+          В globals.css @page не трогаем — иначе сломаем книжную у kitchen/courier. */}
+      <style>{`@media print { @page { size: A4 landscape; margin: 10mm; } }`}</style>
       <div className="no-print mb-6 flex items-center justify-between gap-3 flex-wrap">
         <Link
           href={backHref}

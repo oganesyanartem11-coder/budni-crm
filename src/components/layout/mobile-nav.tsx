@@ -30,7 +30,7 @@ export function MobileNav({ userRole, userName, initials, pendingCount, inboxCou
 
   return (
     <>
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface border-t border-border pb-[env(safe-area-inset-bottom)]">
+      <nav className="no-print lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface border-t border-border pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-stretch justify-around">
           {items.map((item) => {
             const Icon = item.icon

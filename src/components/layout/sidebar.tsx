@@ -24,7 +24,7 @@ export function Sidebar({ userRole, userName, initials, pendingCount, inboxCount
   }
 
   return (
-    <aside className="hidden lg:flex w-[220px] shrink-0 h-screen sticky top-0 flex-col border-r border-border bg-bg">
+    <aside className="no-print hidden lg:flex w-[220px] shrink-0 h-screen sticky top-0 flex-col border-r border-border bg-bg">
       <div className="flex items-center px-5 py-5">
         <Logo size="md" href={HOME_BY_ROLE[userRole]} />
       </div>
