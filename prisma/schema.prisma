@@ -30,73 +30,73 @@ enum MealType {
 
 enum OrderType {
   DYNAMIC // Каждый день меняется, требует подтверждения до cut-off
-  FIXED   // Постоянное число, автогенерация
+  FIXED // Постоянное число, автогенерация
 }
 
 enum DeliveryHorizon {
-  NEXT_DAY  // Заказ сегодня → доставка завтра (типичный случай)
-  SAME_DAY  // Заказ утром → доставка в обед того же дня
+  NEXT_DAY // Заказ сегодня → доставка завтра (типичный случай)
+  SAME_DAY // Заказ утром → доставка в обед того же дня
 }
 
 enum ScheduleType {
-  DAILY        // Каждый день
-  WEEKDAYS     // Пн-Пт
-  WEEKENDS     // Сб-Вс
-  CUSTOM_DAYS  // Конкретные дни недели (см. scheduleData.daysOfWeek)
-  ONE_TIME     // Разовый, на конкретные даты (см. scheduleData.dates)
-  INTERVAL     // С интервалом или по датам месяца (см. scheduleData)
+  DAILY // Каждый день
+  WEEKDAYS // Пн-Пт
+  WEEKENDS // Сб-Вс
+  CUSTOM_DAYS // Конкретные дни недели (см. scheduleData.daysOfWeek)
+  ONE_TIME // Разовый, на конкретные даты (см. scheduleData.dates)
+  INTERVAL // С интервалом или по датам месяца (см. scheduleData)
 }
 
 enum PackagingType {
   INDIVIDUAL // По 1 порции в индивидуальной таре
-  BULK       // В коробках по типам (супы отдельно, горячее отдельно)
+  BULK // В коробках по типам (супы отдельно, горячее отдельно)
 }
 
 enum OrderStatus {
-  DRAFT                  // Черновик (создан, но не сохранён окончательно)
-  PENDING_CONFIRMATION   // Ждём подтверждения (динамика, до 16:00)
-  CONFIRMED              // Подтверждён, будет производиться
-  LOCKED                 // Залочен после 18:00, изменения только админом
-  IN_PRODUCTION          // На производстве
-  OUT_FOR_DELIVERY       // В доставке
-  DELIVERED              // Доставлен
-  CANCELLED              // Отменён
+  DRAFT // Черновик (создан, но не сохранён окончательно)
+  PENDING_CONFIRMATION // Ждём подтверждения (динамика, до 16:00)
+  CONFIRMED // Подтверждён, будет производиться
+  LOCKED // Залочен после 18:00, изменения только админом
+  IN_PRODUCTION // На производстве
+  OUT_FOR_DELIVERY // В доставке
+  DELIVERED // Доставлен
+  CANCELLED // Отменён
 }
 
 enum OrderSource {
-  MANUAL          // Вручную через UI
-  MESSENGER       // Из мессенджера (после AI-парсинга, legacy)
-  BOT             // Из MAX-бота (Спринт 5.3+, через BotConversation)
-  FIXED_AUTO      // Автоматически сгенерирован для FIXED-конфига
-  RECURRING_AUTO  // Из расписания
+  MANUAL // Вручную через UI
+  MESSENGER // Из мессенджера (после AI-парсинга, legacy)
+  BOT // Из MAX-бота (Спринт 5.3+, через BotConversation)
+  FIXED_AUTO // Автоматически сгенерирован для FIXED-конфига
+  RECURRING_AUTO // Из расписания
 }
 
 enum DeliveryType {
-  IN_HOUSE          // Свой курьер
-  EXTERNAL_COURIER  // Внешний (Яндекс/Достависта/etc)
+  IN_HOUSE // Свой курьер
+  EXTERNAL_COURIER // Внешний (Яндекс/Достависта/etc)
 }
 
 enum DeliveryStatus {
-  ASSIGNED      // Назначен курьер
-  PICKED_UP     // Забрал с производства
-  EN_ROUTE      // В пути
-  DELIVERED     // Доставлено
-  FAILED        // Не доставлено (с комментарием)
+  ASSIGNED // Назначен курьер
+  PICKED_UP // Забрал с производства
+  EN_ROUTE // В пути
+  DELIVERED // Доставлено
+  FAILED // Не доставлено (с комментарием)
 }
 
 enum DishCategory {
-  SOUP        // Суп
-  MAIN        // Горячее блюдо
-  GARNISH     // Гарнир
-  SALAD       // Салат
-  DESSERT     // Десерт
-  DRINK       // Компот / напиток
+  SOUP // Суп
+  MAIN // Горячее блюдо
+  GARNISH // Гарнир
+  SALAD // Салат
+  DESSERT // Десерт
+  DRINK // Компот / напиток
   BREAD_WHITE // Белый хлеб
-  BREAD_DARK  // Чёрный хлеб
-  PORRIDGE    // Каша (завтрак)
-  EGGS        // Яйца / омлет (завтрак)
-  PANCAKE     // Блинчики (ужин)
-  OTHER       // Прочее
+  BREAD_DARK // Чёрный хлеб
+  PORRIDGE // Каша (завтрак)
+  EGGS // Яйца / омлет (завтрак)
+  PANCAKE // Блинчики (ужин)
+  OTHER // Прочее
 }
 
 enum IngredientUnit {
@@ -106,10 +106,10 @@ enum IngredientUnit {
 }
 
 enum DishUnit {
-  PORTION  // На порцию
-  LITER    // На литр (для супов, компотов)
-  KG       // На кг (для гарниров, салатов)
-  PIECE    // Поштучно (хлеб, блинчики)
+  PORTION // На порцию
+  LITER // На литр (для супов, компотов)
+  KG // На кг (для гарниров, салатов)
+  PIECE // Поштучно (хлеб, блинчики)
 }
 
 enum MenuStatus {
@@ -134,19 +134,19 @@ enum VatMode {
 // ============================================================
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  role         UserRole
-  pinHash      String   @unique // Хэш PIN-кода (bcrypt)
-  isActive     Boolean  @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id          String    @id @default(cuid())
+  name        String
+  role        UserRole
+  pinHash     String    @unique // Хэш PIN-кода (bcrypt)
+  isActive    Boolean   @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   // MAX-онбординг для менеджера (Спринт 5.5+5.6) — оставлены для legacy токенов;
   // личный chat дропнут в 6.8a (пуши менеджерам идут через Telegram).
-  maxOnboardingToken  String?   @unique
-  onboardedAt         DateTime?
+  maxOnboardingToken String?   @unique
+  onboardedAt        DateTime?
 
   // Telegram-бот: миграция пушей и сводок с MAX на Telegram (Спринт 5.8+)
   telegramChatId              String?   @unique
@@ -154,10 +154,11 @@ model User {
   telegramOnboardingToken     String?   @unique
   telegramOnboardingExpiresAt DateTime?
 
-  approvedMenus       MenuCycle[]   @relation("MenuApprovedBy")
-  activityLogs        ActivityLog[]
-  ordersCreated       Order[]       @relation("OrdersCreated")
-  resolvedInboxItems  InboxItem[]
+  approvedMenus         MenuCycle[]   @relation("MenuApprovedBy")
+  activityLogs          ActivityLog[]
+  ordersCreated         Order[]       @relation("OrdersCreated")
+  resolvedInboxItems    InboxItem[]
+  generatedUpdDocuments UpdDocument[] @relation("UpdGeneratedBy")
 
   @@index([role, isActive])
 }
@@ -167,50 +168,51 @@ model User {
 // ============================================================
 
 model Client {
-  id              String   @id @default(cuid())
-  name            String
-  contactName     String?
-  contactPhone    String?
+  id               String   @id @default(cuid())
+  name             String
+  contactName      String?
+  contactPhone     String?
   contactMessenger String? // Username/ID в мессенджере
-  notes           String?  // Свободное поле о клиенте
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  notes            String? // Свободное поле о клиенте
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // Бот-ассистент в MAX (Спринт 5)
-  maxChatId           String?  @unique
-  maxUsername         String?  // username в MAX, для deeplink «https://max.ru/<username>»
-  maxOnboardingToken  String?  @unique
-  locationAliases     Json?    // {"loc_001": ["первый", "цех", "производство"]}
-  safeAnswerStreak    Int      @default(0)
+  maxChatId          String? @unique
+  maxUsername        String? // username в MAX, для deeplink «https://max.ru/<username>»
+  maxOnboardingToken String? @unique
+  locationAliases    Json? // {"loc_001": ["первый", "цех", "производство"]}
+  safeAnswerStreak   Int     @default(0)
 
   // === Юридические реквизиты (Спринт 7b, опционально) ===
-  legalName        String?   // Полное юридическое название (для УПД)
-  inn              String?
-  kpp              String?
-  ogrn             String?
-  legalAddress     String?
+  legalName    String? // Полное юридическое название (для УПД)
+  inn          String?
+  kpp          String?
+  ogrn         String?
+  legalAddress String?
 
   // === Банковские реквизиты клиента (опционально) ===
-  bankName         String?
-  bankBic          String?
-  bankAccount      String?
-  bankCorrAccount  String?
+  bankName        String?
+  bankBic         String?
+  bankAccount     String?
+  bankCorrAccount String?
 
   // === Договор (опционально) ===
-  contractNumber   String?
-  contractDate     DateTime? @db.Date
+  contractNumber String?
+  contractDate   DateTime? @db.Date
 
   // === Наше юрлицо для отгрузки (опционально, обязательно если есть inn) ===
   defaultOurLegalEntityId String?
   defaultOurLegalEntity   OurLegalEntity? @relation("ClientDefaultLegalEntity", fields: [defaultOurLegalEntityId], references: [id], onDelete: SetNull)
 
-  locations         ClientLocation[]
-  mealConfigs       ClientMealConfig[]
-  orders            Order[]
-  botConversations  BotConversation[]
-  botMessages       BotMessage[]
-  inboxItems        InboxItem[]
+  locations        ClientLocation[]
+  mealConfigs      ClientMealConfig[]
+  orders           Order[]
+  botConversations BotConversation[]
+  botMessages      BotMessage[]
+  inboxItems       InboxItem[]
+  updDocuments     UpdDocument[]
 
   @@index([isActive])
   @@index([name])
@@ -218,46 +220,47 @@ model Client {
 }
 
 model ClientLocation {
-  id                  String   @id @default(cuid())
-  clientId            String
-  client              Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name                String   // Например, "Офис на Ленина" или "Стройка №3"
-  address             String
-  deliveryWindowFrom  String?  // Формат "HH:mm", например "11:30"
-  deliveryWindowTo    String?  // Формат "HH:mm", например "12:00"
-  packaging           PackagingType @default(INDIVIDUAL)
-  tags                String[] @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                 String        @id @default(cuid())
+  clientId           String
+  client             Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name               String // Например, "Офис на Ленина" или "Стройка №3"
+  address            String
+  deliveryWindowFrom String? // Формат "HH:mm", например "11:30"
+  deliveryWindowTo   String? // Формат "HH:mm", например "12:00"
+  packaging          PackagingType @default(INDIVIDUAL)
+  tags               String[]      @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
-  mealConfigs ClientMealConfig[]
-  orders      Order[]
+  mealConfigs  ClientMealConfig[]
+  orders       Order[]
+  updDocuments UpdDocument[]
 
   @@index([clientId, isActive])
 }
 
 // Конфигурация питания клиента/точки: что заказывает, по какому графику, по какой цене
 model ClientMealConfig {
-  id               String         @id @default(cuid())
-  clientId         String
-  client           Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  locationId       String         // 6.8a: NOT NULL — конфиг всегда привязан к конкретной точке клиента
-  location         ClientLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  mealType         MealType
-  orderType        OrderType
-  deliveryHorizon  DeliveryHorizon @default(NEXT_DAY)
-  scheduleType     ScheduleType
-  scheduleData     Json?          // Гибкие правила: {daysOfWeek: [1,2,3], dates: [...], intervalDays: 14}
-  fixedPortions    Int?           // Если orderType = FIXED
-  pricePerPortion  Decimal        @db.Decimal(10, 2)
-  validFrom        DateTime       @default(now())
-  validTo          DateTime?      // Null = бессрочно
-  isActive         Boolean        @default(true)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id              String          @id @default(cuid())
+  clientId        String
+  client          Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationId      String // 6.8a: NOT NULL — конфиг всегда привязан к конкретной точке клиента
+  location        ClientLocation  @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  mealType        MealType
+  orderType       OrderType
+  deliveryHorizon DeliveryHorizon @default(NEXT_DAY)
+  scheduleType    ScheduleType
+  scheduleData    Json? // Гибкие правила: {daysOfWeek: [1,2,3], dates: [...], intervalDays: 14}
+  fixedPortions   Int? // Если orderType = FIXED
+  pricePerPortion Decimal         @db.Decimal(10, 2)
+  validFrom       DateTime        @default(now())
+  validTo         DateTime? // Null = бессрочно
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
-  orders           Order[]
+  orders Order[]
 
   @@index([clientId, isActive])
   @@index([locationId])
@@ -291,7 +294,7 @@ model IngredientPriceHistory {
   ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
   price        Decimal    @db.Decimal(10, 2)
   validFrom    DateTime   @default(now())
-  changedBy    String?    // user id
+  changedBy    String? // user id
 
   @@index([ingredientId, validFrom])
 }
@@ -301,7 +304,7 @@ model Dish {
   name        String
   category    DishCategory
   unit        DishUnit     @default(PORTION)
-  portionSize Int?         // Размер порции в граммах/мл (для информации)
+  portionSize Int? // Размер порции в граммах/мл (для информации)
   notes       String?
   isActive    Boolean      @default(true)
   createdAt   DateTime     @default(now())
@@ -335,7 +338,7 @@ model DishIngredient {
 model MealSet {
   id        String   @id @default(cuid())
   mealType  MealType
-  name      String   // "Обед стандарт", "Ужин стандарт", "Завтрак стандарт"
+  name      String // "Обед стандарт", "Ужин стандарт", "Завтрак стандарт"
   isDefault Boolean  @default(false) // true для базового набора каждого типа
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -363,17 +366,17 @@ model MealSetItem {
 // ============================================================
 
 model MenuCycle {
-  id           String     @id @default(cuid())
-  name         String     // "Меню на неделю 17 (5-11 мая)"
-  validFrom    DateTime   // Начало недели (понедельник)
-  validTo      DateTime   // Конец недели (воскресенье)
-  status       MenuStatus @default(DRAFT)
-  approvedById String?
-  approvedBy   User?      @relation("MenuApprovedBy", fields: [approvedById], references: [id])
-  approvedAt   DateTime?
+  id               String     @id @default(cuid())
+  name             String // "Меню на неделю 17 (5-11 мая)"
+  validFrom        DateTime // Начало недели (понедельник)
+  validTo          DateTime // Конец недели (воскресенье)
+  status           MenuStatus @default(DRAFT)
+  approvedById     String?
+  approvedBy       User?      @relation("MenuApprovedBy", fields: [approvedById], references: [id])
+  approvedAt       DateTime?
   rejectionComment String? // Комментарий от ADMIN при возврате на доработку
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
   days MenuDay[]
 
@@ -385,7 +388,7 @@ model MenuDay {
   id          String    @id @default(cuid())
   menuCycleId String
   menuCycle   MenuCycle @relation(fields: [menuCycleId], references: [id], onDelete: Cascade)
-  dayOfWeek   Int       // 1 = Пн, 7 = Вс (ISO 8601)
+  dayOfWeek   Int // 1 = Пн, 7 = Вс (ISO 8601)
   mealType    MealType
   mealSetId   String?
   mealSet     MealSet?  @relation(fields: [mealSetId], references: [id])
@@ -414,34 +417,34 @@ model MenuDayDish {
 // ============================================================
 
 model Order {
-  id              String          @id @default(cuid())
-  clientId        String
-  client          Client          @relation(fields: [clientId], references: [id])
-  locationId      String
-  location        ClientLocation  @relation(fields: [locationId], references: [id])
-  mealType        MealType
-  deliveryDate    DateTime        @db.Date
-  status          OrderStatus     @default(DRAFT)
-  portions        Int
-  pricePerPortion Decimal         @db.Decimal(10, 2) // Зафиксирована на момент создания
-  totalPrice      Decimal         @db.Decimal(10, 2) // = portions * pricePerPortion
-  packaging       PackagingType
-  tags            String[]        @default([]) // Унаследованы от точки + добавочные на конкретный заказ
-  source          OrderSource
-  originalMessage String?         // Если из мессенджера — сырой текст
-  notes           String?
-  createdAt       DateTime        @default(now())
-  confirmedAt     DateTime?
-  lockedAt        DateTime?
+  id                String         @id @default(cuid())
+  clientId          String
+  client            Client         @relation(fields: [clientId], references: [id])
+  locationId        String
+  location          ClientLocation @relation(fields: [locationId], references: [id])
+  mealType          MealType
+  deliveryDate      DateTime       @db.Date
+  status            OrderStatus    @default(DRAFT)
+  portions          Int
+  pricePerPortion   Decimal        @db.Decimal(10, 2) // Зафиксирована на момент создания
+  totalPrice        Decimal        @db.Decimal(10, 2) // = portions * pricePerPortion
+  packaging         PackagingType
+  tags              String[]       @default([]) // Унаследованы от точки + добавочные на конкретный заказ
+  source            OrderSource
+  originalMessage   String? // Если из мессенджера — сырой текст
+  notes             String?
+  createdAt         DateTime       @default(now())
+  confirmedAt       DateTime?
+  lockedAt          DateTime?
   editedAfterLockAt DateTime?
-  updatedAt       DateTime        @updatedAt
+  updatedAt         DateTime       @updatedAt
 
   // Аудит и связи с источником
-  sourceConfigId  String?
-  sourceConfig    ClientMealConfig? @relation(fields: [sourceConfigId], references: [id], onDelete: SetNull)
+  sourceConfigId String?
+  sourceConfig   ClientMealConfig? @relation(fields: [sourceConfigId], references: [id], onDelete: SetNull)
 
-  createdById     String?
-  createdBy       User?     @relation("OrdersCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
+  createdBy   User?   @relation("OrdersCreated", fields: [createdById], references: [id], onDelete: SetNull)
 
   // Бот-источник заказа (Спринт 5.3+)
   sourceConversationId String?
@@ -458,7 +461,9 @@ model Order {
   // changeOrderLegalEntity (только до lock). Используется в УПД (7c).
   ourLegalEntityId String?
   ourLegalEntity   OurLegalEntity? @relation(fields: [ourLegalEntityId], references: [id], onDelete: SetNull)
-  vatRate          Decimal? @db.Decimal(5, 2)
+  vatRate          Decimal?        @db.Decimal(5, 2)
+
+  updDocumentLink UpdDocumentOrder?
 
   @@index([deliveryDate, status])
   @@index([clientId, deliveryDate])
@@ -472,27 +477,27 @@ model Order {
 // ============================================================
 
 model Delivery {
-  id            String         @id @default(cuid())
-  orderId       String         @unique
-  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  type          DeliveryType
-  courierName   String?        // Имя курьера (свой) или название службы
-  status        DeliveryStatus @default(ASSIGNED)
-  notes         String?
-  pickedUpAt    DateTime?
-  deliveredAt   DateTime?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id          String         @id @default(cuid())
+  orderId     String         @unique
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type        DeliveryType
+  courierName String? // Имя курьера (свой) или название службы
+  status      DeliveryStatus @default(ASSIGNED)
+  notes       String?
+  pickedUpAt  DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   // 6.7: курьер сообщает «не смог доставить» с причиной из enum-like-набора
   // (ADDRESS_WRONG / CLIENT_UNAVAILABLE / ACCESS_DENIED / WEATHER / OTHER).
   // Статус Order не меняется — менеджер видит метку и решает что делать.
   // issueReportedById — id курьера (User.id) для аудита, без relation чтобы
   // не лезть в User-модель.
-  issueReportedAt    DateTime?
-  issueReason        String?
-  issueComment       String?
-  issueReportedById  String?
+  issueReportedAt   DateTime?
+  issueReason       String?
+  issueComment      String?
+  issueReportedById String?
 
   @@index([status])
   @@index([issueReportedAt])
@@ -511,15 +516,15 @@ model Setting {
 
 // Лог действий (для аудита)
 model ActivityLog {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String?
-  user       User?    @relation(fields: [userId], references: [id])
+  user       User?     @relation(fields: [userId], references: [id])
   userRole   UserRole?
-  action     String   // "ORDER_CREATED", "MENU_APPROVED", etc.
-  entityType String?  // "Order", "Client", "Menu"
+  action     String // "ORDER_CREATED", "MENU_APPROVED", etc.
+  entityType String? // "Order", "Client", "Menu"
   entityId   String?
-  payload    Json?    // Дополнительные данные
-  createdAt  DateTime @default(now())
+  payload    Json? // Дополнительные данные
+  createdAt  DateTime  @default(now())
 
   @@index([createdAt])
   @@index([entityType, entityId])
@@ -564,18 +569,18 @@ enum InboxItemStatus {
 }
 
 model BotConversation {
-  id              String                 @id @default(cuid())
-  client          Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  id              String                @id @default(cuid())
+  client          Client                @relation(fields: [clientId], references: [id], onDelete: Cascade)
   clientId        String
   deliveryDate    DateTime
-  status          BotConversationStatus  @default(PENDING)
+  status          BotConversationStatus @default(PENDING)
   questionVariant String?
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 
-  messages        BotMessage[]
-  inboxItems      InboxItem[]
-  orders          Order[]
+  messages   BotMessage[]
+  inboxItems InboxItem[]
+  orders     Order[]
 
   @@unique([clientId, deliveryDate])
   @@index([deliveryDate])
@@ -583,19 +588,19 @@ model BotConversation {
 }
 
 model BotMessage {
-  id               String              @id @default(cuid())
-  clientId         String
-  client           Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  conversation     BotConversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  conversationId   String?
-  direction        BotMessageDirection
-  text             String              @db.Text
-  parsedJson       Json?
-  llmConfidence    Float?
-  llmReason        String?             @db.Text
-  toneLabel        String?
-  readAt           DateTime?           // null = непрочитано (для IN-сообщений). Для OUT/MANAGER_OUT всегда null.
-  createdAt        DateTime            @default(now())
+  id             String              @id @default(cuid())
+  clientId       String
+  client         Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversation   BotConversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  conversationId String?
+  direction      BotMessageDirection
+  text           String              @db.Text
+  parsedJson     Json?
+  llmConfidence  Float?
+  llmReason      String?             @db.Text
+  toneLabel      String?
+  readAt         DateTime? // null = непрочитано (для IN-сообщений). Для OUT/MANAGER_OUT всегда null.
+  createdAt      DateTime            @default(now())
 
   @@index([conversationId, createdAt])
   @@index([clientId, createdAt])
@@ -603,25 +608,25 @@ model BotMessage {
 }
 
 model InboxItem {
-  id                  String              @id @default(cuid())
+  id                  String            @id @default(cuid())
   clientId            String
-  client              Client              @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  conversation        BotConversation?    @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  client              Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  conversation        BotConversation?  @relation(fields: [conversationId], references: [id], onDelete: SetNull)
   conversationId      String?
   reason              InboxItemReason
-  priority            InboxItemPriority   @default(NORMAL)
-  status              InboxItemStatus     @default(UNREAD)
-  humanReason         String?             @db.Text
-  clientMessage       String?             @db.Text
+  priority            InboxItemPriority @default(NORMAL)
+  status              InboxItemStatus   @default(UNREAD)
+  humanReason         String?           @db.Text
+  clientMessage       String?           @db.Text
   parsedJson          Json?
   clientStatsSnapshot Json?
-  draftReply          String?             @db.Text
-  managerReply        String?             @db.Text
-  resolvedBy          User?               @relation(fields: [resolvedById], references: [id])
+  draftReply          String?           @db.Text
+  managerReply        String?           @db.Text
+  resolvedBy          User?             @relation(fields: [resolvedById], references: [id])
   resolvedById        String?
-  createdAt           DateTime            @default(now())
+  createdAt           DateTime          @default(now())
   resolvedAt          DateTime?
-  lastPushedAt        DateTime?           // когда последний раз пушили менеджерам в MAX
+  lastPushedAt        DateTime? // когда последний раз пушили менеджерам в MAX
 
   @@index([status, createdAt])
   @@index([priority, status])
@@ -635,43 +640,100 @@ model InboxItem {
 // ============================================================
 
 model OurLegalEntity {
-  id                  String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  shortName           String   // "ИП Акопов"
-  fullName            String   // "Индивидуальный предприниматель Акопов Олег Армаисович"
+  shortName String // "ИП Акопов"
+  fullName  String // "Индивидуальный предприниматель Акопов Олег Армаисович"
 
-  entityType          LegalEntityType
+  entityType LegalEntityType
 
-  inn                 String   @unique
-  kpp                 String?
-  ogrn                String   @unique // ОГРНИП у ИП (15 цифр), ОГРН у ООО (13 цифр)
+  inn  String  @unique
+  kpp  String?
+  ogrn String  @unique // ОГРНИП у ИП (15 цифр), ОГРН у ООО (13 цифр)
 
-  legalAddress        String
+  legalAddress String
 
-  phone               String?
-  email               String?
+  phone String?
+  email String?
 
-  bankName            String
-  bankBic             String
-  bankAccount         String
-  bankCorrAccount     String
+  bankName        String
+  bankBic         String
+  bankAccount     String
+  bankCorrAccount String
 
-  directorName        String
-  directorPosition    String   @default("Директор")
+  directorName     String
+  directorPosition String @default("Директор")
 
-  vatMode             VatMode  @default(NONE)
-  vatRate             Decimal? @db.Decimal(5, 2)
+  vatMode VatMode  @default(NONE)
+  vatRate Decimal? @db.Decimal(5, 2)
 
   // Счётчик документов УПД с ресетом 1 января. Заполняется в Спринте 7c.
-  lastDocumentNumber  Int      @default(0)
-  lastDocumentYear    Int      @default(0)
+  lastDocumentNumber Int @default(0)
+  lastDocumentYear   Int @default(0)
 
-  isActive            Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  defaultForClients   Client[] @relation("ClientDefaultLegalEntity")
-  orders              Order[]
+  defaultForClients Client[]      @relation("ClientDefaultLegalEntity")
+  orders            Order[]
+  updDocuments      UpdDocument[]
 
   @@index([isActive])
+}
+
+// ============================================================
+// UPD DOCUMENTS (Спринт 7c)
+// УПД — универсальный передаточный документ. Одна УПД = одна отгрузка
+// в один день одной точке от одного юрлица (бизнес-ключ:
+// ourLegalEntityId+clientId+locationId+deliveryDate).
+// Может объединять несколько Order разных mealType (M2M через UpdDocumentOrder).
+// Реквизиты замораживаются в snapshot-полях на момент создания.
+// ============================================================
+
+model UpdDocument {
+  id             String @id @default(cuid())
+  number         Int
+  year           Int
+  documentNumber String // "УПД-2026-0001"
+
+  ourLegalEntityId String
+  ourLegalEntity   OurLegalEntity @relation(fields: [ourLegalEntityId], references: [id], onDelete: Restrict)
+  clientId         String
+  client           Client         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  locationId       String
+  location         ClientLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  deliveryDate     DateTime       @db.Date
+
+  supplierSnapshot Json
+  buyerSnapshot    Json
+  linesSnapshot    Json
+
+  totalAmount      Decimal  @db.Decimal(12, 2)
+  vatRate          Decimal? @db.Decimal(5, 2)
+  vatAmount        Decimal? @db.Decimal(12, 2)
+  amountWithoutVat Decimal  @db.Decimal(12, 2)
+
+  generatedById String?
+  generatedBy   User?    @relation("UpdGeneratedBy", fields: [generatedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime @default(now())
+
+  orders UpdDocumentOrder[]
+
+  @@unique([ourLegalEntityId, clientId, locationId, deliveryDate], name: "upd_business_key")
+  @@index([ourLegalEntityId, year])
+  @@index([clientId])
+  @@index([createdAt])
+}
+
+model UpdDocumentOrder {
+  id            String      @id @default(cuid())
+  updDocumentId String
+  updDocument   UpdDocument @relation(fields: [updDocumentId], references: [id], onDelete: Cascade)
+  orderId       String
+  order         Order       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([updDocumentId, orderId])
+  @@unique([orderId], name: "one_upd_per_order")
+  @@index([orderId])
 }
