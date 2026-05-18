@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, Printer, ChefHat, Package, Truck, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, Printer, ChefHat, Package, Truck, FileText, FileStack, type LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 
@@ -33,7 +33,7 @@ export default async function PrintMenuPage({ searchParams }: PageProps) {
         subtitle="Выберите какой документ распечатать"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <PrintCard
           href={`/production/print/kitchen?date=${date}`}
           icon={ChefHat}
@@ -51,6 +51,18 @@ export default async function PrintMenuPage({ searchParams }: PageProps) {
           icon={Truck}
           title="Накладные курьеру"
           description="Адреса, окна, контакты, заметки. По одной на маршрут."
+        />
+        <PrintCard
+          href={`/production/print/upd?date=${date}`}
+          icon={FileText}
+          title="УПД"
+          description="Универсальный передаточный документ. Превью, формирование, печать в двух экземплярах."
+        />
+        <PrintCard
+          href="/production/print/upd/list"
+          icon={FileStack}
+          title="Выписанные УПД"
+          description="Перепечать ранее сформированных. Номера не меняются."
         />
       </div>
     </>
