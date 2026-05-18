@@ -155,6 +155,7 @@ export async function getOrderDetail(orderId: string) {
       sourceConfig: { select: { id: true, orderType: true, scheduleType: true, fixedPortions: true } },
       createdBy: { select: { id: true, name: true, role: true } },
       delivery: { select: { id: true, status: true, deliveredAt: true, courierName: true, issueReportedAt: true, issueReason: true, issueComment: true, issueReportedById: true } },
+      ourLegalEntity: { select: { id: true, shortName: true, entityType: true, vatMode: true, vatRate: true } },
     },
   })
 

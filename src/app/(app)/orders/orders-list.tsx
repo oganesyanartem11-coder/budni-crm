@@ -16,7 +16,7 @@ import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation, OrderStatus } from '@prisma/client'
 
-type SerializedOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
+type SerializedOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
@@ -243,6 +243,14 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                         >
                           {order.client.name}
                         </Link>
+                        {!order.ourLegalEntityId && (
+                          <span
+                            title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
+                            className="shrink-0 inline-flex items-center text-warning-fg"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                          </span>
+                        )}
                       </span>
                       <div className="text-xs text-fg-muted truncate">{order.location.name}</div>
                     </td>

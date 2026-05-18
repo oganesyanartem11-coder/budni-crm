@@ -7,7 +7,7 @@ import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, MealType } from '@prisma/client'
 
-type SerializedWeekOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
+type SerializedWeekOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>

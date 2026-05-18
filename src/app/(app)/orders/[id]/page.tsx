@@ -5,13 +5,17 @@ import { PageHeader } from '@/components/layout/page-header'
 import { OrderDetail } from './order-detail'
 import { requireRole } from '@/lib/auth/current-user'
 import { getOrderDetail } from '@/lib/db/queries/orders'
+import { listActiveOurLegalEntitiesForClientForm } from '@/app/(app)/clients/actions'
 import { serialize } from '@/lib/utils/serialize'
 
 export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole(['ADMIN', 'MANAGER'])
   const { id } = await params
 
-  const data = await getOrderDetail(id)
+  const [data, legalEntities] = await Promise.all([
+    getOrderDetail(id),
+    listActiveOurLegalEntitiesForClientForm(),
+  ])
   if (!data) notFound()
 
   return (
@@ -29,7 +33,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         title="Карточка заказа"
         subtitle={`${data.order.client.name} · ${data.order.location.name}`}
       />
-      <OrderDetail order={serialize(data.order)} history={serialize(data.history)} />
+      <OrderDetail
+        order={serialize(data.order)}
+        history={serialize(data.history)}
+        legalEntities={legalEntities}
+      />
     </>
   )
 }

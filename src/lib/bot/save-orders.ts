@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
+import { getOrderLegalEntitySnapshot } from '@/lib/orders/legal-entity-snapshot'
 import type { MealType } from '@prisma/client'
 
 export interface SavedItem {
@@ -42,6 +43,9 @@ export interface SaveBotOrdersResult {
 export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotOrdersResult> {
   const savedItems: SavedItem[] = []
   let wasUpdate = false
+
+  // Snapshot юрлица/НДС берём один раз — он одинаков для всех заказов клиента.
+  const snapshot = await getOrderLegalEntitySnapshot(input.clientId)
 
   for (const item of input.items) {
     const configs = input.activeMealConfigsByLocation[item.locationId] ?? []
@@ -99,6 +103,8 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
             packaging: loc.packaging,
             tags: loc.tags,
             confirmedAt: new Date(),
+            ourLegalEntityId: snapshot.ourLegalEntityId,
+            vatRate: snapshot.vatRate,
           },
         })
         savedItems.push({

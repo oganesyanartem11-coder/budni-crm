@@ -12,7 +12,7 @@ import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation } from '@prisma/client'
 
-type SerializedPendingOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
+type SerializedPendingOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>

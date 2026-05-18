@@ -12,7 +12,7 @@ import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, ClientLocation } from '@prisma/client'
 
-type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
+type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
@@ -20,7 +20,7 @@ type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
   delivery: { issueReportedAt: Date | string | null } | null
 }
 
-type SerializedWeekOrder = Omit<Order, 'pricePerPortion' | 'totalPrice'> & {
+type SerializedWeekOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>

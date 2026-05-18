@@ -453,10 +453,18 @@ model Order {
   // Ставится при отправке алёрта в групповой Telegram (опоздание > 30 мин).
   lateAlertSentAt DateTime?
 
+  // 7b-2: snapshot нашего юрлица отгрузки и ставки НДС на момент создания заказа.
+  // Копируется из client.defaultOurLegalEntityId. Меняется отдельным action'ом
+  // changeOrderLegalEntity (только до lock). Используется в УПД (7c).
+  ourLegalEntityId String?
+  ourLegalEntity   OurLegalEntity? @relation(fields: [ourLegalEntityId], references: [id], onDelete: SetNull)
+  vatRate          Decimal? @db.Decimal(5, 2)
+
   @@index([deliveryDate, status])
   @@index([clientId, deliveryDate])
   @@index([locationId, deliveryDate])
   @@index([status])
+  @@index([ourLegalEntityId])
 }
 
 // ============================================================
@@ -663,6 +671,7 @@ model OurLegalEntity {
   updatedAt           DateTime @updatedAt
 
   defaultForClients   Client[] @relation("ClientDefaultLegalEntity")
+  orders              Order[]
 
   @@index([isActive])
 }

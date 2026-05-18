@@ -12,15 +12,49 @@ import { toast } from 'sonner'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
 import { LockedEditConfirmDialog, requiresLockedEditConfirm } from '../_components/locked-edit-confirm'
-import { cancelOrder, rescheduleOrder, editOrderPortions, confirmDynamicOrder } from '../actions'
+import { cancelOrder, rescheduleOrder, editOrderPortions, confirmDynamicOrder, changeOrderLegalEntity } from '../actions'
 import { clearDeliveryIssue } from '../../delivery/actions'
 import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
 import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS, ORDER_TYPE_SHORT } from '@/lib/constants/client'
 import { portionsEditedToast } from '@/lib/constants/order'
 import { showActionError } from '@/lib/ui/optimistic-lock-toast'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils/cn'
-import type { Client, ClientLocation, User as PrismaUser, MealType, OrderStatus, PackagingType, OrderSource, Prisma } from '@prisma/client'
+import type {
+  Client,
+  ClientLocation,
+  User as PrismaUser,
+  MealType,
+  OrderStatus,
+  PackagingType,
+  OrderSource,
+  LegalEntityType,
+  VatMode,
+  Prisma,
+} from '@prisma/client'
+
+const BLOCKED_STATUSES_FOR_LEGAL_ENTITY: OrderStatus[] = [
+  'LOCKED',
+  'IN_PRODUCTION',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'CANCELLED',
+]
 
 interface OrderData {
   id: string
@@ -52,6 +86,21 @@ interface OrderData {
     issueComment: string | null
     issueReportedById: string | null
   } | null
+  ourLegalEntityId: string | null
+  vatRate: number | null
+  ourLegalEntity: {
+    id: string
+    shortName: string
+    entityType: LegalEntityType
+    vatMode: VatMode
+    vatRate: number | null
+  } | null
+}
+
+interface LegalEntityOption {
+  id: string
+  shortName: string
+  entityType: LegalEntityType
 }
 
 interface HistoryEntry {
@@ -65,6 +114,7 @@ interface HistoryEntry {
 interface Props {
   order: OrderData
   history: HistoryEntry[]
+  legalEntities: LegalEntityOption[]
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -72,13 +122,14 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_CONFIRMED: 'Подтверждён',
   ORDER_DECLINED: 'Отклонён клиентом',
   ORDER_PORTIONS_EDITED: 'Изменены порции',
+  ORDER_LEGAL_ENTITY_CHANGED: 'Сменено юрлицо отгрузки',
   ORDER_CANCELLED: 'Отменён',
   ORDER_RESCHEDULED: 'Перенесён',
   ORDERS_LOCKED: 'Зафиксирован автоматически',
   FIXED_ORDERS_GENERATED: 'Сгенерирован автоматически',
 }
 
-export function OrderDetail({ order, history }: Props) {
+export function OrderDetail({ order, history, legalEntities }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -116,6 +167,34 @@ export function OrderDetail({ order, history }: Props) {
   const isPending_ = order.status === 'PENDING_CONFIRMATION'
   const isCancellable = !['CANCELLED', 'DELIVERED'].includes(order.status)
   const isReschedulable = !['CANCELLED', 'DELIVERED'].includes(order.status)
+
+  // 7b-2: смена юрлица отгрузки — только до lock
+  const canChangeLegalEntity = !BLOCKED_STATUSES_FOR_LEGAL_ENTITY.includes(order.status)
+  const [legalEntityDialogOpen, setLegalEntityDialogOpen] = useState(false)
+  const [selectedLegalEntityId, setSelectedLegalEntityId] = useState(
+    order.ourLegalEntityId ?? ''
+  )
+
+  function handleChangeLegalEntity() {
+    if (!selectedLegalEntityId) {
+      toast.error('Выберите юрлицо')
+      return
+    }
+    if (selectedLegalEntityId === order.ourLegalEntityId) {
+      setLegalEntityDialogOpen(false)
+      return
+    }
+    startTransition(async () => {
+      const result = await changeOrderLegalEntity(order.id, selectedLegalEntityId)
+      if (result.ok) {
+        toast.success('Юрлицо отгрузки обновлено')
+        setLegalEntityDialogOpen(false)
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
 
   function doEditPortions(num: number) {
     startTransition(async () => {
@@ -369,6 +448,59 @@ export function OrderDetail({ order, history }: Props) {
               </span>
             )}
           </Row>
+
+          <Row icon={Package} label="Отгрузка от">
+            {order.ourLegalEntity ? (
+              <>
+                <span className="font-medium">{order.ourLegalEntity.shortName}</span>
+                <span className="text-xs text-fg-muted ml-2">
+                  ({order.ourLegalEntity.entityType === 'LLC' ? 'ООО' : 'ИП'})
+                </span>
+                {order.vatRate !== null ? (
+                  <span className="text-xs text-fg-muted ml-2">
+                    · НДС {Number.isInteger(order.vatRate) ? order.vatRate : Number(order.vatRate).toFixed(2)}%
+                  </span>
+                ) : (
+                  <span className="text-xs text-fg-muted ml-2">· без НДС</span>
+                )}
+                {canChangeLegalEntity && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedLegalEntityId(order.ourLegalEntityId ?? '')
+                      setLegalEntityDialogOpen(true)
+                    }}
+                    className="ml-2 text-xs text-fg-subtle hover:text-fg underline"
+                  >
+                    сменить
+                  </button>
+                )}
+              </>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-fg-muted">— не выбрано —</span>
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill bg-warning-bg text-warning-fg text-xs font-medium"
+                  title="Без юрлица отгрузки УПД не сформировать"
+                >
+                  <AlertTriangle className="w-3 h-3" />
+                  УПД не может быть сформирован
+                </span>
+                {canChangeLegalEntity && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedLegalEntityId('')
+                      setLegalEntityDialogOpen(true)
+                    }}
+                    className="px-2.5 py-1 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90"
+                  >
+                    Выбрать юрлицо
+                  </button>
+                )}
+              </div>
+            )}
+          </Row>
         </div>
 
         {/* История */}
@@ -549,6 +681,77 @@ export function OrderDetail({ order, history }: Props) {
         }}
         onCancel={() => setEditConfirmOpen(false)}
       />
+
+      <Dialog
+        open={legalEntityDialogOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setLegalEntityDialogOpen(false)
+            setSelectedLegalEntityId(order.ourLegalEntityId ?? '')
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Сменить юрлицо отгрузки</DialogTitle>
+            <DialogDescription>
+              Это повлияет на УПД и расчёт НДС для этого заказа. Действие
+              записывается в журнал.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <label className="block text-xs uppercase tracking-wider text-fg-muted">
+              Наше юрлицо
+            </label>
+            <Select
+              value={selectedLegalEntityId || '__none__'}
+              onValueChange={(v) => setSelectedLegalEntityId(v === '__none__' ? '' : v)}
+              disabled={legalEntities.length === 0}
+            >
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectValue
+                  placeholder={
+                    legalEntities.length === 0
+                      ? 'Нет активных юрлиц — добавьте их в Настройках'
+                      : '— Выберите юрлицо —'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— не выбрано —</SelectItem>
+                {legalEntities.map((le) => (
+                  <SelectItem key={le.id} value={le.id}>
+                    {le.shortName} ({le.entityType === 'LLC' ? 'ООО' : 'ИП'})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => {
+                setLegalEntityDialogOpen(false)
+                setSelectedLegalEntityId(order.ourLegalEntityId ?? '')
+              }}
+              disabled={isPending}
+              className="px-4 py-2 rounded-pill text-fg-muted text-sm hover:text-fg disabled:opacity-50"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              onClick={handleChangeLegalEntity}
+              disabled={isPending || !selectedLegalEntityId}
+              className="px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              {isPending ? 'Сохраняем…' : 'Сменить'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

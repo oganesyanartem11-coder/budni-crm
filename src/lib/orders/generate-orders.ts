@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
+import { buildLegalEntitySnapshot } from '@/lib/orders/legal-entity-snapshot'
 import type { ClientMealConfig, ScheduleType } from '@prisma/client'
 
 export interface GenerationStats {
@@ -108,7 +109,14 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
       location: { isActive: true },
     },
     include: {
-      client: { select: { id: true, isActive: true } },
+      client: {
+        select: {
+          id: true,
+          isActive: true,
+          defaultOurLegalEntityId: true,
+          defaultOurLegalEntity: { select: { vatRate: true } },
+        },
+      },
       location: { select: { id: true, isActive: true, packaging: true } },
     },
   })
@@ -161,6 +169,7 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
       const isFixed = config.orderType === 'FIXED'
       const portionsValue = isFixed ? (config.fixedPortions ?? 0) : 0
       const priceNum = Number(config.pricePerPortion)
+      const snapshot = buildLegalEntitySnapshot(config.client)
 
       const ordersData = newLocations.map((loc) => ({
         clientId: config.clientId,
@@ -175,6 +184,8 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
         status: isFixed ? ('CONFIRMED' as const) : ('PENDING_CONFIRMATION' as const),
         sourceConfigId: config.id,
         confirmedAt: isFixed ? new Date() : null,
+        ourLegalEntityId: snapshot.ourLegalEntityId,
+        vatRate: snapshot.vatRate,
       }))
 
       await prisma.order.createMany({ data: ordersData })

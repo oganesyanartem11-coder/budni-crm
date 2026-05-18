@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
+import { getOrderLegalEntitySnapshot } from '@/lib/orders/legal-entity-snapshot'
 import { isPastCutoff } from '@/lib/orders/cutoff'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { orderDetailButton } from '@/lib/telegram/buttons'
@@ -63,6 +64,8 @@ export async function createOrder(
 
   const totalPrice = data.portions * data.pricePerPortion
 
+  const snapshot = await getOrderLegalEntitySnapshot(data.clientId)
+
   const order = await prisma.order.create({
     data: {
       clientId: data.clientId,
@@ -79,6 +82,8 @@ export async function createOrder(
       sourceConfigId: data.configId ?? null,
       createdById: user.id,
       confirmedAt: new Date(),
+      ourLegalEntityId: snapshot.ourLegalEntityId,
+      vatRate: snapshot.vatRate,
     },
   })
 
@@ -591,6 +596,73 @@ export async function rescheduleOrder(
       },
     },
   })
+
+  revalidatePath('/orders')
+  revalidatePath(`/orders/${orderId}`)
+  return { ok: true, data: undefined }
+}
+
+
+/**
+ * Сменить наше юрлицо отгрузки на конкретном заказе. Snapshot vatRate
+ * пересчитывается из выбранного юрлица. Доступно ADMIN+MANAGER, только до
+ * lock (DRAFT/PENDING_CONFIRMATION/CONFIRMED). После lock — изменение
+ * запрещено: УПД мог быть уже сформирован.
+ */
+const BLOCKED_STATUSES_FOR_LEGAL_ENTITY_CHANGE = [
+  'LOCKED',
+  'IN_PRODUCTION',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+  'CANCELLED',
+] as const
+
+export async function changeOrderLegalEntity(
+  orderId: string,
+  newOurLegalEntityId: string
+): Promise<ActionResult> {
+  const me = await requireRole(['ADMIN', 'MANAGER'])
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, clientId: true, ourLegalEntityId: true },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+
+  if ((BLOCKED_STATUSES_FOR_LEGAL_ENTITY_CHANGE as readonly string[]).includes(order.status)) {
+    return { ok: false, error: 'Юрлицо нельзя сменить после lock заказа' }
+  }
+
+  const newEntity = await prisma.ourLegalEntity.findUnique({
+    where: { id: newOurLegalEntityId },
+    select: { id: true, isActive: true, vatRate: true, shortName: true },
+  })
+  if (!newEntity) return { ok: false, error: 'Юрлицо не найдено' }
+  if (!newEntity.isActive) return { ok: false, error: 'Это юрлицо архивировано' }
+
+  await prisma.$transaction([
+    prisma.order.update({
+      where: { id: orderId },
+      data: {
+        ourLegalEntityId: newEntity.id,
+        vatRate: newEntity.vatRate,
+      },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: me.id,
+        userRole: me.role,
+        action: 'ORDER_LEGAL_ENTITY_CHANGED',
+        entityType: 'Order',
+        entityId: orderId,
+        payload: {
+          from: order.ourLegalEntityId,
+          to: newEntity.id,
+          shortName: newEntity.shortName,
+        },
+      },
+    }),
+  ])
 
   revalidatePath('/orders')
   revalidatePath(`/orders/${orderId}`)
