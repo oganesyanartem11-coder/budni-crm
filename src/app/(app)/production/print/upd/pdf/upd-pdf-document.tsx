@@ -95,7 +95,7 @@ const styles = StyleSheet.create({
   },
   statusBox: {
     borderWidth: 0.7,
-    borderColor: C_BORDER,
+    borderColor: '#000',
     padding: 3,
     width: 240,
   },
@@ -140,24 +140,52 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
 
+  // Разлинованная сетка верхнего блока (счёт-фактура + стороны) по форме 1137:
+  // внешняя чёрная рамка, строки с горизонтальными линиями, ячейки
+  // «метка | значение | (номер поля)».
+  g1Frame: { borderWidth: 0.75, borderColor: '#000', marginBottom: 4 },
+  g1Row: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#000' },
+  g1RowLast: { flexDirection: 'row' },
+  g1Label: {
+    width: '18%',
+    padding: 3,
+    fontSize: 7,
+    borderRightWidth: 0.5,
+    borderColor: '#000',
+  },
+  g1Value: { flex: 1, padding: 3, fontSize: 7.5 },
+  g1Num: {
+    width: 26,
+    padding: 3,
+    fontSize: 6,
+    color: '#000',
+    textAlign: 'center',
+    borderLeftWidth: 0.5,
+    borderColor: '#000',
+  },
+  g1TwoCol: { flexDirection: 'row' },
+  g1ColLeft: { width: '50%', borderRightWidth: 0.5, borderColor: '#000' },
+  g1ColRight: { width: '50%' },
+  g1InvoiceLabel: { fontSize: 8, fontWeight: 'bold' },
+
   table: {
     marginTop: 2,
-    borderTopWidth: 0.7,
-    borderLeftWidth: 0.7,
-    borderRightWidth: 0.7,
-    borderBottomWidth: 0.7,
-    borderColor: C_BORDER,
+    borderTopWidth: 0.75,
+    borderLeftWidth: 0.75,
+    borderRightWidth: 0.75,
+    borderBottomWidth: 0.75,
+    borderColor: '#000',
   },
   thRow: {
     flexDirection: 'row',
     backgroundColor: '#f3f3f3',
     borderBottomWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
     minHeight: 42,
   },
   thWrap: {
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
     padding: 2,
     justifyContent: 'space-between',
   },
@@ -167,7 +195,7 @@ const styles = StyleSheet.create({
   },
   thGroupWrap: {
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
   thGroupLabel: {
     fontSize: 5.8,
@@ -175,7 +203,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     padding: 2,
     borderBottomWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
   thSubRow: {
     flexDirection: 'row',
@@ -183,7 +211,7 @@ const styles = StyleSheet.create({
   },
   thSubWrap: {
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
     padding: 2,
     justifyContent: 'space-between',
   },
@@ -205,13 +233,13 @@ const styles = StyleSheet.create({
   tdRow: {
     flexDirection: 'row',
     borderBottomWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
   td: {
     fontSize: 7,
     padding: 2,
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
   tdLast: {
     fontSize: 7,
@@ -220,7 +248,7 @@ const styles = StyleSheet.create({
   tdGroup: {
     flexDirection: 'row',
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
   tdGroupLast: {
     flexDirection: 'row',
@@ -229,7 +257,7 @@ const styles = StyleSheet.create({
     fontSize: 7,
     padding: 2,
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
   tdSubLast: {
     fontSize: 7,
@@ -241,8 +269,8 @@ const styles = StyleSheet.create({
 
   totalsRow: {
     flexDirection: 'row',
-    borderTopWidth: 1,
-    borderColor: C_BORDER,
+    borderTopWidth: 0.75,
+    borderColor: '#000',
     backgroundColor: '#fafafa',
   },
   totalsLabel: {
@@ -252,7 +280,7 @@ const styles = StyleSheet.create({
     padding: 2,
     textAlign: 'right',
     borderRightWidth: 0.5,
-    borderColor: C_BORDER,
+    borderColor: '#000',
   },
 
   pagesNote: {
@@ -297,6 +325,30 @@ const styles = StyleSheet.create({
   sigText: { fontSize: 7 },
   sigSmallNote: { fontSize: 6.5, marginTop: 2 },
   mp: { marginTop: 6, fontSize: 7, fontWeight: 'bold' },
+
+  // Разлинованная сетка блока подписей формы 1137: внешняя чёрная рамка,
+  // две колонки (продавец слева / покупатель справа) с вертикальным
+  // разделителем, ячейки с горизонтальными линиями, ровные линии
+  // под подпись/ФИО (g3PenWide) — растягиваются на доступную ширину.
+  g3Frame: { borderWidth: 0.75, borderColor: '#000', marginTop: 4 },
+  g3TwoCol: { flexDirection: 'row' },
+  g3ColLeft: { width: '50%', borderRightWidth: 0.5, borderColor: '#000' },
+  g3ColRight: { width: '50%' },
+  g3Cell: { padding: 3, borderBottomWidth: 0.5, borderColor: '#000' },
+  g3CellLast: { padding: 3 },
+  g3RoleLabel: { fontSize: 7, fontWeight: 'bold', marginBottom: 6 },
+  g3SignRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 1 },
+  g3PenWide: {
+    borderBottomWidth: 0.5,
+    borderColor: '#000',
+    flex: 1,
+    marginHorizontal: 4,
+    height: 10,
+  },
+  g3Caption: { fontSize: 5.5, color: '#555', textAlign: 'center' },
+  g3Note: { fontSize: 6.5, marginTop: 2 },
+  g3FieldNum: { fontSize: 6, color: '#000' },
+  g3Mp: { fontSize: 7, fontWeight: 'bold', marginTop: 4 },
 
   footer: {
     position: 'absolute',
@@ -380,36 +432,97 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
         </View>
       </View>
 
-      <Text style={styles.invoiceLine}>
-        Счёт-фактура № {doc.documentNumber} от {dateNumeric}{' '}
-        <Text style={styles.fieldNum}>(1)</Text>
-      </Text>
-      <Text style={styles.correctionLine}>
-        Исправление № -- от -- <Text style={styles.fieldNum}>(1а)</Text>
-      </Text>
-
-      <View style={styles.partiesRow}>
-        <View style={styles.partyColLeft}>
-          <FieldLine text={`Продавец: ${supplier.fullName}`} num="(2)" />
-          <FieldLine text={`Адрес: ${supplier.legalAddress}`} num="(2а)" />
-          <FieldLine text={`ИНН/КПП продавца: ${innKppSupplier}`} num="(2б)" />
-          <FieldLine text={'Грузоотправитель и его адрес: он же'} num="(3)" />
-          <FieldLine text={`Грузополучатель и его адрес: ${consignee}`} num="(4)" />
-          <FieldLine text={'К платёжно-расчётному документу № -- от --'} num="(5)" />
-          <FieldLine
-            text={`Документ об отгрузке: Универсальный передаточный документ № ${doc.documentNumber} от ${dateNumeric}`}
-            num="(5а)"
-          />
+      {/* Верхний блок (счёт-фактура + стороны) — разлинованная сетка формы 1137 */}
+      <View style={styles.g1Frame}>
+        {/* Счёт-фактура */}
+        <View style={styles.g1Row}>
+          <Text style={[styles.g1Label, styles.g1InvoiceLabel]}>Счёт-фактура №</Text>
+          <Text style={[styles.g1Value, styles.g1InvoiceLabel]}>
+            {doc.documentNumber} от {dateNumeric}
+          </Text>
+          <Text style={styles.g1Num}>(1)</Text>
         </View>
-        <View style={styles.partyColRight}>
-          <FieldLine text={`Покупатель: ${buyerLegal}`} num="(6)" />
-          <FieldLine text={`Адрес: ${buyerAddr}`} num="(6а)" />
-          <FieldLine text={`ИНН/КПП покупателя: ${innKppBuyer}`} num="(6б)" />
-          <FieldLine text={'Валюта: наименование, код Российский рубль, 643'} num="(7)" />
-          <FieldLine
-            text={'Идентификатор государственного контракта, договора (соглашения) (при наличии): --'}
-            num="(8)"
-          />
+
+        {/* Исправление */}
+        <View style={styles.g1Row}>
+          <Text style={styles.g1Label}>Исправление №</Text>
+          <Text style={styles.g1Value}>-- от --</Text>
+          <Text style={styles.g1Num}>(1а)</Text>
+        </View>
+
+        {/* Две колонки: продавец (слева) / покупатель (справа) */}
+        <View style={styles.g1TwoCol}>
+          {/* Сторона продавца */}
+          <View style={styles.g1ColLeft}>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Продавец</Text>
+              <Text style={styles.g1Value}>{supplier.fullName}</Text>
+              <Text style={styles.g1Num}>(2)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Адрес</Text>
+              <Text style={styles.g1Value}>{supplier.legalAddress}</Text>
+              <Text style={styles.g1Num}>(2а)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>ИНН/КПП продавца</Text>
+              <Text style={styles.g1Value}>{innKppSupplier}</Text>
+              <Text style={styles.g1Num}>(2б)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Грузоотправитель и его адрес</Text>
+              <Text style={styles.g1Value}>он же</Text>
+              <Text style={styles.g1Num}>(3)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Грузополучатель и его адрес</Text>
+              <Text style={styles.g1Value}>{consignee}</Text>
+              <Text style={styles.g1Num}>(4)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>К платёжно-расчётному документу №</Text>
+              <Text style={styles.g1Value}>-- от --</Text>
+              <Text style={styles.g1Num}>(5)</Text>
+            </View>
+            <View style={styles.g1RowLast}>
+              <Text style={styles.g1Label}>Документ об отгрузке</Text>
+              <Text style={styles.g1Value}>
+                Универсальный передаточный документ № {doc.documentNumber} от {dateNumeric}
+              </Text>
+              <Text style={styles.g1Num}>(5а)</Text>
+            </View>
+          </View>
+
+          {/* Сторона покупателя */}
+          <View style={styles.g1ColRight}>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Покупатель</Text>
+              <Text style={styles.g1Value}>{buyerLegal}</Text>
+              <Text style={styles.g1Num}>(6)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Адрес</Text>
+              <Text style={styles.g1Value}>{buyerAddr}</Text>
+              <Text style={styles.g1Num}>(6а)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>ИНН/КПП покупателя</Text>
+              <Text style={styles.g1Value}>{innKppBuyer}</Text>
+              <Text style={styles.g1Num}>(6б)</Text>
+            </View>
+            <View style={styles.g1Row}>
+              <Text style={styles.g1Label}>Валюта: наименование, код</Text>
+              <Text style={styles.g1Value}>Российский рубль, 643</Text>
+              <Text style={styles.g1Num}>(7)</Text>
+            </View>
+            <View style={styles.g1RowLast}>
+              <Text style={styles.g1Label}>
+                Идентификатор государственного контракта, договора (соглашения) (при наличии)
+              </Text>
+              <Text style={styles.g1Value}>--</Text>
+              <Text style={styles.g1Num}>(8)</Text>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -573,145 +686,192 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
         Всего к оплате прописью: {amountToWords(rub, kop)} ({formatMoney(doc.totalAmount, { withKopecks: true })})
       </Text>
 
-      {/* Подписи: две стороны */}
-      <View style={styles.sigBlock}>
-        <View style={styles.sigSidesRow}>
+      {/* Подписи: две стороны — разлинованная сетка формы 1137 */}
+      <View style={styles.g3Frame}>
+        <View style={styles.g3TwoCol}>
           {/* Сторона продавца */}
-          <View style={styles.sigSideLeft}>
-            <Text style={styles.sigGroupLabel}>{sellerHeadTitle}</Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={80} />
-              <Text style={styles.sigSlash}>/</Text>
-              <Text style={styles.sigText}>{supplier.directorName}</Text>
+          <View style={styles.g3ColLeft}>
+            {/* Руководитель / ИП */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>{sellerHeadTitle}</Text>
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <Text style={styles.sigText}>{supplier.directorName}</Text>
+              </View>
+              <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
+              {isIE ? (
+                <Text style={styles.g3Note}>
+                  Основной государственный регистрационный номер ИП и дата
+                  присвоения: ОГРНИП {supplier.ogrn}
+                </Text>
+              ) : null}
             </View>
-            <Text style={styles.sigCaption}>(подпись) / (ф.и.о.)</Text>
-            {isIE ? (
-              <Text style={styles.sigSmallNote}>
-                Основной государственный регистрационный номер ИП и дата
-                присвоения: ОГРНИП {supplier.ogrn}
+
+            {/* Главный бухгалтер */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Главный бухгалтер или иное уполномоченное лицо
               </Text>
-            ) : null}
-
-            <Text style={styles.sigGroupLabel}>
-              Главный бухгалтер или иное уполномоченное лицо
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={80} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={110} />
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+              </View>
+              <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
             </View>
-            <Text style={styles.sigCaption}>(подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigSmallNote}>
-              Основание передачи (сдачи) / получения (приёмки): {baseLineText(buyer)}{' '}
-              <Text style={styles.fieldNum}>[8]</Text>
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <Text style={styles.sigText}>
-                Данные о транспортировке и грузе:{' '}
+            {/* Основание [8] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3Note}>
+                Основание передачи (сдачи) / получения (приёмки): {baseLineText(buyer)}{' '}
+                <Text style={styles.g3FieldNum}>[8]</Text>
               </Text>
-              <PenLine width={200} />
-              <Text style={styles.fieldNum}> [9]</Text>
             </View>
 
-            <Text style={styles.sigGroupLabel}>
-              Товар (груз) передал / услуги сдал <Text style={styles.fieldNum}>[10]</Text>
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <Text style={styles.sigText}>{supplier.directorPosition}</Text>
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={70} />
-              <Text style={styles.sigSlash}>/</Text>
-              <Text style={styles.sigText}>{supplier.directorName}</Text>
+            {/* Данные о транспортировке [9] */}
+            <View style={styles.g3Cell}>
+              <View style={styles.g3SignRow}>
+                <Text style={styles.sigText}>Данные о транспортировке и грузе:</Text>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.g3FieldNum}>[9]</Text>
+              </View>
             </View>
-            <Text style={styles.sigCaption}>(должность) / (подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigSmallNote}>
-              Дата отгрузки, передачи (сдачи) « {day} » {month} {year} года{' '}
-              <Text style={styles.fieldNum}>[11]</Text>
-            </Text>
-
-            <Text style={styles.sigGroupLabel}>
-              Ответственный за правильность оформления факта хозяйственной жизни{' '}
-              <Text style={styles.fieldNum}>[13]</Text>
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={70} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={60} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={90} />
+            {/* Товар передал [10] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Товар (груз) передал / услуги сдал <Text style={styles.g3FieldNum}>[10]</Text>
+              </Text>
+              <View style={styles.g3SignRow}>
+                <Text style={styles.sigText}>{supplier.directorPosition}</Text>
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <Text style={styles.sigText}>{supplier.directorName}</Text>
+              </View>
+              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
             </View>
-            <Text style={styles.sigCaption}>(должность) / (подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigSmallNote}>
-              Наименование экономического субъекта — составителя документа{' '}
-              <Text style={styles.fieldNum}>[14]</Text>: {supplier.fullName}, ИНН{' '}
-              {innKppSupplier}
-            </Text>
+            {/* Дата отгрузки [11] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3Note}>
+                Дата отгрузки, передачи (сдачи) « {day} » {month} {year} года{' '}
+                <Text style={styles.g3FieldNum}>[11]</Text>
+              </Text>
+            </View>
 
-            <Text style={styles.mp}>М.П.</Text>
+            {/* Ответственный [13] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Ответственный за правильность оформления факта хозяйственной жизни{' '}
+                <Text style={styles.g3FieldNum}>[13]</Text>
+              </Text>
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+              </View>
+              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+            </View>
+
+            {/* Составитель [14] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3Note}>
+                Наименование экономического субъекта — составителя документа{' '}
+                <Text style={styles.g3FieldNum}>[14]</Text>: {supplier.fullName}, ИНН{' '}
+                {innKppSupplier}
+              </Text>
+            </View>
+
+            {/* М.П. */}
+            <View style={styles.g3CellLast}>
+              <Text style={styles.g3Mp}>М.П.</Text>
+            </View>
           </View>
 
           {/* Сторона покупателя */}
-          <View style={styles.sigSideRight}>
-            <Text style={styles.sigGroupLabel}>
-              Руководитель организации или иное уполномоченное лицо
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={80} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={110} />
+          <View style={styles.g3ColRight}>
+            {/* Руководитель */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Руководитель организации или иное уполномоченное лицо
+              </Text>
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+              </View>
+              <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
             </View>
-            <Text style={styles.sigCaption}>(подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigGroupLabel}>
-              Главный бухгалтер или иное уполномоченное лицо
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={80} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={110} />
+            {/* Главный бухгалтер */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Главный бухгалтер или иное уполномоченное лицо
+              </Text>
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+              </View>
+              <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
             </View>
-            <Text style={styles.sigCaption}>(подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigGroupLabel}>
-              Товар (груз) получил / услуги принял <Text style={styles.fieldNum}>[15]</Text>
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={70} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={60} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={90} />
+            {/* Товар получил [15] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Товар (груз) получил / услуги принял <Text style={styles.g3FieldNum}>[15]</Text>
+              </Text>
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+              </View>
+              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
             </View>
-            <Text style={styles.sigCaption}>(должность) / (подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigSmallNote}>
-              Дата получения (приёмки) « __ » __________ 20__ года{' '}
-              <Text style={styles.fieldNum}>[16]</Text>
-            </Text>
-
-            <Text style={styles.sigGroupLabel}>
-              Ответственный за правильность оформления факта хозяйственной жизни{' '}
-              <Text style={styles.fieldNum}>[18]</Text>
-            </Text>
-            <View style={styles.sigInlineRow}>
-              <PenLine width={70} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={60} />
-              <Text style={styles.sigSlash}>/</Text>
-              <PenLine width={90} />
+            {/* Дата получения [16] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3Note}>
+                Дата получения (приёмки) « __ » __________ 20__ года{' '}
+                <Text style={styles.g3FieldNum}>[16]</Text>
+              </Text>
             </View>
-            <Text style={styles.sigCaption}>(должность) / (подпись) / (ф.и.о.)</Text>
 
-            <Text style={styles.sigSmallNote}>
-              Наименование экономического субъекта — составителя документа{' '}
-              <Text style={styles.fieldNum}>[19]</Text>: {buyerLegal}
-              {buyer.inn ? ', ИНН ' + buyer.inn : ''}
-            </Text>
+            {/* Ответственный [18] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3RoleLabel}>
+                Ответственный за правильность оформления факта хозяйственной жизни{' '}
+                <Text style={styles.g3FieldNum}>[18]</Text>
+              </Text>
+              <View style={styles.g3SignRow}>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+                <Text style={styles.sigSlash}>/</Text>
+                <View style={styles.g3PenWide} />
+              </View>
+              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+            </View>
 
-            <Text style={styles.mp}>М.П.</Text>
+            {/* Составитель [19] */}
+            <View style={styles.g3Cell}>
+              <Text style={styles.g3Note}>
+                Наименование экономического субъекта — составителя документа{' '}
+                <Text style={styles.g3FieldNum}>[19]</Text>: {buyerLegal}
+                {buyer.inn ? ', ИНН ' + buyer.inn : ''}
+              </Text>
+            </View>
+
+            {/* М.П. */}
+            <View style={styles.g3CellLast}>
+              <Text style={styles.g3Mp}>М.П.</Text>
+            </View>
           </View>
         </View>
       </View>
