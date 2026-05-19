@@ -15,23 +15,29 @@ export function GenerateButton({
   const [pending, startTransition] = useTransition()
   const [busy, setBusy] = useState(false)
 
-  function run(after: () => void) {
+  // Глобальный Toaster в layout — top-right (единообразно для CRM). На странице
+  // УПД кнопки тоже в правом верхнем углу — тост перекрывал бы их. Поэтому
+  // ТОЛЬКО эти тосты выводим снизу-справа, глобальную позицию не меняем.
+  const toastOpts = { position: 'bottom-right' as const }
+
+  function run(after: () => void, onError?: () => void) {
     if (disabled || pending || busy) return
     setBusy(true)
     startTransition(async () => {
       try {
         const res = await generateAndGetUpdForDate(dateIso)
         if (!res.ok) {
-          toast.error(res.error)
+          toast.error(res.error, toastOpts)
+          onError?.()
           return
         }
         const { createdCount, reusedCount, conflicts } = res.data
         if (conflicts.length > 0) {
-          toast.warning(`УПД сформированы (новых: ${createdCount}, существующих: ${reusedCount}). Конфликтов: ${conflicts.length}.`)
+          toast.warning(`УПД сформированы (новых: ${createdCount}, существующих: ${reusedCount}). Конфликтов: ${conflicts.length}.`, toastOpts)
         } else if (createdCount === 0 && reusedCount > 0) {
-          toast.success(`Используются ранее сформированные УПД (${reusedCount}).`)
+          toast.success(`Используются ранее сформированные УПД (${reusedCount}).`, toastOpts)
         } else {
-          toast.success(`Сформировано УПД: ${createdCount}${reusedCount ? `, переиспользовано: ${reusedCount}` : ''}.`)
+          toast.success(`Сформировано УПД: ${createdCount}${reusedCount ? `, переиспользовано: ${reusedCount}` : ''}.`, toastOpts)
         }
         after()
       } finally {
@@ -44,12 +50,25 @@ export function GenerateButton({
   }
 
   function onPrint() {
-    run(() => {
-      window.open(
-        `/production/print/upd/pdf?date=${encodeURIComponent(dateIso)}&disposition=inline`,
-        '_blank',
+    if (disabled || pending || busy) return
+    // Окно открываем СИНХРОННО до любого await: после await Safari/Chrome
+    // считают вызов window.open не-юзер-жестом и блокируют попап без ошибки.
+    const win = window.open('', '_blank')
+    if (!win) {
+      toast.error(
+        'Браузер заблокировал новое окно. Разрешите всплывающие окна для печати или используйте «Скачать PDF».',
+        toastOpts,
       )
-    })
+      return
+    }
+    run(
+      () => {
+        win.location.href = `/production/print/upd/pdf?date=${encodeURIComponent(dateIso)}&disposition=inline`
+      },
+      () => {
+        win.close()
+      },
+    )
   }
 
   function onDownload() {
