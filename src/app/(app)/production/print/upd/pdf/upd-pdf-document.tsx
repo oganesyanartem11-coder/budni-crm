@@ -875,10 +875,6 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
           </View>
         </View>
       </View>
-
-      <Text style={styles.footer} fixed>
-        {copyLabel}. Сформировано Будни CRM
-      </Text>
     </>
   )
 }
