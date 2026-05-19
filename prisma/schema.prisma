@@ -126,6 +126,11 @@ enum DishStatus {
   ARCHIVED
 }
 
+enum MenuImportSource {
+  PHOTO
+  EXCEL
+}
+
 enum LegalEntityType {
   INDIVIDUAL_ENTREPRENEUR
   LLC
@@ -166,6 +171,7 @@ model User {
   ordersCreated         Order[]       @relation("OrdersCreated")
   resolvedInboxItems    InboxItem[]
   generatedUpdDocuments UpdDocument[] @relation("UpdGeneratedBy")
+  menuImports           MenuImport[]  @relation("MenuImportCreatedBy")
 
   @@index([role, isActive])
 }
@@ -318,6 +324,16 @@ model Dish {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
+  // AI-помощник шефа (Спринт 8): originalName — ключ связи с расписанием,
+  // correctedName — что показывать; correctionLevel/Note — прозрачность правок.
+  // Всё nullable — для блюд, созданных вне AI-импорта, эти поля не заполняются.
+  originalName    String?
+  correctedName   String?
+  correctionLevel String?
+  correctionNote  String?
+  menuImportId    String?
+  menuImport      MenuImport? @relation(fields: [menuImportId], references: [id])
+
   ingredients   DishIngredient[]
   menuDayDishes MenuDayDish[]
 
@@ -386,7 +402,8 @@ model MenuCycle {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
-  days MenuDay[]
+  days        MenuDay[]
+  menuImports MenuImport[]
 
   @@index([validFrom, validTo])
   @@index([status])
@@ -418,6 +435,27 @@ model MenuDayDish {
 
   @@index([menuDayId])
   @@index([dishId])
+}
+
+// Источник загрузки меню AI-помощником шефа (фото или Excel).
+// Хранит сырой текст для аудита и возможной перегенерации, плюс созданные блюда.
+model MenuImport {
+  id          String           @id @default(cuid())
+  source      MenuImportSource
+  status      MenuStatus       @default(DRAFT)
+  rawText     String           // сырой дамп Excel / OCR фото — для аудита и перегенерации
+  confidence  Float?
+  reason      String?
+  createdById String?
+  createdBy   User?            @relation("MenuImportCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  dishes      Dish[]
+  menuCycleId String?
+  menuCycle   MenuCycle?       @relation(fields: [menuCycleId], references: [id])
+
+  @@index([status])
 }
 
 // ============================================================
