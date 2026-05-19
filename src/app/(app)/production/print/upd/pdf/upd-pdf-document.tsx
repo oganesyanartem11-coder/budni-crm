@@ -706,7 +706,7 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
         </View>
       </View>
 
-      <Text style={styles.pagesNote}>Документ составлен на ___ листе</Text>
+      <Text style={styles.pagesNote}>Документ составлен на <Text style={styles.bold}>1</Text> листе</Text>
 
       <Text style={styles.amountWords}>
         Всего к оплате прописью: {amountToWords(rub, kop)} ({formatMoney(doc.totalAmount, { withKopecks: true })})
