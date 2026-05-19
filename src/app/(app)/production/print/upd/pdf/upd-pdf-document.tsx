@@ -86,7 +86,7 @@ const styles = StyleSheet.create({
   titleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   title: {
     flexGrow: 1,
@@ -96,17 +96,18 @@ const styles = StyleSheet.create({
   statusBox: {
     borderWidth: 0.7,
     borderColor: '#000',
-    padding: 2,
+    padding: 1,
     width: 240,
   },
   statusBoxTitle: {
     fontSize: 8,
     fontWeight: 'bold',
-    marginBottom: 1,
+    marginBottom: 0,
   },
   statusBoxBody: {
     fontSize: 6.5,
     color: C_LIGHT,
+    lineHeight: 1,
   },
 
   invoiceLine: {
@@ -143,7 +144,7 @@ const styles = StyleSheet.create({
   // Разлинованная сетка верхнего блока (счёт-фактура + стороны) по форме 1137:
   // внешняя чёрная рамка, строки с горизонтальными линиями, ячейки
   // «метка | значение | (номер поля)».
-  g1Frame: { borderWidth: 0.75, borderColor: '#000', marginBottom: 4 },
+  g1Frame: { borderWidth: 0.75, borderColor: '#000', marginBottom: 1 },
   g1Row: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#000' },
   g1RowLast: { flexDirection: 'row' },
   g1Label: {
