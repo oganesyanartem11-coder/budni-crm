@@ -570,7 +570,7 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
       <Text style={styles.pagesNote}>Документ составлен на ___ листе</Text>
 
       <Text style={styles.amountWords}>
-        Всего к оплате прописью: {amountToWords(rub, kop)} ({formatMoney(doc.totalAmount, { withKopecks: true })} ₽)
+        Всего к оплате прописью: {amountToWords(rub, kop)} ({formatMoney(doc.totalAmount, { withKopecks: true })})
       </Text>
 
       {/* Подписи: две стороны */}
