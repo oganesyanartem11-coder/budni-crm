@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "DishStatus" AS ENUM ('DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'ARCHIVED');
+
+-- AlterTable
+ALTER TABLE "Dish" ADD COLUMN     "status" "DishStatus" NOT NULL DEFAULT 'APPROVED';
