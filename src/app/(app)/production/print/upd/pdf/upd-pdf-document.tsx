@@ -351,6 +351,31 @@ const styles = StyleSheet.create({
   g3FieldNum: { fontSize: 6, color: '#000' },
   g3Mp: { fontSize: 7, fontWeight: 'bold', marginTop: 4 },
 
+  // Зоны A/B/C блока подписей — на всю ширину (вне двухколоночной сетки)
+  g3FullFrame: { borderWidth: 0.75, borderColor: '#000', marginTop: 2 },
+  g3FullRow: { padding: 2, borderBottomWidth: 0.5, borderColor: '#000' },
+  g3FullRowLast: { padding: 2 },
+  g3HeadsRow: { flexDirection: 'row' },
+  g3HeadCell: { flex: 1, paddingHorizontal: 3 },
+
+  // Зона D блока подписей — парная сетка: левая/правая ячейка в ОДНОЙ строке,
+  // синхронны по высоте (растягиваются под более высокую из пары через alignItems stretch)
+  g3PairFrame: { borderWidth: 0.75, borderColor: '#000', marginTop: 2 },
+  g3PairRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderBottomWidth: 0.5,
+    borderColor: '#000',
+  },
+  g3PairRowLast: { flexDirection: 'row', alignItems: 'stretch' },
+  g3PairLeft: {
+    width: '50%',
+    padding: 2,
+    borderRightWidth: 0.5,
+    borderColor: '#000',
+  },
+  g3PairRight: { width: '50%', padding: 2 },
+
   footer: {
     position: 'absolute',
     bottom: 8,
@@ -687,13 +712,12 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
         Всего к оплате прописью: {amountToWords(rub, kop)} ({formatMoney(doc.totalAmount, { withKopecks: true })})
       </Text>
 
-      {/* Подписи: две стороны — разлинованная сетка формы 1137 */}
-      <View style={styles.g3Frame}>
-        <View style={styles.g3TwoCol}>
-          {/* Сторона продавца */}
-          <View style={styles.g3ColLeft}>
-            {/* Руководитель / ИП */}
-            <View style={styles.g3Cell}>
+      {/* Зоны A/B/C блока подписей — на всю ширину (форма 1137) */}
+      <View style={styles.g3FullFrame}>
+        {/* Зона A: Руководитель / Главбух / ИП + ОГРНИП-сноска */}
+        <View style={styles.g3FullRow}>
+          <View style={styles.g3HeadsRow}>
+            <View style={styles.g3HeadCell}>
               <Text style={styles.g3RoleLabel}>{sellerHeadTitle}</Text>
               <View style={styles.g3SignRow}>
                 <View style={styles.g3PenWide} />
@@ -701,178 +725,155 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
                 <Text style={styles.sigText}>{supplier.directorName}</Text>
               </View>
               <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
-              {isIE ? (
-                <Text style={styles.g3Note}>
-                  Основной государственный регистрационный номер ИП и дата
-                  присвоения: ОГРНИП {supplier.ogrn}
-                </Text>
-              ) : null}
             </View>
-
-            {/* Главный бухгалтер */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Главный бухгалтер или иное уполномоченное лицо
-              </Text>
+            <View style={styles.g3HeadCell}>
+              <Text style={styles.g3RoleLabel}>Главный бухгалтер или иное уполномоченное лицо</Text>
               <View style={styles.g3SignRow}>
                 <View style={styles.g3PenWide} />
                 <Text style={styles.sigSlash}>/</Text>
                 <View style={styles.g3PenWide} />
               </View>
               <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
-            </View>
-
-            {/* Основание [8] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3Note}>
-                Основание передачи (сдачи) / получения (приёмки): {baseLineText(buyer)}{' '}
-                <Text style={styles.g3FieldNum}>[8]</Text>
-              </Text>
-            </View>
-
-            {/* Данные о транспортировке [9] */}
-            <View style={styles.g3Cell}>
-              <View style={styles.g3SignRow}>
-                <Text style={styles.sigText}>Данные о транспортировке и грузе:</Text>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.g3FieldNum}>[9]</Text>
-              </View>
-            </View>
-
-            {/* Товар передал [10] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Товар (груз) передал / услуги сдал <Text style={styles.g3FieldNum}>[10]</Text>
-              </Text>
-              <View style={styles.g3SignRow}>
-                <Text style={styles.sigText}>{supplier.directorPosition}</Text>
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <Text style={styles.sigText}>{supplier.directorName}</Text>
-              </View>
-              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
-            </View>
-
-            {/* Дата отгрузки [11] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3Note}>
-                Дата отгрузки, передачи (сдачи) « {day} » {month} {year} года{' '}
-                <Text style={styles.g3FieldNum}>[11]</Text>
-              </Text>
-            </View>
-
-            {/* Ответственный [13] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Ответственный за правильность оформления факта хозяйственной жизни{' '}
-                <Text style={styles.g3FieldNum}>[13]</Text>
-              </Text>
-              <View style={styles.g3SignRow}>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-              </View>
-              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
-            </View>
-
-            {/* Составитель [14] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3Note}>
-                Наименование экономического субъекта — составителя документа{' '}
-                <Text style={styles.g3FieldNum}>[14]</Text>: {supplier.fullName}, ИНН{' '}
-                {innKppSupplier}
-              </Text>
-            </View>
-
-            {/* М.П. */}
-            <View style={styles.g3CellLast}>
-              <Text style={styles.g3Mp}>М.П.</Text>
             </View>
           </View>
+          {isIE ? (
+            <Text style={styles.g3Note}>
+              Основной государственный регистрационный номер ИП и дата присвоения: ОГРНИП {supplier.ogrn}
+            </Text>
+          ) : null}
+        </View>
+        {/* Зона B: Основание [8] */}
+        <View style={styles.g3FullRow}>
+          <Text style={styles.g3Note}>
+            Основание передачи (сдачи) / получения (приёмки): {baseLineText(buyer)}{' '}
+            <Text style={styles.g3FieldNum}>[8]</Text>
+          </Text>
+        </View>
+        {/* Зона C: Данные о транспортировке [9] */}
+        <View style={styles.g3FullRowLast}>
+          <View style={styles.g3SignRow}>
+            <Text style={styles.sigText}>Данные о транспортировке и грузе:</Text>
+            <View style={styles.g3PenWide} />
+            <Text style={styles.g3FieldNum}>[9]</Text>
+          </View>
+        </View>
+      </View>
 
-          {/* Сторона покупателя */}
-          <View style={styles.g3ColRight}>
-            {/* Руководитель */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Руководитель организации или иное уполномоченное лицо
-              </Text>
-              <View style={styles.g3SignRow}>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-              </View>
-              <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
+      {/* Зона D: парная двухколоночная сетка (форма 1137) — строки синхронны слева/справа */}
+      <View style={styles.g3PairFrame}>
+        {/* [10] / [15] Товар передал / получил */}
+        <View style={styles.g3PairRow}>
+          <View style={styles.g3PairLeft}>
+            <Text style={styles.g3RoleLabel}>
+              Товар (груз) передал / услуги сдал <Text style={styles.g3FieldNum}>[10]</Text>
+            </Text>
+            <View style={styles.g3SignRow}>
+              <Text style={styles.sigText}>{supplier.directorPosition}</Text>
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <Text style={styles.sigText}>{supplier.directorName}</Text>
             </View>
-
-            {/* Главный бухгалтер */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Главный бухгалтер или иное уполномоченное лицо
-              </Text>
-              <View style={styles.g3SignRow}>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-              </View>
-              <Text style={styles.g3Caption}>(подпись) / (ф.и.о.)</Text>
+            <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+          </View>
+          <View style={styles.g3PairRight}>
+            <Text style={styles.g3RoleLabel}>
+              Товар (груз) получил / услуги принял <Text style={styles.g3FieldNum}>[15]</Text>
+            </Text>
+            <View style={styles.g3SignRow}>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
             </View>
-
-            {/* Товар получил [15] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Товар (груз) получил / услуги принял <Text style={styles.g3FieldNum}>[15]</Text>
-              </Text>
-              <View style={styles.g3SignRow}>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-              </View>
-              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+            <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+          </View>
+        </View>
+        {/* [11] / [16] Дата отгрузки / получения */}
+        <View style={styles.g3PairRow}>
+          <View style={styles.g3PairLeft}>
+            <Text style={styles.g3Note}>
+              Дата отгрузки, передачи (сдачи) « {day} » {month} {year} года{' '}
+              <Text style={styles.g3FieldNum}>[11]</Text>
+            </Text>
+          </View>
+          <View style={styles.g3PairRight}>
+            <Text style={styles.g3Note}>
+              Дата получения (приёмки) « __ » __________ 20__ года{' '}
+              <Text style={styles.g3FieldNum}>[16]</Text>
+            </Text>
+          </View>
+        </View>
+        {/* [12] / [17] Иные сведения */}
+        <View style={styles.g3PairRow}>
+          <View style={styles.g3PairLeft}>
+            <Text style={styles.g3Note}>
+              Иные сведения об отгрузке, передаче{' '}
+              <Text style={styles.g3FieldNum}>[12]</Text>
+            </Text>
+          </View>
+          <View style={styles.g3PairRight}>
+            <Text style={styles.g3Note}>
+              Иные сведения о получении, приёмке{' '}
+              <Text style={styles.g3FieldNum}>[17]</Text>
+            </Text>
+          </View>
+        </View>
+        {/* [13] / [18] Ответственный */}
+        <View style={styles.g3PairRow}>
+          <View style={styles.g3PairLeft}>
+            <Text style={styles.g3RoleLabel}>
+              Ответственный за правильность оформления факта хозяйственной жизни{' '}
+              <Text style={styles.g3FieldNum}>[13]</Text>
+            </Text>
+            <View style={styles.g3SignRow}>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
             </View>
-
-            {/* Дата получения [16] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3Note}>
-                Дата получения (приёмки) « __ » __________ 20__ года{' '}
-                <Text style={styles.g3FieldNum}>[16]</Text>
-              </Text>
+            <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+          </View>
+          <View style={styles.g3PairRight}>
+            <Text style={styles.g3RoleLabel}>
+              Ответственный за правильность оформления факта хозяйственной жизни{' '}
+              <Text style={styles.g3FieldNum}>[18]</Text>
+            </Text>
+            <View style={styles.g3SignRow}>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
+              <Text style={styles.sigSlash}>/</Text>
+              <View style={styles.g3PenWide} />
             </View>
-
-            {/* Ответственный [18] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3RoleLabel}>
-                Ответственный за правильность оформления факта хозяйственной жизни{' '}
-                <Text style={styles.g3FieldNum}>[18]</Text>
-              </Text>
-              <View style={styles.g3SignRow}>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-                <Text style={styles.sigSlash}>/</Text>
-                <View style={styles.g3PenWide} />
-              </View>
-              <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
-            </View>
-
-            {/* Составитель [19] */}
-            <View style={styles.g3Cell}>
-              <Text style={styles.g3Note}>
-                Наименование экономического субъекта — составителя документа{' '}
-                <Text style={styles.g3FieldNum}>[19]</Text>: {buyerLegal}
-                {buyer.inn ? ', ИНН ' + buyer.inn : ''}
-              </Text>
-            </View>
-
-            {/* М.П. */}
-            <View style={styles.g3CellLast}>
-              <Text style={styles.g3Mp}>М.П.</Text>
-            </View>
+            <Text style={styles.g3Caption}>(должность) / (подпись) / (ф.и.о.)</Text>
+          </View>
+        </View>
+        {/* [14] / [19] Составитель */}
+        <View style={styles.g3PairRow}>
+          <View style={styles.g3PairLeft}>
+            <Text style={styles.g3Note}>
+              Наименование экономического субъекта — составителя документа{' '}
+              <Text style={styles.g3FieldNum}>[14]</Text>: {supplier.fullName}, ИНН {innKppSupplier}
+            </Text>
+          </View>
+          <View style={styles.g3PairRight}>
+            <Text style={styles.g3Note}>
+              Наименование экономического субъекта — составителя документа{' '}
+              <Text style={styles.g3FieldNum}>[19]</Text>: {buyerLegal}
+              {buyer.inn ? ', ИНН ' + innKppBuyer : ''}
+            </Text>
+          </View>
+        </View>
+        {/* М.П. / М.П. */}
+        <View style={styles.g3PairRowLast}>
+          <View style={styles.g3PairLeft}>
+            <Text style={styles.g3Mp}>М.П.</Text>
+          </View>
+          <View style={styles.g3PairRight}>
+            <Text style={styles.g3Mp}>М.П.</Text>
           </View>
         </View>
       </View>
