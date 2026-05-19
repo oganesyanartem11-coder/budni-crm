@@ -21,6 +21,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const idParam = url.searchParams.get('id')
   const dateParam = url.searchParams.get('date')
+  const disposition =
+    url.searchParams.get('disposition') === 'inline' ? 'inline' : 'attachment'
 
   let dateYmd: string | null = null
 
@@ -78,7 +80,7 @@ export async function GET(request: Request) {
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Disposition': `${disposition}; filename="${filename}"`,
       'Cache-Control': 'no-store',
     },
   })
