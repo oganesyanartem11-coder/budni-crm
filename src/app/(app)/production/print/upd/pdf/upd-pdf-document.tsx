@@ -80,13 +80,13 @@ const styles = StyleSheet.create({
     fontSize: 6,
     color: C_LIGHT,
     textAlign: 'right',
-    marginBottom: 4,
+    marginBottom: 2,
   },
 
   titleRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   title: {
     flexGrow: 1,
@@ -100,12 +100,12 @@ const styles = StyleSheet.create({
     width: 240,
   },
   statusBoxTitle: {
-    fontSize: 8,
+    fontSize: 7,
     fontWeight: 'bold',
     marginBottom: 0,
   },
   statusBoxBody: {
-    fontSize: 6.5,
+    fontSize: 5.5,
     color: C_LIGHT,
     lineHeight: 1,
   },
