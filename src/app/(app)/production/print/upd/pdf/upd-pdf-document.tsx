@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   totalsBlock: { marginTop: 8 },
   totalsLine: { marginBottom: 1 },
   totalsBold: { fontWeight: 'bold' },
-  amountWords: { fontStyle: 'italic', marginTop: 3 },
+  amountWords: { fontWeight: 'bold', marginTop: 3 },
 
   signaturesRow: { flexDirection: 'row', marginTop: 14 },
   signatureCol: { width: '50%', paddingRight: 12 },
