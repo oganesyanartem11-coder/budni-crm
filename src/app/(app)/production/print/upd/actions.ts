@@ -254,7 +254,6 @@ export async function previewUpdForDate(
 
 export interface UpdGenerateResult {
   date: string
-  printUrl: string
   createdCount: number
   reusedCount: number
   conflicts: Array<{ orderId: string; reason: string }>
@@ -394,7 +393,6 @@ export async function generateAndGetUpdForDate(
     ok: true,
     data: {
       date: dateIso,
-      printUrl: `/production/print/upd/view?date=${dateIso}`,
       createdCount,
       reusedCount,
       conflicts,

@@ -143,7 +143,7 @@ export default async function UpdListPage({ searchParams }: PageProps) {
                   </td>
                   <td className="p-3 text-right">
                     <Link
-                      href={`/production/print/upd/view?id=${it.id}`}
+                      href={`/production/print/upd/pdf?id=${it.id}`}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90"
                     >
                       <Printer className="w-3.5 h-3.5" />
