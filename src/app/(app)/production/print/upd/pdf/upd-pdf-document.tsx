@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
   g3ColRight: { width: '50%' },
   g3Cell: { padding: 2, borderBottomWidth: 0.5, borderColor: '#000' },
   g3CellLast: { padding: 2 },
-  g3RoleLabel: { fontSize: 7, fontWeight: 'bold', marginBottom: 6 },
+  g3RoleLabel: { fontSize: 7, fontWeight: 'bold', marginBottom: 2 },
   g3SignRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 1 },
   g3PenWide: {
     borderBottomWidth: 0.5,
