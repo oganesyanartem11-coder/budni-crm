@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
   statusBox: {
     borderWidth: 0.7,
     borderColor: '#000',
-    padding: 3,
+    padding: 2,
     width: 240,
   },
   statusBoxTitle: {
@@ -285,13 +285,13 @@ const styles = StyleSheet.create({
 
   pagesNote: {
     fontSize: 7,
-    marginTop: 4,
+    marginTop: 2,
   },
   amountWords: {
     fontWeight: 'bold',
     fontSize: 8,
-    marginTop: 3,
-    marginBottom: 4,
+    marginTop: 2,
+    marginBottom: 2,
   },
 
   sigBlock: { marginTop: 4 },
@@ -330,12 +330,12 @@ const styles = StyleSheet.create({
   // две колонки (продавец слева / покупатель справа) с вертикальным
   // разделителем, ячейки с горизонтальными линиями, ровные линии
   // под подпись/ФИО (g3PenWide) — растягиваются на доступную ширину.
-  g3Frame: { borderWidth: 0.75, borderColor: '#000', marginTop: 4 },
+  g3Frame: { borderWidth: 0.75, borderColor: '#000', marginTop: 2 },
   g3TwoCol: { flexDirection: 'row' },
   g3ColLeft: { width: '50%', borderRightWidth: 0.5, borderColor: '#000' },
   g3ColRight: { width: '50%' },
-  g3Cell: { padding: 3, borderBottomWidth: 0.5, borderColor: '#000' },
-  g3CellLast: { padding: 3 },
+  g3Cell: { padding: 2, borderBottomWidth: 0.5, borderColor: '#000' },
+  g3CellLast: { padding: 2 },
   g3RoleLabel: { fontSize: 7, fontWeight: 'bold', marginBottom: 6 },
   g3SignRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 1 },
   g3PenWide: {
