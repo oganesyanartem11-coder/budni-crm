@@ -7,6 +7,7 @@ import { prisma } from '@/lib/db/prisma'
 import { pluralize } from '@/lib/utils/format'
 import { getGreeting } from '@/lib/utils/greeting'
 import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
+import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 import { AdminWeekBlock } from './admin-week-block'
 
 // force-dynamic: приветствие зависит от текущего часа.
@@ -24,15 +25,13 @@ export default async function DashboardPage() {
   const todayEnd = (() => { const d = new Date(); d.setHours(23,59,59,999); return d })()
   const tomorrowStart = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0); return d })()
   const tomorrowEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(23,59,59,999); return d })()
-  const pendingUntil = (() => { const d = new Date(); d.setDate(d.getDate() + 2); d.setHours(23,59,59,999); return d })()
 
   const [todayOrders, tomorrowOrders, pendingOrders] = await Promise.all([
     prisma.order.count({ where: { deliveryDate: { gte: todayStart, lt: todayEnd } } }),
     prisma.order.count({ where: { deliveryDate: { gte: tomorrowStart, lt: tomorrowEnd } } }),
-    // pending только за сегодня + завтра (cut-off релевантен только для ближайших)
-    prisma.order.count({
-      where: { status: 'PENDING_CONFIRMATION', deliveryDate: { lte: pendingUntil } },
-    }),
+    // Фильтр согласован с listPendingConfirmation: тот же [today, tomorrowEnd],
+    // иначе счётчик и список расходятся (счётчик > список → клик → пусто).
+    countPendingConfirmationToday(),
   ])
 
   // Fallback: если на сегодня заказов нет, но завтра есть — карточка переключается

@@ -211,10 +211,14 @@ function DeliveryCard({
     })
   }
 
+  // Rules of Hooks: useWindowState — кастомный хук (useState+useEffect внутри).
+  // Должен вызываться ДО любого early return, иначе при переходе isOptimistic
+  // false→true React поднимает "Rendered fewer hooks" → uncaught → error boundary.
+  const windowState = useWindowState(stop.deliveryWindowFrom, stop.deliveryWindowTo)
+
   if (isOptimistic) return null
 
   const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(stop.locationAddress)}`
-  const windowState = useWindowState(stop.deliveryWindowFrom, stop.deliveryWindowTo)
   const isLateState = windowState === 'late'
   const hasWindow = !!(stop.deliveryWindowFrom || stop.deliveryWindowTo)
 
