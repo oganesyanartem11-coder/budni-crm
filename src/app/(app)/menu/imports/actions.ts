@@ -7,6 +7,11 @@ import { prismaDirect } from '@/lib/db/prisma-direct'
 import { requireRole } from '@/lib/auth/current-user'
 import { runMenuImportFromExcel } from '@/lib/menu-import/run-import'
 import { rollbackMenuImport, type RollbackResult } from '@/lib/menu-import/assemble'
+import {
+  getMenuStructureFromImport,
+  expandMenuFromStructure,
+  isMonday,
+} from '@/lib/menu-import/expand-menu'
 import type { MenuImportProgress } from '@prisma/client'
 
 export type ActionResult<T = void> =
@@ -114,6 +119,23 @@ async function assertImportDraft(menuImportId: string): Promise<ActionResult<voi
   })
   if (!mi) return { ok: false, error: 'Импорт не найден' }
   if (mi.status !== 'DRAFT') return { ok: false, error: STATUS_LOCKED_MSG }
+  return { ok: true, data: undefined }
+}
+
+const STATUS_NOT_PENDING_MSG =
+  'Импорт не на согласовании, действие недоступно.'
+
+async function assertImportPendingApproval(
+  menuImportId: string
+): Promise<ActionResult<void>> {
+  const mi = await prisma.menuImport.findUnique({
+    where: { id: menuImportId },
+    select: { status: true },
+  })
+  if (!mi) return { ok: false, error: 'Импорт не найден' }
+  if (mi.status !== 'PENDING_APPROVAL') {
+    return { ok: false, error: STATUS_NOT_PENDING_MSG }
+  }
   return { ok: true, data: undefined }
 }
 
@@ -367,4 +389,191 @@ export async function submitImportForApproval(
   revalidatePath('/menu/imports')
   revalidatePath(`/menu/imports/${parsed.data.menuImportId}`)
   return { ok: true, data: undefined }
+}
+
+// === 8.7a: approve / reject / count для PENDING_APPROVAL =======================
+
+const APPROVE_WEEKS_AHEAD = 13
+
+const approveSchema = z.object({
+  menuImportId: z.string().min(1),
+  startDate: z.string().min(1), // ISO 'YYYY-MM-DD'
+})
+
+export async function approveMenuImport(
+  input: z.infer<typeof approveSchema>
+): Promise<ActionResult<{ cyclesCreated: number }>> {
+  const user = await requireRole(['ADMIN'])
+
+  const parsed = approveSchema.safeParse(input)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'Неверные данные',
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    }
+  }
+
+  const check = await assertImportPendingApproval(parsed.data.menuImportId)
+  if (!check.ok) return check
+
+  const startDate = new Date(parsed.data.startDate + 'T00:00:00.000Z')
+  if (Number.isNaN(startDate.getTime())) {
+    return { ok: false, error: 'Неверный формат даты (ожидается YYYY-MM-DD)' }
+  }
+  if (!isMonday(startDate)) {
+    return { ok: false, error: 'Дата старта должна быть понедельником' }
+  }
+
+  let cyclesCreated: number
+  try {
+    cyclesCreated = await prismaDirect.$transaction(
+      async (tx) => {
+        const structure = await getMenuStructureFromImport(parsed.data.menuImportId, tx)
+        if (structure.weekA.days.length === 0) {
+          throw new Error('Нет данных для разворачивания')
+        }
+
+        // Сносим будущие циклы ЧУЖИХ импортов на этом или позже понедельнике —
+        // MenuDay/MenuDayDish уйдут каскадно (Cascade на menuCycleId/menuDayId).
+        // Циклы текущего импорта в обрезку не попадают (filter menuImportId != X);
+        // их исходные оригинальные циклы остаются как «архивная история».
+        await tx.menuCycle.deleteMany({
+          where: {
+            validFrom: { gte: startDate },
+            menuImportId: { not: parsed.data.menuImportId },
+          },
+        })
+
+        const created = await expandMenuFromStructure(
+          structure,
+          startDate,
+          APPROVE_WEEKS_AHEAD,
+          parsed.data.menuImportId,
+          user.id,
+          tx
+        )
+
+        await tx.menuImport.update({
+          where: { id: parsed.data.menuImportId },
+          data: {
+            status: 'APPROVED',
+            approvedById: user.id,
+            approvedAt: new Date(),
+            startDate,
+            rejectionComment: null,
+          },
+        })
+
+        return created
+      },
+      { timeout: 30000 }
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: msg }
+  }
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'MENU_IMPORT_APPROVED',
+      entityType: 'MenuImport',
+      entityId: parsed.data.menuImportId,
+      payload: {
+        startDate: parsed.data.startDate,
+        cyclesCreated,
+        weeksAhead: APPROVE_WEEKS_AHEAD,
+      },
+    },
+  })
+
+  revalidatePath('/menu/imports')
+  revalidatePath(`/menu/imports/${parsed.data.menuImportId}`)
+  revalidatePath('/menu')
+
+  return { ok: true, data: { cyclesCreated } }
+}
+
+const rejectSchema = z.object({
+  menuImportId: z.string().min(1),
+  comment: z.string().min(1).max(2000),
+})
+
+export async function rejectMenuImport(
+  input: z.infer<typeof rejectSchema>
+): Promise<ActionResult<void>> {
+  const user = await requireRole(['ADMIN'])
+
+  const parsed = rejectSchema.safeParse(input)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'Неверные данные',
+      fieldErrors: parsed.error.flatten().fieldErrors,
+    }
+  }
+
+  const check = await assertImportPendingApproval(parsed.data.menuImportId)
+  if (!check.ok) return check
+
+  await prisma.menuImport.update({
+    where: { id: parsed.data.menuImportId },
+    data: {
+      status: 'DRAFT',
+      rejectionComment: parsed.data.comment,
+      approvedById: null,
+      approvedAt: null,
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'MENU_IMPORT_REJECTED',
+      entityType: 'MenuImport',
+      entityId: parsed.data.menuImportId,
+      payload: { comment: parsed.data.comment },
+    },
+  })
+
+  revalidatePath('/menu/imports')
+  revalidatePath(`/menu/imports/${parsed.data.menuImportId}`)
+  revalidatePath('/menu')
+
+  return { ok: true, data: undefined }
+}
+
+const countReplaceableSchema = z.object({
+  menuImportId: z.string().min(1),
+  startDate: z.string().min(1),
+})
+
+// Сколько MenuCycle будет удалено при approve(menuImportId, startDate).
+// Не модифицирует БД — только count для UI-предупреждения «будет удалено N циклов».
+// Считает циклы ЧУЖИХ импортов с validFrom >= startDate (как и сам deleteMany в approve).
+export async function countReplaceableCycles(
+  input: z.infer<typeof countReplaceableSchema>
+): Promise<ActionResult<{ count: number }>> {
+  await requireRole(['ADMIN'])
+
+  const parsed = countReplaceableSchema.safeParse(input)
+  if (!parsed.success) {
+    return { ok: false, error: 'Неверные данные' }
+  }
+  const startDate = new Date(parsed.data.startDate + 'T00:00:00.000Z')
+  if (Number.isNaN(startDate.getTime())) {
+    return { ok: false, error: 'Неверный формат даты (ожидается YYYY-MM-DD)' }
+  }
+
+  const count = await prisma.menuCycle.count({
+    where: {
+      validFrom: { gte: startDate },
+      menuImportId: { not: parsed.data.menuImportId },
+    },
+  })
+
+  return { ok: true, data: { count } }
 }

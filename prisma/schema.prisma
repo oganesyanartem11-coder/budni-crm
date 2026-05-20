@@ -181,6 +181,7 @@ model User {
   resolvedInboxItems    InboxItem[]
   generatedUpdDocuments UpdDocument[] @relation("UpdGeneratedBy")
   menuImports           MenuImport[]  @relation("MenuImportCreatedBy")
+  approvedMenuImports   MenuImport[]  @relation("MenuImportApprovedBy")
 
   @@index([role, isActive])
 }
@@ -411,11 +412,18 @@ model MenuCycle {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
+  // 8.7: цикл, порождённый разворотом одобренного импорта (chefs approve → expand 13 weeks).
+  // Отделено от legacy MenuImport.menuCycleId одиночного указателя — здесь обратная сторона
+  // множественная: один MenuImport порождает 13+ MenuCycle.
+  menuImportId String?
+  menuImport   MenuImport? @relation("MenuCycleFromImport", fields: [menuImportId], references: [id])
+
   days        MenuDay[]
   menuImports MenuImport[]
 
   @@index([validFrom, validTo])
   @@index([status])
+  @@index([menuImportId])
 }
 
 model MenuDay {
@@ -457,6 +465,11 @@ model MenuImport {
   confidence  Float?
   reason      String?
   errorMessage String?
+  approvedById   String?
+  approvedBy     User?    @relation("MenuImportApprovedBy", fields: [approvedById], references: [id])
+  approvedAt     DateTime?
+  rejectionComment String?
+  startDate      DateTime?
   createdById String?
   createdBy   User?            @relation("MenuImportCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime         @default(now())
@@ -465,6 +478,9 @@ model MenuImport {
   dishes      Dish[]
   menuCycleId String?
   menuCycle   MenuCycle?       @relation(fields: [menuCycleId], references: [id])
+  // 8.7: множественная связь — один импорт → 13+ MenuCycle при approve+expand.
+  // Отдельное relation-имя, чтобы не путать с legacy одиночным menuCycleId выше.
+  menuCycles  MenuCycle[]      @relation("MenuCycleFromImport")
 
   @@index([status])
 }
