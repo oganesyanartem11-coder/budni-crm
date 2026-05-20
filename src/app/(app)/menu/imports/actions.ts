@@ -12,6 +12,10 @@ import {
   expandMenuFromStructure,
   isMonday,
 } from '@/lib/menu-import/expand-menu'
+import {
+  notifyAdminsAboutPendingMenuImport,
+  notifyChefAboutRejectedMenuImport,
+} from '@/lib/bot/notify-import'
 import type { MenuImportProgress } from '@prisma/client'
 
 export type ActionResult<T = void> =
@@ -383,11 +387,24 @@ export async function submitImportForApproval(
     },
   })
 
-  // TODO (Спринт 8.7): notifyAdminsAboutPendingMenuImport(menuImportId) —
-  // Telegram-пуш ADMIN'ам с deeplink на этот импорт.
-
   revalidatePath('/menu/imports')
   revalidatePath(`/menu/imports/${parsed.data.menuImportId}`)
+
+  const importInfo = await prisma.menuImport.findUnique({
+    where: { id: parsed.data.menuImportId },
+    select: {
+      _count: { select: { dishes: true } },
+      createdBy: { select: { name: true } },
+    },
+  })
+  if (importInfo) {
+    await notifyAdminsAboutPendingMenuImport({
+      menuImportId: parsed.data.menuImportId,
+      dishesCount: importInfo._count.dishes,
+      chefName: importInfo.createdBy?.name ?? 'Неизвестно',
+    })
+  }
+
   return { ok: true, data: undefined }
 }
 
@@ -542,6 +559,16 @@ export async function rejectMenuImport(
   revalidatePath('/menu/imports')
   revalidatePath(`/menu/imports/${parsed.data.menuImportId}`)
   revalidatePath('/menu')
+
+  const importInfo = await prisma.menuImport.findUnique({
+    where: { id: parsed.data.menuImportId },
+    select: { createdById: true },
+  })
+  await notifyChefAboutRejectedMenuImport({
+    menuImportId: parsed.data.menuImportId,
+    chefId: importInfo?.createdById ?? null,
+    comment: parsed.data.comment,
+  })
 
   return { ok: true, data: undefined }
 }

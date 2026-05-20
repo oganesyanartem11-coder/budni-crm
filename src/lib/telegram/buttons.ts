@@ -60,3 +60,15 @@ export function menuButton(
   const { appBaseUrl } = getTelegramEnv()
   return new InlineKeyboard().url(label, `${appBaseUrl}/menu?cycle=${menuCycleId}`)
 }
+
+/**
+ * Кнопка «Открыть импорт» — ведёт на /menu/imports/{id}.
+ * Используется в push'ах workflow 8.7 (submit / reject AI-импорта меню).
+ */
+export function importButton(
+  menuImportId: string,
+  label = '📥 Открыть импорт в CRM'
+): InlineKeyboard {
+  const { appBaseUrl } = getTelegramEnv()
+  return new InlineKeyboard().url(label, `${appBaseUrl}/menu/imports/${menuImportId}`)
+}

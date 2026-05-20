@@ -14,7 +14,7 @@ interface PageProps {
 }
 
 export default async function MenuImportPage({ params }: PageProps) {
-  await requireRole(['ADMIN', 'CHEF'])
+  const user = await requireRole(['ADMIN', 'CHEF'])
   const { id } = await params
 
   const mi = await prisma.menuImport.findUnique({
@@ -26,6 +26,10 @@ export default async function MenuImportPage({ params }: PageProps) {
       progress: true,
       reason: true,
       errorMessage: true,
+      approvedAt: true,
+      rejectionComment: true,
+      startDate: true,
+      approvedBy: { select: { name: true } },
       createdAt: true,
       createdBy: { select: { name: true } },
       _count: { select: { dishes: true } },
@@ -83,6 +87,13 @@ export default async function MenuImportPage({ params }: PageProps) {
         dishesCount={mi._count.dishes}
         importStatus={mi.status}
         importData={importData}
+        userRole={user.role}
+        approval={{
+          approvedAt: mi.approvedAt,
+          rejectionComment: mi.rejectionComment,
+          startDate: mi.startDate,
+          approvedByName: mi.approvedBy?.name ?? null,
+        }}
       />
     </>
   )

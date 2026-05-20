@@ -8,10 +8,10 @@ import { AlertCircle, Loader2, CheckCircle2, Circle } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import { getMenuImportProgress } from '../actions'
 import { PROGRESS_STAGES } from '@/lib/menu-import/progress-labels'
-import { ImportView, type AllIngredient } from './import-view'
+import { ImportView, type AllIngredient, type ApprovalInfo } from './import-view'
 import type { SerializedDish } from './dishes-list-view'
 import type { SerializedCycle } from './menu-tree-view'
-import type { MenuImportProgress, MenuStatus } from '@prisma/client'
+import type { MenuImportProgress, MenuStatus, UserRole } from '@prisma/client'
 
 interface Props {
   menuImportId: string
@@ -26,6 +26,8 @@ interface Props {
     menuCycles: SerializedCycle[]
     allIngredients: AllIngredient[]
   } | null
+  userRole: UserRole
+  approval: ApprovalInfo
 }
 
 export function ProgressView({
@@ -36,6 +38,8 @@ export function ProgressView({
   dishesCount,
   importStatus,
   importData,
+  userRole,
+  approval,
 }: Props) {
   const [progress, setProgress] = useState<MenuImportProgress>(initialProgress)
   const [reason, setReason] = useState<string | null>(initialReason)
@@ -155,6 +159,8 @@ export function ProgressView({
           allIngredients={importData.allIngredients}
           status={importStatus}
           dishesCount={dishesCount}
+          userRole={userRole}
+          approval={approval}
         />
       )}
     </div>
