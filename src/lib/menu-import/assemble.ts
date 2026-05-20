@@ -20,6 +20,9 @@ export interface AssembleInput {
   uniqueDishes: string[]
   recipes: GeneratedRecipe[]
   userId: string | null
+  // Если передан — переиспользуем уже существующий MenuImport (плейсхолдер от
+  // оркестратора run-import.ts). Без него — создаётся новый, как было в 8.5b.
+  existingMenuImportId?: string
 }
 
 export interface AssembleResult {
@@ -79,17 +82,29 @@ function addDays(d: Date, n: number): Date {
 export async function assembleMenuImport(input: AssembleInput): Promise<AssembleResult> {
   return prismaDirect.$transaction(
     async (tx) => {
-      // 1. MenuImport
-      const mi = await tx.menuImport.create({
-        data: {
-          source: input.source,
-          status: 'DRAFT',
-          rawText: input.rawText,
-          confidence: input.confidence,
-          reason: input.reason,
-          createdById: input.userId,
-        },
-      })
+      // 1. MenuImport — либо обновляем плейсхолдер от оркестратора, либо создаём новый.
+      const mi = input.existingMenuImportId
+        ? await tx.menuImport.update({
+            where: { id: input.existingMenuImportId },
+            data: {
+              source: input.source,
+              status: 'DRAFT',
+              rawText: input.rawText,
+              confidence: input.confidence,
+              reason: input.reason,
+              createdById: input.userId,
+            },
+          })
+        : await tx.menuImport.create({
+            data: {
+              source: input.source,
+              status: 'DRAFT',
+              rawText: input.rawText,
+              confidence: input.confidence,
+              reason: input.reason,
+              createdById: input.userId,
+            },
+          })
 
       // 2. Ингредиенты: матчинг существующих по name; новые создаём с pricePerUnit=0
       // (AI цен не знает — placeholder, менеджер проставит) и пишем первую запись priceHistory.

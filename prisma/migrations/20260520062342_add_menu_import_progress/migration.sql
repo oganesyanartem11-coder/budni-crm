@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "MenuImportProgress" AS ENUM ('EXTRACTING', 'PARSING_SCHEDULE', 'GENERATING_RECIPES', 'ASSEMBLING', 'READY', 'FAILED');
+
+-- AlterTable
+ALTER TABLE "MenuImport" ADD COLUMN     "progress" "MenuImportProgress" NOT NULL DEFAULT 'EXTRACTING';

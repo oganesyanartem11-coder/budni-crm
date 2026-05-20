@@ -131,6 +131,15 @@ enum MenuImportSource {
   EXCEL
 }
 
+enum MenuImportProgress {
+  EXTRACTING          // чтение файла (Excel/Vision)
+  PARSING_SCHEDULE    // LLM-распознавание меню (8.3)
+  GENERATING_RECIPES  // LLM-генерация техкарт (8.4)
+  ASSEMBLING          // запись в БД (8.5b)
+  READY               // импорт завершён, готов к ревью шефа
+  FAILED              // упало на каком-то этапе (см. reason)
+}
+
 enum LegalEntityType {
   INDIVIDUAL_ENTREPRENEUR
   LLC
@@ -440,10 +449,11 @@ model MenuDayDish {
 // Источник загрузки меню AI-помощником шефа (фото или Excel).
 // Хранит сырой текст для аудита и возможной перегенерации, плюс созданные блюда.
 model MenuImport {
-  id          String           @id @default(cuid())
+  id          String              @id @default(cuid())
   source      MenuImportSource
-  status      MenuStatus       @default(DRAFT)
-  rawText     String           // сырой дамп Excel / OCR фото — для аудита и перегенерации
+  status      MenuStatus          @default(DRAFT)
+  progress    MenuImportProgress  @default(EXTRACTING)
+  rawText     String              // сырой дамп Excel / OCR фото — для аудита и перегенерации
   confidence  Float?
   reason      String?
   createdById String?
