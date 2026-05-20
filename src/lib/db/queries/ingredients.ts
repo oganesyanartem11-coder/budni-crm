@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/db/prisma'
-import type { Prisma } from '@prisma/client'
 
 export async function listIngredients(opts?: { includeInactive?: boolean }) {
   return prisma.ingredient.findMany({

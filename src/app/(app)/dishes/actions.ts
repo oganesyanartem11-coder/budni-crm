@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
-import type { DishCategory, DishUnit } from '@prisma/client'
 
 const ingredientLineSchema = z.object({
   ingredientId: z.string().min(1, 'Выберите ингредиент'),

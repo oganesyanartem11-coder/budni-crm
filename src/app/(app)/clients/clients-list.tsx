@@ -4,9 +4,9 @@ import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { Search, Building2, MapPin, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
-import { formatMoney, formatClients } from '@/lib/utils/format'
+import { formatClients } from '@/lib/utils/format'
 import { ORDER_TYPE_SHORT, MEAL_TYPE_LABELS } from '@/lib/constants/client'
-import type { Client, ClientLocation, ClientMealConfig, MealType, OrderType } from '@prisma/client'
+import type { Client, ClientLocation, MealType, OrderType } from '@prisma/client'
 
 type SerializedClient = Omit<Client, never> & {
   locations: Array<Pick<ClientLocation, 'id' | 'name' | 'packaging' | 'tags'>>

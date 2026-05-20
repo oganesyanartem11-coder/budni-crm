@@ -63,7 +63,6 @@ const COL = {
   customs: '8%',
 } as const
 
-const C_BORDER = '#999'
 const C_LIGHT = '#777'
 
 const styles = StyleSheet.create({
@@ -110,35 +109,9 @@ const styles = StyleSheet.create({
     lineHeight: 1,
   },
 
-  invoiceLine: {
-    fontSize: 9.5,
-    fontWeight: 'bold',
-    marginTop: 1,
-  },
-  correctionLine: {
-    fontSize: 8,
-    marginBottom: 4,
-  },
   fieldNum: {
     color: C_LIGHT,
     fontSize: 6.5,
-  },
-
-  partiesRow: {
-    flexDirection: 'row',
-    marginBottom: 4,
-  },
-  partyColLeft: {
-    width: '50%',
-    paddingRight: 4,
-  },
-  partyColRight: {
-    width: '50%',
-    paddingLeft: 4,
-  },
-  partyLine: {
-    fontSize: 7.5,
-    marginBottom: 1,
   },
 
   // Разлинованная сетка верхнего блока (счёт-фактура + стороны) по форме 1137:
@@ -251,9 +224,6 @@ const styles = StyleSheet.create({
     borderRightWidth: 0.5,
     borderColor: '#000',
   },
-  tdGroupLast: {
-    flexDirection: 'row',
-  },
   tdSub: {
     fontSize: 7,
     padding: 2,
@@ -295,37 +265,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
 
-  sigBlock: { marginTop: 4 },
-  sigSidesRow: { flexDirection: 'row' },
-  sigSideLeft: { width: '50%', paddingRight: 6 },
-  sigSideRight: { width: '50%', paddingLeft: 6, borderLeftWidth: 0.5, borderColor: C_BORDER },
-  sigGroupLabel: {
-    fontSize: 7,
-    fontWeight: 'bold',
-    marginTop: 4,
-    marginBottom: 1,
-  },
-  sigCaption: {
-    fontSize: 6,
-    color: C_LIGHT,
-    marginBottom: 1,
-  },
-  sigInlineRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    marginVertical: 1,
-    fontSize: 7,
-  },
   sigSlash: { fontSize: 7, paddingHorizontal: 2 },
-  sigLine: {
-    borderBottomWidth: 0.5,
-    borderColor: '#444',
-    height: 10,
-    marginHorizontal: 2,
-  },
   sigText: { fontSize: 7 },
-  sigSmallNote: { fontSize: 6.5, marginTop: 2 },
-  mp: { marginTop: 6, fontSize: 7, fontWeight: 'bold' },
 
   // Разлинованная сетка блока подписей формы 1137: внешняя чёрная рамка,
   // две колонки (продавец слева / покупатель справа) с вертикальным
@@ -369,29 +310,7 @@ const styles = StyleSheet.create({
     borderColor: '#000',
   },
   g3PairRight: { width: '50%', padding: 2 },
-
-  footer: {
-    position: 'absolute',
-    bottom: 8,
-    left: 16,
-    right: 16,
-    fontSize: 6,
-    textAlign: 'center',
-    color: C_LIGHT,
-  },
 })
-
-function FieldLine({ text, num }: { text: string; num: string }) {
-  return (
-    <Text style={styles.partyLine}>
-      {text} <Text style={styles.fieldNum}>{num}</Text>
-    </Text>
-  )
-}
-
-function PenLine({ width }: { width: number | string }) {
-  return <View style={[styles.sigLine, { width }]} />
-}
 
 function dayMonthYear(d: Date): { day: string; month: string; year: string } {
   return {

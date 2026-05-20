@@ -5,7 +5,6 @@ import { X, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { createLocation, updateLocation } from '../actions'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { cn } from '@/lib/utils/cn'
 import type { ClientLocation } from '@prisma/client'
 
 interface Props {
