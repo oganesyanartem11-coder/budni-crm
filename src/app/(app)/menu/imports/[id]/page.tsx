@@ -25,6 +25,7 @@ export default async function MenuImportPage({ params }: PageProps) {
       status: true,
       progress: true,
       reason: true,
+      errorMessage: true,
       createdAt: true,
       createdBy: { select: { name: true } },
       _count: { select: { dishes: true } },
@@ -78,6 +79,7 @@ export default async function MenuImportPage({ params }: PageProps) {
         menuImportId={mi.id}
         initialProgress={mi.progress}
         initialReason={mi.reason}
+        initialErrorMessage={mi.errorMessage}
         dishesCount={mi._count.dishes}
         importStatus={mi.status}
         importData={importData}

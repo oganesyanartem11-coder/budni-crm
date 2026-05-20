@@ -17,6 +17,7 @@ interface Props {
   menuImportId: string
   initialProgress: MenuImportProgress
   initialReason: string | null
+  initialErrorMessage: string | null
   dishesCount: number
   importStatus: MenuStatus
   // Подгружается в page.tsx когда progress === 'READY' — иначе null.
@@ -31,12 +32,14 @@ export function ProgressView({
   menuImportId,
   initialProgress,
   initialReason,
+  initialErrorMessage,
   dishesCount,
   importStatus,
   importData,
 }: Props) {
   const [progress, setProgress] = useState<MenuImportProgress>(initialProgress)
   const [reason, setReason] = useState<string | null>(initialReason)
+  const [errorMessage, setErrorMessage] = useState<string | null>(initialErrorMessage)
   const router = useRouter()
   // prev !== null означает что был хотя бы один effect-цикл — при первом монтировании
   // (страница свежеоткрыта с уже READY-импортом) toast не пуляем, только при реальной
@@ -54,6 +57,7 @@ export function ProgressView({
       if (!r.ok || stopped) return
       setProgress(r.data.progress)
       setReason(r.data.reason)
+      setErrorMessage(r.data.errorMessage)
       if (r.data.progress === 'READY' || r.data.progress === 'FAILED') {
         stopped = true
         clearInterval(interval)
@@ -130,7 +134,7 @@ export function ProgressView({
             <div className="flex-1">
               <p className="font-medium text-fg mb-1">Импорт не удался</p>
               <p className="text-sm text-fg-muted mb-4 whitespace-pre-wrap">
-                {reason ?? 'Причина неизвестна. Проверьте логи сервера.'}
+                {errorMessage ?? reason ?? 'Причина неизвестна. Проверьте логи сервера.'}
               </p>
               <Link
                 href="/menu/imports/new"

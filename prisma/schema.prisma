@@ -456,6 +456,7 @@ model MenuImport {
   rawText     String              // сырой дамп Excel / OCR фото — для аудита и перегенерации
   confidence  Float?
   reason      String?
+  errorMessage String?
   createdById String?
   createdBy   User?            @relation("MenuImportCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime         @default(now())

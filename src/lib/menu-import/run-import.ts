@@ -1,3 +1,4 @@
+import { after } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { extractXlsxText, extractedToText } from '@/lib/excel/menu-extractor'
 import { parseMenuSchedule } from '@/lib/llm/menu-schedule-parser'
@@ -13,13 +14,14 @@ export interface RunImportHandle {
   menuImportId: string
 }
 
-// Оркестратор импорта меню из Excel (8.6a).
+// Оркестратор импорта меню из Excel (8.6a, обновлено в 8.6.1).
 // Создаёт MenuImport-плейсхолдер СИНХРОННО (вызывающий получает id сразу),
-// затем fire-and-forget запускает пайплайн: extract → parse → generate → assemble,
+// затем через next/server `after()` запускает пайплайн: extract → parse → generate → assemble,
 // пишет прогресс в БД на каждом этапе. UI читает MenuImport.progress polling'ом.
 //
-// Внимание: fire-and-forget IIFE может быть прервана на serverless (Vercel) — для прода
-// обернём вызов в waitUntil() / unstable_after на уровне route handler'а (8.6b/c).
+// `after()` гарантирует, что Vercel держит runtime до завершения коллбэка, даже после
+// возврата response клиенту — в отличие от голого fire-and-forget IIFE, который убивался
+// после ответа на serverless. Лимит времени — Default Max Duration проекта (300s на Pro).
 export async function runMenuImportFromExcel(opts: RunImportOpts): Promise<RunImportHandle> {
   const placeholder = await prisma.menuImport.create({
     data: {
@@ -35,7 +37,7 @@ export async function runMenuImportFromExcel(opts: RunImportOpts): Promise<RunIm
   const menuImportId = placeholder.id
   console.log(`[run-import ${menuImportId}] created placeholder`)
 
-  void (async () => {
+  after(async () => {
     const t0 = Date.now()
     try {
       // a) EXTRACTING — уже стоит по дефолту от create.
@@ -115,13 +117,13 @@ export async function runMenuImportFromExcel(opts: RunImportOpts): Promise<RunIm
       await prisma.menuImport
         .update({
           where: { id: menuImportId },
-          data: { progress: 'FAILED', reason: msg },
+          data: { progress: 'FAILED', reason: msg, errorMessage: msg },
         })
         .catch((updateErr) => {
           console.error(`[run-import ${menuImportId}] could not write FAILED: ${String(updateErr).slice(0, 500)}`)
         })
     }
-  })()
+  })
 
   return { menuImportId }
 }

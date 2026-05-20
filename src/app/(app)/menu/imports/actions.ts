@@ -61,6 +61,7 @@ export async function getMenuImportProgress(menuImportId: string): Promise<
   ActionResult<{
     progress: MenuImportProgress
     reason: string | null
+    errorMessage: string | null
     updatedAt: Date
   }>
 > {
@@ -68,13 +69,18 @@ export async function getMenuImportProgress(menuImportId: string): Promise<
 
   const mi = await prisma.menuImport.findUnique({
     where: { id: menuImportId },
-    select: { progress: true, reason: true, updatedAt: true },
+    select: { progress: true, reason: true, errorMessage: true, updatedAt: true },
   })
   if (!mi) return { ok: false, error: 'Импорт не найден' }
 
   return {
     ok: true,
-    data: { progress: mi.progress, reason: mi.reason, updatedAt: mi.updatedAt },
+    data: {
+      progress: mi.progress,
+      reason: mi.reason,
+      errorMessage: mi.errorMessage,
+      updatedAt: mi.updatedAt,
+    },
   }
 }
 
