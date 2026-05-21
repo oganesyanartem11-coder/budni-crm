@@ -10,7 +10,15 @@ import { getGreeting } from '@/lib/utils/greeting'
 import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
+import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
 import { AdminWeekBlock } from './admin-week-block'
+
+// Подмножество пресетов, доступных в переключателе дашборда. WoW-бокс
+// активен только для week-периодов — для остальных скрываем индикатор.
+const DASHBOARD_PRESETS: ReportPreset[] = [
+  'this_week', 'last_week', 'this_month', 'this_year', 'custom',
+]
+const WOW_PRESETS: ReportPreset[] = ['this_week', 'last_week']
 
 // Все «реальные» заказы дня: в работе + уже доставленные. Исключает DRAFT
 // (черновики менеджера) и CANCELLED (клиент отменил) — они не должны попадать
@@ -20,7 +28,11 @@ const REAL_ORDER_STATUSES: OrderStatus[] = [...ACTIVE_ORDER_STATUSES, 'DELIVERED
 // force-dynamic: приветствие зависит от текущего часа.
 export const dynamic = 'force-dynamic'
 
-export default async function DashboardPage() {
+interface PageProps {
+  searchParams: Promise<{ period?: string; from?: string; to?: string }>
+}
+
+export default async function DashboardPage({ searchParams }: PageProps) {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
   // CHEF не имеет дашборд-содержимого (только ADMIN+MANAGER блоки) — отправляем на свой home.
@@ -58,8 +70,16 @@ export default async function DashboardPage() {
 
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
 
+  // Финансовый блок: пресет из URL, дефолт this_week. Невалидный preset →
+  // тоже this_week (без падения).
+  const params = await searchParams
+  const presetParam = (params.period ?? 'this_week') as ReportPreset
+  const preset: ReportPreset = DASHBOARD_PRESETS.includes(presetParam) ? presetParam : 'this_week'
+  const range = getPresetRange(preset, params.from, params.to)
+  const withWoW = WOW_PRESETS.includes(preset)
+
   const adminData = isAdminOrManager
-    ? await getAdminDashboardData()
+    ? await getAdminDashboardData(range.from, range.to, { withWoW })
     : null
 
   return (
@@ -125,7 +145,13 @@ export default async function DashboardPage() {
         )}
 
         {isAdminOrManager && adminData && (
-          <AdminWeekBlock data={adminData} />
+          <AdminWeekBlock
+            data={adminData}
+            preset={preset}
+            periodLabel={range.label}
+            customFromIso={params.from}
+            customToIso={params.to}
+          />
         )}
       </div>
     </>

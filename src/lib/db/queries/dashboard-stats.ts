@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import { getFinancialWeek, getPreviousFinancialWeek } from '@/lib/utils/week'
+import { getFinancialWeek } from '@/lib/utils/week'
 import type { OrderStatus } from '@prisma/client'
 
 const REVENUE_STATUSES: OrderStatus[] = [
@@ -21,32 +21,75 @@ export interface TopClient {
 }
 
 export interface AdminDashboardData {
-  weekFrom: string
-  weekTo: string
-  thisWeek: {
+  rangeFrom: string
+  rangeTo: string
+  thisPeriod: {
     totalRevenue: number
     totalOrders: number
     totalPortions: number
     daily: DailyRevenuePoint[]
   }
-  prevWeek: {
-    totalRevenue: number
-    totalOrders: number
-  }
-  revenueChangePct: number | null
+  // WoW сравнение присутствует только для week-периодов (this_week / last_week).
+  // Для month/year/custom → wow = null, индикатор скрывается.
+  wow: {
+    changePct: number | null
+    comparePrevRevenue: number
+    prorated: boolean
+    daysCompared: number
+  } | null
   topClients: TopClient[]
 }
 
 const WEEKDAY_NAMES_SHORT_BY_DOW = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+const RU_MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
 
-export async function getAdminDashboardData(referenceDate?: Date): Promise<AdminDashboardData> {
-  const ref = referenceDate ?? new Date()
-  const { from: thisFrom, to: thisTo } = getFinancialWeek(ref)
-  const { from: prevFrom, to: prevTo } = getPreviousFinancialWeek(ref)
+// Daily-график строится для периодов до ~31 дня. Больше — точек слишком
+// много, график перестаёт читаться, отдаём пустой массив (UI покажет fallback).
+const MAX_DAILY_POINTS = 31
 
-  const thisWeekOrders = await prisma.order.findMany({
+function startOfDay(d: Date): Date {
+  const x = new Date(d)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+
+function endOfDay(d: Date): Date {
+  const x = new Date(d)
+  x.setHours(23, 59, 59, 999)
+  return x
+}
+
+function daysBetweenInclusive(from: Date, to: Date): number {
+  const ms = startOfDay(to).getTime() - startOfDay(from).getTime()
+  return Math.round(ms / (24 * 60 * 60 * 1000)) + 1
+}
+
+function isFinancialWeekRange(from: Date, to: Date): boolean {
+  const { from: fwFrom, to: fwTo } = getFinancialWeek(from)
+  return (
+    startOfDay(from).getTime() === fwFrom.getTime() &&
+    endOfDay(to).getTime() === fwTo.getTime()
+  )
+}
+
+interface Opts {
+  /** Сравнение vs предыдущий период (для WoW-бокса). Имеет смысл только для недель. */
+  withWoW?: boolean
+}
+
+export async function getAdminDashboardData(
+  rangeFrom?: Date,
+  rangeTo?: Date,
+  opts: Opts = {}
+): Promise<AdminDashboardData> {
+  // Дефолт: текущая финансовая неделя.
+  const { from: defaultFrom, to: defaultTo } = getFinancialWeek(new Date())
+  const from = rangeFrom ?? defaultFrom
+  const to = rangeTo ?? defaultTo
+
+  const orders = await prisma.order.findMany({
     where: {
-      deliveryDate: { gte: thisFrom, lte: thisTo },
+      deliveryDate: { gte: from, lte: to },
       status: { in: REVENUE_STATUSES },
     },
     select: {
@@ -59,28 +102,25 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
     },
   })
 
-  const prevAgg = await prisma.order.aggregate({
-    where: {
-      deliveryDate: { gte: prevFrom, lte: prevTo },
-      status: { in: REVENUE_STATUSES },
-    },
-    _sum: { totalPrice: true },
-    _count: { id: true },
-  })
+  // daily — только для коротких диапазонов
+  const periodDays = daysBetweenInclusive(from, to)
+  const buildDaily = periodDays <= MAX_DAILY_POINTS
 
   const dailyMap = new Map<string, { revenue: number; orders: number }>()
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(thisFrom)
-    d.setDate(thisFrom.getDate() + i)
-    const key = d.toISOString().slice(0, 10)
-    dailyMap.set(key, { revenue: 0, orders: 0 })
+  if (buildDaily) {
+    for (let i = 0; i < periodDays; i++) {
+      const d = new Date(from)
+      d.setDate(from.getDate() + i)
+      const key = d.toISOString().slice(0, 10)
+      dailyMap.set(key, { revenue: 0, orders: 0 })
+    }
   }
 
   let totalRevenue = 0
   let totalPortions = 0
   const clientMap = new Map<string, TopClient>()
 
-  for (const o of thisWeekOrders) {
+  for (const o of orders) {
     const key = o.deliveryDate.toISOString().slice(0, 10)
     const day = dailyMap.get(key)
     const price = Number(o.totalPrice)
@@ -101,35 +141,86 @@ export async function getAdminDashboardData(referenceDate?: Date): Promise<Admin
   }
 
   const daily: DailyRevenuePoint[] = []
-  for (const [key, val] of dailyMap.entries()) {
-    const d = new Date(key + 'T00:00:00')
-    const dayLabel = `${WEEKDAY_NAMES_SHORT_BY_DOW[d.getDay()]} ${d.getDate()}.${(d.getMonth() + 1).toString().padStart(2, '0')}`
-    daily.push({ date: key, dayLabel, revenue: val.revenue, orders: val.orders })
+  if (buildDaily) {
+    const useWeekdayLabel = periodDays <= 7 && isFinancialWeekRange(from, to)
+    for (const [key, val] of dailyMap.entries()) {
+      const d = new Date(key + 'T00:00:00')
+      const dayLabel = useWeekdayLabel
+        ? `${WEEKDAY_NAMES_SHORT_BY_DOW[d.getDay()]} ${d.getDate()}.${(d.getMonth() + 1).toString().padStart(2, '0')}`
+        : `${d.getDate()} ${RU_MONTHS_SHORT[d.getMonth()]}`
+      daily.push({ date: key, dayLabel, revenue: val.revenue, orders: val.orders })
+    }
   }
 
   const topClients = Array.from(clientMap.values())
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 3)
 
-  const prevRevenue = Number(prevAgg._sum.totalPrice ?? 0)
-  const revenueChangePct = prevRevenue > 0
-    ? Math.round(((totalRevenue - prevRevenue) / prevRevenue) * 1000) / 10
-    : null
+  // WoW-сравнение. Прорейт: если today попадает в [from, to] — считаем
+  // N = дней от from до today (вкл.). Иначе период закончен → N = periodDays.
+  // Сравниваем sum(this[0..N-1]) с sum(prev[0..N-1]), prev = shift -periodDays.
+  let wow: AdminDashboardData['wow'] = null
+  if (opts.withWoW) {
+    const today = startOfDay(new Date())
+    const isOngoing = today >= startOfDay(from) && today <= endOfDay(to)
+    const daysCompared = isOngoing
+      ? Math.min(daysBetweenInclusive(from, today), periodDays)
+      : periodDays
+    const compareFrom = new Date(from)
+    compareFrom.setDate(from.getDate() - periodDays)
+    const compareTo = new Date(compareFrom)
+    compareTo.setDate(compareFrom.getDate() + daysCompared - 1)
+    compareTo.setHours(23, 59, 59, 999)
+    const compareCutoff = new Date(from)
+    compareCutoff.setDate(from.getDate() + daysCompared - 1)
+    compareCutoff.setHours(23, 59, 59, 999)
+
+    const [compareAgg, thisAggUpToCutoff] = await Promise.all([
+      prisma.order.aggregate({
+        where: {
+          deliveryDate: { gte: compareFrom, lte: compareTo },
+          status: { in: REVENUE_STATUSES },
+        },
+        _sum: { totalPrice: true },
+      }),
+      isOngoing
+        ? prisma.order.aggregate({
+            where: {
+              deliveryDate: { gte: from, lte: compareCutoff },
+              status: { in: REVENUE_STATUSES },
+            },
+            _sum: { totalPrice: true },
+          })
+        : Promise.resolve({ _sum: { totalPrice: totalRevenue } }),
+    ])
+
+    const comparePrevRevenue = Number(compareAgg._sum.totalPrice ?? 0)
+    const thisRevenueProrated = isOngoing
+      ? Number(thisAggUpToCutoff._sum.totalPrice ?? 0)
+      : totalRevenue
+
+    const changePct = comparePrevRevenue > 0
+      ? Math.round(((thisRevenueProrated - comparePrevRevenue) / comparePrevRevenue) * 1000) / 10
+      : null
+
+    wow = {
+      changePct,
+      comparePrevRevenue,
+      prorated: isOngoing && daysCompared < periodDays,
+      daysCompared,
+    }
+  }
 
   return {
-    weekFrom: thisFrom.toISOString(),
-    weekTo: thisTo.toISOString(),
-    thisWeek: {
+    rangeFrom: from.toISOString(),
+    rangeTo: to.toISOString(),
+    thisPeriod: {
       totalRevenue,
-      totalOrders: thisWeekOrders.length,
+      totalOrders: orders.length,
       totalPortions,
       daily,
     },
-    prevWeek: {
-      totalRevenue: prevRevenue,
-      totalOrders: prevAgg._count.id,
-    },
-    revenueChangePct,
+    wow,
     topClients,
   }
 }
