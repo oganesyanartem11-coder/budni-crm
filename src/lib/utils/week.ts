@@ -80,16 +80,16 @@ export function getDateForDayOfWeek(monday: Date, dayOfWeek: number): Date {
 }
 
 /**
- * Финансовая неделя: Пт 00:00 → Чт 23:59 (по ТЗ).
+ * Финансовая неделя: Сб 00:00 → Пт 23:59 (правильный бизнес-интервал).
  */
 export function getFinancialWeek(date: Date): { from: Date; to: Date } {
   const d = new Date(date)
   d.setHours(0, 0, 0, 0)
 
   const dow = d.getDay()
-  const backToFri = (dow - 5 + 7) % 7
+  const backToSat = (dow - 6 + 7) % 7
   const from = new Date(d)
-  from.setDate(d.getDate() - backToFri)
+  from.setDate(d.getDate() - backToSat)
   from.setHours(0, 0, 0, 0)
 
   const to = new Date(from)
@@ -106,6 +106,14 @@ export function getPreviousFinancialWeek(date: Date): { from: Date; to: Date } {
   const to = new Date(current.to)
   to.setDate(to.getDate() - 7)
   return { from, to }
+}
+
+/**
+ * true, если заданная дата попадает в текущую финансовую неделю (Сб-Пт).
+ */
+export function isInCurrentFinancialWeek(date: Date): boolean {
+  const { from, to } = getFinancialWeek(new Date())
+  return date >= from && date <= to
 }
 
 export type ReportPreset =
