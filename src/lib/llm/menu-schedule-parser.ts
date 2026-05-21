@@ -1,9 +1,6 @@
 import { getAnthropicClient } from './client'
-
-// Разбор структуры меню требует понимания произвольной таблицы —
-// глобальный LLM_MODEL (Haiku) для этого слаб. Используем Opus локально,
-// не меняя константу для остальных обёрток.
-const MODEL = 'claude-opus-4-7'
+import { getParserModel, getFallbackModel } from '@/lib/ai/models'
+import { callWithFallback } from '@/lib/ai/with-fallback'
 
 export interface ScheduleEntry {
   week: number
@@ -57,15 +54,39 @@ ${rawMenuText}
 
   const startTime = Date.now()
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  })
+  // System prompt стабильный — отдаём массивом с cache_control ephemeral.
+  // На Opus 4.7 минимальный кэшируемый префикс ~4096 токенов; если текущий
+  // системник короче, Anthropic тихо пропустит кэш (никакой ошибки),
+  // cache_read_input_tokens останется 0. Не вредит — будет работать как
+  // обычный вызов. См. usage.cache_read_input_tokens в логах.
+  const cachedSystem = [
+    { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
+  ]
+
+  const response = await callWithFallback(
+    () =>
+      client.messages.create({
+        model: getParserModel(),
+        max_tokens: 8000,
+        system: cachedSystem,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    () =>
+      client.messages.create({
+        model: getFallbackModel(),
+        max_tokens: 8000,
+        system: cachedSystem,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    'parseMenuSchedule'
+  )
 
   const elapsed = Date.now() - startTime
-  console.log(`[LLM] menu schedule parse took ${elapsed}ms`)
+  console.log(
+    `[LLM] menu schedule parse took ${elapsed}ms, ` +
+      `cache_read=${response.usage.cache_read_input_tokens ?? 0}, ` +
+      `cache_write=${response.usage.cache_creation_input_tokens ?? 0}`
+  )
 
   const textBlock = response.content.find((b) => b.type === 'text')
   if (!textBlock || textBlock.type !== 'text') {

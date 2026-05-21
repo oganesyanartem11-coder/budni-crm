@@ -1,4 +1,5 @@
-import { getAnthropicClient, LLM_MODEL } from './client'
+import { getAnthropicClient } from './client'
+import { getInboxModel } from '@/lib/ai/models'
 import type { BotMessageDirection } from '@prisma/client'
 
 export interface GenerateDraftInput {
@@ -44,7 +45,7 @@ ${messagesText}
 Напиши draft ответа клиенту на последнее его сообщение.`
 
   const response = await client.messages.create({
-    model: LLM_MODEL,
+    model: getInboxModel(),
     max_tokens: 300,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],

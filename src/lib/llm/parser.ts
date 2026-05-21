@@ -1,4 +1,5 @@
-import { getAnthropicClient, LLM_MODEL } from './client'
+import { getAnthropicClient } from './client'
+import { getInboxModel } from '@/lib/ai/models'
 
 export type ParsedResponseType = 'numeric' | 'cancellation_intent' | 'question' | 'noise'
 
@@ -91,7 +92,7 @@ ${
   const startTime = Date.now()
 
   const response = await client.messages.create({
-    model: LLM_MODEL,
+    model: getInboxModel(),
     max_tokens: 500,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],

@@ -1,9 +1,6 @@
 import { getAnthropicClient } from './client'
-
-// Генерация черновиков техкарт требует знаний кулинарии и понимания
-// типичных пропорций — Haiku для этого слаб. Используем Opus локально,
-// глобальный LLM_MODEL (Haiku для бота заявок) не трогаем.
-const MODEL = 'claude-opus-4-7'
+import { getRecipesModel, getFallbackModel } from '@/lib/ai/models'
+import { callWithFallback } from '@/lib/ai/with-fallback'
 
 export type DishCategory =
   | 'SOUP'
@@ -147,15 +144,39 @@ ${ingredientsList}
 
   const startTime = Date.now()
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  })
+  // System prompt стабильный — отдаём массивом с cache_control ephemeral.
+  // На Opus 4.7 минимальный кэшируемый префикс ~4096 токенов; для текущего
+  // системника (~1300 токенов) кэш может не сработать — Anthropic тихо
+  // пропустит, cache_read_input_tokens=0. Если в будущем system вырастет
+  // выше порога — кэш активируется автоматически без правок здесь.
+  const cachedSystem = [
+    { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
+  ]
+
+  const response = await callWithFallback(
+    () =>
+      client.messages.create({
+        model: getRecipesModel(),
+        max_tokens: 16000,
+        system: cachedSystem,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    () =>
+      client.messages.create({
+        model: getFallbackModel(),
+        max_tokens: 16000,
+        system: cachedSystem,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    'generateRecipes'
+  )
 
   const elapsed = Date.now() - startTime
-  console.log(`[LLM] recipe generation took ${elapsed}ms`)
+  console.log(
+    `[LLM] recipe generation took ${elapsed}ms, ` +
+      `cache_read=${response.usage.cache_read_input_tokens ?? 0}, ` +
+      `cache_write=${response.usage.cache_creation_input_tokens ?? 0}`
+  )
 
   const textBlock = response.content.find((b) => b.type === 'text')
   if (!textBlock || textBlock.type !== 'text') {
