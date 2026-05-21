@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import { TrendingUp, ShoppingCart, Coffee, XCircle, type LucideIcon } from 'lucide-react'
+import { TrendingUp, ShoppingCart, Coffee, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -37,7 +37,7 @@ export function ClientAnalyticsTab({ analytics }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <SummaryCard
           icon={TrendingUp}
           label="Выручка за год"
@@ -55,13 +55,6 @@ export function ClientAnalyticsTab({ analytics }: Props) {
           label="Средний чек"
           value={formatMoney(analytics.averageOrder)}
           hint={`~${Math.round(analytics.averagePortions)} ${pluralize(Math.round(analytics.averagePortions), ['порция', 'порции', 'порций'])} / заказ`}
-        />
-        <SummaryCard
-          icon={XCircle}
-          label="Отказы"
-          value={`${analytics.cancelledRate}%`}
-          hint={`${analytics.totalCancelled} отменено`}
-          tone={analytics.cancelledRate > 15 ? 'warning' : analytics.cancelledRate > 5 ? 'neutral' : 'success'}
         />
       </div>
 

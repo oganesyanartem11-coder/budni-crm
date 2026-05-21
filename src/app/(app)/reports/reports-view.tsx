@@ -3,10 +3,9 @@
 import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import { Calendar, TrendingUp, ShoppingCart, XCircle, Clock, Printer, Trophy, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { Calendar, TrendingUp, ShoppingCart, Clock, Printer, Trophy, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, formatOrders } from '@/lib/utils/format'
-import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils/cn'
 import {
@@ -17,12 +16,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { FinancialReport } from '@/lib/db/queries/reports'
 import type { ReportPreset } from '@/lib/utils/week'
-
-const MEAL_TYPE_COLORS: Record<string, string> = {
-  BREAKFAST: 'var(--color-warning)',
-  LUNCH: 'var(--color-success)',
-  DINNER: 'var(--color-info)',
-}
 
 interface Props {
   preset: ReportPreset
@@ -146,12 +139,11 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
         />
       ) : (
         <div className="print-area space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <SummaryCard icon={TrendingUp} label="Выручка" value={formatMoney(report.totalRevenue)} tone="info" />
             <SummaryCard icon={ShoppingCart} label="Заказов" value={report.totalOrders.toString()} hint={formatPortions(report.totalPortions)} />
             <SummaryCard icon={Clock} label="Средний чек" value={formatMoney(report.averageOrder)} hint="за заказ" />
             <SummaryCard icon={Calendar} label="В день в среднем" value={formatMoney(report.averagePerDay)} hint={`${report.daysInPeriod} дн.`} />
-            <SummaryCard icon={XCircle} label="Отказы" value={`${report.cancelledRate}%`} hint={`${report.totalCancelled} отменено`} tone={report.cancelledRate > 15 ? 'warning' : 'neutral'} />
           </div>
 
           <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
@@ -196,100 +188,39 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {report.clients.length > 0 && (
-              <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-                <div className="flex items-center gap-2 mb-4">
-                  <Trophy className="w-4 h-4 text-warning-fg" />
-                  <h3 className="text-base font-semibold">Клиенты периода ({report.clients.length})</h3>
-                </div>
-                <ul className="divide-y divide-border">
-                  {report.clients.slice(0, 10).map((c, i) => (
-                    <li key={c.clientId}>
-                      <Link
-                        href={`/clients/${c.clientId}`}
-                        className="flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-bg/50 transition-colors group"
-                      >
-                        <div className="w-7 h-7 rounded-full bg-bg flex items-center justify-center text-xs font-bold text-fg-muted shrink-0">
-                          {i + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate text-sm">{c.clientName}</p>
-                          <p className="text-xs text-fg-muted">{formatOrders(c.ordersCount)} · {formatPortions(c.portions)}</p>
-                        </div>
-                        <p className="font-semibold tabular-nums whitespace-nowrap text-sm">{formatMoney(c.revenue)}</p>
-                        <ChevronRight className="w-3.5 h-3.5 text-fg-subtle group-hover:text-fg-muted transition-colors no-print" />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-                {report.clients.length > 10 && (
-                  <p className="text-xs text-fg-subtle mt-3 text-center no-print">
-                    Показаны первые 10 из {report.clients.length}
-                  </p>
-                )}
+          {report.clients.length > 0 && (
+            <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Trophy className="w-4 h-4 text-warning-fg" />
+                <h3 className="text-base font-semibold">Клиенты периода ({report.clients.length})</h3>
               </div>
-            )}
-
-            {report.mealTypes.length > 0 && (
-              <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-                <h3 className="text-base font-semibold mb-4">По типам питания</h3>
-                <div className="h-32 -ml-2 -mr-2 mb-3">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={report.mealTypes} margin={{ top: 5, right: 12, bottom: 5, left: 12 }} layout="vertical">
-                      <XAxis type="number" hide />
-                      <YAxis
-                        type="category"
-                        dataKey="mealType"
-                        axisLine={false}
-                        tickLine={false}
-                        width={80}
-                        tick={(props) => {
-                          const { x, y, payload } = props as { x: number | string; y: number | string; payload?: { value?: string } }
-                          const value = payload?.value
-                          return (
-                            <text x={x} y={y} dy={4} textAnchor="end" fill="var(--color-fg-muted)" fontSize={12}>
-                              {value ? MEAL_TYPE_LABELS[value as 'BREAKFAST' | 'LUNCH' | 'DINNER'] : ''}
-                            </text>
-                          )
-                        }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: 'var(--color-surface)',
-                          border: '1px solid var(--color-border)',
-                          borderRadius: '12px',
-                          fontSize: '12px',
-                        }}
-                        formatter={(value) => [formatMoney(Number(value)), 'Выручка']}
-                      />
-                      <Bar dataKey="revenue" radius={[0, 6, 6, 0]}>
-                        {report.mealTypes.map((mt) => (
-                          <Cell key={mt.mealType} fill={MEAL_TYPE_COLORS[mt.mealType]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <ul className="space-y-1.5 text-sm">
-                  {report.mealTypes.map((mt) => (
-                    <li key={mt.mealType} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-xl bg-bg/40">
-                      <span className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ background: MEAL_TYPE_COLORS[mt.mealType] }}
-                        />
-                        <span className="truncate font-medium">{MEAL_TYPE_LABELS[mt.mealType]}</span>
-                      </span>
-                      <span className="text-fg-muted tabular-nums shrink-0 text-xs">
-                        {formatPortions(mt.portions)} · {formatMoney(mt.revenue)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+              <ul className="divide-y divide-border">
+                {report.clients.slice(0, 10).map((c, i) => (
+                  <li key={c.clientId}>
+                    <Link
+                      href={`/clients/${c.clientId}`}
+                      className="flex items-center gap-3 py-2.5 px-2 rounded-xl hover:bg-bg/50 transition-colors group"
+                    >
+                      <div className="w-7 h-7 rounded-full bg-bg flex items-center justify-center text-xs font-bold text-fg-muted shrink-0">
+                        {i + 1}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate text-sm">{c.clientName}</p>
+                        <p className="text-xs text-fg-muted">{formatOrders(c.ordersCount)} · {formatPortions(c.portions)}</p>
+                      </div>
+                      <p className="font-semibold tabular-nums whitespace-nowrap text-sm">{formatMoney(c.revenue)}</p>
+                      <ChevronRight className="w-3.5 h-3.5 text-fg-subtle group-hover:text-fg-muted transition-colors no-print" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+              {report.clients.length > 10 && (
+                <p className="text-xs text-fg-subtle mt-3 text-center no-print">
+                  Показаны первые 10 из {report.clients.length}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="text-xs text-fg-subtle text-center pt-2 print-only">
             Сформировано: {new Date().toLocaleString('ru-RU')} · Будни CRM

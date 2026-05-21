@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import type { OrderStatus, MealType } from '@prisma/client'
+import type { OrderStatus } from '@prisma/client'
 
 const REVENUE_STATUSES: OrderStatus[] = [
   'CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY', 'DELIVERED',
@@ -21,13 +21,6 @@ export interface ReportClient {
   portions: number
 }
 
-export interface ReportMealType {
-  mealType: MealType
-  revenue: number
-  portions: number
-  ordersCount: number
-}
-
 export interface FinancialReport {
   from: string
   to: string
@@ -41,7 +34,6 @@ export interface FinancialReport {
   averagePerDay: number
   daily: DailyPoint[]
   clients: ReportClient[]
-  mealTypes: ReportMealType[]
 }
 
 const RU_MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
@@ -66,7 +58,6 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
     select: {
       id: true,
       deliveryDate: true,
-      mealType: true,
       portions: true,
       totalPrice: true,
       status: true,
@@ -99,7 +90,6 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
   }
 
   const clientMap = new Map<string, ReportClient>()
-  const mealTypeMap = new Map<MealType, ReportMealType>()
 
   for (const o of activeOrders) {
     const dayKey = o.deliveryDate.toISOString().slice(0, 10)
@@ -119,15 +109,6 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
     c.revenue += price
     c.ordersCount += 1
     c.portions += o.portions
-
-    let mt = mealTypeMap.get(o.mealType)
-    if (!mt) {
-      mt = { mealType: o.mealType, revenue: 0, portions: 0, ordersCount: 0 }
-      mealTypeMap.set(o.mealType, mt)
-    }
-    mt.revenue += price
-    mt.portions += o.portions
-    mt.ordersCount += 1
   }
 
   const daily: DailyPoint[] = Array.from(dailyMap.values()).map((v) => ({
@@ -139,7 +120,6 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
   }))
 
   const clients = Array.from(clientMap.values()).sort((a, b) => b.revenue - a.revenue)
-  const mealTypes = Array.from(mealTypeMap.values()).sort((a, b) => b.revenue - a.revenue)
 
   return {
     from: start.toISOString(),
@@ -156,6 +136,5 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
     averagePerDay: totalRevenue / daysInPeriod,
     daily,
     clients,
-    mealTypes,
   }
 }
