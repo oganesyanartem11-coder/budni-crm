@@ -5,7 +5,8 @@ import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { pluralize } from '@/lib/utils/format'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
-import { formatMoneyRu, formatDateWithDay } from '@/lib/digest/format'
+import { getMaterialCostForRange } from '@/lib/digest/material-cost'
+import { formatMoneyRu, formatDateWithDay, formatMarginLines } from '@/lib/digest/format'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,8 +41,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'already_ran_today' })
   }
 
-  // TODO: Sprint 6.5 — добавить getMaterialCostForRange (себестоимость сырья из IngredientPriceHistory) + строки «Себестоимость» и «Маржа». Требует unit-тестов на связку Order ↔ MenuDayDish ↔ Dish ↔ IngredientPriceHistory.
-  const [todayAgg, tomorrowOrders] = await Promise.all([
+  const [todayAgg, tomorrowOrders, materialCostToday] = await Promise.all([
     prisma.order.aggregate({
       where: {
         deliveryDate: todayMsk,
@@ -61,6 +61,7 @@ export async function GET(request: Request) {
         client: { select: { name: true } },
       },
     }),
+    getMaterialCostForRange(todayMsk, todayMsk, TODAY_STATUSES),
   ])
 
   const totalRevenueToday = Number(todayAgg._sum.totalPrice ?? 0)
@@ -93,10 +94,17 @@ export async function GET(request: Request) {
   blocks.push(`🌙 <b>Итог дня ${escapeHtml(todayLabel)}</b>`)
 
   if (todayHasOrders) {
-    blocks.push(
-      `💰 <b>Выручка:</b> ${formatMoneyRu(totalRevenueToday)}\n` +
-        `🍽 <b>Порций:</b> ${totalPortionsToday}`
-    )
+    const todayLines = [
+      `💰 <b>Выручка:</b> ${formatMoneyRu(totalRevenueToday)}`,
+      `🍽 <b>Порций:</b> ${totalPortionsToday}`,
+      ...formatMarginLines(
+        totalRevenueToday,
+        materialCostToday.totalCost,
+        materialCostToday.daysWithoutMenu,
+        materialCostToday.totalDays
+      ),
+    ]
+    blocks.push(todayLines.join('\n'))
   } else {
     blocks.push('Заказов не было.')
   }

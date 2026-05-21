@@ -31,6 +31,18 @@ export const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
   'OUT_FOR_DELIVERY',
 ]
 
+// Статусы, формирующие выручку: дошедшие до подтверждения и далее, плюс доставленные.
+// Используется во всех агрегаторах денег (dashboard, reports, client-analytics, дайджесты).
+// Раньше дублировалось локально в 4 файлах — вынесено сюда для consistency.
+// НЕ readonly: Prisma WhereInput требует мутабельный OrderStatus[] для status.in.
+export const REVENUE_STATUSES: OrderStatus[] = [
+  'CONFIRMED',
+  'LOCKED',
+  'IN_PRODUCTION',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+]
+
 export const ORDER_STATUS_GROUPS = {
   pending: ['PENDING_CONFIRMATION'] as OrderStatus[],
   confirmed: ['CONFIRMED', 'LOCKED'] as OrderStatus[],

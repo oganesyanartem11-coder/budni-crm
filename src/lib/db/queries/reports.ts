@@ -1,9 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import type { OrderStatus } from '@prisma/client'
-
-const REVENUE_STATUSES: OrderStatus[] = [
-  'CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY', 'DELIVERED',
-]
+import { REVENUE_STATUSES } from '@/lib/constants/order'
 
 export interface DailyPoint {
   date: string

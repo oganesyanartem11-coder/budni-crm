@@ -1,31 +1,22 @@
 import { NextResponse } from 'next/server'
-import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { getFinancialWeek, getPreviousFinancialWeek } from '@/lib/utils/week'
 import { pluralize } from '@/lib/utils/format'
+import { REVENUE_STATUSES } from '@/lib/constants/order'
+import { getMaterialCostForRange } from '@/lib/digest/material-cost'
 import {
   formatMoneyRu,
   formatWowLine,
   formatDate,
   formatDayName,
+  formatMarginLines,
 } from '@/lib/digest/format'
 
 export const dynamic = 'force-dynamic'
 
 const ACTION = 'FRIDAY_WEEK_DIGEST_SENT'
-
-// Заказы, которые формируют выручку недели. Тот же набор, что в
-// src/lib/db/queries/dashboard-stats.ts — чтобы цифры в Telegram и в
-// дашборде сходились копейка-в-копейку.
-const REVENUE_STATUSES: OrderStatus[] = [
-  'CONFIRMED',
-  'LOCKED',
-  'IN_PRODUCTION',
-  'OUT_FOR_DELIVERY',
-  'DELIVERED',
-]
 
 const LOG_PREFIX = '[friday-week-digest]'
 
@@ -56,8 +47,7 @@ export async function GET(request: Request) {
   const thisWeek = getFinancialWeek(now)
   const prevWeek = getPreviousFinancialWeek(now)
 
-  // TODO: Sprint 6.5 — добавить getMaterialCostForRange (себестоимость сырья из IngredientPriceHistory) + строки «Себестоимость» и «Маржа». Требует unit-тестов на связку Order ↔ MenuDayDish ↔ Dish ↔ IngredientPriceHistory.
-  const [thisWeekOrders, prevAgg] = await Promise.all([
+  const [thisWeekOrders, prevAgg, materialCostThisWeek] = await Promise.all([
     prisma.order.findMany({
       where: {
         deliveryDate: { gte: thisWeek.from, lte: thisWeek.to },
@@ -80,6 +70,7 @@ export async function GET(request: Request) {
       _sum: { totalPrice: true, portions: true },
       _count: { _all: true },
     }),
+    getMaterialCostForRange(thisWeek.from, thisWeek.to, REVENUE_STATUSES),
   ])
 
   // === Агрегаты по текущей неделе ===
@@ -174,6 +165,18 @@ export async function GET(request: Request) {
     const wow = formatWowLine(totalPortions, prevPortions)
     if (wow) lines.push(`   ${escapeHtml(wow)}`)
     blocks.push(lines.join('\n'))
+  }
+
+  // Себестоимость + маржа (без WoW — оставлено на отдельный заход,
+  // чтобы не удваивать БД-нагрузку cron'а вторым проходом по прошлой неделе).
+  const marginLines = formatMarginLines(
+    totalRevenue,
+    materialCostThisWeek.totalCost,
+    materialCostThisWeek.daysWithoutMenu,
+    materialCostThisWeek.totalDays
+  )
+  if (marginLines.length > 0) {
+    blocks.push(marginLines.join('\n'))
   }
 
   // Топ-3 клиента

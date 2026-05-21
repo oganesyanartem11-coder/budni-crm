@@ -43,3 +43,34 @@ export function formatDate(date: Date): string {
 export function formatDateWithDay(date: Date): string {
   return `${formatDate(date)} (${formatDayName(date)})`
 }
+
+/**
+ * Форматирует строки "Себестоимость" и "Маржа" для дайджеста.
+ * Возвращает массив строк (для join('\n')).
+ * Если меню не утверждено вообще (всё daysWithoutMenu) — возвращает [].
+ */
+export function formatMarginLines(
+  revenue: number,
+  totalCost: number,
+  daysWithoutMenu: number,
+  totalDays: number
+): string[] {
+  if (totalDays > 0 && daysWithoutMenu === totalDays) return []
+
+  const margin = revenue - totalCost
+  const lines: string[] = []
+  lines.push(`🥩 <b>Себестоимость:</b> ${formatMoneyRu(totalCost)}`)
+
+  if (revenue > 0) {
+    const pct = Math.round((margin / revenue) * 100)
+    lines.push(`💎 <b>Маржа:</b> ${formatMoneyRu(margin)} (${pct}%)`)
+  } else {
+    lines.push(`💎 <b>Маржа:</b> ${formatMoneyRu(margin)}`)
+  }
+
+  if (daysWithoutMenu > 0 && daysWithoutMenu < totalDays) {
+    lines.push(`   <i>(без учёта ${daysWithoutMenu} из ${totalDays} дн. без меню)</i>`)
+  }
+
+  return lines
+}
