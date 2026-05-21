@@ -4,7 +4,8 @@ import { getFinancialReport } from '@/lib/db/queries/reports'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
 import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
-import { AnalyticsView, MARGIN_MAX_DAYS } from './analytics-view'
+import { AnalyticsView } from './analytics-view'
+import { MARGIN_MAX_DAYS } from './constants'
 
 interface PageProps {
   searchParams: Promise<{ preset?: string; from?: string; to?: string }>
@@ -32,15 +33,6 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
       ? getMaterialCostForRange(range.from, range.to, REVENUE_STATUSES)
       : Promise.resolve(null),
   ])
-
-  console.log('[ANALYTICS_DEBUG] preset:', preset)
-  console.log('[ANALYTICS_DEBUG] range.from:', range.from.toISOString())
-  console.log('[ANALYTICS_DEBUG] range.to:', range.to.toISOString())
-  console.log('[ANALYTICS_DEBUG] totalDays:', totalDays)
-  console.log('[ANALYTICS_DEBUG] showMargin:', showMargin)
-  console.log('[ANALYTICS_DEBUG] materialCost:', JSON.stringify(materialCost))
-  console.log('[ANALYTICS_DEBUG] report.totalRevenue:', report.totalRevenue)
-  console.log('[ANALYTICS_DEBUG] report.totalOrders:', report.totalOrders)
 
   return (
     <>

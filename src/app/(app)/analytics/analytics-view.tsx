@@ -6,14 +6,10 @@ import { ChartCard } from '@/components/charts/chart-card'
 import { RevenueLineChart } from '@/components/charts/revenue-line-chart'
 import { formatMoneyRu } from '@/lib/digest/format'
 import { cn } from '@/lib/utils/cn'
+import { MARGIN_MAX_DAYS, DAILY_MODE_MAX } from './constants'
 import type { ReportPreset } from '@/lib/utils/week'
 import type { FinancialReport, DailyPoint } from '@/lib/db/queries/reports'
 import type { MaterialCostResult } from '@/lib/digest/material-cost'
-
-// Граница для расчёта маржи: до квартала включительно. Дальше getMaterialCostForRange
-// делает N+1 запросов (per-day MenuCycle.findFirst), на годовом периоде это 365+
-// запросов. Когда оптимизируем aggregate — порог можно поднять.
-export const MARGIN_MAX_DAYS = 92
 
 type Metric = 'revenue' | 'portions'
 
@@ -28,8 +24,6 @@ interface Props {
 }
 
 const MONTH_RU_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
-
-const DAILY_MODE_MAX = 31
 
 export function AnalyticsView({
   preset,
