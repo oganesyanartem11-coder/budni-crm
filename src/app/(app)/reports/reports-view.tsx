@@ -1,19 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { Calendar, TrendingUp, ShoppingCart, Clock, Printer, Trophy, ChevronRight, ChevronDown, type LucideIcon } from 'lucide-react'
+import { Calendar, TrendingUp, ShoppingCart, Clock, Printer, Trophy, ChevronRight, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, formatOrders } from '@/lib/utils/format'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils/cn'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu'
+import { PeriodSelector } from '@/components/period-selector'
 import type { FinancialReport } from '@/lib/db/queries/reports'
 import type { ReportPreset } from '@/lib/utils/week'
 
@@ -24,75 +17,18 @@ interface Props {
   report: FinancialReport
 }
 
-const MAIN_PRESETS: Array<{ key: ReportPreset; label: string }> = [
-  { key: 'today', label: 'Сегодня' },
-  { key: 'this_week', label: 'Эта неделя' },
-  { key: 'this_month', label: 'Этот месяц' },
-  { key: 'this_year', label: 'Год' },
-]
-
-const SECONDARY_PRESETS: Array<{ key: ReportPreset; label: string }> = [
-  { key: 'yesterday', label: 'Вчера' },
-  { key: 'last_week', label: 'Прошлая неделя' },
-  { key: 'last_month', label: 'Прошлый месяц' },
-  { key: 'this_quarter', label: 'Квартал' },
-  { key: 'custom', label: 'Произвольно' },
-]
-
 export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const [isPending, startTransition] = useTransition()
-
-  const fromDate = rangeFromIso.slice(0, 10)
-  const toDate = rangeToIso.slice(0, 10)
-
-  const [customFrom, setCustomFrom] = useState(fromDate)
-  const [customTo, setCustomTo] = useState(toDate)
-
-  function applyPreset(p: ReportPreset) {
-    const url = new URL(window.location.href)
-    url.searchParams.delete('from')
-    url.searchParams.delete('to')
-    url.searchParams.set('preset', p)
-    startTransition(() => router.push(`${pathname}?${url.searchParams.toString()}`))
-  }
-
-  function applyCustom() {
-    const url = new URL(window.location.href)
-    url.searchParams.set('preset', 'custom')
-    url.searchParams.set('from', customFrom)
-    url.searchParams.set('to', customTo)
-    startTransition(() => router.push(`${pathname}?${url.searchParams.toString()}`))
-  }
-
   const hasData = report.totalOrders > 0
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl bg-surface border border-border p-4 space-y-3 no-print" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex flex-wrap gap-1.5">
-            {MAIN_PRESETS.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => applyPreset(p.key)}
-                disabled={isPending}
-                className={cn(
-                  'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors disabled:opacity-50',
-                  preset === p.key ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-            <SecondaryPresetMenu
-              preset={preset}
-              onSelect={applyPreset}
-              disabled={isPending}
-            />
-          </div>
+      <div className="rounded-2xl bg-surface border border-border p-4 no-print" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <PeriodSelector
+            preset={preset}
+            rangeFromIso={rangeFromIso}
+            rangeToIso={rangeToIso}
+          />
           <button
             type="button"
             onClick={() => window.print()}
@@ -102,33 +38,6 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
             Печать
           </button>
         </div>
-
-        {preset === 'custom' && (
-          <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-border">
-            <Calendar className="w-4 h-4 text-fg-muted shrink-0" />
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
-            />
-            <span className="text-fg-muted text-sm">→</span>
-            <input
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
-            />
-            <button
-              type="button"
-              onClick={applyCustom}
-              disabled={isPending}
-              className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              Применить
-            </button>
-          </div>
-        )}
       </div>
 
       {!hasData ? (
@@ -228,49 +137,6 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
         </div>
       )}
     </div>
-  )
-}
-
-function SecondaryPresetMenu({
-  preset,
-  onSelect,
-  disabled,
-}: {
-  preset: ReportPreset
-  onSelect: (p: ReportPreset) => void
-  disabled: boolean
-}) {
-  const activeSecondary = SECONDARY_PRESETS.find((p) => p.key === preset)
-  const label = activeSecondary?.label ?? 'Другой период'
-  const isActive = !!activeSecondary
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          disabled={disabled}
-          className={cn(
-            'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors disabled:opacity-50 flex items-center gap-1',
-            isActive ? 'bg-accent text-accent-fg' : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
-          )}
-        >
-          {label}
-          <ChevronDown className="w-3.5 h-3.5" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
-        {SECONDARY_PRESETS.map((p) => (
-          <DropdownMenuItem
-            key={p.key}
-            onClick={() => onSelect(p.key)}
-            className={cn('cursor-pointer', preset === p.key && 'font-semibold')}
-          >
-            {p.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 
