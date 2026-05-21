@@ -20,7 +20,7 @@ export function AdminWeekBlock({ data }: Props) {
     <section className="space-y-3">
       <div className="flex items-baseline justify-between gap-3 flex-wrap">
         <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Финансовая неделя</h2>
-        <span className="text-xs text-fg-subtle">Пт–Чт · {weekLabel}</span>
+        <span className="text-xs text-fg-subtle">Сб–Пт · {weekLabel}</span>
       </div>
 
       <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>

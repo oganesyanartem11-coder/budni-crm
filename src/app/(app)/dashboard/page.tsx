@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowRight } from 'lucide-react'
+import type { OrderStatus } from '@prisma/client'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
@@ -8,7 +9,13 @@ import { pluralize } from '@/lib/utils/format'
 import { getGreeting } from '@/lib/utils/greeting'
 import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
+import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
 import { AdminWeekBlock } from './admin-week-block'
+
+// Все «реальные» заказы дня: в работе + уже доставленные. Исключает DRAFT
+// (черновики менеджера) и CANCELLED (клиент отменил) — они не должны попадать
+// в «сколько у нас сегодня/завтра заказов».
+const REAL_ORDER_STATUSES: OrderStatus[] = [...ACTIVE_ORDER_STATUSES, 'DELIVERED']
 
 // force-dynamic: приветствие зависит от текущего часа.
 export const dynamic = 'force-dynamic'
@@ -25,25 +32,29 @@ export default async function DashboardPage() {
   const todayEnd = (() => { const d = new Date(); d.setHours(23,59,59,999); return d })()
   const tomorrowStart = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0); return d })()
   const tomorrowEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(23,59,59,999); return d })()
+  const todayIso = todayStart.toISOString().slice(0, 10)
+  const tomorrowIso = tomorrowStart.toISOString().slice(0, 10)
 
-  const [todayOrders, tomorrowOrders, pendingOrders] = await Promise.all([
-    prisma.order.count({ where: { deliveryDate: { gte: todayStart, lt: todayEnd } } }),
-    prisma.order.count({ where: { deliveryDate: { gte: tomorrowStart, lt: tomorrowEnd } } }),
+  const [todayAgg, tomorrowAgg, pendingOrders] = await Promise.all([
+    prisma.order.aggregate({
+      where: { deliveryDate: { gte: todayStart, lt: todayEnd }, status: { in: REAL_ORDER_STATUSES } },
+      _count: { id: true },
+      _sum: { portions: true },
+    }),
+    prisma.order.aggregate({
+      where: { deliveryDate: { gte: tomorrowStart, lt: tomorrowEnd }, status: { in: REAL_ORDER_STATUSES } },
+      _count: { id: true },
+      _sum: { portions: true },
+    }),
     // Фильтр согласован с listPendingConfirmation: тот же [today, tomorrowEnd],
     // иначе счётчик и список расходятся (счётчик > список → клик → пусто).
     countPendingConfirmationToday(),
   ])
 
-  // Fallback: если на сегодня заказов нет, но завтра есть — карточка переключается
-  // на «На завтра», чтобы менеджер сразу видел работу, а не пустой ноль.
-  const showTomorrow = todayOrders === 0 && tomorrowOrders > 0
-  const primaryLabel = showTomorrow ? 'На завтра' : 'На сегодня'
-  const primaryValue = showTomorrow ? tomorrowOrders : todayOrders
-  const primaryHint = showTomorrow
-    ? 'Заказов на сегодня нет'
-    : todayOrders === 0
-      ? 'Заказов на сегодня нет'
-      : `${pluralize(todayOrders, ['заказ', 'заказа', 'заказов'])} с доставкой сегодня`
+  const todayCount = todayAgg._count.id
+  const todayPortions = todayAgg._sum.portions ?? 0
+  const tomorrowCount = tomorrowAgg._count.id
+  const tomorrowPortions = tomorrowAgg._sum.portions ?? 0
 
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
 
@@ -63,13 +74,28 @@ export default async function DashboardPage() {
         {isAdminOrManager && (
           <section className="space-y-3">
             <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Заказы</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <StatCard
-                href="/orders"
-                label={primaryLabel}
-                value={primaryValue}
-                hint={primaryHint}
-                tone={primaryValue > 0 ? 'info' : 'neutral'}
+                href={`/orders?date=${todayIso}`}
+                label="На сегодня"
+                value={todayCount}
+                hint={
+                  todayCount === 0
+                    ? 'Заказов на сегодня нет'
+                    : `${pluralize(todayPortions, ['порция', 'порции', 'порций'])}`
+                }
+                tone={todayCount > 0 ? 'info' : 'neutral'}
+              />
+              <StatCard
+                href={`/orders?date=${tomorrowIso}`}
+                label="На завтра"
+                value={tomorrowCount}
+                hint={
+                  tomorrowCount === 0
+                    ? 'Заказов на завтра пока нет'
+                    : `${pluralize(tomorrowPortions, ['порция', 'порции', 'порций'])}`
+                }
+                tone={tomorrowCount > 0 ? 'info' : 'neutral'}
               />
               {pendingOrders > 0 ? (
                 <Link
