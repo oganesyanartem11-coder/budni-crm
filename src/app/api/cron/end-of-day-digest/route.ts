@@ -1,26 +1,19 @@
 import { NextResponse } from 'next/server'
-import { format } from 'date-fns'
-import { ru } from 'date-fns/locale'
 import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
-import { reportsButton } from '@/lib/telegram/buttons'
-import { formatPortions } from '@/lib/utils/format'
+import { pluralize } from '@/lib/utils/format'
+import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
+import { formatMoneyRu, formatDateWithDay } from '@/lib/digest/format'
 
 export const dynamic = 'force-dynamic'
 
 const ACTION = 'END_OF_DAY_DIGEST_SENT'
 
-// Заказы, которые сегодня были «в работе» хотя бы в одной из стадий.
-// CANCELLED/DRAFT/PENDING_CONFIRMATION в итоговую цифру дня не идут.
-const END_OF_DAY_STATUSES: OrderStatus[] = [
-  'CONFIRMED',
-  'LOCKED',
-  'IN_PRODUCTION',
-  'OUT_FOR_DELIVERY',
-  'DELIVERED',
-]
+// Сегодняшние «реальные» заказы: всё что было в работе хотя бы в одной стадии,
+// плюс уже доставленные. CANCELLED/DRAFT/PENDING_CONFIRMATION на дне не считаем.
+const TODAY_STATUSES: OrderStatus[] = [...ACTIVE_ORDER_STATUSES, 'DELIVERED']
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization')
@@ -35,9 +28,10 @@ export async function GET(request: Request) {
 
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
+  const tomorrowMsk = mskMidnightUtc(now, 1)
   const todayIso = todayMsk.toISOString().slice(0, 10)
 
-  // Идемпотентность.
+  // Идемпотентность: один дайджест на МСК-сутки.
   const alreadyRan = await prisma.activityLog.findFirst({
     where: { action: ACTION, createdAt: { gte: todayMsk } },
     select: { id: true },
@@ -46,47 +40,94 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'already_ran_today' })
   }
 
-  const orders = await prisma.order.findMany({
-    where: {
-      deliveryDate: todayMsk,
-      status: { in: END_OF_DAY_STATUSES },
-    },
-    select: { portions: true, status: true, clientId: true },
-  })
-
-  const button = reportsButton(todayIso)
-  const dateLabel = format(todayMsk, 'EEEEEE, d MMMM', { locale: ru })
-
-  if (orders.length === 0) {
-    const text = `🌙 День закрыт, <i>${escapeHtml(dateLabel)}</i>\n\nСегодня не было заказов.`
-    const result = await notifyGroup(text, { parseMode: 'HTML', replyMarkup: button })
-
-    await prisma.activityLog.create({
-      data: {
-        userId: null,
-        userRole: 'ADMIN',
-        action: ACTION,
-        entityType: 'System',
-        entityId: todayIso,
-        payload: { date: todayIso, total: 0, sentToGroup: result.ok, empty: true },
+  // TODO: Sprint 6.5 — добавить getMaterialCostForRange (себестоимость сырья из IngredientPriceHistory) + строки «Себестоимость» и «Маржа». Требует unit-тестов на связку Order ↔ MenuDayDish ↔ Dish ↔ IngredientPriceHistory.
+  const [todayAgg, tomorrowOrders] = await Promise.all([
+    prisma.order.aggregate({
+      where: {
+        deliveryDate: todayMsk,
+        status: { in: TODAY_STATUSES },
       },
-    })
+      _sum: { totalPrice: true, portions: true },
+    }),
+    prisma.order.findMany({
+      where: {
+        deliveryDate: tomorrowMsk,
+        status: { in: ACTIVE_ORDER_STATUSES },
+      },
+      select: {
+        portions: true,
+        clientId: true,
+        status: true,
+        client: { select: { name: true } },
+      },
+    }),
+  ])
 
-    return NextResponse.json({ ok: true, date: todayIso, total: 0, sentToGroup: result.ok })
+  const totalRevenueToday = Number(todayAgg._sum.totalPrice ?? 0)
+  const totalPortionsToday = todayAgg._sum.portions ?? 0
+  const todayHasOrders = totalPortionsToday > 0 || totalRevenueToday > 0
+
+  const totalPortionsTomorrow = tomorrowOrders.reduce((s, o) => s + o.portions, 0)
+  const pendingTomorrow = tomorrowOrders.filter((o) => o.status === 'PENDING_CONFIRMATION').length
+
+  // Группировка завтрашних заказов по клиенту: ВСЕ клиенты, по убыванию порций.
+  const byClient = new Map<string, { name: string; portions: number }>()
+  for (const o of tomorrowOrders) {
+    const prev = byClient.get(o.clientId)
+    if (prev) {
+      prev.portions += o.portions
+    } else {
+      byClient.set(o.clientId, { name: o.client.name, portions: o.portions })
+    }
+  }
+  const clientsTomorrow = Array.from(byClient.values()).sort((a, b) => b.portions - a.portions)
+
+  const tomorrowHasOrders = clientsTomorrow.length > 0
+
+  // ── Сборка сообщения ────────────────────────────────────────────────
+  const todayLabel = formatDateWithDay(todayMsk)
+  const tomorrowLabel = formatDateWithDay(tomorrowMsk)
+
+  const blocks: string[] = []
+
+  blocks.push(`🌙 <b>Итог дня ${escapeHtml(todayLabel)}</b>`)
+
+  if (todayHasOrders) {
+    blocks.push(
+      `💰 <b>Выручка:</b> ${formatMoneyRu(totalRevenueToday)}\n` +
+        `🍽 <b>Порций:</b> ${totalPortionsToday}`
+    )
+  } else {
+    blocks.push('Заказов не было.')
   }
 
-  const totalPortions = orders.reduce((s, o) => s + o.portions, 0)
-  const clientCount = new Set(orders.map((o) => o.clientId)).size
-  const deliveredCount = orders.filter((o) => o.status === 'DELIVERED').length
+  const tomorrowLines: string[] = []
+  tomorrowLines.push(`📅 <b>Завтра ${escapeHtml(tomorrowLabel)}:</b>`)
+  if (tomorrowHasOrders) {
+    tomorrowLines.push(
+      `🍽 <b>Порций к производству:</b> ${totalPortionsTomorrow}`
+    )
+    for (const c of clientsTomorrow) {
+      const word = pluralize(c.portions, ['порция', 'порции', 'порций'])
+      tomorrowLines.push(`   • ${escapeHtml(c.name)} — ${c.portions} ${word}`)
+    }
+  } else {
+    // Однострочный вариант: «Завтра 23.05 (Сб): пока пусто» — заменяет заголовок выше.
+    tomorrowLines.length = 0
+    tomorrowLines.push(`📅 <b>Завтра ${escapeHtml(tomorrowLabel)}:</b> пока пусто`)
+  }
+  if (pendingTomorrow > 0) {
+    tomorrowLines.push(`⏳ <b>Ждут подтверждения:</b> ${pendingTomorrow}`)
+  }
+  blocks.push(tomorrowLines.join('\n'))
 
-  const text =
-    `🌙 День закрыт, <i>${escapeHtml(dateLabel)}</i>\n\n` +
-    `Отгружено: <b>${formatPortions(totalPortions)}</b>\n` +
-    `Клиентов: ${clientCount}\n` +
-    `Доставлено: ${deliveredCount}/${orders.length}\n\n` +
-    `ℹ️ Детали и динамика — в аналитике.`
+  const text = blocks.join('\n\n')
 
-  const result = await notifyGroup(text, { parseMode: 'HTML', replyMarkup: button })
+  const result = await notifyGroup(text, { parseMode: 'HTML' })
+
+  if (!result.ok) {
+    console.error(`[end-of-day-digest] notifyGroup failed: ${result.error}`)
+  }
 
   await prisma.activityLog.create({
     data: {
@@ -97,10 +138,10 @@ export async function GET(request: Request) {
       entityId: todayIso,
       payload: {
         date: todayIso,
-        total: totalPortions,
-        orders: orders.length,
-        delivered: deliveredCount,
-        clients: clientCount,
+        revenue: totalRevenueToday,
+        portionsToday: totalPortionsToday,
+        portionsTomorrow: totalPortionsTomorrow,
+        pendingTomorrow,
         sentToGroup: result.ok,
         error: result.error ?? null,
       },
@@ -110,10 +151,10 @@ export async function GET(request: Request) {
   return NextResponse.json({
     ok: true,
     date: todayIso,
-    total: totalPortions,
-    orders: orders.length,
-    delivered: deliveredCount,
-    clients: clientCount,
+    revenue: totalRevenueToday,
+    portionsToday: totalPortionsToday,
+    portionsTomorrow: totalPortionsTomorrow,
+    pendingTomorrow,
     sentToGroup: result.ok,
     error: result.error ?? null,
   })
