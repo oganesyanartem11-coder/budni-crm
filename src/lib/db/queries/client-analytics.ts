@@ -18,6 +18,14 @@ export interface MealTypeBreakdown {
   ordersCount: number
 }
 
+export interface LocationBreakdown {
+  locationId: string
+  locationName: string
+  revenue: number
+  portions: number
+  ordersCount: number
+}
+
 export interface ClientAnalytics {
   clientId: string
   totalRevenue: number
@@ -30,6 +38,7 @@ export interface ClientAnalytics {
   weekly: PeriodPoint[]
   monthly: PeriodPoint[]
   mealTypes: MealTypeBreakdown[]
+  locations: LocationBreakdown[]
 }
 
 const RU_MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
@@ -76,6 +85,8 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
       portions: true,
       totalPrice: true,
       status: true,
+      locationId: true,
+      location: { select: { id: true, name: true } },
     },
   })
 
@@ -107,6 +118,25 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
     mt.ordersCount += 1
   }
   const mealTypes = Array.from(mealMap.values()).sort((a, b) => b.revenue - a.revenue)
+
+  const locationMap = new Map<string, LocationBreakdown>()
+  for (const o of activeOrders) {
+    let loc = locationMap.get(o.locationId)
+    if (!loc) {
+      loc = {
+        locationId: o.locationId,
+        locationName: o.location.name,
+        revenue: 0,
+        portions: 0,
+        ordersCount: 0,
+      }
+      locationMap.set(o.locationId, loc)
+    }
+    loc.revenue += Number(o.totalPrice)
+    loc.portions += o.portions
+    loc.ordersCount += 1
+  }
+  const locations = Array.from(locationMap.values()).sort((a, b) => b.revenue - a.revenue)
 
   const weeklyMap = new Map<string, { revenue: number; orders: number; portions: number; date: Date }>()
   for (let i = 11; i >= 0; i--) {
@@ -181,5 +211,6 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
     weekly,
     monthly,
     mealTypes,
+    locations,
   }
 }

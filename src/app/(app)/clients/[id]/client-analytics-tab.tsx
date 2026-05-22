@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import { TrendingUp, ShoppingCart, Coffee, type LucideIcon } from 'lucide-react'
-import { formatMoney, formatPortions, pluralize } from '@/lib/utils/format'
+import { TrendingUp, ShoppingCart, Coffee, MapPin, type LucideIcon } from 'lucide-react'
+import { formatMoney, formatPortions, formatOrders, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils/cn'
@@ -106,6 +106,37 @@ export function ClientAnalyticsTab({ analytics }: Props) {
           </ResponsiveContainer>
         </div>
       </div>
+
+      {analytics.locations.length >= 2 && (() => {
+        const totalLocRevenue = analytics.locations.reduce((s, l) => s + l.revenue, 0)
+        return (
+          <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <h3 className="text-base font-semibold mb-4 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-fg-muted" />
+              Разбивка по точкам доставки
+            </h3>
+            <div className="grid grid-cols-1 gap-2 text-sm">
+              {analytics.locations.map((loc) => {
+                const sharePct = totalLocRevenue > 0 ? Math.round((loc.revenue / totalLocRevenue) * 100) : 0
+                return (
+                  <div
+                    key={loc.locationId}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-bg/40"
+                  >
+                    <span className="font-medium truncate min-w-0">{loc.locationName}</span>
+                    <span className="flex items-center gap-3 text-xs text-fg-muted tabular-nums shrink-0">
+                      <span className="text-fg">{formatMoney(loc.revenue)}</span>
+                      <span>{loc.portions} порц.</span>
+                      <span>{formatOrders(loc.ordersCount)}</span>
+                      <span className="text-fg-subtle">{sharePct}%</span>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       {analytics.mealTypes.length > 0 && (
         <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
