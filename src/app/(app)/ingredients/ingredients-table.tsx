@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition } from 'react'
+import Link from 'next/link'
 import { Search, Plus, Edit2, Archive, ArchiveRestore, ChevronDown, Wheat } from 'lucide-react'
 import { toast } from 'sonner'
 import { IngredientModal } from './ingredient-modal'
@@ -232,7 +233,9 @@ function FragmentRow({
       <tr className={cn('hover:bg-bg/30 transition-colors', !ing.isActive && 'opacity-50')}>
         <td className="px-5 py-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium">{ing.name}</span>
+            <Link href={`/ingredients/${ing.id}`} className="font-medium hover:underline">
+              {ing.name}
+            </Link>
             {canSeePrices && ing.pricePerUnit === 0 && (
               <Badge className="bg-warning-bg text-warning-fg border-warning/20 hover:bg-warning-bg">Без цены</Badge>
             )}
