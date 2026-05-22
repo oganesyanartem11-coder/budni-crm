@@ -79,22 +79,43 @@ export function getDateForDayOfWeek(monday: Date, dayOfWeek: number): Date {
   return date
 }
 
+// UTC+3 круглый год — Россия отменила переход на летнее время в 2011-м,
+// MSK сейчас фиксированный UTC+3 без DST.
+const MSK_OFFSET_HOURS = 3
+const MSK_OFFSET_MS = MSK_OFFSET_HOURS * 3600 * 1000
+
 /**
- * Финансовая неделя: Сб 00:00 → Пт 23:59 (правильный бизнес-интервал).
+ * Финансовая неделя «Будни»: Сб 00:00:00.000 МСК → Пт 23:59:59.999 МСК.
+ *
+ * Работает корректно независимо от TZ серверного процесса:
+ * вычисления ведутся явно в MSK через арифметику UTC-миллисекунд.
+ *
+ * До этого использовался setHours() в локальной TZ процесса. На Vercel
+ * runtime в UTC граница to получалась '...23:59:59.999Z', что в MSK уже
+ * 02:59:59.999 следующего дня — блок «Финансы» на /dashboard показывал
+ * '16.05 – 23.05' вместо '16.05 – 22.05'.
  */
 export function getFinancialWeek(date: Date): { from: Date; to: Date } {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
+  const ms = date.getTime()
 
-  const dow = d.getDay()
+  // Сдвигаем точку на +3 часа — теперь UTC-компоненты shifted-даты
+  // совпадают с MSK-компонентами исходной date.
+  const mskShifted = new Date(ms + MSK_OFFSET_MS)
+  const y = mskShifted.getUTCFullYear()
+  const m = mskShifted.getUTCMonth()
+  const d = mskShifted.getUTCDate()
+  const dow = mskShifted.getUTCDay() // 0=Sun..6=Sat — MSK day-of-week
+
+  // Откатить назад до субботы (Сб=6 в MSK).
   const backToSat = (dow - 6 + 7) % 7
-  const from = new Date(d)
-  from.setDate(d.getDate() - backToSat)
-  from.setHours(0, 0, 0, 0)
 
-  const to = new Date(from)
-  to.setDate(from.getDate() + 6)
-  to.setHours(23, 59, 59, 999)
+  // from = "MSK-полночь" этой субботы → как UTC-точка = MSK-полночь − 3 часа.
+  const fromUtcMidnight = Date.UTC(y, m, d - backToSat, 0, 0, 0, 0)
+  const from = new Date(fromUtcMidnight - MSK_OFFSET_MS)
+
+  // to = "Пт 23:59:59.999 МСК" → как UTC-точка.
+  const toUtcEndOfDay = Date.UTC(y, m, d - backToSat + 6, 23, 59, 59, 999)
+  const to = new Date(toUtcEndOfDay - MSK_OFFSET_MS)
 
   return { from, to }
 }
