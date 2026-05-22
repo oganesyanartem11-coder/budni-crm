@@ -74,7 +74,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: 'Аналитика',
     items: [
       { href: '/reports',   label: 'Отчёты',    icon: FileBarChart, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/analytics', label: 'Аналитика', icon: TrendingUp,   roles: ['ADMIN'] },
+      { href: '/analytics', label: 'Аналитика', icon: TrendingUp,   roles: ['ADMIN', 'MANAGER'] },
     ],
   },
 ]

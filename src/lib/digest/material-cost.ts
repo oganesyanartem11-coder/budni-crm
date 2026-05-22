@@ -9,6 +9,10 @@ export type MaterialCostResult = {
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
+// MSK = UTC+3 круглый год (нет DST). Используется для нормализации
+// границ диапазона к MSK-полуночи независимо от TZ серверного процесса.
+const MSK_OFFSET_MS = 3 * 3600 * 1000
+
 /**
  * Себестоимость сырья за диапазон дат [from, to] включительно.
  * Логика per-day идентична getIngredientsSummary (production.ts:200-342),
@@ -27,27 +31,49 @@ export async function getMaterialCostForRange(
   to: Date,
   statuses: OrderStatus[]
 ): Promise<MaterialCostResult> {
-  const start = new Date(from)
-  start.setHours(0, 0, 0, 0)
-  const end = new Date(to)
-  end.setHours(0, 0, 0, 0)
+  // Нормализуем границы к MSK-полуночи дня в котором лежит from/to.
+  // Раньше использовался setHours(0,0,0,0) локально; на UTC-сервере это
+  // ломало totalDays для диапазонов, чьи from/to уже представлены в
+  // MSK-семантике (после fix getFinancialWeek 6.6: from=21:00Z пред.дня,
+  // to=20:59:59Z). См. arithmetic в getFinancialWeek (utils/week.ts).
+  const fromMskShifted = new Date(from.getTime() + MSK_OFFSET_MS)
+  const startMs =
+    Date.UTC(
+      fromMskShifted.getUTCFullYear(),
+      fromMskShifted.getUTCMonth(),
+      fromMskShifted.getUTCDate(),
+      0, 0, 0, 0
+    ) - MSK_OFFSET_MS
 
-  if (end.getTime() < start.getTime()) {
+  const toMskShifted = new Date(to.getTime() + MSK_OFFSET_MS)
+  const endMs =
+    Date.UTC(
+      toMskShifted.getUTCFullYear(),
+      toMskShifted.getUTCMonth(),
+      toMskShifted.getUTCDate(),
+      0, 0, 0, 0
+    ) - MSK_OFFSET_MS
+
+  if (endMs < startMs) {
     return { totalCost: 0, daysWithoutMenu: 0, totalDays: 0 }
   }
 
-  const totalDays = Math.round((end.getTime() - start.getTime()) / ONE_DAY_MS) + 1
+  const totalDays = Math.round((endMs - startMs) / ONE_DAY_MS) + 1
 
   let totalCost = 0
   let daysWithoutMenu = 0
 
   for (let i = 0; i < totalDays; i++) {
-    const dayStart = new Date(start.getTime() + i * ONE_DAY_MS)
-    const dayEnd = new Date(dayStart)
-    dayEnd.setHours(23, 59, 59, 999)
+    const dayStart = new Date(startMs + i * ONE_DAY_MS)
+    // MSK-конец дня = MSK-полночь следующего дня − 1мс. lte: dayEnd
+    // эквивалентно lt: dayStart+24h, но lte привычнее для диапазонов.
+    const dayEnd = new Date(dayStart.getTime() + ONE_DAY_MS - 1)
 
-    // 1. День недели (ISO: 1=Пн, 7=Вс).
-    const jsDay = dayStart.getDay()
+    // 1. День недели в MSK (ISO: 1=Пн, 7=Вс). Считаем от MSK-shifted
+    //    точки, иначе на UTC-сервере dayStart=21:00Z даст getDay() от
+    //    предыдущего календарного дня.
+    const dayMskShifted = new Date(dayStart.getTime() + MSK_OFFSET_MS)
+    const jsDay = dayMskShifted.getUTCDay()
     const dayOfWeek = jsDay === 0 ? 7 : jsDay
 
     // 2. Активное APPROVED меню на этот день. Проверяем БЕЗУСЛОВНО, до
