@@ -4,6 +4,7 @@ import { Edit2, ArrowLeft } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { ClientDetail } from './client-detail'
 import { MaxChatIdSection } from './max-chat-id-section'
+import { OnboardingChecklist } from './onboarding-checklist'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { serialize } from '@/lib/utils/serialize'
@@ -64,6 +65,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           </Link>
         }
       />
+      <OnboardingChecklist client={client} />
       <MaxChatIdSection
         clientId={client.id}
         currentValue={client.maxChatId}

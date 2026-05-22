@@ -70,7 +70,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
 
   return (
     <div
-      className="rounded-2xl bg-surface border border-border p-5 mb-5"
+      id="max-chat-id-section"
+      className="rounded-2xl bg-surface border border-border p-5 mb-5 scroll-mt-24"
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <div className="flex items-center gap-2 mb-4">

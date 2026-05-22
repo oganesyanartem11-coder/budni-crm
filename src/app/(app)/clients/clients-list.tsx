@@ -1,21 +1,24 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useTransition } from 'react'
 import Link from 'next/link'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { Search, Building2, MapPin, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import { formatClients } from '@/lib/utils/format'
 import { ORDER_TYPE_SHORT, MEAL_TYPE_LABELS } from '@/lib/constants/client'
+import { getOnboardingStatus, type ClientForOnboarding } from '@/lib/clients/onboarding'
 import type { Client, ClientLocation, MealType, OrderType } from '@prisma/client'
 
 type SerializedClient = Omit<Client, never> & {
-  locations: Array<Pick<ClientLocation, 'id' | 'name' | 'packaging' | 'tags'>>
+  locations: Array<Pick<ClientLocation, 'id' | 'name' | 'packaging' | 'tags' | 'isActive'>>
   mealConfigs: Array<{
     id: string
     mealType: MealType
     orderType: OrderType
     fixedPortions: number | null
     pricePerPortion: number
+    isActive: boolean
   }>
   _count: {
     orders: number
@@ -24,17 +27,49 @@ type SerializedClient = Omit<Client, never> & {
   }
 }
 
+type StatusFilter = 'all' | 'incomplete'
+
 interface Props {
   clients: SerializedClient[]
 }
 
 export function ClientsList({ clients }: Props) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [, startTransition] = useTransition()
+
   const [search, setSearch] = useState('')
   const [showArchived, setShowArchived] = useState(false)
+
+  const statusFilter: StatusFilter =
+    searchParams.get('status') === 'incomplete' ? 'incomplete' : 'all'
+
+  function setStatusFilter(value: StatusFilter) {
+    const params = new URLSearchParams(searchParams.toString())
+    if (value === 'all') {
+      params.delete('status')
+    } else {
+      params.set('status', value)
+    }
+    startTransition(() => {
+      const qs = params.toString()
+      router.push(qs ? `${pathname}?${qs}` : pathname)
+    })
+  }
 
   const filtered = useMemo(() => {
     return clients.filter((c) => {
       if (!showArchived && !c.isActive) return false
+
+      if (statusFilter === 'incomplete') {
+        // Архивных в выборку «в настройке» не пускаем — чек-лист для них
+        // бессмыслен. Если showArchived=true и есть архивные — они отсеяны.
+        if (!c.isActive) return false
+        const status = getOnboardingStatus(c as ClientForOnboarding)
+        if (status.isComplete) return false
+      }
+
       if (search) {
         const q = search.toLowerCase()
         const inName = c.name.toLowerCase().includes(q)
@@ -44,7 +79,7 @@ export function ClientsList({ clients }: Props) {
       }
       return true
     })
-  }, [clients, search, showArchived])
+  }, [clients, search, showArchived, statusFilter])
 
   return (
     <div className="space-y-4">
@@ -58,6 +93,32 @@ export function ClientsList({ clients }: Props) {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
           />
+        </div>
+        <div className="inline-flex rounded-pill border border-border p-0.5 bg-bg text-xs">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('all')}
+            className={cn(
+              'px-3 py-1 rounded-pill transition-colors',
+              statusFilter === 'all'
+                ? 'bg-accent text-accent-fg font-medium'
+                : 'text-fg-muted hover:text-fg'
+            )}
+          >
+            Все
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('incomplete')}
+            className={cn(
+              'px-3 py-1 rounded-pill transition-colors',
+              statusFilter === 'incomplete'
+                ? 'bg-accent text-accent-fg font-medium'
+                : 'text-fg-muted hover:text-fg'
+            )}
+          >
+            В настройке
+          </button>
         </div>
         <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer select-none">
           <input

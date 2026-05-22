@@ -109,7 +109,7 @@ export function ClientDetail({ client, analytics }: Props) {
     !!client.defaultOurLegalEntity
 
   return (
-    <div className="space-y-5">
+    <div id="client-tabs" className="space-y-5 scroll-mt-24">
       {client.notes && (
         <div className="rounded-2xl bg-warning-bg/30 border border-warning/20 px-5 py-4">
           <p className="text-xs uppercase tracking-wider text-warning-fg/80 font-medium mb-1">Заметки</p>

@@ -12,13 +12,17 @@ export default async function ClientsPage() {
   const clients = await prisma.client.findMany({
     orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     include: {
+      // isActive нужен для getOnboardingStatus (фильтр ?status=incomplete).
+      // where тут тоже на isActive=true — карточки клиента показывают только
+      // активные точки/конфиги; поле isActive в select избыточно по факту
+      // (все true), но требуется типом ClientForOnboarding.
       locations: {
         where: { isActive: true },
-        select: { id: true, name: true, packaging: true, tags: true },
+        select: { id: true, name: true, packaging: true, tags: true, isActive: true },
       },
       mealConfigs: {
         where: { isActive: true },
-        select: { id: true, mealType: true, orderType: true, fixedPortions: true, pricePerPortion: true },
+        select: { id: true, mealType: true, orderType: true, fixedPortions: true, pricePerPortion: true, isActive: true },
       },
       _count: {
         select: {

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, ChevronRight } from 'lucide-react'
 import type { OrderStatus } from '@prisma/client'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
@@ -11,6 +11,7 @@ import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
 import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
+import { getOnboardingStatus } from '@/lib/clients/onboarding'
 import { AdminWeekBlock } from './admin-week-block'
 
 // Подмножество пресетов, доступных в переключателе дашборда. WoW-бокс
@@ -47,7 +48,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const todayIso = todayStart.toISOString().slice(0, 10)
   const tomorrowIso = tomorrowStart.toISOString().slice(0, 10)
 
-  const [todayAgg, tomorrowAgg, pendingOrders] = await Promise.all([
+  const [todayAgg, tomorrowAgg, pendingOrders, clientsForOnboarding] = await Promise.all([
     prisma.order.aggregate({
       where: { deliveryDate: { gte: todayStart, lt: todayEnd }, status: { in: REAL_ORDER_STATUSES } },
       _count: { id: true },
@@ -61,12 +62,31 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     // Фильтр согласован с listPendingConfirmation: тот же [today, tomorrowEnd],
     // иначе счётчик и список расходятся (счётчик > список → клик → пусто).
     countPendingConfirmationToday(),
+    // Активные клиенты для счётчика «в настройке». Запрашиваем только для ADMIN
+    // (на дашборде MANAGER эту карточку не показываем).
+    user.role === 'ADMIN'
+      ? prisma.client.findMany({
+          where: { isActive: true },
+          select: {
+            id: true,
+            contactPhone: true,
+            defaultOurLegalEntityId: true,
+            maxChatId: true,
+            locations: { select: { isActive: true } },
+            mealConfigs: { select: { isActive: true } },
+          },
+        })
+      : Promise.resolve([]),
   ])
 
   const todayCount = todayAgg._count.id
   const todayPortions = todayAgg._sum.portions ?? 0
   const tomorrowCount = tomorrowAgg._count.id
   const tomorrowPortions = tomorrowAgg._sum.portions ?? 0
+
+  const clientsInSetup = clientsForOnboarding.filter(
+    (c) => !getOnboardingStatus(c).isComplete
+  ).length
 
   const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
 
@@ -141,6 +161,25 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 </div>
               )}
             </div>
+          </section>
+        )}
+
+        {user.role === 'ADMIN' && clientsInSetup > 0 && (
+          <section className="space-y-3">
+            <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Онбординг</h2>
+            <Link
+              href="/clients?status=incomplete"
+              className="block rounded-2xl bg-surface border border-border p-5 hover:bg-bg/50 transition-colors group"
+              style={{ boxShadow: 'var(--shadow-card)' }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-fg-muted">Клиенты в настройке</p>
+                  <p className="text-2xl font-semibold text-fg mt-1 tabular-nums">{clientsInSetup}</p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-fg-subtle group-hover:text-fg-muted group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </Link>
           </section>
         )}
 
