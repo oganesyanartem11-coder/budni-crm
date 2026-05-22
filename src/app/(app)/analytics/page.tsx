@@ -88,7 +88,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
     <>
       <PageHeader
         title="Аналитика"
-        subtitle={`${range.label} · ${range.from.toLocaleDateString('ru-RU')} – ${range.to.toLocaleDateString('ru-RU')}`}
+        subtitle={`${range.label} · ${range.from.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })} – ${range.to.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}`}
       />
       <AnalyticsView
         preset={preset}

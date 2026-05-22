@@ -38,7 +38,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
     <>
       <PageHeader
         title="Отчёты"
-        subtitle={`${range.label} · ${range.from.toLocaleDateString('ru-RU')} – ${range.to.toLocaleDateString('ru-RU')}`}
+        subtitle={`${range.label} · ${range.from.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })} – ${range.to.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}`}
       />
       <ReportsView
         preset={preset}
