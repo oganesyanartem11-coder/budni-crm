@@ -421,6 +421,8 @@ model MenuCycle {
   days        MenuDay[]
   menuImports MenuImport[]
 
+  // 7.6 B.2: на одну неделю — ровно один цикл (любого статуса).
+  @@unique([validFrom])
   @@index([validFrom, validTo])
   @@index([status])
   @@index([menuImportId])
