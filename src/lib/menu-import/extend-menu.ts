@@ -1,7 +1,11 @@
 import type { Prisma } from '@prisma/client'
-import { isMonday, type MenuImportStructure } from './expand-menu'
+import { type MenuImportStructure } from './expand-menu'
+import { getMondayOfWeek, getSundayOfWeek } from '@/lib/utils/week'
 
 type Tx = Prisma.TransactionClient
+
+const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface ActiveMenuInfo {
   menuImportId: string
@@ -51,15 +55,10 @@ export async function findActiveMenuForExtension(tx: Tx): Promise<ActiveMenuInfo
   }
 }
 
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d)
-  r.setUTCDate(r.getUTCDate() + n)
-  return r
-}
-
-function formatDayMonth(d: Date): string {
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+function formatDayMonthMsk(d: Date): string {
+  const shifted = new Date(d.getTime() + MSK_OFFSET_MS)
+  const dd = String(shifted.getUTCDate()).padStart(2, '0')
+  const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0')
   return `${dd}.${mm}`
 }
 
@@ -85,7 +84,10 @@ export async function extendMenuPlan(
   startOffset: 0 | 1,
   tx: Tx
 ): Promise<number> {
-  if (!isMonday(startDate)) {
+  // Новая семантика (7.6 A.1): startDate должен быть MSK-полночью понедельника
+  // как UTC-точка — идемпотентен по getMondayOfWeek. Унифицировано с week.ts
+  // и expandMenuFromStructure.
+  if (getMondayOfWeek(startDate).getTime() !== startDate.getTime()) {
     throw new Error('startDate должен быть понедельником')
   }
   if (structure.weekA.days.length === 0) {
@@ -98,10 +100,10 @@ export async function extendMenuPlan(
   for (let i = 0; i < weeksAhead; i++) {
     const isWeekA = (i + startOffset) % 2 === 0 || structure.weekB === null
     const week = isWeekA ? structure.weekA : structure.weekB!
-    const validFrom = addDays(startDate, i * 7)
-    const validTo = addDays(validFrom, 6)
+    const validFrom = new Date(startDate.getTime() + i * 7 * DAY_MS)
+    const validTo = getSundayOfWeek(validFrom)
     const weekLabel = isWeekA ? 'А' : 'Б'
-    const name = `Неделя ${weekLabel}, ${formatDayMonth(validFrom)} - ${formatDayMonth(validTo)}`
+    const name = `Неделя ${weekLabel}, ${formatDayMonthMsk(validFrom)} - ${formatDayMonthMsk(validTo)}`
 
     const cycle = await tx.menuCycle.create({
       data: {

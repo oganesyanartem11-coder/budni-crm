@@ -7,6 +7,10 @@ import type {
 } from '@prisma/client'
 import type { ScheduleEntry } from '@/lib/llm/menu-schedule-parser'
 import type { GeneratedRecipe } from '@/lib/llm/recipe-generator'
+import { getMondayOfWeek, getSundayOfWeek } from '@/lib/utils/week'
+
+const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface AssembleInput {
   source: MenuImportSource
@@ -57,20 +61,17 @@ const MEAL_TO_TYPE: Record<string, MealType> = {
   'ужин': 'DINNER',
 }
 
-// Ближайший будущий понедельник в UTC от now() (если сегодня понедельник — следующий).
+// Следующий MSK-понедельник от now() (если сегодня уже понедельник — следующий).
+// Реализация через getMondayOfWeek(now + 7d): берём момент через неделю и
+// нормализуем до MSK-полночи понедельника той недели. Это всегда даёт следующий
+// MSK-понедельник независимо от того, какой сегодня день недели.
 function nextMondayFromNow(): Date {
-  const now = new Date()
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const dow = d.getUTCDay() // 0=Вс ... 6=Сб
-  const days = dow === 1 ? 7 : (8 - dow) % 7
-  d.setUTCDate(d.getUTCDate() + days)
-  return d
+  return getMondayOfWeek(new Date(Date.now() + 7 * DAY_MS))
 }
 
-function addDays(d: Date, n: number): Date {
-  const r = new Date(d)
-  r.setUTCDate(r.getUTCDate() + n)
-  return r
+// "YYYY-MM-DD" в MSK-календаре из произвольной UTC-точки.
+function mskIsoDate(d: Date): string {
+  return new Date(d.getTime() + MSK_OFFSET_MS).toISOString().slice(0, 10)
 }
 
 // Сборка одного импорта меню (фото или Excel) в БД одной транзакцией.
@@ -209,9 +210,9 @@ export async function assembleMenuImport(input: AssembleInput): Promise<Assemble
       let cyclesCreated = 0
 
       for (const week of weeks) {
-        const from = addDays(baseMonday, (week - 1) * 7)
-        const to = addDays(from, 6)
-        const name = `AI-импорт неделя ${week} (${from.toISOString().slice(0, 10)})`
+        const from = new Date(baseMonday.getTime() + (week - 1) * 7 * DAY_MS)
+        const to = getSundayOfWeek(from)
+        const name = `AI-импорт неделя ${week} (${mskIsoDate(from)})`
         const cycle = await tx.menuCycle.create({
           data: { name, validFrom: from, validTo: to, status: 'DRAFT' },
         })

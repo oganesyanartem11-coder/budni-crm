@@ -1,50 +1,83 @@
-import { startOfWeek, endOfWeek, addWeeks, format, isSameWeek } from 'date-fns'
 import { ru } from 'date-fns/locale'
+import { formatInTimeZone } from 'date-fns-tz'
+
+// UTC+3 круглый год — Россия отменила переход на летнее время в 2011-м,
+// MSK сейчас фиксированный UTC+3 без DST.
+const MSK_OFFSET_HOURS = 3
+const MSK_OFFSET_MS = MSK_OFFSET_HOURS * 3600 * 1000
+const MSK_TIMEZONE = 'Europe/Moscow'
+const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
- * Возвращает понедельник недели для заданной даты (ISO неделя).
- * Время сбрасывается на 00:00:00.000.
+ * Возвращает понедельник ISO-недели для заданного момента.
+ * Семантика: «MSK 00:00 этого понедельника» как UTC-точка
+ * (например 2026-05-17T21:00:00.000Z = Пн 18 мая 00:00 МСК).
+ *
+ * Работает корректно независимо от TZ серверного процесса и браузера клиента —
+ * вычисления ведутся через арифметику UTC-миллисекунд со сдвигом на MSK.
+ * Унифицировано с getFinancialWeek и expand-menu.ts: все понедельники
+ * в системе хранятся и сравниваются как одна и та же UTC-точка.
  */
 export function getMondayOfWeek(date: Date): Date {
-  const monday = startOfWeek(date, { weekStartsOn: 1 })
-  monday.setHours(0, 0, 0, 0)
-  return monday
+  const mskShifted = new Date(date.getTime() + MSK_OFFSET_MS)
+  const y = mskShifted.getUTCFullYear()
+  const m = mskShifted.getUTCMonth()
+  const d = mskShifted.getUTCDate()
+  const dow = mskShifted.getUTCDay() // 0=Sun..6=Sat в MSK-календаре
+  const daysToMon = (dow + 6) % 7 // Пн→0, Вт→1, …, Вс→6
+  const mondayMskMidnightAsUtc = Date.UTC(y, m, d - daysToMon, 0, 0, 0, 0)
+  return new Date(mondayMskMidnightAsUtc - MSK_OFFSET_MS)
 }
 
 /**
- * Возвращает воскресенье недели для заданной даты.
- * Время устанавливается на 23:59:59.999.
+ * Возвращает воскресенье ISO-недели для заданного момента.
+ * Семантика: «MSK 23:59:59.999 воскресенья» как UTC-точка
+ * (например 2026-05-24T20:59:59.999Z = Вс 24 мая 23:59:59.999 МСК).
  */
 export function getSundayOfWeek(date: Date): Date {
-  const sunday = endOfWeek(date, { weekStartsOn: 1 })
-  sunday.setHours(23, 59, 59, 999)
-  return sunday
+  const monday = getMondayOfWeek(date)
+  return new Date(monday.getTime() + 7 * DAY_MS - 1)
 }
 
 /**
- * Сдвигает неделю на N недель (положительное вперёд, отрицательное назад).
+ * Сдвигает MSK-понедельник на N недель. Чистая арифметика UTC-миллисекунд:
+ * 7 суток ровно (Москва без DST). На входе ожидается MSK-понедельник
+ * (результат getMondayOfWeek); на выходе — MSK-понедельник через N недель.
  */
-export function shiftWeek(date: Date, weeks: number): Date {
-  return getMondayOfWeek(addWeeks(date, weeks))
+export function shiftWeek(monday: Date, weeks: number): Date {
+  return new Date(monday.getTime() + weeks * 7 * DAY_MS)
 }
 
 /**
- * Форматирует диапазон недели для UI: "5–11 мая 2026".
+ * Форматирует диапазон недели для UI в MSK-календаре:
+ * «18–24 мая 2026» (в одном месяце),
+ * «29 апр – 5 мая 2026» (на границе месяцев),
+ * «29 дек – 4 янв 2026» (на границе года).
+ *
+ * formatInTimeZone из date-fns-tz гарантирует MSK-вывод вне зависимости
+ * от TZ процесса.
  */
 export function formatWeekRange(monday: Date): string {
   const sunday = getSundayOfWeek(monday)
-  const sameMonth = monday.getMonth() === sunday.getMonth()
-  if (sameMonth) {
-    return `${format(monday, 'd', { locale: ru })}–${format(sunday, 'd MMMM yyyy', { locale: ru })}`
+  const mondayMonth = formatInTimeZone(monday, MSK_TIMEZONE, 'M')
+  const sundayMonth = formatInTimeZone(sunday, MSK_TIMEZONE, 'M')
+  if (mondayMonth === sundayMonth) {
+    const mondayDay = formatInTimeZone(monday, MSK_TIMEZONE, 'd')
+    const sundayDayMonthYear = formatInTimeZone(sunday, MSK_TIMEZONE, 'd MMMM yyyy', { locale: ru })
+    return `${mondayDay}–${sundayDayMonthYear}`
   }
-  return `${format(monday, 'd MMM', { locale: ru })} – ${format(sunday, 'd MMM yyyy', { locale: ru })}`
+  const mondayDayMonth = formatInTimeZone(monday, MSK_TIMEZONE, 'd MMM', { locale: ru })
+  const sundayDayMonthYear = formatInTimeZone(sunday, MSK_TIMEZONE, 'd MMM yyyy', { locale: ru })
+  return `${mondayDayMonth} – ${sundayDayMonthYear}`
 }
 
 /**
- * Возвращает true если заданная дата — текущая неделя.
+ * true, если переданный момент попадает в ту же MSK-неделю, что и сейчас.
+ * Сравнение через нормализованный понедельник, не через date-fns isSameWeek
+ * (которая зависит от локальной TZ процесса).
  */
 export function isCurrentWeek(date: Date): boolean {
-  return isSameWeek(date, new Date(), { weekStartsOn: 1 })
+  return getMondayOfWeek(date).getTime() === getMondayOfWeek(new Date()).getTime()
 }
 
 /**
@@ -71,18 +104,12 @@ export const WEEKDAY_NAMES_SHORT: Record<number, string> = {
 }
 
 /**
- * Возвращает дату для конкретного дня недели (1-7) от понедельника.
+ * Возвращает дату для конкретного дня недели (ISO 1=Пн..7=Вс) от MSK-понедельника.
+ * Результат — «MSK 00:00 этого дня» как UTC-точка.
  */
 export function getDateForDayOfWeek(monday: Date, dayOfWeek: number): Date {
-  const date = new Date(monday)
-  date.setDate(monday.getDate() + (dayOfWeek - 1))
-  return date
+  return new Date(monday.getTime() + (dayOfWeek - 1) * DAY_MS)
 }
-
-// UTC+3 круглый год — Россия отменила переход на летнее время в 2011-м,
-// MSK сейчас фиксированный UTC+3 без DST.
-const MSK_OFFSET_HOURS = 3
-const MSK_OFFSET_MS = MSK_OFFSET_HOURS * 3600 * 1000
 
 /**
  * Финансовая неделя «Будни»: Сб 00:00:00.000 МСК → Пт 23:59:59.999 МСК.

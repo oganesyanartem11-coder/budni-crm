@@ -5,6 +5,10 @@ import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { getMenuStructureFromImport } from '@/lib/menu-import/expand-menu'
 import { findActiveMenuForExtension, extendMenuPlan } from '@/lib/menu-import/extend-menu'
+import { getMondayOfWeek } from '@/lib/utils/week'
+
+const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export const dynamic = 'force-dynamic'
 
@@ -26,20 +30,16 @@ function daysBetween(from: Date, to: Date): number {
   return Math.round(ms / (24 * 60 * 60 * 1000))
 }
 
-function addDaysUtc(d: Date, n: number): Date {
-  const r = new Date(d)
-  r.setUTCDate(r.getUTCDate() + n)
-  return r
-}
-
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10)
+  // MSK-календарная YYYY-MM-DD из произвольной UTC-точки (для логов и payload).
+  return new Date(d.getTime() + MSK_OFFSET_MS).toISOString().slice(0, 10)
 }
 
 function formatDateRu(d: Date): string {
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const yyyy = d.getUTCFullYear()
+  const shifted = new Date(d.getTime() + MSK_OFFSET_MS)
+  const dd = String(shifted.getUTCDate()).padStart(2, '0')
+  const mm = String(shifted.getUTCMonth() + 1).padStart(2, '0')
+  const yyyy = shifted.getUTCFullYear()
   return `${dd}.${mm}.${yyyy}`
 }
 
@@ -96,14 +96,17 @@ export async function GET(request: Request) {
           }
         }
 
-        // Стартовый понедельник нового блока = воскресенье последнего цикла + 1.
-        const newStartMonday = addDaysUtc(active.lastValidTo, 1)
-        if (newStartMonday.getUTCDay() !== 1) {
-          // Защита от багов в Спринте 8.7a: если validTo был не воскресенье,
-          // прерываемся и логируем — не вставляем испорченные циклы.
+        // Стартовый понедельник нового блока = MSK-понедельник следующий за
+        // воскресеньем последнего цикла. lastValidTo по новой семантике (7.6 A.1) —
+        // MSK Вс 23:59:59.999 как UTC-точка; +1 мс → начало MSK-понедельника
+        // следующей недели; getMondayOfWeek нормализует до его MSK-полночи.
+        const nextMonday = getMondayOfWeek(new Date(active.lastValidTo.getTime() + 1))
+        if (getMondayOfWeek(nextMonday).getTime() !== nextMonday.getTime()) {
+          // Defensive: после нормализации всегда совпадёт, но проверка остаётся
+          // на случай экстремального дрейфа lastValidTo (например ручная правка).
           return {
             action: 'error' as const,
-            reason: `lastValidTo=${isoDate(active.lastValidTo)} → next day is not Monday (got dayOfWeek=${newStartMonday.getUTCDay()})`,
+            reason: `lastValidTo=${isoDate(active.lastValidTo)} → нормализация дала не-MSK-полночь`,
           }
         }
 
@@ -123,7 +126,7 @@ export async function GET(request: Request) {
 
         const cyclesCreated = await extendMenuPlan(
           structure,
-          newStartMonday,
+          nextMonday,
           EXTEND_WEEKS,
           active.menuImportId,
           null, // approvedById: cron не от имени пользователя
@@ -131,7 +134,9 @@ export async function GET(request: Request) {
           tx
         )
 
-        const newHorizon = addDaysUtc(newStartMonday, EXTEND_WEEKS * 7 - 1)
+        // newHorizon = последний день блока (Вс конца последней недели в MSK).
+        // EXTEND_WEEKS недель × 7 дней − 1 день; на UTC-точке это просто +ms.
+        const newHorizon = new Date(nextMonday.getTime() + (EXTEND_WEEKS * 7 - 1) * DAY_MS)
         return {
           action: 'extended' as const,
           menuImportId: active.menuImportId,

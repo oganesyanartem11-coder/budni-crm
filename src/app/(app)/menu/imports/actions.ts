@@ -10,8 +10,8 @@ import { rollbackMenuImport, type RollbackResult } from '@/lib/menu-import/assem
 import {
   getMenuStructureFromImport,
   expandMenuFromStructure,
-  isMonday,
 } from '@/lib/menu-import/expand-menu'
+import { getMondayOfWeek } from '@/lib/utils/week'
 import {
   notifyAdminsAboutPendingMenuImport,
   notifyChefAboutRejectedMenuImport,
@@ -434,11 +434,20 @@ export async function approveMenuImport(
   const check = await assertImportPendingApproval(parsed.data.menuImportId)
   if (!check.ok) return check
 
-  const startDate = new Date(parsed.data.startDate + 'T00:00:00.000Z')
-  if (Number.isNaN(startDate.getTime())) {
+  // YYYY-MM-DD → MSK-полночь этой даты как UTC-точка (= Y-M-D 00:00 МСК).
+  // Семантика синхронизирована с getMondayOfWeek/expandMenuFromStructure (7.6 A.1).
+  const parts = parsed.data.startDate.split('-').map(Number)
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
     return { ok: false, error: 'Неверный формат даты (ожидается YYYY-MM-DD)' }
   }
-  if (!isMonday(startDate)) {
+  const [y, m, d] = parts
+  const candidateMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - 3 * 60 * 60 * 1000
+  const candidate = new Date(candidateMs)
+  if (Number.isNaN(candidate.getTime())) {
+    return { ok: false, error: 'Неверный формат даты (ожидается YYYY-MM-DD)' }
+  }
+  const startDate = getMondayOfWeek(candidate)
+  if (startDate.getTime() !== candidate.getTime()) {
     return { ok: false, error: 'Дата старта должна быть понедельником' }
   }
 
@@ -590,9 +599,21 @@ export async function countReplaceableCycles(
   if (!parsed.success) {
     return { ok: false, error: 'Неверные данные' }
   }
-  const startDate = new Date(parsed.data.startDate + 'T00:00:00.000Z')
-  if (Number.isNaN(startDate.getTime())) {
+  // Та же MSK-нормализация что в approveMenuImport — сравнение с validFrom
+  // (MSK-полночь понедельника как UTC-точка) корректно по границе.
+  const parts = parsed.data.startDate.split('-').map(Number)
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
     return { ok: false, error: 'Неверный формат даты (ожидается YYYY-MM-DD)' }
+  }
+  const [y, m, d] = parts
+  const candidateMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - 3 * 60 * 60 * 1000
+  const candidate = new Date(candidateMs)
+  if (Number.isNaN(candidate.getTime())) {
+    return { ok: false, error: 'Неверный формат даты (ожидается YYYY-MM-DD)' }
+  }
+  const startDate = getMondayOfWeek(candidate)
+  if (startDate.getTime() !== candidate.getTime()) {
+    return { ok: false, error: 'Дата старта должна быть понедельником' }
   }
 
   const count = await prisma.menuCycle.count({
