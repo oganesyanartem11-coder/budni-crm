@@ -11,6 +11,9 @@ import {
   Copy,
   Send,
   Link2,
+  Lock,
+  Unlock,
+  Monitor,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -19,7 +22,10 @@ import {
   setUserActive,
   generateOnboardingTokenForUser,
   unlinkTelegramFromUser,
+  unlockUser,
 } from './actions'
+import { SessionsModal } from './sessions-modal'
+import { LockModal } from './lock-modal'
 import type { UserRole } from '@prisma/client'
 import {
   Select,
@@ -40,7 +46,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils/cn'
-import { formatDateMsk } from '@/lib/utils/format'
+import { formatDateMsk, formatDateTimeMsk } from '@/lib/utils/format'
 
 interface UserRow {
   id: string
@@ -51,6 +57,9 @@ interface UserRow {
   onboardedAt: string | null
   telegramChatId: string | null
   telegramUsername: string | null
+  loginLockedUntil: string | null
+  failedLoginAttempts: number
+  activeSessionsCount: number
 }
 
 interface Props {
@@ -106,6 +115,10 @@ export function UsersTable({ users, currentUserId }: Props) {
 
   // Подтверждение перевыдачи для уже привязанного юзера
   const [reissueTarget, setReissueTarget] = useState<UserRow | null>(null)
+
+  // 7.12 — модалки сессий и блокировки
+  const [sessionsTarget, setSessionsTarget] = useState<UserRow | null>(null)
+  const [lockTarget, setLockTarget] = useState<UserRow | null>(null)
 
   function handleRoleChange(v: UserRole) {
     setRole(v)
@@ -212,6 +225,23 @@ export function UsersTable({ users, currentUserId }: Props) {
     })
   }
 
+  function isLocked(u: UserRow): boolean {
+    return !!u.loginLockedUntil && new Date(u.loginLockedUntil) > new Date()
+  }
+
+  function handleUnlock(u: UserRow) {
+    if (!confirm(`Разблокировать «${u.name}»? failedLoginAttempts будет сброшен.`)) return
+    startTransition(async () => {
+      const r = await unlockUser(u.id)
+      if (r.ok) {
+        toast.success(`${u.name} разблокирован`)
+        router.refresh()
+      } else {
+        toast.error(r.error)
+      }
+    })
+  }
+
   function handleTelegramClick(u: UserRow) {
     if (!u.telegramChatId) {
       doReissue(u)
@@ -247,7 +277,9 @@ export function UsersTable({ users, currentUserId }: Props) {
               <tr>
                 <th className="text-left px-4 py-3 font-medium">Имя</th>
                 <th className="text-left px-3 py-3 font-medium">Роль</th>
+                <th className="text-left px-3 py-3 font-medium">Статус</th>
                 <th className="text-left px-3 py-3 font-medium">Telegram</th>
+                <th className="text-left px-3 py-3 font-medium hidden md:table-cell">Сессии</th>
                 <th className="text-left px-3 py-3 font-medium hidden md:table-cell">Создан</th>
                 <th className="text-right px-4 py-3 font-medium">Действия</th>
               </tr>
@@ -271,6 +303,21 @@ export function UsersTable({ users, currentUserId }: Props) {
                       {ROLE_LABELS[u.role]}
                     </span>
                   </td>
+                  <td className="px-3 py-3 text-xs">
+                    {isLocked(u) ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill bg-danger-bg text-danger-fg font-medium"
+                        title={`Заблокирован до ${formatDateTimeMsk(u.loginLockedUntil)}`}
+                      >
+                        <Lock className="w-3 h-3" />
+                        До {formatDateTimeMsk(u.loginLockedUntil)}
+                      </span>
+                    ) : u.isActive ? (
+                      <span className="text-fg-muted">Активен</span>
+                    ) : (
+                      <span className="text-danger-fg">Отключён</span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-xs text-fg-muted">
                     {u.telegramChatId ? (
                       <span className="inline-flex items-center gap-1 text-success-fg">
@@ -280,6 +327,18 @@ export function UsersTable({ users, currentUserId }: Props) {
                     ) : (
                       '—'
                     )}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-fg-muted hidden md:table-cell">
+                    <button
+                      type="button"
+                      onClick={() => setSessionsTarget(u)}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill bg-bg hover:bg-border text-xs disabled:opacity-50"
+                      title="Активные сессии"
+                    >
+                      <Monitor className="w-3 h-3" />
+                      {u.activeSessionsCount}
+                    </button>
                   </td>
                   <td className="px-3 py-3 text-xs text-fg-muted hidden md:table-cell">
                     {formatDateMsk(u.createdAt)}
@@ -334,6 +393,32 @@ export function UsersTable({ users, currentUserId }: Props) {
                           <Power className="w-3.5 h-3.5" />
                         )}
                       </button>
+                      {isLocked(u) ? (
+                        <button
+                          type="button"
+                          onClick={() => handleUnlock(u)}
+                          disabled={isPending}
+                          title="Разблокировать"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-pill bg-success-bg/40 text-success-fg hover:bg-success-bg text-xs disabled:opacity-50"
+                        >
+                          <Unlock className="w-3.5 h-3.5" />
+                          Разблокировать
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setLockTarget(u)}
+                          disabled={isPending || u.id === currentUserId || !u.isActive}
+                          title={
+                            u.id === currentUserId
+                              ? 'Нельзя заблокировать себя'
+                              : 'Заблокировать вход'
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-pill bg-bg hover:bg-danger-bg/40 hover:text-danger-fg text-xs disabled:opacity-50"
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -604,6 +689,31 @@ export function UsersTable({ users, currentUserId }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <SessionsModal
+        userId={sessionsTarget?.id ?? null}
+        userName={sessionsTarget?.name ?? ''}
+        open={!!sessionsTarget}
+        onOpenChange={(o) => {
+          if (!o) {
+            setSessionsTarget(null)
+            router.refresh()
+          }
+        }}
+      />
+
+      <LockModal
+        userId={lockTarget?.id ?? null}
+        userName={lockTarget?.name ?? ''}
+        open={!!lockTarget}
+        onOpenChange={(o) => {
+          if (!o) setLockTarget(null)
+        }}
+        onLocked={() => {
+          setLockTarget(null)
+          router.refresh()
+        }}
+      />
     </div>
   )
 }

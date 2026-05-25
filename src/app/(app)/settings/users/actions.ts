@@ -2,6 +2,7 @@
 
 import { randomBytes } from 'crypto'
 import { revalidatePath } from 'next/cache'
+import { UAParser } from 'ua-parser-js'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { createPinFields, generateUniquePin } from '@/lib/auth/pin'
@@ -309,6 +310,157 @@ export async function unlinkTelegramFromUser(
     }),
   ])
 
+  revalidatePath('/settings/users')
+  return { ok: true, data: undefined }
+}
+
+export interface UserSessionView {
+  id: string
+  createdAt: string
+  lastUsedAt: string
+  expiresAt: string
+  ipAddress: string | null
+  browser: string | null
+  os: string | null
+  device: string | null
+  rawUserAgent: string | null
+}
+
+/**
+ * 7.12: Список активных (не отозванных, не истёкших) сессий юзера для ADMIN-панели.
+ * UA парсится через ua-parser-js (pin 2.0.0 — supply-chain incident август 2024).
+ */
+export async function listUserSessions(
+  userId: string
+): Promise<ActionResult<UserSessionView[]>> {
+  const admin = await requireRole(['ADMIN'])
+  const now = new Date()
+  const sessions = await prisma.session.findMany({
+    where: { userId, revokedAt: null, expiresAt: { gt: now } },
+    orderBy: { lastUsedAt: 'desc' },
+    select: {
+      id: true,
+      createdAt: true,
+      lastUsedAt: true,
+      expiresAt: true,
+      ipAddress: true,
+      userAgent: true,
+    },
+  })
+  await prisma.activityLog.create({
+    data: {
+      userId: admin.id,
+      userRole: 'ADMIN',
+      action: 'ADMIN_LIST_USER_SESSIONS',
+      entityType: 'User',
+      entityId: userId,
+    },
+  })
+  return {
+    ok: true,
+    data: sessions.map((s) => {
+      const ua = s.userAgent ? new UAParser(s.userAgent).getResult() : null
+      return {
+        id: s.id,
+        createdAt: s.createdAt.toISOString(),
+        lastUsedAt: s.lastUsedAt.toISOString(),
+        expiresAt: s.expiresAt.toISOString(),
+        ipAddress: s.ipAddress,
+        browser: ua
+          ? [ua.browser.name, ua.browser.version].filter(Boolean).join(' ') || null
+          : null,
+        os: ua ? [ua.os.name, ua.os.version].filter(Boolean).join(' ') || null : null,
+        device: ua ? (ua.device.vendor || ua.device.type) ?? null : null,
+        rawUserAgent: s.userAgent,
+      }
+    }),
+  }
+}
+
+/**
+ * 7.12: Отзыв одной сессии (ADMIN). После revoke юзер на следующем запросе
+ * получит 401 (см. getCurrentUser → revokedAt check).
+ */
+export async function revokeUserSession(sessionId: string): Promise<ActionResult> {
+  const admin = await requireRole(['ADMIN'])
+  await prisma.session.update({
+    where: { id: sessionId },
+    data: { revokedAt: new Date() },
+  })
+  await prisma.activityLog.create({
+    data: {
+      userId: admin.id,
+      userRole: 'ADMIN',
+      action: 'ADMIN_REVOKE_SESSION',
+      entityType: 'Session',
+      entityId: sessionId,
+    },
+  })
+  revalidatePath('/settings/users')
+  return { ok: true, data: undefined }
+}
+
+/**
+ * 7.12: Ручная блокировка ADMIN'ом — ставит loginLockedUntil + revoke всех активных
+ * сессий. Часы: 1..720 (30 дней макс).
+ */
+export async function lockUser(userId: string, hours: number): Promise<ActionResult> {
+  const admin = await requireRole(['ADMIN'])
+  // Защита от самоблока: ADMIN не должен иметь возможности заблокировать сам
+  // себя (зеркало setUserActive). UI ставит disabled, но через DevTools/прямой
+  // вызов action это обходится — поэтому проверка дублируется на сервере.
+  if (userId === admin.id) {
+    return { ok: false, error: 'Нельзя заблокировать самого себя' }
+  }
+  if (!Number.isFinite(hours) || hours < 1 || hours > 720) {
+    return { ok: false, error: 'Часы должны быть от 1 до 720' }
+  }
+  const lockUntil = new Date(Date.now() + hours * 3600 * 1000)
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: { loginLockedUntil: lockUntil },
+    }),
+    prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: admin.id,
+        userRole: 'ADMIN',
+        action: 'ADMIN_LOCK_USER',
+        entityType: 'User',
+        entityId: userId,
+        payload: { hours, lockUntil: lockUntil.toISOString() },
+      },
+    }),
+  ])
+  revalidatePath('/settings/users')
+  return { ok: true, data: undefined }
+}
+
+/**
+ * 7.12: Снимает loginLockedUntil и сбрасывает failedLoginAttempts. Сессии не
+ * восстанавливаем — после разблокировки юзер должен залогиниться заново.
+ */
+export async function unlockUser(userId: string): Promise<ActionResult> {
+  const admin = await requireRole(['ADMIN'])
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: { loginLockedUntil: null, failedLoginAttempts: 0 },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: admin.id,
+        userRole: 'ADMIN',
+        action: 'ADMIN_UNLOCK_USER',
+        entityType: 'User',
+        entityId: userId,
+      },
+    }),
+  ])
   revalidatePath('/settings/users')
   return { ok: true, data: undefined }
 }

@@ -38,6 +38,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Не пробрасываем 5xx — Telegram начал бы ретраить с экспоненциальным
     // бэкоффом, нам это не нужно: ошибка уже залогирована.
     console.error('[telegram] handleUpdate failed:', err)
+    // 7.12: репорт в in-house tracker.
+    void import('@/lib/errors/tracker').then((m) =>
+      m.trackError({
+        error: err,
+        request: { url: req.url, method: 'POST' },
+        extra: { source: 'telegram/webhook' },
+      })
+    )
   }
 
   return new NextResponse('ok', { status: 200 })

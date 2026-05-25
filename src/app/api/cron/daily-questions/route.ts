@@ -137,6 +137,13 @@ async function handler(request: Request) {
       const reason = err instanceof Error ? err.message : String(err)
       result.errors.push({ clientName: client.name, reason })
       console.error(`[daily-questions] error for ${client.name}:`, reason)
+      // 7.12: репорт в in-house tracker (per-client failure, не валит весь cron).
+      void import('@/lib/errors/tracker').then((m) =>
+        m.trackError({
+          error: err,
+          extra: { source: 'cron/daily-questions', clientName: client.name },
+        })
+      )
     }
   }
 

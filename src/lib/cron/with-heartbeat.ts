@@ -41,6 +41,15 @@ export function withCronHeartbeat(jobName: string, handler: CronHandler): CronHa
       const errorMessage = err instanceof Error ? err.message : String(err)
       console.error(`[cron:${jobName}] failed:`, err)
       payload = { ok: false, error: errorMessage }
+      // 7.12: репорт в in-house tracker. Dynamic import — избегаем circular dep
+      // (tracker → prisma → ... → cron). void — не блокируем основной поток.
+      void import('@/lib/errors/tracker').then((m) =>
+        m.trackError({
+          error: err,
+          extra: { jobName, source: 'cron' },
+          level: 'error',
+        })
+      )
       response = NextResponse.json({ ok: false, error: errorMessage }, { status: 500 })
     }
 

@@ -8,6 +8,7 @@ import { UsersTable } from './users-table'
 export default async function UsersPage() {
   const me = await requireRole(['ADMIN'])
 
+  const now = new Date()
   const users = await prisma.user.findMany({
     orderBy: [{ isActive: 'desc' }, { role: 'asc' }, { name: 'asc' }],
     select: {
@@ -19,6 +20,15 @@ export default async function UsersPage() {
       onboardedAt: true,
       telegramChatId: true,
       telegramUsername: true,
+      loginLockedUntil: true,
+      failedLoginAttempts: true,
+      _count: {
+        select: {
+          sessions: {
+            where: { revokedAt: null, expiresAt: { gt: now } },
+          },
+        },
+      },
     },
   })
 
@@ -36,9 +46,19 @@ export default async function UsersPage() {
       <PageHeader title="Пользователи" subtitle={`Всего: ${users.length}`} />
       <UsersTable
         users={users.map((u) => ({
-          ...u,
+          id: u.id,
+          name: u.name,
+          role: u.role,
+          isActive: u.isActive,
           createdAt: u.createdAt.toISOString(),
           onboardedAt: u.onboardedAt ? u.onboardedAt.toISOString() : null,
+          telegramChatId: u.telegramChatId,
+          telegramUsername: u.telegramUsername,
+          loginLockedUntil: u.loginLockedUntil
+            ? u.loginLockedUntil.toISOString()
+            : null,
+          failedLoginAttempts: u.failedLoginAttempts,
+          activeSessionsCount: u._count.sessions,
         }))}
         currentUserId={me.id}
       />

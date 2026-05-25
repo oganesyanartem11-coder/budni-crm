@@ -13,6 +13,18 @@ interface Props {
 export default function GlobalError({ error, reset }: Props) {
   useEffect(() => {
     console.error(error)
+    // 7.12: best-effort репортинг клиентской ошибки в наш in-house tracker.
+    // catch(() => {}) — не хотим, чтобы ещё одна ошибка прервала рендер fallback.
+    void fetch('/api/errors/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: error.message,
+        stack: error.stack,
+        digest: error.digest,
+        url: typeof window !== 'undefined' ? window.location.href : null,
+      }),
+    }).catch(() => {})
   }, [error])
 
   return (

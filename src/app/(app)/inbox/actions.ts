@@ -103,6 +103,10 @@ export async function fetchInboxListFresh(): Promise<InboxClientCard[] | null> {
     return await fetchInboxListData()
   } catch (err) {
     console.error('[inbox] fetchInboxListFresh failed:', err)
+    // 7.12: репорт в in-house tracker (dynamic import — no circular dep).
+    void import('@/lib/errors/tracker').then((m) =>
+      m.trackError({ error: err, extra: { source: 'inbox/fetchInboxListFresh' } })
+    )
     return null
   }
 }
