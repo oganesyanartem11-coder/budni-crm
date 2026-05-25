@@ -12,8 +12,10 @@ export async function compressImage(
   file: File,
   opts: { maxDim?: number; quality?: number } = {},
 ): Promise<CompressedImage> {
-  const maxDim = opts.maxDim ?? 1600
-  const quality = opts.quality ?? 0.85
+  // 7.14B-1 hotfix: дефолт 1200 @ 0.75 даёт ~0.5-1.5 МБ для типичных накладных.
+  // Раньше 1600 @ 0.85 → 2-4 МБ, что упиралось в endpoint-лимит и сетевые таймауты.
+  const maxDim = opts.maxDim ?? 1200
+  const quality = opts.quality ?? 0.75
 
   // createImageBitmap нативно декодирует HEIC на Safari/iOS и большинстве браузеров.
   const bitmap = await createImageBitmap(file)
@@ -35,6 +37,15 @@ export async function compressImage(
       quality,
     )
   })
+
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[compress]', {
+      original: file.size,
+      compressed: blob.size,
+      width,
+      height,
+    })
+  }
 
   return {
     blob,

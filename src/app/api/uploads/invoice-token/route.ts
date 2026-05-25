@@ -25,7 +25,10 @@ export async function POST(request: Request) {
             'image/heic',
             'image/heif',
           ],
-          maximumSizeInBytes: 5 * 1024 * 1024, // 5MB — после клиентской компрессии 1600px@0.85 норма 300-600KB
+          // 7.14B-1 hotfix: клиент жмёт до ~1.5MB (1200px@0.75), запас 10× даём
+          // на детальные фото / edge-cases. Раньше было 5MB — фото upload'ы
+          // упирались в финальную фазу PUT и зависали на 86-88%.
+          maximumSizeInBytes: 15 * 1024 * 1024,
           tokenPayload: JSON.stringify({ pathname }),
         }
       },
