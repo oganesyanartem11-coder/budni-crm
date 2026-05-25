@@ -27,6 +27,7 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'cleanup-login-attempts',      scheduleUtc: '0 0 * * 1',   description: 'Очистка LoginAttempt старше 30 дней (понедельник)', maxAgeHours: 170 },
   { jobName: 'cleanup-sessions',            scheduleUtc: '30 0 * * 1',  description: 'Очистка expired/revoked Session (понедельник)',     maxAgeHours: 170 },
   { jobName: 'cleanup-activity-log',        scheduleUtc: '0 1 * * 1',   description: 'Очистка ActivityLog/ErrorLog (понедельник)',        maxAgeHours: 200 },
+  { jobName: 'market-check-reminder',       scheduleUtc: '0 7 * * 0',   description: 'Воскресная проверка рынка (овощи)',                 maxAgeHours: 170 },
 ]
 
 export const CRON_HEARTBEAT_ACTION = 'CRON_HEARTBEAT'

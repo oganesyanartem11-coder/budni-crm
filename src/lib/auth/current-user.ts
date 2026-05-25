@@ -44,10 +44,19 @@ export async function getCurrentUser(): Promise<User> {
 
 /**
  * Защищает маршрут от пользователей не из allowedRoles.
+ *
+ * 7.14A: ADMIN_PRO автоматически наследует все права ADMIN — это даёт
+ * возможность ввести новую роль, не правя 168 точек `requireRole(['ADMIN'])`
+ * по проекту. Если в allowedRoles есть 'ADMIN', мы виртуально добавляем
+ * 'ADMIN_PRO'. Если нужен строгий PRO-only маршрут (приёмка накладных) —
+ * передавай `requireRole(['ADMIN_PRO'])` без 'ADMIN'.
  */
 export async function requireRole(allowedRoles: UserRole[]): Promise<User> {
   const user = await getCurrentUser()
-  if (!allowedRoles.includes(user.role)) {
+  const effective: UserRole[] = allowedRoles.includes('ADMIN')
+    ? [...allowedRoles, 'ADMIN_PRO']
+    : allowedRoles
+  if (!effective.includes(user.role)) {
     redirect('/dashboard')
   }
   return user

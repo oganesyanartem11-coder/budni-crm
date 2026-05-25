@@ -16,6 +16,7 @@ datasource db {
 // ============================================================
 
 enum UserRole {
+  ADMIN_PRO
   ADMIN
   MANAGER
   CHEF
@@ -132,17 +133,62 @@ enum MenuImportSource {
 }
 
 enum MenuImportProgress {
-  EXTRACTING          // чтение файла (Excel/Vision)
-  PARSING_SCHEDULE    // LLM-распознавание меню (8.3)
-  GENERATING_RECIPES  // LLM-генерация техкарт (8.4)
-  ASSEMBLING          // запись в БД (8.5b)
-  READY               // импорт завершён, готов к ревью шефа
-  FAILED              // упало на каком-то этапе (см. reason)
+  EXTRACTING // чтение файла (Excel/Vision)
+  PARSING_SCHEDULE // LLM-распознавание меню (8.3)
+  GENERATING_RECIPES // LLM-генерация техкарт (8.4)
+  ASSEMBLING // запись в БД (8.5b)
+  READY // импорт завершён, готов к ревью шефа
+  FAILED // упало на каком-то этапе (см. reason)
 }
 
 enum LegalEntityType {
   INDIVIDUAL_ENTREPRENEUR
   LLC
+}
+
+// ============================================================
+// INVOICES (Спринт 7.14A) — приёмка накладных с Vision-распознаванием
+// ============================================================
+
+enum IngredientStatus {
+  DRAFT
+  APPROVED
+}
+
+enum InvoiceStatus {
+  PROCESSING
+  AWAITING_ACCEPT
+  ACCEPTED
+  REJECTED
+  REVERTED
+  FAILED
+}
+
+enum InvoiceProgress {
+  UPLOADED
+  RECOGNIZING
+  MATCHING
+  READY
+  FAILED
+}
+
+enum InvoiceMatchAction {
+  MATCHED_EXISTING
+  CREATED_NEW
+  SKIPPED
+}
+
+enum InvoiceConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum PriceChangeLevel {
+  LOW
+  MEDIUM
+  HIGH
+  NEW
 }
 
 enum VatMode {
@@ -155,21 +201,21 @@ enum VatMode {
 // ============================================================
 
 model User {
-  id          String    @id @default(cuid())
-  name        String
-  role        UserRole
-  pinHash     String    @unique // Хэш PIN-кода (bcrypt)
+  id                  String    @id @default(cuid())
+  name                String
+  role                UserRole
+  pinHash             String    @unique // Хэш PIN-кода (bcrypt)
   // 7.11: HMAC-SHA256(JWT_SECRET, pin)[:16] — O(1)-индекс для логина,
   // bcrypt.compare остаётся как primary verify. Nullable, чтобы старые юзеры
   // заполнялись лениво при следующем успешном логине (см. login/actions.ts).
-  pinLookupHash String? @unique
-  isActive    Boolean   @default(true)
-  lastLoginAt DateTime?
+  pinLookupHash       String?   @unique
+  isActive            Boolean   @default(true)
+  lastLoginAt         DateTime?
   // 7.9: brute-force защита и ручная блокировка ADMIN'ом
   failedLoginAttempts Int       @default(0)
   loginLockedUntil    DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   // MAX-онбординг для менеджера (Спринт 5.5+5.6) — оставлены для legacy токенов;
   // личный chat дропнут в 6.8a (пуши менеджерам идут через Telegram).
@@ -191,6 +237,13 @@ model User {
   approvedMenuImports   MenuImport[]  @relation("MenuImportApprovedBy")
   sessions              Session[]
 
+  // 7.14A: приёмка накладных. receivedBy — кто загрузил фото (любая роль,
+  // на практике ADMIN_PRO), acceptedBy — кто подтвердил (только ADMIN_PRO),
+  // revertedBy — кто откатил приёмку (только ADMIN_PRO).
+  invoicesReceived Invoice[] @relation("InvoicesReceived")
+  invoicesAccepted Invoice[] @relation("InvoicesAccepted")
+  invoicesReverted Invoice[] @relation("InvoicesReverted")
+
   @@index([role, isActive])
 }
 
@@ -198,15 +251,15 @@ model User {
 // JWT хранит только sessionId; реальная проверка revokedAt/expiresAt идёт
 // в getCurrentUser. Cleanup через cron cleanup-sessions раз в неделю.
 model Session {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  lastUsedAt  DateTime  @default(now())
-  ipAddress   String?
-  userAgent   String?
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime  @default(now())
+  ipAddress  String?
+  userAgent  String?
 
   @@index([userId, revokedAt])
   @@index([expiresAt])
@@ -341,8 +394,20 @@ model Ingredient {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
+  // 7.14A: DRAFT — создан Vision-импортом, ждёт ручного APPROVED от ADMIN_PRO.
+  // APPROVED — нормальный ингредиент, виден в выпадашках, участвует в техкартах.
+  // Дефолт APPROVED, чтобы существующие ингредиенты не сломались миграцией.
+  status        IngredientStatus @default(APPROVED)
+  // 7.14A: помечает овощи/фрукты — у них допустима бо́льшая волатильность цены,
+  // поэтому пороги алёртов мягче. См. invoice-recognizer.
+  isVegetable   Boolean          @default(false)
+  // 7.14A: накопленные синонимы бренда / упаковки из распознанных накладных
+  // ({"variant": "..", "supplier": "..", "seenAt": "..."} — массив).
+  brandVariants Json?
+
   dishIngredients DishIngredient[]
   priceHistory    IngredientPriceHistory[]
+  invoiceLines    InvoiceLine[]
 
   @@index([isActive])
 }
@@ -496,30 +561,30 @@ model MenuDayDish {
 // Источник загрузки меню AI-помощником шефа (фото или Excel).
 // Хранит сырой текст для аудита и возможной перегенерации, плюс созданные блюда.
 model MenuImport {
-  id          String              @id @default(cuid())
-  source      MenuImportSource
-  status      MenuStatus          @default(DRAFT)
-  progress    MenuImportProgress  @default(EXTRACTING)
-  rawText     String              // сырой дамп Excel / OCR фото — для аудита и перегенерации
-  confidence  Float?
-  reason      String?
-  errorMessage String?
-  approvedById   String?
-  approvedBy     User?    @relation("MenuImportApprovedBy", fields: [approvedById], references: [id])
-  approvedAt     DateTime?
+  id               String             @id @default(cuid())
+  source           MenuImportSource
+  status           MenuStatus         @default(DRAFT)
+  progress         MenuImportProgress @default(EXTRACTING)
+  rawText          String // сырой дамп Excel / OCR фото — для аудита и перегенерации
+  confidence       Float?
+  reason           String?
+  errorMessage     String?
+  approvedById     String?
+  approvedBy       User?              @relation("MenuImportApprovedBy", fields: [approvedById], references: [id])
+  approvedAt       DateTime?
   rejectionComment String?
-  startDate      DateTime?
-  createdById String?
-  createdBy   User?            @relation("MenuImportCreatedBy", fields: [createdById], references: [id])
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  startDate        DateTime?
+  createdById      String?
+  createdBy        User?              @relation("MenuImportCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
   dishes      Dish[]
   menuCycleId String?
-  menuCycle   MenuCycle?       @relation(fields: [menuCycleId], references: [id])
+  menuCycle   MenuCycle?  @relation(fields: [menuCycleId], references: [id])
   // 8.7: множественная связь — один импорт → 13+ MenuCycle при approve+expand.
   // Отдельное relation-имя, чтобы не путать с legacy одиночным menuCycleId выше.
-  menuCycles  MenuCycle[]      @relation("MenuCycleFromImport")
+  menuCycles  MenuCycle[] @relation("MenuCycleFromImport")
 
   @@index([status])
 }
@@ -646,22 +711,22 @@ model ActivityLog {
 // В development НЕ пишется (см. src/lib/errors/tracker.ts). Чистится в cleanup-activity-log
 // cron (см. 7.12 cleanup): resolved старше 30 дней удаляются.
 model ErrorLog {
-  id            String   @id @default(cuid())
-  fingerprint   String   // SHA-256(message + stack-top-line + url)[:16]
-  message       String
-  stack         String?  @db.Text
-  url           String?
-  method        String?
-  userId        String?
-  userRole      String?
-  environment   String
-  level         String   @default("error")
-  count         Int      @default(1)
-  firstSeenAt   DateTime @default(now())
-  lastSeenAt    DateTime @default(now())
-  resolvedAt    DateTime?
-  resolvedBy    String?
-  payload       Json?
+  id          String    @id @default(cuid())
+  fingerprint String // SHA-256(message + stack-top-line + url)[:16]
+  message     String
+  stack       String?   @db.Text
+  url         String?
+  method      String?
+  userId      String?
+  userRole    String?
+  environment String
+  level       String    @default("error")
+  count       Int       @default(1)
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  payload     Json?
 
   @@unique([fingerprint])
   @@index([resolvedAt, lastSeenAt])
@@ -874,4 +939,79 @@ model UpdDocumentOrder {
   @@unique([updDocumentId, orderId])
   @@unique([orderId], name: "one_upd_per_order")
   @@index([orderId])
+}
+
+// ============================================================
+// INVOICES (Спринт 7.14A)
+// Приёмка товарных накладных: фото → Vision → matching ingredients
+// → ADMIN_PRO accept/reject → обновление pricePerUnit и history.
+// Бизнес-ключ: (supplierName, invoiceNumber, invoiceDate) — защита
+// от двойной загрузки одной и той же накладной.
+// ============================================================
+
+model Invoice {
+  id                String            @id @default(cuid())
+  supplierName      String
+  // Lower-cased + trimmed копия supplierName для бизнес-ключа и индексов
+  // (Postgres collation независимый поиск).
+  supplierNameLower String
+  invoiceNumber     String
+  invoiceDate       DateTime
+  receivedAt        DateTime          @default(now())
+  receivedById      String
+  receivedBy        User              @relation("InvoicesReceived", fields: [receivedById], references: [id])
+  acceptedById      String?
+  acceptedBy        User?             @relation("InvoicesAccepted", fields: [acceptedById], references: [id])
+  acceptedAt        DateTime?
+  revertedById      String?
+  revertedBy        User?             @relation("InvoicesReverted", fields: [revertedById], references: [id])
+  revertedAt        DateTime?
+  imageUrl          String
+  imageWidth        Int?
+  imageHeight       Int?
+  exifTakenAt       DateTime?
+  // Эвристика: EXIF слишком старый/будущий или отсутствует — ставим true,
+  // ADMIN_PRO видит предупреждение в UI приёмки.
+  exifSuspicious    Boolean           @default(false)
+  status            InvoiceStatus
+  progress          InvoiceProgress
+  // Сырой JSON от Vision-модели — для аудита и пересборки строк.
+  aiRawResponse     Json?
+  aiErrorMessage    String?
+  totalAmount       Decimal?          @db.Decimal(10, 2)
+  // Максимальный уровень alert среди строк — для антидубль-чека Telegram-пушей.
+  alertLevelSent    PriceChangeLevel?
+  lines             InvoiceLine[]
+
+  @@unique([supplierNameLower, invoiceNumber, invoiceDate], name: "invoice_business_key")
+  @@index([status, progress])
+  @@index([receivedAt])
+  @@index([supplierNameLower])
+}
+
+model InvoiceLine {
+  id                   String             @id @default(cuid())
+  invoiceId            String
+  invoice              Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineIndex            Int
+  rawName              String
+  rawQuantity          Decimal            @db.Decimal(10, 3)
+  rawUnit              String
+  rawPricePerUnit      Decimal            @db.Decimal(10, 2)
+  rawAmount            Decimal            @db.Decimal(10, 2)
+  matchedIngredientId  String?
+  matchedIngredient    Ingredient?        @relation(fields: [matchedIngredientId], references: [id])
+  matchedAction        InvoiceMatchAction
+  aiConfidence         InvoiceConfidence
+  aiContext            String?
+  // Цена за кг/л, нормализованная из rawUnit (для сравнения с предыдущей).
+  pricePerKgNormalized Decimal?           @db.Decimal(10, 2)
+  previousPricePerKg   Decimal?           @db.Decimal(10, 2)
+  priceChangePercent   Decimal?           @db.Decimal(6, 2)
+  priceChangeLevel     PriceChangeLevel
+  // Координаты bounding box на исходном фото — для подсветки в UI.
+  boundingBoxes        Json?
+
+  @@index([invoiceId, lineIndex])
+  @@index([matchedIngredientId])
 }

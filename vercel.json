@@ -17,6 +17,7 @@
     { "path": "/api/cron/monitor-heartbeats", "schedule": "0 19 * * *" },
     { "path": "/api/cron/cleanup-login-attempts", "schedule": "0 0 * * 1" },
     { "path": "/api/cron/cleanup-sessions", "schedule": "30 0 * * 1" },
-    { "path": "/api/cron/cleanup-activity-log", "schedule": "0 1 * * 1" }
+    { "path": "/api/cron/cleanup-activity-log", "schedule": "0 1 * * 1" },
+    { "path": "/api/cron/market-check-reminder", "schedule": "0 7 * * 0" }
   ]
 }

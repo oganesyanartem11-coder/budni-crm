@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils/cn'
 import { formatDateMsk, formatDateTimeMsk } from '@/lib/utils/format'
+import { ROLE_LABELS, ROLE_COLORS } from '@/lib/constants/roles'
 
 interface UserRow {
   id: string
@@ -67,22 +68,11 @@ interface Props {
   currentUserId: string
 }
 
-const ROLE_LABELS: Record<UserRole, string> = {
-  ADMIN: 'Администратор',
-  MANAGER: 'Менеджер',
-  CHEF: 'Шеф',
-  COURIER: 'Курьер',
-}
-
-const ROLE_COLORS: Record<UserRole, string> = {
-  ADMIN: 'bg-danger-bg text-danger-fg',
-  MANAGER: 'bg-info-bg text-info-fg',
-  CHEF: 'bg-warning-bg text-warning-fg',
-  COURIER: 'bg-neutral-bg text-neutral-fg',
-}
+// 7.14A: ROLE_LABELS/ROLE_COLORS перенесены в @/lib/constants/roles
+// (единая точка истины, включая ADMIN_PRO).
 
 function defaultLinkTelegramFor(role: UserRole): boolean {
-  return role === 'MANAGER' || role === 'ADMIN'
+  return role === 'MANAGER' || role === 'ADMIN' || role === 'ADMIN_PRO'
 }
 
 // Состояние «после успешного действия» — модалка с готовым текстом и
@@ -464,6 +454,7 @@ export function UsersTable({ users, currentUserId }: Props) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ADMIN_PRO">{ROLE_LABELS.ADMIN_PRO}</SelectItem>
                   <SelectItem value="MANAGER">{ROLE_LABELS.MANAGER}</SelectItem>
                   <SelectItem value="ADMIN">{ROLE_LABELS.ADMIN}</SelectItem>
                   <SelectItem value="CHEF">{ROLE_LABELS.CHEF}</SelectItem>

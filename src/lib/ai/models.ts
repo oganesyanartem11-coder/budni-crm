@@ -12,6 +12,7 @@ const DEFAULT_PARSER_MODEL = 'claude-opus-4-7'
 const DEFAULT_RECIPES_MODEL = 'claude-opus-4-7'
 const DEFAULT_INBOX_MODEL = 'claude-haiku-4-5-20251001'
 const DEFAULT_FALLBACK_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_VISION_MODEL = 'claude-sonnet-4-6'
 
 /** parseMenuSchedule: разбор структуры меню из Excel/фото (Opus). */
 export function getParserModel(): string {
@@ -31,4 +32,13 @@ export function getInboxModel(): string {
 /** Используется при overloaded/5xx primary-модели в Opus-вызовах. */
 export function getFallbackModel(): string {
   return process.env.ANTHROPIC_MODEL_FALLBACK ?? DEFAULT_FALLBACK_MODEL
+}
+
+/**
+ * invoice-recognizer (7.14A) и прочие Vision-задачи: разбор накладной,
+ * EXIF-проверка, поиск номера и даты на фото. Sonnet быстрее Opus и
+ * умеет в Vision; Opus оставлен как ручной override через env.
+ */
+export function getVisionModel(): string {
+  return process.env.ANTHROPIC_MODEL_VISION ?? DEFAULT_VISION_MODEL
 }

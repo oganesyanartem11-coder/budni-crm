@@ -114,6 +114,55 @@ export async function notifyAllManagersDirect(
   return { sentTo, skippedNoTelegram, failed }
 }
 
+/**
+ * Пуш всем активным ADMIN_PRO c привязанным Telegram.
+ *
+ * Используется для HIGH-алёртов приёмки накладных (7.14A): даже если
+ * групповой чат пропущен, ADMIN_PRO получит личный пуш.
+ */
+export async function notifyAllAdminProDirect(
+  text: string,
+  opts?: NotifyOptions
+): Promise<NotifyAllManagersResult> {
+  const allAdminPro = await prisma.user.findMany({
+    where: { isActive: true, role: 'ADMIN_PRO' },
+    select: { id: true, telegramChatId: true },
+  })
+
+  const withTelegram = allAdminPro.filter((m) => m.telegramChatId !== null)
+  const skippedNoTelegram = allAdminPro.length - withTelegram.length
+
+  if (withTelegram.length === 0) {
+    console.warn(
+      `[telegram/notify] notifyAllAdminPro: no ADMIN_PRO with telegramChatId ` +
+        `(total active ADMIN_PRO: ${allAdminPro.length})`
+    )
+    return { sentTo: 0, skippedNoTelegram, failed: 0 }
+  }
+
+  const sends = await Promise.allSettled(
+    withTelegram.map((m) =>
+      sendTelegramMessage(m.telegramChatId as string, text, {
+        parseMode: opts?.parseMode ?? DEFAULT_PARSE_MODE,
+        replyMarkup: opts?.replyMarkup,
+      })
+    )
+  )
+
+  let sentTo = 0
+  let failed = 0
+  for (const s of sends) {
+    if (s.status === 'fulfilled' && s.value.ok) sentTo++
+    else failed++
+  }
+
+  console.log(
+    `[telegram/notify] notifyAllAdminPro: sentTo=${sentTo} skippedNoTelegram=${skippedNoTelegram} failed=${failed}`
+  )
+
+  return { sentTo, skippedNoTelegram, failed }
+}
+
 export interface NotifyGroupResult {
   ok: boolean
   error?: string

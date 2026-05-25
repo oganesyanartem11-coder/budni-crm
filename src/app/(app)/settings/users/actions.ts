@@ -7,17 +7,12 @@ import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { createPinFields, generateUniquePin } from '@/lib/auth/pin'
 import { getTelegramEnv } from '@/lib/telegram/env'
+import { ROLE_LABELS } from '@/lib/constants/roles'
 import type { UserRole } from '@prisma/client'
 
 const ONBOARDING_TTL_MINUTES = 30
 const DEFAULT_APP_BASE_URL = 'https://budni-crm.vercel.app'
-
-const ROLE_LABELS: Record<UserRole, string> = {
-  ADMIN: 'Администратор',
-  MANAGER: 'Менеджер',
-  CHEF: 'Шеф',
-  COURIER: 'Курьер',
-}
+// 7.14A: ROLE_LABELS перенесён в @/lib/constants/roles (единая точка истины).
 
 function appBaseUrl(): string {
   const v = process.env.TELEGRAM_APP_BASE_URL?.trim() || DEFAULT_APP_BASE_URL

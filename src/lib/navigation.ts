@@ -16,6 +16,11 @@ import {
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
 
+// 7.14A: ROLE_LABELS переехал в @/lib/constants/roles — единая точка истины
+// для лейблов/цветов/описаний ролей. Реэкспортируем здесь, чтобы существующие
+// импорты `import { ROLE_LABELS } from '@/lib/navigation'` не сломались.
+export { ROLE_LABELS } from '@/lib/constants/roles'
+
 export type NavBadgeKey = 'pendingCount' | 'inboxCount'
 
 export interface NavItem {
@@ -40,41 +45,44 @@ export interface NavGroup {
  * Внутри группы видны только пункты, чья roles содержит текущую роль —
  * пустая после фильтрации группа в Sidebar/Drawer не рендерится.
  */
+// 7.14A: ADMIN_PRO видит всё, что видит ADMIN, поэтому добавлен в каждый
+// items.roles рядом с 'ADMIN'. Эксклюзивные пункты ADMIN_PRO (если появятся,
+// напр. /invoices) добавляются с `roles: ['ADMIN_PRO']` без ADMIN.
 export const NAV_GROUPS: NavGroup[] = [
   {
     id: 'daily',
     title: 'Ежедневно',
     items: [
-      { href: '/dashboard', label: 'Дашборд',  icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/inbox',     label: 'Inbox',    icon: Inbox,           roles: ['ADMIN', 'MANAGER'], badge: 'inboxCount' },
-      { href: '/orders',    label: 'Заказы',   icon: ClipboardList,   roles: ['ADMIN', 'MANAGER'], badge: 'pendingCount' },
-      { href: '/delivery',  label: 'Доставка', icon: Truck,           roles: ['ADMIN', 'MANAGER', 'COURIER'] },
+      { href: '/dashboard', label: 'Дашборд',  icon: LayoutDashboard, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
+      { href: '/inbox',     label: 'Inbox',    icon: Inbox,           roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'inboxCount' },
+      { href: '/orders',    label: 'Заказы',   icon: ClipboardList,   roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'pendingCount' },
+      { href: '/delivery',  label: 'Доставка', icon: Truck,           roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'COURIER'] },
     ],
   },
   {
     id: 'production',
     title: 'Производство',
     items: [
-      { href: '/production',    label: 'Производство', icon: ChefHat,      roles: ['ADMIN', 'CHEF', 'MANAGER'] },
-      { href: '/menu',          label: 'Меню недели',  icon: CalendarDays, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
-      { href: '/menu/imports',  label: 'Импорт меню',  icon: Sparkles,     roles: ['ADMIN', 'CHEF'] },
+      { href: '/production',    label: 'Производство', icon: ChefHat,      roles: ['ADMIN_PRO', 'ADMIN', 'CHEF', 'MANAGER'] },
+      { href: '/menu',          label: 'Меню недели',  icon: CalendarDays, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
+      { href: '/menu/imports',  label: 'Импорт меню',  icon: Sparkles,     roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
     ],
   },
   {
     id: 'directory',
     title: 'Справочники',
     items: [
-      { href: '/clients',     label: 'Клиенты', icon: Users,    roles: ['ADMIN', 'MANAGER'] },
-      { href: '/dishes',      label: 'Блюда',   icon: Utensils, roles: ['ADMIN', 'MANAGER', 'CHEF'] },
-      { href: '/ingredients', label: 'Сырьё',   icon: Wheat,    roles: ['ADMIN', 'CHEF'] },
+      { href: '/clients',     label: 'Клиенты', icon: Users,    roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
+      { href: '/dishes',      label: 'Блюда',   icon: Utensils, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
+      { href: '/ingredients', label: 'Сырьё',   icon: Wheat,    roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
     ],
   },
   {
     id: 'analytics',
     title: 'Аналитика',
     items: [
-      { href: '/reports',   label: 'Отчёты',    icon: FileBarChart, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/analytics', label: 'Аналитика', icon: TrendingUp,   roles: ['ADMIN', 'MANAGER'] },
+      { href: '/reports',   label: 'Отчёты',    icon: FileBarChart, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
+      { href: '/analytics', label: 'Аналитика', icon: TrendingUp,   roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
     ],
   },
 ]
@@ -93,6 +101,14 @@ export interface TabbarItem {
 }
 
 export const MOBILE_TABBAR_BY_ROLE: Record<UserRole, TabbarItem[]> = {
+  // 7.14A: ADMIN_PRO повторяет раскладку ADMIN — дополнительные функции
+  // (приёмка накладных) доступны через /invoices и пункт в "Ещё".
+  ADMIN_PRO: [
+    { href: '/dashboard', label: 'Дашборд',  icon: LayoutDashboard },
+    { href: '/inbox',     label: 'Inbox',    icon: Inbox },
+    { href: '/orders',    label: 'Заказы',   icon: ClipboardList },
+    { href: MORE_HREF,    label: 'Ещё',      icon: Menu },
+  ],
   ADMIN: [
     { href: '/dashboard', label: 'Дашборд',  icon: LayoutDashboard },
     { href: '/inbox',     label: 'Inbox',    icon: Inbox },
@@ -118,16 +134,9 @@ export const MOBILE_TABBAR_BY_ROLE: Record<UserRole, TabbarItem[]> = {
 
 /** Стартовая страница после логина по роли. */
 export const HOME_BY_ROLE: Record<UserRole, string> = {
+  ADMIN_PRO: '/dashboard',
   ADMIN: '/dashboard',
   MANAGER: '/orders',
   CHEF: '/production',
   COURIER: '/delivery',
-}
-
-/** Человеческие лейблы для роли — UI вывод (Sidebar profile, ProfileMenu). */
-export const ROLE_LABELS: Record<UserRole, string> = {
-  ADMIN: 'Администратор',
-  MANAGER: 'Менеджер',
-  CHEF: 'Шеф',
-  COURIER: 'Курьер',
 }
