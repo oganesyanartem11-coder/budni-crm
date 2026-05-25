@@ -11,6 +11,21 @@ export async function POST(request: Request) {
 
   const body = (await request.json()) as HandleUploadBody
 
+  // 🪲 TEMP DEBUG (revert after diagnosis): какие BLOB_* env подхвачены в runtime.
+  // Только префиксы и наличие — полные значения секретов НЕ логируем.
+  console.log('[invoice-token-debug]', {
+    hasReadWriteToken: !!process.env.BLOB_READ_WRITE_TOKEN,
+    readWriteTokenPrefix: process.env.BLOB_READ_WRITE_TOKEN?.slice(0, 30) ?? null,
+    hasStoreId: !!process.env.BLOB_STORE_ID,
+    storeIdValue: process.env.BLOB_STORE_ID ?? null,
+    hasWebhookKey: !!process.env.BLOB_WEBHOOK_PUBLIC_KEY,
+    hasVercelOidcToken: !!process.env.VERCEL_OIDC_TOKEN,
+    hasBlobApiUrl: !!process.env.VERCEL_BLOB_API_URL,
+    hasPublicBlobApiUrl: !!process.env.NEXT_PUBLIC_VERCEL_BLOB_API_URL,
+    blobApiUrlValue: process.env.VERCEL_BLOB_API_URL ?? null,
+    publicBlobApiUrlValue: process.env.NEXT_PUBLIC_VERCEL_BLOB_API_URL ?? null,
+  })
+
   try {
     const jsonResponse = await handleUpload({
       body,
