@@ -1,6 +1,7 @@
 import { Sidebar } from '@/components/layout/sidebar'
 import { MobileNav } from '@/components/layout/mobile-nav'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 import { prisma } from '@/lib/db/prisma'
 
@@ -17,7 +18,7 @@ export default async function AppLayout({
     .join('')
     .toUpperCase()
 
-  const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
+  const isAdminOrManager = isAdminLike(user.role) || user.role === 'MANAGER'
   const [pendingCount, inboxCount] = isAdminOrManager
     ? await Promise.all([
         countPendingConfirmationToday(),

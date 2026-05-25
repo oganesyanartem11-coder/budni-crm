@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { ROLE_LABELS } from '@/lib/navigation'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import type { UserRole } from '@prisma/client'
 
 interface Props {
@@ -68,7 +69,7 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
           <span className="text-fg-subtle"> · {ROLE_LABELS[role]}</span>
         </div>
         <DropdownMenuSeparator />
-        {role === 'ADMIN' && (
+        {isAdminLike(role) && (
           <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
             <Link href="/settings" className="flex items-center gap-2 cursor-pointer text-fg">
               <SettingsIcon className="w-4 h-4" />
@@ -76,7 +77,7 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
             </Link>
           </DropdownMenuItem>
         )}
-        {role === 'ADMIN' && (
+        {isAdminLike(role) && (
           <DropdownMenuItem asChild className="focus:bg-bg focus:text-fg [&_*]:focus:text-fg">
             <Link href="/settings/users" className="flex items-center gap-2 cursor-pointer text-fg">
               <UsersIcon className="w-4 h-4" />

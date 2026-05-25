@@ -2,11 +2,12 @@ import Link from 'next/link'
 import { Users as UsersIcon, Send, Building2, Bug, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 
 export default async function SettingsPage() {
   const user = await requireRole(['ADMIN'])
 
-  const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
+  const isAdminOrManager = isAdminLike(user.role) || user.role === 'MANAGER'
 
   return (
     <>
@@ -34,7 +35,7 @@ export default async function SettingsPage() {
           </Link>
         )}
 
-        {user.role === 'ADMIN' && (
+        {isAdminLike(user.role) && (
           <Link
             href="/settings/users"
             className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"
@@ -55,7 +56,7 @@ export default async function SettingsPage() {
           </Link>
         )}
 
-        {user.role === 'ADMIN' && (
+        {isAdminLike(user.role) && (
           <Link
             href="/settings/legal-entities"
             className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"
@@ -76,7 +77,7 @@ export default async function SettingsPage() {
           </Link>
         )}
 
-        {user.role === 'ADMIN' && (
+        {isAdminLike(user.role) && (
           <Link
             href="/settings/errors"
             className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"

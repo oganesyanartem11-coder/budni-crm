@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { DishesGrid } from './dishes-grid'
 import { requireRole } from '@/lib/auth/current-user'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import { prisma } from '@/lib/db/prisma'
 import { serialize } from '@/lib/utils/serialize'
 
@@ -22,7 +23,7 @@ export default async function DishesPage() {
 
   const serialized = serialize(dishes)
   const canSeePrices = user.role !== 'CHEF'
-  const canEdit = user.role === 'ADMIN' || user.role === 'MANAGER' || user.role === 'CHEF'
+  const canEdit = isAdminLike(user.role) || user.role === 'MANAGER' || user.role === 'CHEF'
 
   // Defense-in-depth: для CHEF зануляем цены ингредиентов — себестоимость
   // считается клиентом из этих чисел, без них даст 0 (которое UI всё равно скрывает).

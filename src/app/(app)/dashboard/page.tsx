@@ -12,6 +12,7 @@ import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
 import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
 import { getOnboardingStatus } from '@/lib/clients/onboarding'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import { AdminWeekBlock } from './admin-week-block'
 import { AvgDishCostCards } from './avg-dish-cost-cards'
 
@@ -63,9 +64,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     // Фильтр согласован с listPendingConfirmation: тот же [today, tomorrowEnd],
     // иначе счётчик и список расходятся (счётчик > список → клик → пусто).
     countPendingConfirmationToday(),
-    // Активные клиенты для счётчика «в настройке». Запрашиваем только для ADMIN
+    // Активные клиенты для счётчика «в настройке». Запрашиваем только для ADMIN/ADMIN_PRO
     // (на дашборде MANAGER эту карточку не показываем).
-    user.role === 'ADMIN'
+    isAdminLike(user.role)
       ? prisma.client.findMany({
           where: { isActive: true },
           select: {
@@ -89,7 +90,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     (c) => !getOnboardingStatus(c).isComplete
   ).length
 
-  const isAdminOrManager = user.role === 'ADMIN' || user.role === 'MANAGER'
+  const isAdminOrManager = isAdminLike(user.role) || user.role === 'MANAGER'
 
   // Финансовый блок: пресет из URL, дефолт this_week. Невалидный preset →
   // тоже this_week (без падения).
@@ -165,7 +166,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </section>
         )}
 
-        {user.role === 'ADMIN' && clientsInSetup > 0 && (
+        {isAdminLike(user.role) && clientsInSetup > 0 && (
           <section className="space-y-3">
             <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Онбординг</h2>
             <Link
@@ -197,7 +198,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {/* Себестоимость порции по mealType — только ADMIN (MANAGER не видит цены).
             Виджеты идут после финансового блока: финансы — головная метрика,
             себестоимость — дополнительный разрез по типам приёма пищи. */}
-        {user.role === 'ADMIN' && <AvgDishCostCards />}
+        {isAdminLike(user.role) && <AvgDishCostCards />}
       </div>
     </>
   )

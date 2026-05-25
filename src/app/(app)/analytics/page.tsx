@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import { getFinancialReport } from '@/lib/db/queries/reports'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
 import { getIngredientsConsumptionForRange } from '@/lib/db/queries/ingredients-consumption'
@@ -41,7 +42,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
 
   // Defense-in-depth: MANAGER не видит рубли. Зануляем поля на сервере
   // ПЕРЕД отправкой в client component. Паттерн как в /ingredients для CHEF.
-  const canSeePrices = user.role === 'ADMIN'
+  const canSeePrices = isAdminLike(user.role)
 
   const safeReport = canSeePrices
     ? report
