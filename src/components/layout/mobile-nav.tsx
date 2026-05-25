@@ -20,13 +20,25 @@ interface Props {
   initials: string
   pendingCount: number
   inboxCount: number
+  invoicesAwaitingCount: number
 }
 
-export function MobileNav({ userRole, userName, initials, pendingCount, inboxCount }: Props) {
+export function MobileNav({
+  userRole,
+  userName,
+  initials,
+  pendingCount,
+  inboxCount,
+  invoicesAwaitingCount,
+}: Props) {
   const pathname = usePathname()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const items = MOBILE_TABBAR_BY_ROLE[userRole]
-  const counts: Record<NavBadgeKey, number> = { pendingCount, inboxCount }
+  const counts: Record<NavBadgeKey, number> = {
+    pendingCount,
+    inboxCount,
+    invoicesAwaitingCount,
+  }
 
   return (
     <>

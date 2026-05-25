@@ -19,12 +19,18 @@ export default async function AppLayout({
     .toUpperCase()
 
   const isAdminOrManager = isAdminLike(user.role) || user.role === 'MANAGER'
-  const [pendingCount, inboxCount] = isAdminOrManager
-    ? await Promise.all([
-        countPendingConfirmationToday(),
-        prisma.botMessage.count({ where: { direction: 'IN', readAt: null } }),
-      ])
-    : [0, 0]
+  const canSeeInvoices =
+    isAdminLike(user.role) || user.role === 'MANAGER' || user.role === 'CHEF'
+
+  const [pendingCount, inboxCount, invoicesAwaitingCount] = await Promise.all([
+    isAdminOrManager ? countPendingConfirmationToday() : Promise.resolve(0),
+    isAdminOrManager
+      ? prisma.botMessage.count({ where: { direction: 'IN', readAt: null } })
+      : Promise.resolve(0),
+    canSeeInvoices
+      ? prisma.invoice.count({ where: { status: 'AWAITING_ACCEPT' } })
+      : Promise.resolve(0),
+  ])
 
   return (
     <div className="min-h-screen bg-bg flex">
@@ -34,6 +40,7 @@ export default async function AppLayout({
         initials={initials}
         pendingCount={pendingCount}
         inboxCount={inboxCount}
+        invoicesAwaitingCount={invoicesAwaitingCount}
       />
 
       <main className="flex-1 min-w-0 px-4 lg:px-8 py-6 lg:py-10 pb-24 lg:pb-10">
@@ -48,6 +55,7 @@ export default async function AppLayout({
         initials={initials}
         pendingCount={pendingCount}
         inboxCount={inboxCount}
+        invoicesAwaitingCount={invoicesAwaitingCount}
       />
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { del } from '@vercel/blob'
 import { after } from 'next/server'
+import type { InvoiceProgress, InvoiceStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 
@@ -95,6 +96,85 @@ export async function deleteInvoiceImage(invoiceId: string): Promise<ActionResul
     }
     await prisma.invoice.update({ where: { id: invoiceId }, data: { imageUrl: '' } })
   }
+
+  return { ok: true, data: undefined }
+}
+
+/**
+ * Лёгкий poll-эндпоинт для progress-view.tsx — возвращает только то,
+ * что нужно клиенту для прогресс-бара (без всей картинки и линий).
+ */
+export async function getInvoiceProgress(invoiceId: string): Promise<ActionResult<{
+  progress: InvoiceProgress
+  status: InvoiceStatus
+  aiErrorMessage: string | null
+  hasLines: boolean
+}>> {
+  await requireRole(['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'])
+
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    select: {
+      progress: true,
+      status: true,
+      aiErrorMessage: true,
+      _count: { select: { lines: true } },
+    },
+  })
+
+  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+
+  return {
+    ok: true,
+    data: {
+      progress: invoice.progress,
+      status: invoice.status,
+      aiErrorMessage: invoice.aiErrorMessage,
+      hasLines: invoice._count.lines > 0,
+    },
+  }
+}
+
+/**
+ * Перезапуск распознавания для FAILED-накладной. Чтобы не плодить отдельные
+ * Invoice-записи, переиспользуем существующую: сбрасываем progress/status в
+ * UPLOADED/PROCESSING и снова запускаем orchestrator через after().
+ */
+export async function retryRecognition(invoiceId: string): Promise<ActionResult> {
+  await requireRole(['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'])
+
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    select: { status: true, imageUrl: true },
+  })
+  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+  if (invoice.status !== 'FAILED') {
+    return { ok: false, error: `Можно перераспознать только FAILED, сейчас ${invoice.status}` }
+  }
+  if (!invoice.imageUrl) {
+    return { ok: false, error: 'У накладной нет фото — повторное распознавание невозможно' }
+  }
+
+  await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: { status: 'PROCESSING', progress: 'UPLOADED', aiErrorMessage: null },
+  })
+
+  // Удалить старые InvoiceLine'ы (если были — например MATCHING упал посередине),
+  // чтобы orchestrator создавал заново без дублей.
+  await prisma.invoiceLine.deleteMany({ where: { invoiceId } })
+
+  after(async () => {
+    try {
+      const { recognizeInvoice } = await import('@/lib/invoices/recognize-and-match')
+      await recognizeInvoice(invoiceId)
+    } catch (err) {
+      try {
+        const { trackError } = await import('@/lib/errors/tracker')
+        await trackError({ error: err as Error, extra: { invoiceId, source: 'retryRecognition.after' } })
+      } catch {}
+    }
+  })
 
   return { ok: true, data: undefined }
 }

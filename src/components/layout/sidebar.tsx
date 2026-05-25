@@ -14,13 +14,22 @@ interface SidebarProps {
   initials: string
   pendingCount: number
   inboxCount: number
+  invoicesAwaitingCount: number
 }
 
-export function Sidebar({ userRole, userName, initials, pendingCount, inboxCount }: SidebarProps) {
+export function Sidebar({
+  userRole,
+  userName,
+  initials,
+  pendingCount,
+  inboxCount,
+  invoicesAwaitingCount,
+}: SidebarProps) {
   const pathname = usePathname()
   const counts: Record<NavBadgeKey, number> = {
     pendingCount,
     inboxCount,
+    invoicesAwaitingCount,
   }
 
   return (

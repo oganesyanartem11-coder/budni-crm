@@ -12,6 +12,7 @@ import {
   Inbox,
   Menu,
   Sparkles,
+  ReceiptText,
   type LucideIcon,
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
@@ -21,7 +22,7 @@ import type { UserRole } from '@prisma/client'
 // импорты `import { ROLE_LABELS } from '@/lib/navigation'` не сломались.
 export { ROLE_LABELS } from '@/lib/constants/roles'
 
-export type NavBadgeKey = 'pendingCount' | 'inboxCount'
+export type NavBadgeKey = 'pendingCount' | 'inboxCount' | 'invoicesAwaitingCount'
 
 export interface NavItem {
   href: string
@@ -66,6 +67,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/production',    label: 'Производство', icon: ChefHat,      roles: ['ADMIN_PRO', 'ADMIN', 'CHEF', 'MANAGER'] },
       { href: '/menu',          label: 'Меню недели',  icon: CalendarDays, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
       { href: '/menu/imports',  label: 'Импорт меню',  icon: Sparkles,     roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
+      { href: '/invoices',      label: 'Накладные',    icon: ReceiptText,  roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'], badge: 'invoicesAwaitingCount' },
     ],
   },
   {
