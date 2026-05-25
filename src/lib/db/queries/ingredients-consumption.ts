@@ -32,7 +32,8 @@ export interface IngredientsConsumptionResult {
  *     PCS:  needed = bruttoGrams × portions
  *
  * Использует CURRENT Ingredient.pricePerUnit (historical отложен в тех-долг).
- * НЕ учитывает MealSetItem.quantity (consistency с другими агрегаторами).
+ * Учитывает MealSetItem.quantity (Sprint 7.11 O-3): набор может включать
+ * несколько штук одной категории (например, 2 хлеба на обед).
  *
  * MSK-нормализация границ обязательна: на UTC-сервере setHours(0,0,0,0)
  * к from/to от getFinancialWeek даёт неверный totalDays и dayOfWeek.
@@ -89,6 +90,7 @@ export async function getIngredientsConsumptionForRange(
         days: {
           where: { dayOfWeek },
           include: {
+            mealSet: { include: { items: true } },
             dishes: {
               include: {
                 dish: {
@@ -129,13 +131,24 @@ export async function getIngredientsConsumptionForRange(
       const portions = portionsByMealType.get(menuDay.mealType) ?? 0
       if (portions === 0) continue
 
+      // MealSetItem.quantity на slotCategory (Sprint 7.11 O-3).
+      const categoryQty = new Map<string, number>()
+      if (menuDay.mealSet) {
+        for (const item of menuDay.mealSet.items) {
+          categoryQty.set(item.dishCategory, item.quantity)
+        }
+      }
+
       for (const mdd of menuDay.dishes) {
+        const slotQty = categoryQty.get(mdd.slotCategory) ?? 1
+        const effectivePortions = portions * slotQty
+
         for (const di of mdd.dish.ingredients) {
           const brutto = Number(di.bruttoGrams)
           const price = Number(di.ingredient.pricePerUnit)
           const unit = di.ingredient.unit as 'KG' | 'L' | 'PCS'
 
-          const needed = unit === 'PCS' ? brutto * portions : (brutto / 1000) * portions
+          const needed = unit === 'PCS' ? brutto * effectivePortions : (brutto / 1000) * effectivePortions
           const cost = needed * price
 
           const existing = acc.get(di.ingredientId)

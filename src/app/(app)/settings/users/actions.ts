@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto'
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
-import { generateUniquePin, hashPin } from '@/lib/auth/pin'
+import { createPinFields, generateUniquePin } from '@/lib/auth/pin'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import type { UserRole } from '@prisma/client'
 
@@ -96,7 +96,7 @@ export async function createUser(input: {
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
-  const pinHash = await hashPin(pin)
+  const { pinHash, pinLookupHash } = await createPinFields(pin)
 
   let onboardingToken: string | null = null
   let onboardingExpiresAt: Date | null = null
@@ -110,6 +110,7 @@ export async function createUser(input: {
       name,
       role: input.role,
       pinHash,
+      pinLookupHash,
       telegramOnboardingToken: onboardingToken,
       telegramOnboardingExpiresAt: onboardingExpiresAt,
     },
@@ -155,9 +156,12 @@ export async function regenerateUserPin(
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
-  const pinHash = await hashPin(pin)
+  const { pinHash, pinLookupHash } = await createPinFields(pin)
 
-  await prisma.user.update({ where: { id: userId }, data: { pinHash } })
+  await prisma.user.update({
+    where: { id: userId },
+    data: { pinHash, pinLookupHash },
+  })
 
   revalidatePath('/settings/users')
   return { ok: true, data: { pin } }

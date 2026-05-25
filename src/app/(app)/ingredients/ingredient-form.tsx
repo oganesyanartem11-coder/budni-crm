@@ -137,16 +137,21 @@ export function IngredientForm({ ingredient, onSuccess, onCancel, canSeePrices }
         )}
       </div>
 
-      <div className="space-y-1.5">
-        <label htmlFor="notes" className="text-sm font-medium">Заметки</label>
-        <textarea
-          id="notes"
-          rows={2}
-          {...form.register('notes')}
-          className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors resize-none"
-          placeholder="Опционально"
-        />
-      </div>
+      {/* J-1 (Sprint 7.11): notes часто содержат заметки о поставщиках/ценах —
+          скрываем от CHEF (canSeePrices=false). Сервер всё равно проигнорирует
+          поле для роли CHEF (defense-in-depth). */}
+      {canSeePrices && (
+        <div className="space-y-1.5">
+          <label htmlFor="notes" className="text-sm font-medium">Заметки</label>
+          <textarea
+            id="notes"
+            rows={2}
+            {...form.register('notes')}
+            className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors resize-none"
+            placeholder="Опционально"
+          />
+        </div>
+      )}
 
       <div className="flex justify-end gap-2 pt-2">
         <button

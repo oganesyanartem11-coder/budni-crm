@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { formatInTimeZone } from 'date-fns-tz'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
@@ -23,6 +24,15 @@ const LOG_PREFIX = '[friday-week-digest]'
 
 async function handler(_request: Request) {
   const now = new Date()
+
+  // Defense-in-depth: cron уже настроен на пятницу, но если кто-то дёрнет
+  // вручную в другой день — не шлём дайджест с «недоделанной» неделей.
+  // ISO weekday: 1=Mon, 5=Fri, 7=Sun.
+  const weekday = parseInt(formatInTimeZone(now, 'Europe/Moscow', 'i'), 10)
+  if (weekday !== 5) {
+    return NextResponse.json({ ok: true, skipped: 'not_friday', weekday })
+  }
+
   const todayMsk = mskMidnightUtc(now, 0)
 
   // Идемпотентность в пределах суток МСК — на случай ручного повторного

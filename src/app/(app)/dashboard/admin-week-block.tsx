@@ -14,6 +14,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatMoney, formatOrders, formatPortions } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
+import { ChartCard } from '@/components/charts/chart-card'
 import type { AdminDashboardData } from '@/lib/db/queries/dashboard-stats'
 import type { ReportPreset } from '@/lib/utils/week'
 
@@ -215,13 +216,16 @@ export function AdminWeekBlock({ data, preset, periodLabel, customFromIso, custo
       </div>
 
       {data.topClients.length > 0 && (
-        <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex items-center gap-2">
+        <ChartCard
+          title={
+            <span className="inline-flex items-center gap-2">
               <Trophy className="w-4 h-4 text-warning-fg" />
-              <p className="text-sm font-semibold">Топ клиенты периода</p>
-            </div>
-          </div>
+              Топ клиенты периода
+            </span>
+          }
+          height="auto"
+          bodyClassName="mt-1"
+        >
           <ul className="space-y-2">
             {data.topClients.map((c, i) => (
               <li key={c.clientId}>
@@ -249,7 +253,7 @@ export function AdminWeekBlock({ data, preset, periodLabel, customFromIso, custo
               </li>
             ))}
           </ul>
-        </div>
+        </ChartCard>
       )}
     </section>
   )

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -56,9 +56,19 @@ interface Props {
 
 type Tab = 'locations' | 'configs' | 'orders' | 'analytics'
 
+const VALID_TABS: readonly Tab[] = ['locations', 'configs', 'orders', 'analytics']
+
+function isTab(value: string | null): value is Tab {
+  return value !== null && (VALID_TABS as readonly string[]).includes(value)
+}
+
 export function ClientDetail({ client, analytics }: Props) {
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('locations')
+  const searchParams = useSearchParams()
+  // Sprint 7.11 O-7: ?tab=configs из онбординг-чеклиста скроллит и открывает нужный таб.
+  // useSearchParams читает URL и на сервере (SSR), и на клиенте — initial state совпадает.
+  const initialTab: Tab = isTab(searchParams.get('tab')) ? (searchParams.get('tab') as Tab) : 'locations'
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [, startTransition] = useTransition()
 
   const [locModal, setLocModal] = useState<{ open: boolean; location?: ClientLocation }>({ open: false })

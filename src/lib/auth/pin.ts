@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db/prisma'
+import { hashPinLookup } from './pin-lookup'
 
 const SALT_ROUNDS = 10
 
@@ -9,6 +10,25 @@ export async function hashPin(pin: string): Promise<string> {
 
 export async function verifyPin(pin: string, hash: string): Promise<boolean> {
   return bcrypt.compare(pin, hash)
+}
+
+/**
+ * 7.11: возвращает оба производных значения PIN'а для сохранения в User.
+ *
+ * - pinHash    — bcrypt, медленный compare с тайминг-защитой (primary verify).
+ * - pinLookupHash — HMAC-индекс, дёшев и детерминирован: один запрос
+ *   findFirst({ where: { pinLookupHash } }) вместо bcrypt-перебора всех юзеров.
+ *
+ * ВСЕГДА вызывать вместо одиночного hashPin при записи PIN'а в БД, иначе
+ * fast-path логина деградирует обратно в O(N×bcrypt).
+ */
+export async function createPinFields(pin: string): Promise<{
+  pinHash: string
+  pinLookupHash: string
+}> {
+  const pinHash = await hashPin(pin)
+  const pinLookupHash = hashPinLookup(pin)
+  return { pinHash, pinLookupHash }
 }
 
 /**

@@ -55,7 +55,7 @@ export function getOnboardingStatus(client: ClientForOnboarding): OnboardingStat
       key: 'mealConfig',
       label: 'Конфиг питания',
       done: hasActiveMealConfig,
-      actionHref: '#client-tabs',
+      actionHref: '?tab=configs#client-tabs',
     },
     {
       key: 'phone',

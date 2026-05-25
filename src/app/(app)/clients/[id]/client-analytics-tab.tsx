@@ -6,6 +6,7 @@ import { TrendingUp, ShoppingCart, Coffee, MapPin, type LucideIcon } from 'lucid
 import { formatMoney, formatPortions, formatOrders, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { EmptyState } from '@/components/ui/empty-state'
+import { ChartCard } from '@/components/charts/chart-card'
 import { cn } from '@/lib/utils/cn'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 
@@ -58,63 +59,68 @@ export function ClientAnalyticsTab({ analytics }: Props) {
         />
       </div>
 
-      <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-          <h3 className="text-base font-semibold">Динамика выручки</h3>
+      <ChartCard
+        title={<span className="text-base font-semibold">Динамика выручки</span>}
+        action={
           <div className="flex gap-1 p-1 bg-bg rounded-pill">
             <PeriodToggle active={period === 'weekly'} onClick={() => setPeriod('weekly')} label="Недели" />
             <PeriodToggle active={period === 'monthly'} onClick={() => setPeriod('monthly')} label="Месяцы" />
           </div>
-        </div>
-
-        <div className="h-56 -ml-2 -mr-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
-              <XAxis
-                dataKey="label"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: 'var(--color-fg-muted)', fontSize: 10 }}
-                interval="preserveStartEnd"
-              />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: '12px',
-                  fontSize: '12px',
-                  boxShadow: 'var(--shadow-popover)',
-                }}
-                formatter={(value, name) => {
-                  const num = Number(value)
-                  if (name === 'revenue') return [formatMoney(num), 'Выручка']
-                  if (name === 'orders') return [num.toString(), 'Заказов']
-                  return [num.toString(), String(name ?? '')]
-                }}
-                labelStyle={{ color: 'var(--color-fg)', fontWeight: 600 }}
-              />
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                stroke="var(--color-accent)"
-                strokeWidth={2.5}
-                dot={{ fill: 'var(--color-accent)', r: 3 }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+        }
+        height="auto"
+        bodyClassName="h-56 -ml-2 -mr-2"
+      >
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
+            <XAxis
+              dataKey="label"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: 'var(--color-fg-muted)', fontSize: 10 }}
+              interval="preserveStartEnd"
+            />
+            <YAxis hide />
+            <Tooltip
+              contentStyle={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+                borderRadius: '12px',
+                fontSize: '12px',
+                boxShadow: 'var(--shadow-popover)',
+              }}
+              formatter={(value, name) => {
+                const num = Number(value)
+                if (name === 'revenue') return [formatMoney(num), 'Выручка']
+                if (name === 'orders') return [num.toString(), 'Заказов']
+                return [num.toString(), String(name ?? '')]
+              }}
+              labelStyle={{ color: 'var(--color-fg)', fontWeight: 600 }}
+            />
+            <Line
+              type="monotone"
+              dataKey="revenue"
+              stroke="var(--color-accent)"
+              strokeWidth={2.5}
+              dot={{ fill: 'var(--color-accent)', r: 3 }}
+              activeDot={{ r: 5 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartCard>
 
       {analytics.locations.length >= 2 && (() => {
         const totalLocRevenue = analytics.locations.reduce((s, l) => s + l.revenue, 0)
         return (
-          <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <h3 className="text-base font-semibold mb-4 flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-fg-muted" />
-              Разбивка по точкам доставки
-            </h3>
+          <ChartCard
+            title={
+              <span className="text-base font-semibold flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-fg-muted" />
+                Разбивка по точкам доставки
+              </span>
+            }
+            height="auto"
+            bodyClassName="mt-1"
+          >
             <div className="grid grid-cols-1 gap-2 text-sm">
               {analytics.locations.map((loc) => {
                 const sharePct = totalLocRevenue > 0 ? Math.round((loc.revenue / totalLocRevenue) * 100) : 0
@@ -134,67 +140,70 @@ export function ClientAnalyticsTab({ analytics }: Props) {
                 )
               })}
             </div>
-          </div>
+          </ChartCard>
         )
       })()}
 
       {analytics.mealTypes.length > 0 && (
-        <div className="rounded-2xl bg-surface border border-border p-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <h3 className="text-base font-semibold mb-4">Структура заказов</h3>
-          <div className="h-32 -ml-2 -mr-2 mb-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={analytics.mealTypes} margin={{ top: 5, right: 12, bottom: 5, left: 12 }} layout="vertical">
-                <XAxis type="number" hide />
-                <YAxis
-                  type="category"
-                  dataKey="mealType"
-                  axisLine={false}
-                  tickLine={false}
-                  width={70}
-                  tick={(props) => {
-                    const { x, y, payload } = props as { x: number | string; y: number | string; payload?: { value?: string } }
-                    const value = payload?.value
-                    return (
-                      <text x={x} y={y} dy={4} textAnchor="end" fill="var(--color-fg-muted)" fontSize={12}>
-                        {value ? MEAL_TYPE_LABELS[value as 'BREAKFAST' | 'LUNCH' | 'DINNER'] : ''}
-                      </text>
-                    )
-                  }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '12px',
-                    fontSize: '12px',
-                  }}
-                  formatter={(value) => [Number(value).toString(), 'Порций']}
-                />
-                <Bar dataKey="portions" radius={[0, 6, 6, 0]}>
-                  {analytics.mealTypes.map((mt) => (
-                    <Cell key={mt.mealType} fill={MEAL_TYPE_COLORS[mt.mealType]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-            {analytics.mealTypes.map((mt) => (
-              <div key={mt.mealType} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-bg/40">
-                <span className="flex items-center gap-2 min-w-0">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ background: MEAL_TYPE_COLORS[mt.mealType] }}
-                  />
-                  <span className="truncate font-medium">{MEAL_TYPE_LABELS[mt.mealType]}</span>
-                </span>
-                <span className="text-fg-muted tabular-nums shrink-0 text-xs">
-                  {formatMoney(mt.revenue)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ChartCard
+          title={<span className="text-base font-semibold">Структура заказов</span>}
+          height="auto"
+          bodyClassName="h-32 -ml-2 -mr-2"
+          footer={
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+              {analytics.mealTypes.map((mt) => (
+                <div key={mt.mealType} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-bg/40">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ background: MEAL_TYPE_COLORS[mt.mealType] }}
+                    />
+                    <span className="truncate font-medium">{MEAL_TYPE_LABELS[mt.mealType]}</span>
+                  </span>
+                  <span className="text-fg-muted tabular-nums shrink-0 text-xs">
+                    {formatMoney(mt.revenue)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          }
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={analytics.mealTypes} margin={{ top: 5, right: 12, bottom: 5, left: 12 }} layout="vertical">
+              <XAxis type="number" hide />
+              <YAxis
+                type="category"
+                dataKey="mealType"
+                axisLine={false}
+                tickLine={false}
+                width={70}
+                tick={(props) => {
+                  const { x, y, payload } = props as { x: number | string; y: number | string; payload?: { value?: string } }
+                  const value = payload?.value
+                  return (
+                    <text x={x} y={y} dy={4} textAnchor="end" fill="var(--color-fg-muted)" fontSize={12}>
+                      {value ? MEAL_TYPE_LABELS[value as 'BREAKFAST' | 'LUNCH' | 'DINNER'] : ''}
+                    </text>
+                  )
+                }}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '12px',
+                  fontSize: '12px',
+                }}
+                formatter={(value) => [Number(value).toString(), 'Порций']}
+              />
+              <Bar dataKey="portions" radius={[0, 6, 6, 0]}>
+                {analytics.mealTypes.map((mt) => (
+                  <Cell key={mt.mealType} fill={MEAL_TYPE_COLORS[mt.mealType]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
       )}
     </div>
   )

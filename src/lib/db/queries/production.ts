@@ -238,6 +238,7 @@ export async function getIngredientsSummary(targetDate: Date): Promise<Ingredien
       days: {
         where: { dayOfWeek },
         include: {
+          mealSet: { include: { items: true } },
           dishes: {
             include: {
               dish: {
@@ -265,15 +266,27 @@ export async function getIngredientsSummary(targetDate: Date): Promise<Ingredien
     }
   }
 
-  // 4. Идём по всем блюдам всех типов питания, считаем суммарную потребность по ингредиентам
+  // 4. Идём по всем блюдам всех типов питания, считаем суммарную потребность по ингредиентам.
+  //    Учитываем MealSetItem.quantity (Sprint 7.11 O-3): набор может включать
+  //    несколько штук одной категории (например, 2 хлеба на обед).
   const ingredientsMap = new Map<string, IngredientProductionRow>()
 
   for (const day of menu.days) {
     const portions = portionsByMealType[day.mealType]
     if (portions === 0) continue
 
+    // Карта slotCategory → quantity из MealSet (по умолчанию 1, если MealSet не задан).
+    const categoryQty = new Map<string, number>()
+    if (day.mealSet) {
+      for (const item of day.mealSet.items) {
+        categoryQty.set(item.dishCategory, item.quantity)
+      }
+    }
+
     for (const menuDish of day.dishes) {
       const dish = menuDish.dish
+      const slotQty = categoryQty.get(menuDish.slotCategory) ?? 1
+      const effectivePortions = portions * slotQty
 
       for (const di of dish.ingredients) {
         const ing = di.ingredient
@@ -283,9 +296,9 @@ export async function getIngredientsSummary(targetDate: Date): Promise<Ingredien
         // для PCS — brutto уже в штуках на 1 порцию
         let neededInIngredientUnit: number
         if (ing.unit === 'KG' || ing.unit === 'L') {
-          neededInIngredientUnit = (bruttoNum / 1000) * portions
+          neededInIngredientUnit = (bruttoNum / 1000) * effectivePortions
         } else {
-          neededInIngredientUnit = bruttoNum * portions
+          neededInIngredientUnit = bruttoNum * effectivePortions
         }
 
         const existing = ingredientsMap.get(ing.id)
@@ -296,7 +309,7 @@ export async function getIngredientsSummary(targetDate: Date): Promise<Ingredien
             dishName: dish.name,
             bruttoPerPortion: bruttoNum,
             unit: ing.unit,
-            portions,
+            portions: effectivePortions,
             totalNeeded: neededInIngredientUnit,
           })
         } else {
@@ -313,7 +326,7 @@ export async function getIngredientsSummary(targetDate: Date): Promise<Ingredien
               dishName: dish.name,
               bruttoPerPortion: bruttoNum,
               unit: ing.unit,
-              portions,
+              portions: effectivePortions,
               totalNeeded: neededInIngredientUnit,
             }],
           })

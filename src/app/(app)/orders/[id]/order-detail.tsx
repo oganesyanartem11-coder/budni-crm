@@ -276,13 +276,14 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
       const result = await rescheduleOrder({
         orderId: order.id,
         newDate,
+        expectedUpdatedAt: new Date(order.updatedAt).toISOString(),
       })
       if (result.ok) {
         toast.success('Заказ перенесён')
         setRescheduleOpen(false)
         router.refresh()
       } else {
-        toast.error(result.error)
+        showActionError(result.error, () => router.refresh())
       }
     })
   }

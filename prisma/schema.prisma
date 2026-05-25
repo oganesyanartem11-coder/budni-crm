@@ -159,6 +159,10 @@ model User {
   name        String
   role        UserRole
   pinHash     String    @unique // Хэш PIN-кода (bcrypt)
+  // 7.11: HMAC-SHA256(JWT_SECRET, pin)[:16] — O(1)-индекс для логина,
+  // bcrypt.compare остаётся как primary verify. Nullable, чтобы старые юзеры
+  // заполнялись лениво при следующем успешном логине (см. login/actions.ts).
+  pinLookupHash String? @unique
   isActive    Boolean   @default(true)
   lastLoginAt DateTime?
   // 7.9: brute-force защита и ручная блокировка ADMIN'ом

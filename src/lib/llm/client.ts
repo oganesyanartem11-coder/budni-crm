@@ -1,7 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
 
-export const LLM_MODEL = 'claude-haiku-4-5-20251001'
-
 let anthropicInstance: Anthropic | null = null
 
 export function getAnthropicClient(): Anthropic {

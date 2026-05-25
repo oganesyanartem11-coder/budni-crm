@@ -34,6 +34,11 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
   // даже если что-то пришло из формы. Финансы — ответственность MANAGER+.
   const finalPrice = user.role === 'CHEF' ? 0 : parsed.data.pricePerUnit
 
+  // J-1 (Sprint 7.11): notes — финансово-чувствительное поле (часто содержит
+  // комментарии о поставщиках/ценах), CHEF не должен его задавать.
+  const isChef = user.role === 'CHEF'
+  const finalNotes = isChef ? undefined : (parsed.data.notes ?? undefined)
+
   // Уникальность по имени
   const existing = await prisma.ingredient.findUnique({
     where: { name: parsed.data.name },
@@ -47,7 +52,7 @@ export async function createIngredient(formData: IngredientFormData): Promise<Ac
       name: parsed.data.name,
       unit: parsed.data.unit,
       pricePerUnit: finalPrice,
-      notes: parsed.data.notes ?? undefined,
+      notes: finalNotes,
     },
   })
 
@@ -108,13 +113,17 @@ export async function updateIngredient(id: string, formData: IngredientFormData)
   const effectivePrice = isChef ? Number(current.pricePerUnit) : parsed.data.pricePerUnit
   const priceChanged = !isChef && Number(current.pricePerUnit) !== parsed.data.pricePerUnit
 
+  // J-1 (Sprint 7.11): notes — финансово-чувствительное (комментарии о поставщиках,
+  // ценах, скидках). CHEF не редактирует — сохраняем текущее значение из БД.
+  const effectiveNotes = isChef ? current.notes : (parsed.data.notes ?? null)
+
   await prisma.ingredient.update({
     where: { id },
     data: {
       name: parsed.data.name,
       unit: parsed.data.unit,
       pricePerUnit: effectivePrice,
-      notes: parsed.data.notes ?? null,
+      notes: effectiveNotes,
     },
   })
 

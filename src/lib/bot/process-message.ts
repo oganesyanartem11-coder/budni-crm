@@ -15,6 +15,7 @@ import {
   type SavedItemForReply,
 } from './templates'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import type { BotConversation, MealType, Prisma } from '@prisma/client'
 
@@ -300,8 +301,10 @@ async function handleSpontaneous(
 
   let isReopenedConversation = false
   if (!conversation) {
-    const today = new Date()
-    today.setUTCHours(0, 0, 0, 0)
+    // 7.11/F-1: deliveryDate должен быть «MSK-полночь сегодня как UTC-точка»,
+    // иначе на серверах в UTC (Vercel) между 21:00 и 24:00 МСК он сваливался
+    // в следующий календарный день и ломал @@unique([clientId, deliveryDate]).
+    const today = mskMidnightUtc(new Date(), 0)
     try {
       conversation = await prisma.botConversation.create({
         data: { clientId: client.id, deliveryDate: today, status: 'AWAITING_MANAGER' },

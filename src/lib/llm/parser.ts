@@ -43,6 +43,14 @@ const VALID_TONES: ToneLabel[] = ['neutral', 'rude', 'thanks', 'urgent']
 export async function parseClientResponse(input: ParseInput): Promise<ParsedResponse> {
   const client = getAnthropicClient()
 
+  // 7.11/F-2: пре-LLM эвристика «КРИК ЗАГЛАВНЫМИ» как намёк на rude tone.
+  // > 8 символов отсекает аббревиатуры ("ОК", "ОБЕД"); требование наличия
+  // буквы (а не только цифр) — чтобы "123456789" не классифицировалось как rude.
+  // LLM получает hint в промпте и волен переоценить (например THANKS/URGENT
+  // тоже бывают CAPS). При невалидном LLM-ответе fallback тоже rude.
+  const text = input.clientText
+  const isCapsRude = text.length > 8 && text === text.toUpperCase() && /[А-ЯA-Z]/.test(text)
+
   const systemPrompt = `Ты — парсер ответов клиентов кейтеринг-компании "Будни".
 Клиенты — юрлица. Каждый день они отвечают на вопрос "сколько порций на завтра?" свободным текстом.
 Твоя задача — извлечь структуру: для каждой точки доставки определить количество порций.
@@ -86,7 +94,7 @@ ${
 }
 
 Ответ клиента: "${input.clientText}"
-
+${isCapsRude ? '\nПодсказка: текст написан CAPS LOCK\'ом — это часто признак раздражения; ToneLabel="rude" по умолчанию, но при доброжелательном контексте смело меняй.\n' : ''}
 Распознай структуру. Верни JSON.`
 
   const startTime = Date.now()
@@ -112,6 +120,11 @@ ${
     .replace(/```\s*$/, '')
     .trim()
 
+  // 7.11/F-2: при isCapsRude pre-fill — 'rude'. LLM может это переопределить
+  // через явный toneLabel в JSON; pre-fill применяется только когда LLM
+  // не дал валидного значения (невалидный JSON / отсутствие поля / битый тон).
+  const defaultTone: ToneLabel = isCapsRude ? 'rude' : 'neutral'
+
   let parsed: unknown
   try {
     parsed = JSON.parse(jsonText)
@@ -122,7 +135,7 @@ ${
       items: [],
       confidence: 0,
       reason: 'LLM вернул невалидный JSON',
-      toneLabel: 'neutral',
+      toneLabel: defaultTone,
       rawClientText: input.clientText,
       rawLlmResponse,
     }
@@ -147,7 +160,7 @@ ${
     items,
     confidence: typeof p.confidence === 'number' ? p.confidence : 0,
     reason: typeof p.reason === 'string' ? p.reason : '',
-    toneLabel: VALID_TONES.includes(p.toneLabel as ToneLabel) ? (p.toneLabel as ToneLabel) : 'neutral',
+    toneLabel: VALID_TONES.includes(p.toneLabel as ToneLabel) ? (p.toneLabel as ToneLabel) : defaultTone,
     rawClientText: input.clientText,
     rawLlmResponse,
   }

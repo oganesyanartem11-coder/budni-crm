@@ -16,11 +16,12 @@ const MSK_OFFSET_MS = 3 * 3600 * 1000
 /**
  * Себестоимость сырья за диапазон дат [from, to] включительно.
  * Логика per-day идентична getIngredientsSummary (production.ts:200-342),
- * но без хардкода статусов и без MealSetItem.quantity.
+ * без хардкода статусов (передаются параметром).
  *
  * Использует ТЕКУЩУЮ цену Ingredient.pricePerUnit (не historical) —
  * historical price на эту итерацию вне scope (см. отчёт разведки 6.5).
- * Не учитывает MealSetItem.quantity (consistency с UI getIngredientsSummary).
+ * Учитывает MealSetItem.quantity (Sprint 7.11 O-3): набор может включать
+ * несколько штук одной категории (например, 2 хлеба на обед).
  *
  * daysWithoutMenu — дни в диапазоне, для которых нет активного APPROVED
  * MenuCycle. Передаётся наверх, чтобы вызывающий мог пометить маржу как
@@ -89,6 +90,7 @@ export async function getMaterialCostForRange(
         days: {
           where: { dayOfWeek },
           include: {
+            mealSet: { include: { items: true } },
             dishes: {
               include: {
                 dish: {
@@ -132,18 +134,28 @@ export async function getMaterialCostForRange(
 
     // 4. Считаем стоимость дня: по всем MenuDay (mealType-ам) для которых
     //    есть порции — суммируем по блюдам и их ингредиентам.
+    //    Учитываем MealSetItem.quantity на slotCategory (Sprint 7.11 O-3).
     for (const day of menu.days) {
       const portions = portionsByMealType[day.mealType]
       if (portions === 0) continue
 
+      const categoryQty = new Map<string, number>()
+      if (day.mealSet) {
+        for (const item of day.mealSet.items) {
+          categoryQty.set(item.dishCategory, item.quantity)
+        }
+      }
+
       for (const menuDish of day.dishes) {
+        const slotQty = categoryQty.get(menuDish.slotCategory) ?? 1
+        const effectivePortions = portions * slotQty
         const dish = menuDish.dish
         for (const di of dish.ingredients) {
           const brutto = Number(di.bruttoGrams)
           const price = Number(di.ingredient.pricePerUnit)
           const costPerPortion =
             di.ingredient.unit === 'PCS' ? brutto * price : (brutto / 1000) * price
-          totalCost += costPerPortion * portions
+          totalCost += costPerPortion * effectivePortions
         }
       }
     }

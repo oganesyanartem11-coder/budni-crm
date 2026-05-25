@@ -507,6 +507,7 @@ export async function cancelOrder(
 const rescheduleOrderSchema = z.object({
   orderId: z.string().min(1),
   newDate: z.string().min(1),
+  expectedUpdatedAt: z.string().optional(),
 })
 
 /**
@@ -524,7 +525,14 @@ export async function rescheduleOrder(
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
 
-  const { orderId, newDate } = parsed.data
+  const { orderId, newDate, expectedUpdatedAt } = parsed.data
+
+  try {
+    await assertOrderUpdatedAt(orderId, expectedUpdatedAt)
+  } catch (e) {
+    if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+    throw e
+  }
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
