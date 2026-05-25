@@ -4,6 +4,7 @@ import { useState, useTransition, useRef, type DragEvent, type ChangeEvent } fro
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Upload, FileSpreadsheet, X, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { createMenuImport } from '../actions'
 import { cn } from '@/lib/utils/cn'
 
@@ -81,9 +82,19 @@ export function UploadForm() {
       const r = await createMenuImport(fd)
       if (r.ok) {
         router.push(`/menu/imports/${r.data.menuImportId}`)
-      } else {
-        setError(r.error)
+        return
       }
+      if (r.activeImportId) {
+        const activeId = r.activeImportId
+        toast.error(r.error, {
+          action: {
+            label: 'Открыть',
+            onClick: () => router.push(`/menu/imports/${activeId}`),
+          },
+        })
+        return
+      }
+      setError(r.error)
     })
   }
 

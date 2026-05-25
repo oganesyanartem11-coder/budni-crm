@@ -22,11 +22,31 @@ export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string; fieldErrors?: Record<string, string[]> }
 
+// Узкий вариант для createMenuImport: коллизия с уже идущим импортом
+// возвращает activeImportId, чтобы UI смог открыть его в один клик.
+export type CreateMenuImportResult =
+  | { ok: true; data: { menuImportId: string } }
+  | { ok: false; error: string; activeImportId?: string; fieldErrors?: Record<string, string[]> }
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 МБ — разумный лимит для xlsx-меню
+
+// 7.7.B: считаем активным любой импорт в любой LLM/assemble-стадии.
+// READY/FAILED — терминальные, новый запуск разрешён.
+const ACTIVE_PROGRESSES: MenuImportProgress[] = [
+  'EXTRACTING',
+  'PARSING_SCHEDULE',
+  'GENERATING_RECIPES',
+  'ASSEMBLING',
+]
+
+// Stuck-импорт: Vercel Pro Max Duration 300s; ×6 запас на случай повторной попытки
+// или ручного редеплоя посередине пайплайна. После 30 минут считаем сдохшим
+// (например, runtime прибился сразу после update progress, статус не пометился FAILED).
+const STUCK_THRESHOLD_MS = 30 * 60 * 1000
 
 export async function createMenuImport(
   formData: FormData
-): Promise<ActionResult<{ menuImportId: string }>> {
+): Promise<CreateMenuImportResult> {
   const user = await requireRole(['ADMIN', 'CHEF'])
 
   const file = formData.get('file')
@@ -39,6 +59,32 @@ export async function createMenuImport(
   const lower = file.name.toLowerCase()
   if (!lower.endsWith('.xlsx') && !lower.endsWith('.xls')) {
     return { ok: false, error: 'Поддерживаются только Excel-файлы (.xlsx, .xls). Фото-меню добавим позже.' }
+  }
+
+  // 7.7.B: защита от параллельных запусков. Проверяем по createdById — на одного
+  // пользователя один импорт в работе. Stuck старше 30 минут — добиваем FAILED
+  // и пускаем новый.
+  const activeImport = await prisma.menuImport.findFirst({
+    where: {
+      createdById: user.id,
+      progress: { in: ACTIVE_PROGRESSES },
+    },
+    select: { id: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+  })
+  if (activeImport) {
+    const ageMs = Date.now() - activeImport.createdAt.getTime()
+    if (ageMs < STUCK_THRESHOLD_MS) {
+      return {
+        ok: false,
+        error: 'У вас уже идёт импорт меню. Дождитесь завершения или откройте его.',
+        activeImportId: activeImport.id,
+      }
+    }
+    await prisma.menuImport.update({
+      where: { id: activeImport.id },
+      data: { progress: 'FAILED', errorMessage: 'Auto-marked stuck (>30 min без обновлений)' },
+    })
   }
 
   const buffer = Buffer.from(await file.arrayBuffer())
