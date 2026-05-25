@@ -6,6 +6,7 @@ import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { getMenuStructureFromImport } from '@/lib/menu-import/expand-menu'
 import { findActiveMenuForExtension, extendMenuPlan } from '@/lib/menu-import/extend-menu'
 import { getMondayOfWeek } from '@/lib/utils/week'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -43,17 +44,7 @@ function formatDateRu(d: Date): string {
   return `${dd}.${mm}.${yyyy}`
 }
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
 
@@ -260,3 +251,5 @@ export async function GET(request: Request) {
     telegramError: tg.error ?? null,
   })
 }
+
+export const GET = withCronHeartbeat('extend-active-menu', handler)

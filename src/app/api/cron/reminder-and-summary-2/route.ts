@@ -7,22 +7,13 @@ import {
   alreadyRanToday,
   markRanToday,
 } from '@/lib/bot/daily-summary'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
 const CRON_LABEL = 'reminder-2' // 15:30 МСК
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
 
   if (await alreadyRanToday(CRON_LABEL, now)) {
@@ -53,3 +44,5 @@ export async function GET(request: Request) {
     errors: [...reminders.errors, ...summary.errors],
   })
 }
+
+export const GET = withCronHeartbeat('reminder-and-summary-2', handler)

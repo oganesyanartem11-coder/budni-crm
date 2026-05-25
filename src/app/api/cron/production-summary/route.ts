@@ -8,6 +8,7 @@ import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { productionSummaryButton } from '@/lib/telegram/buttons'
 import { formatPortions, formatLocations, formatClients } from '@/lib/utils/format'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,17 +20,7 @@ const MEAL_TYPE_LABEL: Record<MealType, string> = {
   DINNER: 'Ужин',
 }
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
   const tomorrowMsk = mskMidnightUtc(now, 1)
@@ -226,3 +217,5 @@ export async function GET(request: Request) {
     error: result.error ?? null,
   })
 }
+
+export const GET = withCronHeartbeat('production-summary', handler)

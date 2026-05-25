@@ -1,31 +1,15 @@
 import { NextResponse } from 'next/server'
 import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * Cron-route для Vercel Cron Jobs.
- * Защищён CRON_SECRET в Authorization header.
+ * Защищён CRON_SECRET в Authorization header (HOF withCronHeartbeat).
  * Запускается ежедневно в 03:00 UTC (06:00 MSK), генерирует FIXED-заказы на завтра.
  */
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json(
-      { ok: false, error: 'CRON_SECRET not configured' },
-      { status: 500 }
-    )
-  }
-
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json(
-      { ok: false, error: 'Unauthorized' },
-      { status: 401 }
-    )
-  }
-
+async function handler(_request: Request) {
   // Целевая дата — завтра
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
@@ -47,3 +31,5 @@ export async function GET(request: Request) {
     )
   }
 }
+
+export const GET = withCronHeartbeat('generate-fixed-orders', handler)

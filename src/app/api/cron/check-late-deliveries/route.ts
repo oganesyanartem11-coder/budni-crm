@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { formatPortions } from '@/lib/utils/format'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -21,16 +22,7 @@ const MSK_OFFSET_HOURS = 3
  * Группирует по client+location (одна остановка → одно сообщение в Telegram),
  * шлёт в групповой чат, ставит lateAlertSentAt=now() всем участвующим Order.
  */
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
 
@@ -120,6 +112,8 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ ok: true, sent: sent.length, errors })
 }
+
+export const GET = withCronHeartbeat('check-late-deliveries', handler)
 
 function minutesPastWindow(windowToHHmm: string, deliveryDate: Date, now: Date): number {
   const m = /^(\d{1,2}):(\d{2})$/.exec(windowToHHmm)

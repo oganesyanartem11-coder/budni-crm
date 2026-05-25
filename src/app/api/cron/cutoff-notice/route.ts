@@ -7,22 +7,13 @@ import {
   alreadyRanToday,
   markRanToday,
 } from '@/lib/bot/daily-summary'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
 const CRON_LABEL = 'cutoff-notice' // 16:00 МСК
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
 
   if (await alreadyRanToday(CRON_LABEL, now)) {
@@ -75,3 +66,5 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ ok: true, sent_notices: sent, errors })
 }
+
+export const GET = withCronHeartbeat('cutoff-notice', handler)

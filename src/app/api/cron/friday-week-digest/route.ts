@@ -13,6 +13,7 @@ import {
   formatDayName,
   formatMarginLines,
 } from '@/lib/digest/format'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,17 +21,7 @@ const ACTION = 'FRIDAY_WEEK_DIGEST_SENT'
 
 const LOG_PREFIX = '[friday-week-digest]'
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
 
@@ -262,3 +253,5 @@ export async function GET(request: Request) {
     error: result.error ?? null,
   })
 }
+
+export const GET = withCronHeartbeat('friday-week-digest', handler)

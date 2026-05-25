@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -20,16 +21,7 @@ const IDEMPOTENCY_WINDOW_MS = 90 * 60 * 1000
  * cron-сервисом (curl с Bearer CRON_SECRET). Файл готов к включению
  * после апгрейда на Pro.
  */
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(_request: Request) {
   const now = new Date()
 
   // Идемпотентность: уже слали в последние 90 мин — пропускаем.
@@ -94,3 +86,5 @@ export async function GET(request: Request) {
     failed: result.failed,
   })
 }
+
+export const GET = withCronHeartbeat('unpriced-ingredients-digest', handler)

@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma'
 import { getNextActiveDayForClient } from '@/lib/db/queries/bot'
 import { getDailyQuestionText } from '@/lib/bot/templates'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,17 +36,7 @@ interface ResponseBody {
   errors: ErrorEntry[]
 }
 
-export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  const expectedSecret = process.env.CRON_SECRET
-
-  if (!expectedSecret) {
-    return NextResponse.json({ ok: false, error: 'CRON_SECRET not configured' }, { status: 500 })
-  }
-  if (authHeader !== `Bearer ${expectedSecret}`) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
+async function handler(request: Request) {
   const url = new URL(request.url)
   const dryRun = url.searchParams.get('dryRun') === 'true'
 
@@ -151,3 +142,5 @@ export async function GET(request: Request) {
 
   return NextResponse.json(result)
 }
+
+export const GET = withCronHeartbeat('daily-questions', handler)
