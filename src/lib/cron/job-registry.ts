@@ -24,6 +24,7 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'check-late-deliveries',       scheduleUtc: '*/10 6-19 * * *', description: 'Поздние доставки — алерт каждые 10 минут (9-22 МСК)', maxAgeHours: 14 },
   { jobName: 'unpriced-ingredients-digest', scheduleUtc: '0 9 * * 1',   description: 'Ингредиенты без цены (понедельник)',   maxAgeHours: 170 },
   { jobName: 'monitor-heartbeats',          scheduleUtc: '0 19 * * *',  description: 'Monitor cron heartbeats (себя не алертит)', maxAgeHours: 26 },
+  { jobName: 'cleanup-login-attempts',      scheduleUtc: '0 0 * * 1',   description: 'Очистка LoginAttempt старше 30 дней (понедельник)', maxAgeHours: 170 },
 ]
 
 export const CRON_HEARTBEAT_ACTION = 'CRON_HEARTBEAT'

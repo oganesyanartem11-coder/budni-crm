@@ -161,6 +161,9 @@ model User {
   pinHash     String    @unique // Хэш PIN-кода (bcrypt)
   isActive    Boolean   @default(true)
   lastLoginAt DateTime?
+  // 7.9: brute-force защита и ручная блокировка ADMIN'ом
+  failedLoginAttempts Int       @default(0)
+  loginLockedUntil    DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -184,6 +187,17 @@ model User {
   approvedMenuImports   MenuImport[]  @relation("MenuImportApprovedBy")
 
   @@index([role, isActive])
+}
+
+// 7.9: глобальный rate-limit логина. Append-only, очищается еженедельно
+// через cron cleanup-login-attempts (retention 30 дней).
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  success   Boolean
+  ipAddress String?
+
+  @@index([createdAt, success])
 }
 
 // ============================================================
