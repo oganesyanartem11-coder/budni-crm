@@ -4,7 +4,13 @@ import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/db/prisma'
 import { isValidPinFormat, verifyPin } from '@/lib/auth/pin'
-import { createSession, setSessionCookie, clearSessionCookie } from '@/lib/auth/session'
+import {
+  createSession,
+  setSessionCookie,
+  clearSessionCookie,
+  getSession,
+  revokeSession,
+} from '@/lib/auth/session'
 
 export type LoginResult =
   | { ok: true }
@@ -24,6 +30,11 @@ async function readIpAddress(): Promise<string | null> {
   const headersList = await headers()
   const forwardedFor = headersList.get('x-forwarded-for')
   return forwardedFor?.split(',')[0]?.trim() || null
+}
+
+async function readUserAgent(): Promise<string | null> {
+  const headersList = await headers()
+  return headersList.get('user-agent') || null
 }
 
 export async function loginAction(pin: string): Promise<LoginResult> {
@@ -142,18 +153,21 @@ export async function loginAction(pin: string): Promise<LoginResult> {
     },
   })
 
-  // Создаём сессию
-  const token = await createSession({
-    userId: matchedUser.id,
-    role: matchedUser.role,
-    name: matchedUser.name,
-  })
+  // Создаём server-side Session (7.10) и JWT со ссылкой на её id.
+  const userAgent = await readUserAgent()
+  const token = await createSession(matchedUser.id, { ipAddress, userAgent })
   await setSessionCookie(token)
 
   return { ok: true }
 }
 
 export async function logoutAction(): Promise<void> {
+  // 7.10: помечаем Session revokedAt, чтобы любые ещё подписанные JWT
+  // с этим sessionId тоже отвергались getCurrentUser.
+  const cookie = await getSession()
+  if (cookie?.sessionId) {
+    await revokeSession(cookie.sessionId)
+  }
   await clearSessionCookie()
   redirect('/login')
 }

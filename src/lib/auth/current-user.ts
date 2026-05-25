@@ -5,23 +5,41 @@ import type { User, UserRole } from '@prisma/client'
 
 /**
  * Возвращает текущего пользователя или редиректит на /login.
- * Используется в серверных компонентах внутри (app)/.
+ *
+ * 7.10: проверяет server-side Session — отвергает revoked/expired токены
+ * даже если JWT-подпись валидна. Это даёт возможность выгнать конкретный
+ * cookie (compromised) через Session.revokedAt без ротации JWT_SECRET.
  */
 export async function getCurrentUser(): Promise<User> {
-  const session = await getSession()
+  const cookie = await getSession()
+  if (!cookie) {
+    redirect('/login')
+  }
+
+  const session = await prisma.session.findUnique({
+    where: { id: cookie.sessionId },
+    include: { user: true },
+  })
+
   if (!session) {
     redirect('/login')
   }
-
-  const user = await prisma.user.findUnique({
-    where: { id: session.userId },
-  })
-
-  if (!user || !user.isActive) {
+  if (session.revokedAt) {
+    redirect('/login')
+  }
+  if (session.expiresAt.getTime() < Date.now()) {
+    redirect('/login')
+  }
+  if (!session.user.isActive) {
     redirect('/login')
   }
 
-  return user
+  // best-effort lastUsedAt — не блокируем ответ при ошибке.
+  prisma.session
+    .update({ where: { id: session.id }, data: { lastUsedAt: new Date() } })
+    .catch(() => {})
+
+  return session.user
 }
 
 /**

@@ -185,8 +185,27 @@ model User {
   generatedUpdDocuments UpdDocument[] @relation("UpdGeneratedBy")
   menuImports           MenuImport[]  @relation("MenuImportCreatedBy")
   approvedMenuImports   MenuImport[]  @relation("MenuImportApprovedBy")
+  sessions              Session[]
 
   @@index([role, isActive])
+}
+
+// 7.10: server-side sessions с возможностью revoke.
+// JWT хранит только sessionId; реальная проверка revokedAt/expiresAt идёт
+// в getCurrentUser. Cleanup через cron cleanup-sessions раз в неделю.
+model Session {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  lastUsedAt  DateTime  @default(now())
+  ipAddress   String?
+  userAgent   String?
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 // 7.9: глобальный rate-limit логина. Append-only, очищается еженедельно

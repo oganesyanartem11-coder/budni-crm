@@ -15,6 +15,7 @@
     { "path": "/api/cron/check-late-deliveries", "schedule": "*/10 6-19 * * *" },
     { "path": "/api/cron/unpriced-ingredients-digest", "schedule": "0 9 * * 1" },
     { "path": "/api/cron/monitor-heartbeats", "schedule": "0 19 * * *" },
-    { "path": "/api/cron/cleanup-login-attempts", "schedule": "0 0 * * 1" }
+    { "path": "/api/cron/cleanup-login-attempts", "schedule": "0 0 * * 1" },
+    { "path": "/api/cron/cleanup-sessions", "schedule": "30 0 * * 1" }
   ]
 }
