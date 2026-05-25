@@ -13,6 +13,7 @@ import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
 import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
 import { getOnboardingStatus } from '@/lib/clients/onboarding'
 import { AdminWeekBlock } from './admin-week-block'
+import { AvgDishCostCards } from './avg-dish-cost-cards'
 
 // Подмножество пресетов, доступных в переключателе дашборда. WoW-бокс
 // активен только для week-периодов — для остальных скрываем индикатор.
@@ -192,6 +193,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             customToIso={params.to}
           />
         )}
+
+        {/* Себестоимость порции по mealType — только ADMIN (MANAGER не видит цены).
+            Виджеты идут после финансового блока: финансы — головная метрика,
+            себестоимость — дополнительный разрез по типам приёма пищи. */}
+        {user.role === 'ADMIN' && <AvgDishCostCards />}
       </div>
     </>
   )
