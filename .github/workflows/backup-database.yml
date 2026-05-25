@@ -26,6 +26,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-18
           pg_dump --version
+          which pg_dump
+          /usr/lib/postgresql/18/bin/pg_dump --version
 
       - name: Set timestamp
         id: timestamp
@@ -39,7 +41,7 @@ jobs:
           mkdir -p backups
           # Custom format (-Fc) — сжатый бинарный, читается через pg_restore.
           # --no-owner и --no-acl — для портабельности между БД с разными ролями.
-          pg_dump \
+          /usr/lib/postgresql/18/bin/pg_dump \
             --format=custom \
             --no-owner \
             --no-acl \
