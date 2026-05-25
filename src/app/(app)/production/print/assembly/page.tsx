@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/current-user'
 import { getAssemblyOrders } from '@/lib/db/queries/production'
-import { formatDateLong, formatDeliveryWindow, formatOrders, formatPortions } from '@/lib/utils/format'
+import { formatDateLong, formatDateTimeMsk, formatDeliveryWindow, formatOrders, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import { PrintButton } from '../print-button'
 
@@ -84,7 +84,7 @@ export default async function AssemblyPrintPage({ searchParams }: PageProps) {
           )}
 
           <div className="mt-8 pt-4 border-t border-border text-xs text-fg-subtle">
-            Сформировано: {new Date().toLocaleString('ru-RU')} · Будни CRM
+            Сформировано: {formatDateTimeMsk(new Date())} · Будни CRM
           </div>
         </div>
       </div>

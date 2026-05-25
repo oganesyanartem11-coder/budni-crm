@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/current-user'
 import { getProductionSummary } from '@/lib/db/queries/production'
-import { formatDateLong, formatPortions } from '@/lib/utils/format'
+import { formatDateLong, formatDateTimeMsk, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS } from '@/lib/constants/dish-categories'
 import { PrintButton } from '../print-button'
@@ -92,7 +92,7 @@ export default async function KitchenPrintPage({ searchParams }: PageProps) {
           )}
 
           <div className="mt-8 pt-4 border-t border-border text-xs text-fg-subtle">
-            Сформировано: {new Date().toLocaleString('ru-RU')} · Будни CRM
+            Сформировано: {formatDateTimeMsk(new Date())} · Будни CRM
           </div>
         </div>
       </div>

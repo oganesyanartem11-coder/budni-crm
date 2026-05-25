@@ -10,6 +10,7 @@ import { MealConfigModal } from './meal-config-modal'
 import { ClientAnalyticsTab } from './client-analytics-tab'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 import { archiveClient, archiveLocation, deleteMealConfig } from '../actions'
+import { formatDateMsk } from '@/lib/utils/format'
 import { formatMoney, formatDeliveryWindow, formatOrders } from '@/lib/utils/format'
 import {
   ORDER_TYPE_SHORT,
@@ -399,9 +400,7 @@ function ConfigsTab({
 }
 
 function RequisitesBlock({ client }: { client: SerializedClientDetail }) {
-  const contractDateStr = client.contractDate
-    ? new Date(client.contractDate).toLocaleDateString('ru-RU')
-    : null
+  const contractDateStr = client.contractDate ? formatDateMsk(client.contractDate) : null
 
   return (
     <div

@@ -167,3 +167,25 @@ export function formatPhoneLink(phone: string | null | undefined): string | null
   else if (digits.startsWith('8') && digits.length === 11) normalized = '7' + digits.slice(1)
   return `+${normalized}`
 }
+
+/**
+ * Форматирует дату в "ДД.ММ.ГГГГ" в MSK-таймзоне.
+ * На Vercel UTC и в браузере Артёма (MSK) даёт одинаковый результат —
+ * 7.7.A фикс баги toLocaleDateString без timeZone.
+ */
+export function formatDateMsk(date: Date | string | null | undefined): string {
+  if (!date) return ''
+  const d = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })
+}
+
+/**
+ * Форматирует дату+время в "ДД.ММ.ГГГГ, ЧЧ:ММ:СС" в MSK-таймзоне.
+ */
+export function formatDateTimeMsk(date: Date | string | null | undefined): string {
+  if (!date) return ''
+  const d = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })
+}

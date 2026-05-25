@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { MessageSquare, Save, X, Link as LinkIcon, Copy, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { updateClientMaxChatId, ensureClientOnboardingToken } from '../actions'
+import { formatDateTimeMsk } from '@/lib/utils/format'
 
 interface Props {
   clientId: string
@@ -89,7 +90,7 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
               </p>
               {onboardedAt && (
                 <p className="text-xs text-success-fg/80 mt-0.5">
-                  Подключение: {new Date(onboardedAt).toLocaleString('ru-RU')}
+                  Подключение: {formatDateTimeMsk(onboardedAt)}
                 </p>
               )}
             </div>

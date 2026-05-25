@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { getMondayOfWeek, getSundayOfWeek } from '@/lib/utils/week'
+import { formatDateMsk } from '@/lib/utils/format'
 import {
   notifyAdminsAboutPendingMenu,
   notifyGroupAboutApprovedMenu,
@@ -90,7 +91,7 @@ export async function createDraftMenu(weekStartIso: string): Promise<CreateDraft
     mealSetByType.set(ms.mealType, ms.id)
   }
 
-  const cycleName = `Меню недели ${monday.toLocaleDateString('ru-RU')}`
+  const cycleName = `Меню недели ${formatDateMsk(monday)}`
 
   // Создаём цикл с днями
   const cycle = await prisma.menuCycle.create({

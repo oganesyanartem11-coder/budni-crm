@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { Calendar, TrendingUp, ShoppingCart, Clock, Printer, Trophy, ChevronRight, type LucideIcon } from 'lucide-react'
-import { formatMoney, formatPortions, formatOrders } from '@/lib/utils/format'
+import { formatMoney, formatPortions, formatOrders, formatDateTimeMsk } from '@/lib/utils/format'
 import { EmptyState } from '@/components/ui/empty-state'
 import { cn } from '@/lib/utils/cn'
 import { PeriodSelector } from '@/components/period-selector'
@@ -132,7 +132,7 @@ export function ReportsView({ preset, rangeFromIso, rangeToIso, report }: Props)
           )}
 
           <div className="text-xs text-fg-subtle text-center pt-2 print-only">
-            Сформировано: {new Date().toLocaleString('ru-RU')} · Будни CRM
+            Сформировано: {formatDateTimeMsk(new Date())} · Будни CRM
           </div>
         </div>
       )}

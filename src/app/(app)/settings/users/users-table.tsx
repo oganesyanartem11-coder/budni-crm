@@ -40,6 +40,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils/cn'
+import { formatDateMsk } from '@/lib/utils/format'
 
 interface UserRow {
   id: string
@@ -281,7 +282,7 @@ export function UsersTable({ users, currentUserId }: Props) {
                     )}
                   </td>
                   <td className="px-3 py-3 text-xs text-fg-muted hidden md:table-cell">
-                    {new Date(u.createdAt).toLocaleDateString('ru-RU')}
+                    {formatDateMsk(u.createdAt)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="inline-flex items-center gap-1.5">
