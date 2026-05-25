@@ -13,6 +13,7 @@
     { "path": "/api/cron/end-of-day-digest", "schedule": "0 15 * * *" },
     { "path": "/api/cron/friday-week-digest", "schedule": "0 16 * * 5" },
     { "path": "/api/cron/check-late-deliveries", "schedule": "*/10 6-19 * * *" },
-    { "path": "/api/cron/unpriced-ingredients-digest", "schedule": "0 9 * * 1" }
+    { "path": "/api/cron/unpriced-ingredients-digest", "schedule": "0 9 * * 1" },
+    { "path": "/api/cron/monitor-heartbeats", "schedule": "0 19 * * *" }
   ]
 }
