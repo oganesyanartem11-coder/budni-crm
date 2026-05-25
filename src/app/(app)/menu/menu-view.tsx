@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   ChevronLeft,
   ChevronRight,
@@ -13,6 +14,7 @@ import {
   Archive,
   Undo2,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { StatusBadge } from '@/components/ui/status-badge'
@@ -107,9 +109,10 @@ interface Props {
   menu: MenuData | null
   dishes: Dish[]
   userRole: UserRole
+  previewImportId: string | null
 }
 
-export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
+export function MenuView({ weekStartIso, menu, dishes, userRole, previewImportId }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [editingDay, setEditingDay] = useState<MenuDayData | null>(null)
@@ -140,6 +143,14 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
       if (result.ok) {
         toast.success('Черновик меню создан')
         router.refresh()
+      } else if (result.importId) {
+        const importId = result.importId
+        toast.error(result.error, {
+          action: {
+            label: 'Открыть импорт',
+            onClick: () => router.push(`/menu/imports/${importId}`),
+          },
+        })
       } else {
         toast.error(result.error)
       }
@@ -229,9 +240,31 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
 
   const showRejectionBanner =
     !!menu && menu.status === 'DRAFT' && !!menu.rejectionComment
+  const showPreviewBanner = !!previewImportId && canEdit
 
   return (
     <div className="space-y-5">
+      {showPreviewBanner && (
+        <div className="rounded-2xl border-l-4 border-warning bg-warning-bg/30 p-4 flex items-start gap-3">
+          <Sparkles className="w-5 h-5 text-warning-fg shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0 space-y-1">
+            <p className="font-semibold text-sm text-warning-fg">
+              Это preview AI-импорта
+            </p>
+            <p className="text-sm text-warning-fg">
+              Меню сгенерировано AI и пока не утверждено. Перейдите в импорт чтобы
+              проверить блюда и развернуть его на 13 недель.
+            </p>
+          </div>
+          <Link
+            href={`/menu/imports/${previewImportId}`}
+            className="shrink-0 px-3 py-1.5 rounded-pill bg-warning text-accent-fg font-medium text-xs hover:opacity-90 transition-opacity flex items-center gap-1.5"
+          >
+            Утвердить →
+          </Link>
+        </div>
+      )}
+
       {showRejectionBanner && menu && (
         <div className="rounded-2xl border-l-4 border-warning bg-warning-bg/30 p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-warning-fg shrink-0 mt-0.5" />
@@ -314,7 +347,7 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
               </span>
             )}
 
-            {menu?.status === 'DRAFT' && canEdit && (
+            {menu?.status === 'DRAFT' && canEdit && !previewImportId && (
               <button
                 type="button"
                 onClick={handleSubmitForApproval}
@@ -326,7 +359,7 @@ export function MenuView({ weekStartIso, menu, dishes, userRole }: Props) {
               </button>
             )}
 
-            {menu?.status === 'DRAFT' && isAdmin && (
+            {menu?.status === 'DRAFT' && isAdmin && !previewImportId && (
               <button
                 type="button"
                 onClick={() => setArchiveOpen(true)}

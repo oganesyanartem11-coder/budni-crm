@@ -20,12 +20,18 @@ export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
+// Узкий вариант для createDraftMenu: на коллизию возвращает importId, если за
+// существующим циклом стоит preview AI-импорта (DRAFT/PENDING_APPROVAL).
+export type CreateDraftMenuResult =
+  | { ok: true; data: { id: string } }
+  | { ok: false; error: string; importId?: string }
+
 /**
  * Создаёт пустой черновик меню для заданной недели.
  * Сразу создаёт MenuDay для каждого из 7 дней × 3 типов питания (с привязкой к default MealSet).
  * Блюда — пусто, шеф наполняет позже.
  */
-export async function createDraftMenu(weekStartIso: string): Promise<ActionResult<{ id: string }>> {
+export async function createDraftMenu(weekStartIso: string): Promise<CreateDraftMenuResult> {
   const user = await requireRole(['ADMIN', 'CHEF'])
 
   const parsed = createMenuSchema.safeParse({ weekStartIso })
@@ -36,14 +42,41 @@ export async function createDraftMenu(weekStartIso: string): Promise<ActionResul
   const monday = getMondayOfWeek(new Date(parsed.data.weekStartIso))
   const sunday = getSundayOfWeek(monday)
 
-  // Проверяем — нет ли уже меню на эту неделю
+  // 7.6 B.2/B.3: при коллизии — пытаемся вытащить ассоциированный MenuImport
+  // через Dish.menuImportId (тот же канон что в expand-menu / page.tsx) и
+  // вернуть его id, чтобы UI открыл правильный preview импорта.
   const existing = await prisma.menuCycle.findFirst({
-    where: {
-      validFrom: monday,
+    where: { validFrom: monday },
+    select: {
+      id: true,
+      days: {
+        orderBy: { dayOfWeek: 'asc' },
+        take: 1,
+        select: {
+          dishes: {
+            take: 1,
+            select: {
+              dish: {
+                select: {
+                  menuImport: { select: { id: true, status: true } },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   })
 
   if (existing) {
+    const imp = existing.days[0]?.dishes[0]?.dish?.menuImport
+    if (imp && (imp.status === 'DRAFT' || imp.status === 'PENDING_APPROVAL')) {
+      return {
+        ok: false,
+        error: 'На эту неделю уже есть preview AI-импорта. Откройте его в разделе «Импорт меню» и утвердите.',
+        importId: imp.id,
+      }
+    }
     return { ok: false, error: 'Меню на эту неделю уже существует' }
   }
 

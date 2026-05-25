@@ -19,6 +19,38 @@ export default async function MenuPage({ searchParams }: PageProps) {
 
   const menu = await getMenuForWeek(monday)
 
+  // 7.6 B.3: опознаём preview AI-импорта. Только для DRAFT — у APPROVED/PENDING/ARCHIVED
+  // баннер бессмысленен. Связь cycle → import восстанавливается через Dish.menuImportId
+  // (тот же канон что в expand-menu.getMenuStructureFromImport).
+  let previewImportId: string | null = null
+  if (menu && menu.status === 'DRAFT') {
+    const source = await prisma.menuCycle.findUnique({
+      where: { id: menu.id },
+      select: {
+        days: {
+          orderBy: { dayOfWeek: 'asc' },
+          take: 1,
+          select: {
+            dishes: {
+              take: 1,
+              select: {
+                dish: {
+                  select: {
+                    menuImport: { select: { id: true, status: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    const imp = source?.days[0]?.dishes[0]?.dish?.menuImport
+    if (imp && (imp.status === 'DRAFT' || imp.status === 'PENDING_APPROVAL')) {
+      previewImportId = imp.id
+    }
+  }
+
   // Загружаем все активные блюда. Редактор открывается только в DRAFT
   // (isEditable считается в menu-view), но для просмотра меню в других
   // статусах список блюд тоже нужен — каталог может быть полезен в read-only.
@@ -40,6 +72,7 @@ export default async function MenuPage({ searchParams }: PageProps) {
         menu={menu ? serialize(menu) : null}
         dishes={serialize(dishes)}
         userRole={user.role}
+        previewImportId={previewImportId}
       />
     </>
   )
