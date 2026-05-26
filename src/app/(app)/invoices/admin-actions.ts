@@ -344,39 +344,3 @@ export async function revertInvoice(invoiceId: string): Promise<ActionResult> {
   return { ok: true, data: undefined }
 }
 
-/**
- * Подтвердить DRAFT-ингредиент (созданный из накладной): status DRAFT → APPROVED.
- */
-export async function approveDraftIngredient(
-  ingredientId: string
-): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN_PRO'])
-
-  const ing = await prisma.ingredient.findUnique({
-    where: { id: ingredientId },
-    select: { id: true, name: true, status: true },
-  })
-  if (!ing) return { ok: false, error: 'Ингредиент не найден' }
-  if (ing.status === 'APPROVED') {
-    return { ok: false, error: 'Ингредиент уже APPROVED' }
-  }
-
-  await prisma.ingredient.update({
-    where: { id: ingredientId },
-    data: { status: 'APPROVED' },
-  })
-
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      userRole: user.role,
-      action: 'ADMIN_APPROVE_DRAFT_INGREDIENT',
-      entityType: 'Ingredient',
-      entityId: ingredientId,
-      payload: { name: ing.name },
-    },
-  })
-
-  revalidatePath('/ingredients')
-  return { ok: true, data: undefined }
-}

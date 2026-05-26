@@ -1,8 +1,9 @@
 import { Sidebar } from '@/components/layout/sidebar'
 import { MobileNav } from '@/components/layout/mobile-nav'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { isAdminLike } from '@/lib/auth/role-helpers'
+import { isAdminLike, isAdminPro } from '@/lib/auth/role-helpers'
 import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
+import { getDraftIngredientsCount } from '@/lib/db/queries/sidebar-counts'
 import { prisma } from '@/lib/db/prisma'
 
 export default async function AppLayout({
@@ -22,15 +23,24 @@ export default async function AppLayout({
   const canSeeInvoices =
     isAdminLike(user.role) || user.role === 'MANAGER' || user.role === 'CHEF'
 
-  const [pendingCount, inboxCount, invoicesAwaitingCount] = await Promise.all([
-    isAdminOrManager ? countPendingConfirmationToday() : Promise.resolve(0),
-    isAdminOrManager
-      ? prisma.botMessage.count({ where: { direction: 'IN', readAt: null } })
-      : Promise.resolve(0),
-    canSeeInvoices
-      ? prisma.invoice.count({ where: { status: 'AWAITING_ACCEPT' } })
-      : Promise.resolve(0),
-  ])
+  const [pendingCount, inboxCount, invoicesPending, draftIngredientsCount] =
+    await Promise.all([
+      isAdminOrManager ? countPendingConfirmationToday() : Promise.resolve(0),
+      isAdminOrManager
+        ? prisma.botMessage.count({ where: { direction: 'IN', readAt: null } })
+        : Promise.resolve(0),
+      canSeeInvoices
+        ? prisma.invoice.count({ where: { status: 'AWAITING_ACCEPT' } })
+        : Promise.resolve(0),
+      // DRAFT-ингредиенты утверждать может только ADMIN_PRO — не раздуваем
+      // badge остальным ролям (они физически не могут пройти на страницу
+      // /invoices/draft-ingredients и не должны видеть счётчик в сайдбаре).
+      isAdminPro(user.role) ? getDraftIngredientsCount() : Promise.resolve(0),
+    ])
+
+  // Sidebar badge на пункте «Накладные» — сумма "требующих внимания админа":
+  // ожидающие приёмки накладные + новые ингредиенты-черновики (только для PRO).
+  const invoicesAwaitingCount = invoicesPending + draftIngredientsCount
 
   return (
     <div className="min-h-screen bg-bg flex">

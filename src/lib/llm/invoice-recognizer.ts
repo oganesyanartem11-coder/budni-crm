@@ -15,6 +15,7 @@ export type RecognizedInvoiceLine = {
 
 export type RecognizedInvoice = {
   supplierName: string
+  supplierInn?: string | null
   invoiceNumber: string
   invoiceDate: string // ISO YYYY-MM-DD
   totalAmount: number | null
@@ -30,6 +31,11 @@ const INVOICE_TOOL: Anthropic.Messages.Tool = {
     type: 'object',
     properties: {
       supplierName: { type: 'string', description: 'Поставщик/контрагент' },
+      supplierInn: {
+        type: ['string', 'null'],
+        description:
+          'ИНН поставщика — 10 (юр.лицо) или 12 (ИП) цифр. Обычно рядом с реквизитами поставщика. Пусто/null если не виден.',
+      },
       invoiceNumber: { type: 'string', description: 'Номер накладной' },
       invoiceDate: { type: 'string', description: 'Дата накладной в формате YYYY-MM-DD' },
       totalAmount: {
@@ -80,7 +86,8 @@ export async function recognizeInvoiceImage(input: {
 - Цены оставляй как в документе (с НДС или без — не конвертируй).
 - Единицы измерения оставляй как в накладной (г/кг/л/мл/шт/уп) — не нормализуй.
 - Для каждой строки по возможности укажи bounding box в относительных координатах (0-1).
-- Дата накладной в формате YYYY-MM-DD.`
+- Дата накладной в формате YYYY-MM-DD.
+- Если виден ИНН поставщика — извлеки его (только цифры). Если не виден — оставь null.`
 
   const response = await client.messages.create({
     model: getVisionModel(),

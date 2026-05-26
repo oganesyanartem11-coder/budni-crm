@@ -955,6 +955,10 @@ model Invoice {
   // Lower-cased + trimmed копия supplierName для бизнес-ключа и индексов
   // (Postgres collation независимый поиск).
   supplierNameLower String
+  // 7.14B-2: ИНН поставщика (10 или 12 цифр) — извлекается Vision-моделью.
+  // Опционально; используется для будущего сопоставления поставщиков.
+  // VARCHAR(20) синхронизирован с migration.sql — лишний запас на edge-case.
+  supplierInn       String?           @db.VarChar(20)
   invoiceNumber     String
   invoiceDate       DateTime
   receivedAt        DateTime          @default(now())
@@ -987,6 +991,7 @@ model Invoice {
   @@index([status, progress])
   @@index([receivedAt])
   @@index([supplierNameLower])
+  @@index([supplierInn])
 }
 
 model InvoiceLine {

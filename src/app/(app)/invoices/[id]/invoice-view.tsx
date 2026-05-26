@@ -5,7 +5,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ArrowLeft, ArrowRight, Loader2, CheckCircle2, X, RotateCcw, AlertCircle } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Loader2, CheckCircle2, X, RotateCcw, AlertTriangle } from 'lucide-react'
 import type { InvoiceConfidence, InvoiceMatchAction, PriceChangeLevel, UserRole } from '@prisma/client'
 import { cn } from '@/lib/utils/cn'
 import { formatMoneyRu } from '@/lib/digest/format'
@@ -14,11 +14,9 @@ import { isAdminPro } from '@/lib/auth/role-helpers'
 import { InvoiceStatusChip } from '@/lib/invoices/status-chip'
 import { acceptInvoice } from '../admin-actions'
 import { FailedState } from './failed-state'
-// Эти компоненты создаёт Subagent C — на момент сборки A.4 их может ещё не быть,
-// tsc будет ругаться (это ожидаемо параллельно).
 import { RejectDialog } from './reject-dialog'
 import { RevertDialog } from './revert-dialog'
-import { BboxOverlay } from './bbox-overlay'
+import { LineIndicator } from './line-indicator'
 
 // ------------------------- input shape -------------------------------------
 // page.tsx передаёт serialize(invoice) — Decimal становится number, Date остаётся Date.
@@ -80,12 +78,16 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
   const [isAccepting, startAccept] = useTransition()
   const [rejectOpen, setRejectOpen] = useState(false)
   const [revertOpen, setRevertOpen] = useState(false)
-  const [hoveredLineId, setHoveredLineId] = useState<string | null>(null)
+  const [hoveredLineIndex, setHoveredLineIndex] = useState<number | null>(null)
 
   const adminPro = isAdminPro(currentUserRole)
   const isAwaiting = invoice.status === 'AWAITING_ACCEPT'
   const isAccepted = invoice.status === 'ACCEPTED'
   const isFailed = invoice.status === 'FAILED'
+
+  const linesNeedingAttention = invoice.lines.filter(
+    (l) => l.aiConfidence === 'LOW' || l.aiConfidence === 'MEDIUM',
+  ).length
 
   function onAccept() {
     startAccept(async () => {
@@ -94,9 +96,16 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
         toast.error(r.error)
         return
       }
-      toast.success('Накладная принята')
-      router.refresh()
+      toast.success('Накладная принята, цены обновлены')
+      router.push('/invoices')
     })
+  }
+
+  function handleScrollToAttention() {
+    const target = document.querySelector('[data-line-attention="true"]')
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
   }
 
   return (
@@ -119,7 +128,19 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
               № {invoice.invoiceNumber} · {formatDateLong(invoice.invoiceDate)}
             </p>
           </div>
-          <InvoiceStatusChip status={invoice.status} className="mt-1" />
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            <InvoiceStatusChip status={invoice.status} />
+            {linesNeedingAttention > 0 && (
+              <button
+                type="button"
+                onClick={handleScrollToAttention}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill text-xs font-medium bg-warning/10 text-warning-fg hover:bg-warning/20 transition-colors"
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {linesNeedingAttention} строк требуют проверки
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Audit */}
@@ -137,14 +158,21 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
               Откатил {invoice.revertedBy.name} · {formatDateTimeMsk(invoice.revertedAt)}
             </p>
           )}
-          {invoice.exifSuspicious && (
-            <p className="text-warning-fg flex items-center gap-1">
-              <AlertCircle className="w-3.5 h-3.5" />
-              EXIF подозрительный — фото может быть не свежее
-            </p>
-          )}
         </div>
       </header>
+
+      {/* EXIF suspicious warning */}
+      {invoice.exifSuspicious && (
+        <div className="rounded-2xl border border-warning/30 bg-warning/10 p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-warning-fg shrink-0 mt-0.5" />
+          <div>
+            <p className="font-medium text-warning-fg">Фото без EXIF-метаданных</p>
+            <p className="text-sm text-fg-muted mt-0.5">
+              Возможно, фото отредактировано или взято из стороннего источника. Проверьте подлинность вручную.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* FAILED — общий компонент FailedState (с retry + ссылкой на оригинал фото). */}
       {isFailed && (
@@ -160,35 +188,33 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Левая колонка — фото */}
         <div className="lg:sticky lg:top-6 lg:self-start space-y-3">
-          <a
-            href={invoice.imageUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block relative rounded-2xl border border-border overflow-hidden bg-surface"
-          >
-            {invoice.imageUrl ? (
-              <Image
-                src={invoice.imageUrl}
-                alt={`Накладная ${invoice.supplierName} № ${invoice.invoiceNumber}`}
-                width={invoice.imageWidth ?? 1600}
-                height={invoice.imageHeight ?? 2000}
-                className="w-full h-auto"
-                sizes="(max-width: 1024px) 100vw, 50vw"
-              />
-            ) : (
-              <div className="aspect-[3/4] flex items-center justify-center text-fg-subtle text-sm">
-                Фото удалено
-              </div>
-            )}
-            {invoice.imageUrl && (
-              <BboxOverlay
-                lines={invoice.lines}
-                imageWidth={invoice.imageWidth ?? 1600}
-                imageHeight={invoice.imageHeight ?? 2000}
-                hoveredLineId={hoveredLineId}
-              />
-            )}
-          </a>
+          <div className="relative">
+            <LineIndicator
+              hoveredLineIndex={hoveredLineIndex}
+              totalLines={invoice.lines.length}
+            />
+            <a
+              href={invoice.imageUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block relative rounded-2xl border border-border overflow-hidden bg-surface"
+            >
+              {invoice.imageUrl ? (
+                <Image
+                  src={invoice.imageUrl}
+                  alt={`Накладная ${invoice.supplierName} № ${invoice.invoiceNumber}`}
+                  width={invoice.imageWidth ?? 1600}
+                  height={invoice.imageHeight ?? 2000}
+                  className="w-full h-auto"
+                  sizes="(max-width: 1024px) 100vw, 50vw"
+                />
+              ) : (
+                <div className="aspect-[3/4] flex items-center justify-center text-fg-subtle text-sm">
+                  Фото удалено
+                </div>
+              )}
+            </a>
+          </div>
           {invoice.totalAmount !== null && (
             <div className="text-sm text-fg-muted">
               Итого: <span className="font-semibold text-fg">{formatMoneyRu(invoice.totalAmount)}</span>
@@ -203,12 +229,12 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
               В накладной нет распознанных позиций.
             </div>
           ) : (
-            invoice.lines.map((line) => (
+            invoice.lines.map((line, idx) => (
               <InvoiceLineCard
                 key={line.id}
                 line={line}
-                isHovered={hoveredLineId === line.id}
-                onHoverChange={(h) => setHoveredLineId(h ? line.id : null)}
+                isHovered={hoveredLineIndex === idx}
+                onHoverChange={(h) => setHoveredLineIndex(h ? idx : null)}
               />
             ))
           )}
@@ -313,9 +339,14 @@ function InvoiceLineCard({
   const conf = CONFIDENCE_STYLES[line.aiConfidence]
   const pc = PRICE_CHANGE_STYLES[line.priceChangeLevel]
   const isLow = line.aiConfidence === 'LOW'
+  const needsAttention = line.aiConfidence === 'LOW' || line.aiConfidence === 'MEDIUM'
+  const showAiContext =
+    !!line.aiContext &&
+    !(line.aiConfidence === 'HIGH' && line.matchedAction === 'MATCHED_EXISTING')
 
   return (
     <div
+      data-line-attention={needsAttention ? 'true' : 'false'}
       onMouseEnter={() => onHoverChange(true)}
       onMouseLeave={() => onHoverChange(false)}
       className={cn(
@@ -351,7 +382,7 @@ function InvoiceLineCard({
         </p>
       )}
 
-      {line.aiContext && (
+      {showAiContext && (
         <p className="text-xs italic text-fg-muted whitespace-pre-wrap">
           {line.aiContext}
         </p>

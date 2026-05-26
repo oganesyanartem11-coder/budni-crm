@@ -1,9 +1,10 @@
 import Link from 'next/link'
-import { ReceiptText, ChevronRight, Sparkles } from 'lucide-react'
+import { ReceiptText, ChevronRight, Sparkles, Search as SearchIcon } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 import { InvoiceStatusChip } from '@/lib/invoices/status-chip'
-import { formatDateLong } from '@/lib/utils/format'
+import { formatDateLong, pluralize } from '@/lib/utils/format'
 import { formatMoneyRu } from '@/lib/digest/format'
+import { SearchBar } from './search-bar'
 import type { InvoiceStatus } from '@prisma/client'
 
 interface InvoiceRow {
@@ -29,10 +30,15 @@ const STATUS_FILTERS: Array<{ key: 'all' | InvoiceStatus; label: string }> = [
   { key: 'REVERTED', label: 'Откаченные' },
 ]
 
-function buildHref(key: 'all' | InvoiceStatus, supplier?: string): string {
+function buildHref(
+  key: 'all' | InvoiceStatus,
+  supplier?: string,
+  q?: string
+): string {
   const sp = new URLSearchParams()
   if (key !== 'all') sp.set('status', key)
   if (supplier) sp.set('supplier', supplier)
+  if (q) sp.set('q', q)
   const qs = sp.toString()
   return qs ? `/invoices?${qs}` : '/invoices'
 }
@@ -41,20 +47,56 @@ export function InvoicesList({
   invoices,
   activeStatus,
   activeSupplier,
+  activeQuery,
+  draftIngredientsCount,
 }: {
   invoices: InvoiceRow[]
   activeStatus: InvoiceStatus | undefined
   activeSupplier: string | undefined
+  activeQuery: string | undefined
+  draftIngredientsCount: number
 }) {
+  const hasActiveFilters = Boolean(activeStatus || activeSupplier || activeQuery)
+
   return (
     <div className="space-y-4">
+      {draftIngredientsCount > 0 && (
+        <Link
+          href="/invoices/draft-ingredients"
+          className="block rounded-2xl border border-info/30 bg-info/5 p-4 hover:bg-info/10 transition-colors"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Sparkles className="w-5 h-5 text-info-fg shrink-0" />
+              <div>
+                <p className="font-medium text-fg">
+                  🆕 {draftIngredientsCount}{' '}
+                  {pluralize(draftIngredientsCount, [
+                    'новый ингредиент',
+                    'новых ингредиента',
+                    'новых ингредиентов',
+                  ])}{' '}
+                  ждут утверждения
+                </p>
+                <p className="text-sm text-fg-muted">
+                  Проверьте и утвердите или объедините с существующими
+                </p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-fg-subtle shrink-0" />
+          </div>
+        </Link>
+      )}
+
+      <SearchBar initial={activeQuery} />
+
       <div className="flex flex-wrap gap-1.5">
         {STATUS_FILTERS.map((f) => {
           const isActive = f.key === 'all' ? !activeStatus : activeStatus === f.key
           return (
             <Link
               key={f.key}
-              href={buildHref(f.key, activeSupplier)}
+              href={buildHref(f.key, activeSupplier, activeQuery)}
               className={`px-3 py-1.5 rounded-pill text-xs font-medium transition-colors ${
                 isActive
                   ? 'bg-accent text-accent-fg'
@@ -68,20 +110,36 @@ export function InvoicesList({
       </div>
 
       {invoices.length === 0 ? (
-        <EmptyState
-          icon={ReceiptText}
-          title="Накладных пока нет"
-          description="Сфотографируйте накладную — AI распознает позиции и сопоставит с базой ингредиентов."
-          cta={
-            <Link
-              href="/invoices/new"
-              className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity inline-flex items-center gap-2"
-            >
-              <Sparkles className="w-4 h-4" />
-              Загрузить накладную
-            </Link>
-          }
-        />
+        hasActiveFilters ? (
+          <EmptyState
+            icon={SearchIcon}
+            title="Не найдено накладных по фильтрам"
+            description="Попробуйте изменить фильтры или поисковый запрос."
+            cta={
+              <Link
+                href="/invoices"
+                className="px-5 py-2.5 rounded-pill border border-border text-fg font-medium text-sm hover:bg-fg/5 transition-colors inline-flex items-center gap-2"
+              >
+                Сбросить фильтры
+              </Link>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={ReceiptText}
+            title="📦 Пока ни одной накладной"
+            description="Сфотографируйте накладную — AI распознает позиции и сопоставит с базой ингредиентов."
+            cta={
+              <Link
+                href="/invoices/new"
+                className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity inline-flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                Загрузить накладную
+              </Link>
+            }
+          />
+        )
       ) : (
         <div className="space-y-2">
           {invoices.map((inv) => (

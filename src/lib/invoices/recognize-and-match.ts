@@ -123,6 +123,7 @@ export async function recognizeInvoice(invoiceId: string): Promise<void> {
         data: {
           supplierName: recognized.supplierName,
           supplierNameLower: supplierLower,
+          supplierInn: recognized.supplierInn ?? null,
           invoiceNumber: recognized.invoiceNumber,
           invoiceDate: new Date(recognized.invoiceDate),
           totalAmount: recognized.totalAmount ?? undefined,

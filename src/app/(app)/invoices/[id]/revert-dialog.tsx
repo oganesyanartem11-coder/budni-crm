@@ -29,9 +29,9 @@ export function RevertDialog({ invoiceId, open, onOpenChange }: Props) {
     startTransition(async () => {
       const r = await revertInvoice(invoiceId)
       if (r.ok) {
-        toast.success('Приёмка откачена')
+        toast.success('Приёмка откачена, цены возвращены')
         onOpenChange(false)
-        router.refresh()
+        router.push('/invoices')
       } else {
         toast.error(r.error)
       }

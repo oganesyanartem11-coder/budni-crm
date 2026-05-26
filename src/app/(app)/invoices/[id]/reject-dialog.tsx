@@ -44,7 +44,7 @@ export function RejectDialog({ invoiceId, open, onOpenChange }: Props) {
         toast.success('Накладная отклонена')
         onOpenChange(false)
         setReason('')
-        router.refresh()
+        router.push('/invoices')
       } else {
         toast.error(r.error)
       }
