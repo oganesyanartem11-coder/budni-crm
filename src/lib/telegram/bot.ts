@@ -2,6 +2,7 @@ import { Bot } from 'grammy'
 import type { CommandContext, Context } from 'grammy'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
+import { dispatchCallback } from './callback-router'
 import { getTelegramEnv } from './env'
 
 interface TelegramBotCache {
@@ -102,6 +103,7 @@ async function handleOtherMessage(ctx: Context): Promise<void> {
 
 function registerHandlers(bot: Bot): void {
   bot.command('start', handleStart)
+  bot.on('callback_query:data', dispatchCallback)
   bot.on('message', handleOtherMessage)
 }
 
