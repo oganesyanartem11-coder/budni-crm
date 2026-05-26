@@ -332,6 +332,7 @@ model Client {
   inboxItems       InboxItem[]
   updDocuments     UpdDocument[]
   toneAlerts       ToneAlertLog[]
+  clientAlerts     ClientAlertLog[]
 
   @@index([isActive])
   @@index([name])
@@ -836,6 +837,7 @@ model InboxItem {
   createdAt           DateTime          @default(now())
   resolvedAt          DateTime?
   lastPushedAt        DateTime? // когда последний раз пушили менеджерам в MAX
+  alerts              ClientAlertLog[]
 
   @@index([status, createdAt])
   @@index([priority, status])
@@ -1042,4 +1044,25 @@ model ToneAlertLog {
   createdAt DateTime @default(now())
 
   @@index([clientId, tone, createdAt])
+}
+
+// ============================================================
+// CLIENT ALERTS (Спринт 7.15.B) — единый лог Telegram-алёртов
+// о клиентах. Заменяет split logic между ToneAlertLog (7.15) и
+// InboxItem.lastPushedAt (5.x). Per-client 2-мин cooldown с
+// escalation rule (urgent прорывается через rude-cooldown).
+// ============================================================
+
+model ClientAlertLog {
+  id          String     @id @default(cuid())
+  clientId    String
+  client      Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  inboxItemId String?
+  inboxItem   InboxItem? @relation(fields: [inboxItemId], references: [id], onDelete: SetNull)
+  tone        String? // 'rude' | 'urgent' | null
+  reason      String? // InboxItemReason value | null
+  priority    String? // 'HIGH' | 'NORMAL' | null
+  createdAt   DateTime   @default(now())
+
+  @@index([clientId, createdAt])
 }

@@ -219,6 +219,66 @@ export async function notifyToneRecipients(
   return { sentTo, skippedNoTelegram, failed }
 }
 
+/**
+ * 7.15.B: единый список получателей алёртов о клиентах (inbox + tone слиты).
+ *
+ * Список = все активные ADMIN/MANAGER/ADMIN_PRO ∪ User.receivesToneAlerts=true.
+ * Семантически это «все получатели критичных клиентских алёртов» — широкий
+ * охват по умолчанию + addressable через флаг для не-ролевых юзеров.
+ *
+ * Используется в notifyClientSignal (объединённый канал). Старые
+ * notifyAllManagersDirect / notifyToneRecipients оставлены для backward
+ * compat вызовов (digest, прочее).
+ */
+export async function notifyAlertRecipients(
+  text: string,
+  opts?: NotifyOptions
+): Promise<NotifyAllManagersResult> {
+  const recipients = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { role: { in: ['ADMIN', 'MANAGER', 'ADMIN_PRO'] } },
+        { receivesToneAlerts: true },
+      ],
+    },
+    select: { id: true, telegramChatId: true },
+  })
+
+  const withTelegram = recipients.filter((u) => u.telegramChatId !== null)
+  const skippedNoTelegram = recipients.length - withTelegram.length
+
+  if (withTelegram.length === 0) {
+    console.warn(
+      `[telegram/notify] notifyAlertRecipients: no recipients with telegramChatId ` +
+        `(total: ${recipients.length})`
+    )
+    return { sentTo: 0, skippedNoTelegram, failed: 0 }
+  }
+
+  const sends = await Promise.allSettled(
+    withTelegram.map((u) =>
+      sendTelegramMessage(u.telegramChatId as string, text, {
+        parseMode: opts?.parseMode ?? DEFAULT_PARSE_MODE,
+        replyMarkup: opts?.replyMarkup,
+      })
+    )
+  )
+
+  let sentTo = 0
+  let failed = 0
+  for (const s of sends) {
+    if (s.status === 'fulfilled' && s.value.ok) sentTo++
+    else failed++
+  }
+
+  console.log(
+    `[telegram/notify] notifyAlertRecipients: sentTo=${sentTo} skippedNoTelegram=${skippedNoTelegram} failed=${failed}`
+  )
+
+  return { sentTo, skippedNoTelegram, failed }
+}
+
 export interface NotifyGroupResult {
   ok: boolean
   error?: string

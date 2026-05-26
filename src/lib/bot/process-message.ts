@@ -6,8 +6,7 @@ import { getClientStats } from '@/lib/orders/client-stats'
 import { isPastCutoff } from '@/lib/orders/cutoff'
 import { saveBotOrders } from './save-orders'
 import { createInboxItem } from './create-inbox-item'
-import { notifyManagersAboutInboxItem } from './notify-managers'
-import { notifyToneAlert } from './notify-tone-alert'
+import { notifyClientSignal } from './notify-client-signal'
 import { classifyMessageTone } from '@/lib/llm/tone-classifier'
 import { logBotMessage } from './log-message'
 import {
@@ -122,19 +121,11 @@ async function handleBotResponse(
     toneLabel: parsed.toneLabel,
   })
 
-  // 7.15: TG-алёрт менеджерам при rude/urgent тоне. rude — c 15-мин cooldown
-  // на (clientId, tone) через ToneAlertLog; urgent — без cooldown (прорывается).
-  // Алёрт независим от веток ABCD ниже — нужен сам факт негатива в новом IN.
-  if (parsed.toneLabel === 'rude' || parsed.toneLabel === 'urgent') {
-    await notifyToneAlert({
-      clientId: client.id,
-      conversationId: conv.id,
-      tone: parsed.toneLabel,
-      messageText: text,
-    }).catch((e) => {
-      console.error('[bot] notifyToneAlert failed:', e)
-    })
-  }
+  // 7.15.B: tone-only алёрт (КЕЙС A — заказ принят, но клиент написал rude/urgent)
+  // отправляется НИЖЕ перед return-saved. Для КЕЙСОВ C/D алёрт объединён с
+  // notifyClientSignal про InboxItem — отдельный tone-вызов не нужен.
+  const alertTone =
+    parsed.toneLabel === 'rude' || parsed.toneLabel === 'urgent' ? parsed.toneLabel : null
 
   // Аномалии содержания (без cutoff — cutoff обрабатываем отдельно как кейс C
   // с сохранением заказа). isPastCutoff=false внутри detectAnomalies, чтобы
@@ -174,8 +165,15 @@ async function handleBotResponse(
       } as Prisma.InputJsonValue,
     })
 
-    await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
-      console.error('[bot] notifyManagers failed:', e)
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: text,
+      inboxItemId: inbox.id,
+      tone: alertTone,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => {
+      console.error('[bot] notifyClientSignal failed:', e)
     })
 
     return { reply: null, action: 'inbox', inboxItemId: inbox.id }
@@ -246,16 +244,24 @@ async function handleBotResponse(
       clientMessage: text,
       parsedJson: parsed as unknown as Prisma.InputJsonValue,
     })
-    await notifyManagersAboutInboxItem(inbox.id).catch((e) => {
-      console.error('[bot] notifyManagers failed:', e)
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: text,
+      inboxItemId: inbox.id,
+      tone: alertTone,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => {
+      console.error('[bot] notifyClientSignal failed:', e)
     })
 
     return { reply: POST_CUTOFF_REPLY, action: 'post_cutoff', inboxItemId: inbox.id }
   }
 
   if (wasFirstAnswer) {
-    // КЕЙС A — первый ответ до 16:00. Без инбокса, без push'а: клиент попадёт
-    // в сводку cron'ом 14:00 / 15:30 как «принято».
+    // КЕЙС A — первый ответ до 16:00. Заказ принят, в обычной ветке инбокса нет.
+    // 7.15.B: если тон rude/urgent — всё равно шлём tone-only алёрт (inboxItemId=null,
+    // reason=null). notifyClientSignal сам решит про cooldown.
     await prisma.botConversation.update({
       where: { id: conv.id },
       data: { status: 'CONFIRMED' },
@@ -269,6 +275,19 @@ async function handleBotResponse(
       direction: 'OUT',
       text: reply,
     })
+
+    if (alertTone) {
+      await notifyClientSignal({
+        clientId: client.id,
+        messageText: text,
+        inboxItemId: null,
+        tone: alertTone,
+        reason: null,
+        priority: null,
+      }).catch((e) => {
+        console.error('[bot] notifyClientSignal failed (saved-with-tone):', e)
+      })
+    }
 
     return { reply, action: 'saved' }
   }
@@ -356,18 +375,9 @@ async function handleSpontaneous(
     toneLabel: spontaneousTone,
   })
 
-  // Алёрт менеджерам при rude/urgent. conversationId передаём null — spontaneous
-  // BotConversation тут техническая (создаётся для логирования), не cron-driven.
-  if (spontaneousTone === 'rude' || spontaneousTone === 'urgent') {
-    await notifyToneAlert({
-      clientId: client.id,
-      conversationId: null,
-      tone: spontaneousTone,
-      messageText: text,
-    }).catch((e) => {
-      console.error('[bot] notifyToneAlert failed (spontaneous):', e)
-    })
-  }
+  // 7.15.B: tone-сигнал шлём вместе с inbox-сигналом ниже через notifyClientSignal.
+  const spontaneousAlertTone =
+    spontaneousTone === 'rude' || spontaneousTone === 'urgent' ? spontaneousTone : null
 
   // Дедупим InboxItem по conv. Reopened → новый item.
   let inboxItem = isReopenedConversation
@@ -399,8 +409,15 @@ async function handleSpontaneous(
     })
   }
 
-  await notifyManagersAboutInboxItem(inboxItem.id).catch((e) => {
-    console.error('[bot] notifyManagers failed:', e)
+  await notifyClientSignal({
+    clientId: client.id,
+    messageText: text,
+    inboxItemId: inboxItem.id,
+    tone: spontaneousAlertTone,
+    reason: inboxItem.reason,
+    priority: inboxItem.priority,
+  }).catch((e) => {
+    console.error('[bot] notifyClientSignal failed (spontaneous):', e)
   })
 
   return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
