@@ -12,7 +12,7 @@ import { orderDetailButton } from '@/lib/telegram/buttons'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { formatDateShort } from '@/lib/utils/format'
 import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
-import { MealType } from '@prisma/client'
+import { MealType, type UserRole } from '@prisma/client'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -326,12 +326,15 @@ const editOrderSchema = z.object({
  * Не для PENDING_CONFIRMATION — для них есть confirmDynamicOrder.
  * Не для CANCELLED/DELIVERED — это финальные статусы.
  */
-export async function editOrderPortions(
-  formData: z.infer<typeof editOrderSchema>
+export async function editOrderPortionsCore(
+  user: { id: string; role: UserRole },
+  rawInput: unknown,
 ): Promise<ActionResult<{ editedAfterLock: boolean }>> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  if (!['ADMIN', 'ADMIN_PRO', 'MANAGER'].includes(user.role)) {
+    return { ok: false, error: 'Нет прав' }
+  }
 
-  const parsed = editOrderSchema.safeParse(formData)
+  const parsed = editOrderSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
@@ -403,12 +406,18 @@ export async function editOrderPortions(
   // Кухня и курьер должны узнать что их данные устарели. Если push упал —
   // НЕ блокируем save: менеджер уже сохранил, мы только пишем в лог.
   if (afterCutoff) {
+    const userRow = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { name: true },
+    })
+    const userName = userRow?.name ?? 'неизвестно'
+
     const text =
       `⚠️ <b>Правка заказа после 16:00</b>\n\n` +
       `${escapeHtml(order.client.name)} · ${escapeHtml(order.location.name)}\n` +
       `${MEAL_TYPE_LABELS[order.mealType]} на ${formatDateShort(order.deliveryDate)}\n\n` +
       `Было: <b>${order.portions}</b> → Стало: <b>${portions}</b>\n` +
-      `Правил: ${escapeHtml(user.name)}\n\n` +
+      `Правил: ${escapeHtml(userName)}\n\n` +
       `Кухня и курьер: учтите изменения.`
 
     const pushResult = await notifyGroup(text, {
@@ -433,8 +442,16 @@ export async function editOrderPortions(
     })
   }
 
-  revalidatePath('/orders')
   return { ok: true, data: { editedAfterLock: afterCutoff } }
+}
+
+export async function editOrderPortions(
+  formData: z.infer<typeof editOrderSchema>
+): Promise<ActionResult<{ editedAfterLock: boolean }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const result = await editOrderPortionsCore({ id: user.id, role: user.role }, formData)
+  if (result.ok) revalidatePath('/orders')
+  return result
 }
 
 const cancelOrderSchema = z.object({
@@ -447,12 +464,15 @@ const cancelOrderSchema = z.object({
  * Отменяет заказ. Работает на любом статусе кроме DELIVERED/CANCELLED.
  * Записывает в ActivityLog с причиной.
  */
-export async function cancelOrder(
-  formData: z.infer<typeof cancelOrderSchema>
+export async function cancelOrderCore(
+  user: { id: string; role: UserRole },
+  rawInput: unknown,
 ): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  if (!['ADMIN', 'ADMIN_PRO', 'MANAGER'].includes(user.role)) {
+    return { ok: false, error: 'Нет прав' }
+  }
 
-  const parsed = cancelOrderSchema.safeParse(formData)
+  const parsed = cancelOrderSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
@@ -500,9 +520,20 @@ export async function cancelOrder(
     },
   })
 
-  revalidatePath('/orders')
-  revalidatePath(`/orders/${orderId}`)
   return { ok: true, data: undefined }
+}
+
+export async function cancelOrder(
+  formData: z.infer<typeof cancelOrderSchema>
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const result = await cancelOrderCore({ id: user.id, role: user.role }, formData)
+  if (result.ok) {
+    const orderId = (formData as { orderId?: string })?.orderId
+    revalidatePath('/orders')
+    if (orderId) revalidatePath(`/orders/${orderId}`)
+  }
+  return result
 }
 
 const rescheduleOrderSchema = z.object({
@@ -516,12 +547,15 @@ const rescheduleOrderSchema = z.object({
  * проверяем что на новой дате нет другого активного заказа
  * с тем же бизнес-ключом (clientId + locationId + mealType).
  */
-export async function rescheduleOrder(
-  formData: z.infer<typeof rescheduleOrderSchema>
+export async function rescheduleOrderCore(
+  user: { id: string; role: UserRole },
+  rawInput: unknown,
 ): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  if (!['ADMIN', 'ADMIN_PRO', 'MANAGER'].includes(user.role)) {
+    return { ok: false, error: 'Нет прав' }
+  }
 
-  const parsed = rescheduleOrderSchema.safeParse(formData)
+  const parsed = rescheduleOrderSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
@@ -606,9 +640,20 @@ export async function rescheduleOrder(
     },
   })
 
-  revalidatePath('/orders')
-  revalidatePath(`/orders/${orderId}`)
   return { ok: true, data: undefined }
+}
+
+export async function rescheduleOrder(
+  formData: z.infer<typeof rescheduleOrderSchema>
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const result = await rescheduleOrderCore({ id: user.id, role: user.role }, formData)
+  if (result.ok) {
+    const orderId = (formData as { orderId?: string })?.orderId
+    revalidatePath('/orders')
+    if (orderId) revalidatePath(`/orders/${orderId}`)
+  }
+  return result
 }
 
 
@@ -693,12 +738,15 @@ const restoreOrderSchema = z.object({
  * "правка после lock") и пишет специальный action в ActivityLog —
  * кухня/курьер должны узнать что их данные снова актуальны.
  */
-export async function restoreOrder(
-  formData: z.infer<typeof restoreOrderSchema>
+export async function restoreOrderCore(
+  user: { id: string; role: UserRole },
+  rawInput: unknown,
 ): Promise<ActionResult<{ editedAfterLock: boolean }>> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  if (!['ADMIN', 'ADMIN_PRO', 'MANAGER'].includes(user.role)) {
+    return { ok: false, error: 'Нет прав' }
+  }
 
-  const parsed = restoreOrderSchema.safeParse(formData)
+  const parsed = restoreOrderSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
@@ -754,9 +802,20 @@ export async function restoreOrder(
     },
   })
 
-  revalidatePath('/orders')
-  revalidatePath(`/orders/${orderId}`)
   return { ok: true, data: { editedAfterLock: afterCutoff } }
+}
+
+export async function restoreOrder(
+  formData: z.infer<typeof restoreOrderSchema>
+): Promise<ActionResult<{ editedAfterLock: boolean }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const result = await restoreOrderCore({ id: user.id, role: user.role }, formData)
+  if (result.ok) {
+    const orderId = (formData as { orderId?: string })?.orderId
+    revalidatePath('/orders')
+    if (orderId) revalidatePath(`/orders/${orderId}`)
+  }
+  return result
 }
 
 const addOrderNoteSchema = z.object({
@@ -773,12 +832,15 @@ const addOrderNoteSchema = z.object({
  * Не разрешено для CANCELLED/DELIVERED: финальные статусы, добавлять туда
  * новые заметки — путать аудит.
  */
-export async function addOrderNote(
-  formData: z.infer<typeof addOrderNoteSchema>
+export async function addOrderNoteCore(
+  user: { id: string; role: UserRole },
+  rawInput: unknown,
 ): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  if (!['ADMIN', 'ADMIN_PRO', 'MANAGER'].includes(user.role)) {
+    return { ok: false, error: 'Нет прав' }
+  }
 
-  const parsed = addOrderNoteSchema.safeParse(formData)
+  const parsed = addOrderNoteSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
@@ -825,9 +887,20 @@ export async function addOrderNote(
     },
   })
 
-  revalidatePath('/orders')
-  revalidatePath(`/orders/${orderId}`)
   return { ok: true, data: undefined }
+}
+
+export async function addOrderNote(
+  formData: z.infer<typeof addOrderNoteSchema>
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const result = await addOrderNoteCore({ id: user.id, role: user.role }, formData)
+  if (result.ok) {
+    const orderId = (formData as { orderId?: string })?.orderId
+    revalidatePath('/orders')
+    if (orderId) revalidatePath(`/orders/${orderId}`)
+  }
+  return result
 }
 
 const createOneTimeOrderSchema = z.object({
@@ -848,12 +921,15 @@ const createOneTimeOrderSchema = z.object({
  * Дубль-проверка по бизнес-ключу {clientId, locationId, mealType, deliveryDate}
  * — иначе вместо createOneTimeOrder надо использовать editOrderPortions.
  */
-export async function createOneTimeOrder(
-  formData: z.infer<typeof createOneTimeOrderSchema>
+export async function createOneTimeOrderCore(
+  user: { id: string; role: UserRole },
+  rawInput: unknown,
 ): Promise<ActionResult<{ orderId: string }>> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  if (!['ADMIN', 'ADMIN_PRO', 'MANAGER'].includes(user.role)) {
+    return { ok: false, error: 'Нет прав' }
+  }
 
-  const parsed = createOneTimeOrderSchema.safeParse(formData)
+  const parsed = createOneTimeOrderSchema.safeParse(rawInput)
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
   }
@@ -993,6 +1069,14 @@ export async function createOneTimeOrder(
     },
   })
 
-  revalidatePath('/orders')
   return { ok: true, data: { orderId: newOrder.id } }
+}
+
+export async function createOneTimeOrder(
+  formData: z.infer<typeof createOneTimeOrderSchema>
+): Promise<ActionResult<{ orderId: string }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const result = await createOneTimeOrderCore({ id: user.id, role: user.role }, formData)
+  if (result.ok) revalidatePath('/orders')
+  return result
 }

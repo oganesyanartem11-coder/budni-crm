@@ -1,57 +1,34 @@
 /**
- * Executor для Боря-pending-actions (Спринт 7.16.A.2, блок B2).
+ * Executor для Боря-pending-actions.
  *
  * После того как пользователь нажимает inline-кнопку «Подтверждаю»,
- * обвязка (telegram/bot.ts в B3) вызывает executePendingAction(id, userId).
+ * обвязка (telegram/bot.ts) вызывает executePendingAction(id, userId).
  *
  * Что делаем:
  * - Загружаем BorisPendingAction
  * - Проверяем что записан тем же userId (через conversation)
  * - Проверяем что не executed/cancelled/expired
- * - Идём по actions[] и для каждого зовём соответствующий server action
- *   из @/app/(app)/orders/actions
+ * - Подгружаем User из БД (id + role) и вызываем *Core-функции
+ *   из @/app/(app)/orders/actions с явным user аргументом.
+ *   ⚠️ Боря вызывает Core, а НЕ server action wrapper —
+ *   wrapper вызывает requireRole, который читает cookies; в TG webhook
+ *   контексте cookies нет, redirect('/login') бросит NEXT_REDIRECT.
  * - Помечаем executedAt после прохода
  *
- * Tolerance: один tool падает — остальные продолжают. Это лучше чем
- * атомарный rollback, потому что server actions не транзакционны
- * (они каждый делает свои revalidatePath/notifyGroup), и мы не хотим
- * валить весь batch из-за одной ошибки.
- *
- * Server actions используются с `as never` каст потому, что они принимают
- * z.infer<их Zod-схема>; JSON в БД теряет precise тип, но валидация всё
- * равно произойдёт внутри самого action (safeParse).
- *
- * NB: restoreOrder/addOrderNote/createOneTimeOrder/rescheduleOrder будут
- * добавлены параллельно в блоке B1. На момент когда B2 пишется они могут
- * не существовать — TS поймает это при финальном tsc, и B1 импортирует
- * их к моменту мерджа.
+ * Tolerance: один tool падает — остальные продолжают. Server actions не
+ * транзакционны между собой (revalidatePath/notifyGroup), и атомарный
+ * rollback всё равно невозможен — лучше частичный успех с прозрачным отчётом.
  */
 
 import { prisma } from '@/lib/db/prisma'
 import {
-  editOrderPortions,
-  cancelOrder,
-  restoreOrder,
-  rescheduleOrder,
-  addOrderNote,
-  createOneTimeOrder,
+  editOrderPortionsCore,
+  cancelOrderCore,
+  restoreOrderCore,
+  rescheduleOrderCore,
+  addOrderNoteCore,
+  createOneTimeOrderCore,
 } from '@/app/(app)/orders/actions'
-
-/**
- * Server actions внутри зовут revalidatePath/redirect — те бросают NEXT_REDIRECT
- * "сигнал" (special error с digest='NEXT_REDIRECT;...'). В React Server Components
- * этот сигнал ловит Next.js, но мы вызываем actions из контекста TG-бота — здесь
- * сигнал долетает до нашего try/catch. Действие при этом уже совершилось в БД,
- * просто навигационный signal не у дел. Трактуем как успех.
- *
- * Проверка через digest.startsWith — стабильный API (не зависит от internal
- * Next-импорта next/dist/client/components/redirect-error).
- */
-function isNextRedirect(e: unknown): boolean {
-  if (typeof e !== 'object' || e === null || !('digest' in e)) return false
-  const digest = (e as { digest?: unknown }).digest
-  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')
-}
 
 export interface ExecuteResultItem {
   tool: string
@@ -87,6 +64,14 @@ export async function executePendingAction(
     return { ok: false, results: [{ tool: '_', ok: false, error: 'expired' }] }
   }
 
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true },
+  })
+  if (!user) {
+    return { ok: false, results: [{ tool: '_', ok: false, error: 'user_not_found' }] }
+  }
+
   const actions = pending.actions as Array<{
     tool: string
     input: Record<string, unknown>
@@ -98,22 +83,22 @@ export async function executePendingAction(
       let r: { ok: boolean; error?: string; data?: unknown }
       switch (a.tool) {
         case 'edit_order_portions':
-          r = await editOrderPortions(a.input as never)
+          r = await editOrderPortionsCore(user, a.input)
           break
         case 'cancel_order':
-          r = await cancelOrder(a.input as never)
+          r = await cancelOrderCore(user, a.input)
           break
         case 'restore_order':
-          r = await restoreOrder(a.input as never)
+          r = await restoreOrderCore(user, a.input)
           break
         case 'reschedule_order':
-          r = await rescheduleOrder(a.input as never)
+          r = await rescheduleOrderCore(user, a.input)
           break
         case 'add_order_note':
-          r = await addOrderNote(a.input as never)
+          r = await addOrderNoteCore(user, a.input)
           break
         case 'create_one_time_order':
-          r = await createOneTimeOrder(a.input as never)
+          r = await createOneTimeOrderCore(user, a.input)
           break
         default:
           r = { ok: false, error: `unknown_tool:${a.tool}` }
@@ -125,15 +110,11 @@ export async function executePendingAction(
         data: 'data' in r ? r.data : undefined,
       })
     } catch (e) {
-      if (isNextRedirect(e)) {
-        results.push({ tool: a.tool, ok: true })
-      } else {
-        results.push({
-          tool: a.tool,
-          ok: false,
-          error: e instanceof Error ? e.message : String(e),
-        })
-      }
+      results.push({
+        tool: a.tool,
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      })
     }
   }
 
