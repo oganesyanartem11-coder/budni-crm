@@ -40,16 +40,25 @@ export interface ParseInput {
 const VALID_TYPES: ParsedResponseType[] = ['numeric', 'cancellation_intent', 'question', 'noise']
 const VALID_TONES: ToneLabel[] = ['neutral', 'rude', 'thanks', 'urgent']
 
+/**
+ * Пре-LLM эвристика «КРИК ЗАГЛАВНЫМИ» как намёк на rude tone (7.11/F-2).
+ * Порог > 8 символов отсекает аббревиатуры ("ОК", "ОБЕД"); требование
+ * наличия буквы (не только цифр) защищает от "123456789".
+ *
+ * Используется в parseClientResponse (для pre-fill defaultTone) и в
+ * tone-classifier.ts (для shortcut'а без AI-вызова на явно rude-сообщения).
+ */
+export function isCapsRude(text: string): boolean {
+  return text.length > 8 && text === text.toUpperCase() && /[А-ЯA-Z]/.test(text)
+}
+
 export async function parseClientResponse(input: ParseInput): Promise<ParsedResponse> {
   const client = getAnthropicClient()
 
-  // 7.11/F-2: пре-LLM эвристика «КРИК ЗАГЛАВНЫМИ» как намёк на rude tone.
-  // > 8 символов отсекает аббревиатуры ("ОК", "ОБЕД"); требование наличия
-  // буквы (а не только цифр) — чтобы "123456789" не классифицировалось как rude.
   // LLM получает hint в промпте и волен переоценить (например THANKS/URGENT
   // тоже бывают CAPS). При невалидном LLM-ответе fallback тоже rude.
   const text = input.clientText
-  const isCapsRude = text.length > 8 && text === text.toUpperCase() && /[А-ЯA-Z]/.test(text)
+  const isCaps = isCapsRude(text)
 
   const systemPrompt = `Ты — парсер ответов клиентов кейтеринг-компании "Будни".
 Клиенты — юрлица. Каждый день они отвечают на вопрос "сколько порций на завтра?" свободным текстом.
@@ -94,7 +103,7 @@ ${
 }
 
 Ответ клиента: "${input.clientText}"
-${isCapsRude ? '\nПодсказка: текст написан CAPS LOCK\'ом — это часто признак раздражения; ToneLabel="rude" по умолчанию, но при доброжелательном контексте смело меняй.\n' : ''}
+${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — это часто признак раздражения; ToneLabel="rude" по умолчанию, но при доброжелательном контексте смело меняй.\n' : ''}
 Распознай структуру. Верни JSON.`
 
   const startTime = Date.now()
@@ -120,10 +129,10 @@ ${isCapsRude ? '\nПодсказка: текст написан CAPS LOCK\'ом 
     .replace(/```\s*$/, '')
     .trim()
 
-  // 7.11/F-2: при isCapsRude pre-fill — 'rude'. LLM может это переопределить
+  // 7.11/F-2: при CAPS-rude pre-fill — 'rude'. LLM может это переопределить
   // через явный toneLabel в JSON; pre-fill применяется только когда LLM
   // не дал валидного значения (невалидный JSON / отсутствие поля / битый тон).
-  const defaultTone: ToneLabel = isCapsRude ? 'rude' : 'neutral'
+  const defaultTone: ToneLabel = isCaps ? 'rude' : 'neutral'
 
   let parsed: unknown
   try {

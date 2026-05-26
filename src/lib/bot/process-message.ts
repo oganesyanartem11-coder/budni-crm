@@ -8,6 +8,7 @@ import { saveBotOrders } from './save-orders'
 import { createInboxItem } from './create-inbox-item'
 import { notifyManagersAboutInboxItem } from './notify-managers'
 import { notifyToneAlert } from './notify-tone-alert'
+import { classifyMessageTone } from '@/lib/llm/tone-classifier'
 import { logBotMessage } from './log-message'
 import {
   formatAcceptedReply,
@@ -341,12 +342,32 @@ async function handleSpontaneous(
     isReopenedConversation = true
   }
 
+  // 7.15 hotfix #2: spontaneous-сообщения тоже классифицируем по тону.
+  // parseClientResponse здесь не запускается (нет структуры order'ов для извлечения),
+  // поэтому tone из него взять неоткуда. Lightweight classifyMessageTone делает
+  // отдельный AI-вызов (tool_use, max_tokens=50), fail-safe → 'neutral' при сбое.
+  const spontaneousTone = await classifyMessageTone(text)
+
   await logBotMessage({
     clientId: client.id,
     conversationId: conversation.id,
     direction: 'IN',
     text,
+    toneLabel: spontaneousTone,
   })
+
+  // Алёрт менеджерам при rude/urgent. conversationId передаём null — spontaneous
+  // BotConversation тут техническая (создаётся для логирования), не cron-driven.
+  if (spontaneousTone === 'rude' || spontaneousTone === 'urgent') {
+    await notifyToneAlert({
+      clientId: client.id,
+      conversationId: null,
+      tone: spontaneousTone,
+      messageText: text,
+    }).catch((e) => {
+      console.error('[bot] notifyToneAlert failed (spontaneous):', e)
+    })
+  }
 
   // Дедупим InboxItem по conv. Reopened → новый item.
   let inboxItem = isReopenedConversation
