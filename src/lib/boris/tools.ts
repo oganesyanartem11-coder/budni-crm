@@ -21,6 +21,12 @@
 import type { AgentTool } from '@/lib/llm/agent-loop'
 import { prisma } from '@/lib/db/prisma'
 import type { MealType, Prisma } from '@prisma/client'
+import {
+  MEAL_TYPE_RU,
+  ORDER_STATUS_RU,
+  formatDateHuman,
+  formatPortions,
+} from './labels'
 
 const MAX_LIST_ITEMS = 20
 
@@ -93,10 +99,13 @@ const findOrdersTool: AgentTool = {
       orderId: o.id,
       client: { id: o.client.id, name: o.client.name },
       location: { id: o.location.id, name: o.location.name },
-      mealType: o.mealType,
-      deliveryDate: formatDate(o.deliveryDate),
-      portions: o.portions,
-      status: o.status,
+      mealType: MEAL_TYPE_RU[o.mealType],
+      deliveryDate: formatDateHuman(o.deliveryDate),
+      deliveryDateIso: formatDate(o.deliveryDate),
+      portions: formatPortions(o.portions),
+      portionsNumber: o.portions,
+      status: ORDER_STATUS_RU[o.status],
+      statusCode: o.status,
       updatedAt: o.updatedAt.toISOString(),
     }))
 
@@ -129,10 +138,14 @@ const getOrderDetailsTool: AgentTool = {
       orderId: order.id,
       client: order.client,
       location: order.location,
-      mealType: order.mealType,
-      deliveryDate: formatDate(order.deliveryDate),
-      status: order.status,
-      portions: order.portions,
+      mealType: MEAL_TYPE_RU[order.mealType],
+      mealTypeCode: order.mealType,
+      deliveryDate: formatDateHuman(order.deliveryDate),
+      deliveryDateIso: formatDate(order.deliveryDate),
+      status: ORDER_STATUS_RU[order.status],
+      statusCode: order.status,
+      portions: formatPortions(order.portions),
+      portionsNumber: order.portions,
       pricePerPortion: Number(order.pricePerPortion),
       totalPrice: Number(order.totalPrice),
       packaging: order.packaging,
@@ -206,7 +219,8 @@ const getClientSummaryTool: AgentTool = {
         tags: loc.tags,
         activeMealConfigs: loc.mealConfigs.map((mc) => ({
           id: mc.id,
-          mealType: mc.mealType,
+          mealType: MEAL_TYPE_RU[mc.mealType],
+          mealTypeCode: mc.mealType,
           orderType: mc.orderType,
           fixedPortions: mc.fixedPortions,
           pricePerPortion: Number(mc.pricePerPortion),
@@ -252,8 +266,11 @@ const getOrdersForDateTool: AgentTool = {
         orderId: string
         location: string
         mealType: string
-        portions: number
+        mealTypeCode: MealType
+        portions: string
+        portionsNumber: number
         status: string
+        statusCode: string
         totalPrice: number
         updatedAt: string
       }>
@@ -267,9 +284,12 @@ const getOrdersForDateTool: AgentTool = {
       grouped[key].orders.push({
         orderId: o.id,
         location: o.location.name,
-        mealType: o.mealType,
-        portions: o.portions,
-        status: o.status,
+        mealType: MEAL_TYPE_RU[o.mealType],
+        mealTypeCode: o.mealType,
+        portions: formatPortions(o.portions),
+        portionsNumber: o.portions,
+        status: ORDER_STATUS_RU[o.status],
+        statusCode: o.status,
         totalPrice: Number(o.totalPrice),
         updatedAt: o.updatedAt.toISOString(),
       })
@@ -277,6 +297,7 @@ const getOrdersForDateTool: AgentTool = {
 
     return {
       date,
+      dateHuman: formatDateHuman(date),
       clients: Object.values(grouped),
       truncated: orders.length > MAX_LIST_ITEMS,
       totalOrders: orders.length > MAX_LIST_ITEMS ? `>${MAX_LIST_ITEMS}` : orders.length,
@@ -330,11 +351,13 @@ const getMenuForDateTool: AgentTool = {
 
     return {
       date,
+      dateHuman: formatDateHuman(date),
       dayOfWeek,
       cycleId: cycle.id,
       cycleName: cycle.name,
       days: cycle.days.map((day) => ({
-        mealType: day.mealType,
+        mealType: MEAL_TYPE_RU[day.mealType],
+        mealTypeCode: day.mealType,
         dishes: day.dishes.map((dd) => ({
           dishId: dd.dish.id,
           name: dd.dish.correctedName ?? dd.dish.name,
@@ -421,7 +444,8 @@ const getDishMarginTool: AgentTool = {
           dishCosts.push({
             dishId: dd.dish.id,
             name: dd.dish.correctedName ?? dd.dish.name,
-            mealType: day.mealType,
+            mealType: MEAL_TYPE_RU[day.mealType],
+            mealTypeCode: day.mealType,
             costPerPortion: Math.round(cost * 100) / 100,
           })
         }
