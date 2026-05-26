@@ -39,7 +39,27 @@ export async function POST(request: Request) {
 
   const context: MorningContext | null = await buildMorningContext(now)
   if (!context) {
-    return NextResponse.json({ ok: true, skipped: 'empty_context' })
+    // Hotfix #1: даже на skip создаём briefing-запись, чтобы UI получил
+    // briefingId и понятный content (вместо «—» в тосте).
+    const created = await prisma.borisBriefing.create({
+      data: {
+        type: 'MORNING',
+        recipientUserId: null,
+        recipientChatId: '',
+        content: 'Сегодня нет заказов в работе — Борис молчит.',
+        contextData: { skipped: 'empty_context' },
+        isDryRun: true,
+        sentToTg: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      },
+    })
+    return NextResponse.json({
+      ok: true,
+      skipped: 'empty_context',
+      briefingId: created.id,
+    })
   }
 
   let groupChatId: string
@@ -47,7 +67,29 @@ export async function POST(request: Request) {
     groupChatId = getTelegramEnv().groupChatId
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ ok: true, skipped: 'no_group_chat', error: msg })
+    // Hotfix #1: skip с briefing-записью. recipientChatId пустой —
+    // groupChatId не получили, других получателей у утреннего нет.
+    const created = await prisma.borisBriefing.create({
+      data: {
+        type: 'MORNING',
+        recipientUserId: null,
+        recipientChatId: '',
+        content: 'Групповой TG-чат не настроен (TELEGRAM_GROUP_CHAT_ID). Борис не может отправить утренний.',
+        contextData: { skipped: 'no_group_chat', error: msg },
+        isDryRun: true,
+        sentToTg: false,
+        errorMessage: msg,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      },
+    })
+    return NextResponse.json({
+      ok: true,
+      skipped: 'no_group_chat',
+      briefingId: created.id,
+      error: msg,
+    })
   }
 
   let content: string

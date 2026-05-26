@@ -51,13 +51,57 @@ export async function POST(request: Request) {
     orderBy: { createdAt: 'asc' },
   })
   if (!user || !user.telegramChatId) {
-    return NextResponse.json({ ok: false, error: 'no_admin_pro_with_telegram' }, { status: 404 })
+    // Hotfix #1: skip с briefing-записью, чтобы UI получил briefingId.
+    const created = await prisma.borisBriefing.create({
+      data: {
+        type: 'SELF_ANALYSIS',
+        recipientUserId: null,
+        recipientChatId: '',
+        content: 'Не нашлось активного ADMIN_PRO с привязанным Telegram — самоанализ некому отправлять.',
+        contextData: { skipped: 'no_admin_pro' },
+        isDryRun: true,
+        sentToTg: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      },
+    })
+    return NextResponse.json({
+      ok: true,
+      skipped: 'no_admin_pro',
+      briefingId: created.id,
+    })
   }
 
   const { weekStart, weekEnd } = await getCurrentFinancialWeek(now)
   const context = await buildSelfAnalysisContext(user.id, weekStart, weekEnd)
   if (context === null) {
-    return NextResponse.json({ ok: true, skipped: 'empty_week', weekStart, weekEnd })
+    // Hotfix #1: skip с briefing-записью.
+    const created = await prisma.borisBriefing.create({
+      data: {
+        type: 'SELF_ANALYSIS',
+        recipientUserId: user.id,
+        recipientChatId: user.telegramChatId ?? '',
+        content: 'За прошедшую финансовую неделю недостаточно данных для самоанализа.',
+        contextData: {
+          skipped: 'empty_week',
+          weekStart: weekStart.toISOString(),
+          weekEnd: weekEnd.toISOString(),
+        },
+        isDryRun: true,
+        sentToTg: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      },
+    })
+    return NextResponse.json({
+      ok: true,
+      skipped: 'empty_week',
+      briefingId: created.id,
+      weekStart,
+      weekEnd,
+    })
   }
 
   // Генерация. На исключении Anthropic API всё равно создаём briefing с errorMessage,

@@ -69,16 +69,23 @@ export function BorisHistoryView({
       const json = (await res.json().catch(() => ({}))) as {
         briefingId?: string
         sentToTg?: boolean
+        skipped?: string
         error?: string
       }
       if (!res.ok) {
         throw new Error(json.error ?? `HTTP ${res.status}`)
       }
-      toast.success(
-        `Создан briefing ID: ${json.briefingId ?? '—'}, sentToTg: ${
-          json.sentToTg === undefined ? 'N/A' : String(json.sentToTg)
-        }`,
-      )
+      if (json.skipped) {
+        toast.success(
+          `Brief создан со статусом skip: ${json.skipped} (ID: ${json.briefingId ?? '—'})`,
+        )
+      } else {
+        toast.success(
+          `Создан briefing ID: ${json.briefingId ?? '—'}, sentToTg: ${
+            json.sentToTg === undefined ? 'N/A' : String(json.sentToTg)
+          }`,
+        )
+      }
       router.refresh()
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
