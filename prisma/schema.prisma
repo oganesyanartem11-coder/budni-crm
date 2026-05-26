@@ -197,6 +197,18 @@ enum VatMode {
   VAT_10_INCLUSIVE
 }
 
+enum BriefingType {
+  MORNING
+  SELF_ANALYSIS
+}
+
+enum BorisMetricSource {
+  ACTION_CHAT
+  ACTION_EXECUTOR
+  MORNING
+  SELF_ANALYSIS
+}
+
 // ============================================================
 // USERS / AUTH
 // ============================================================
@@ -252,6 +264,13 @@ model User {
 
   // 7.16.A.2: разговоры пользователя с AI-агентом Action-Борисом
   borisConversations BorisConversation[]
+
+  // 7.16.B: брифинги Бориса (утренние / самоанализ), адресованные этому юзеру
+  // (для самоанализа — конкретный ADMIN_PRO; утренние идут в группу, recipient=null).
+  borisBriefings BorisBriefing[] @relation("BorisBriefingRecipient")
+
+  // 7.16.B: трекинг LLM-вызовов Action-Бориса для аналитики и self-analysis.
+  borisMetrics BorisMetrics[] @relation("BorisMetricsUser")
 
   @@index([role, isActive])
 }
@@ -1087,6 +1106,7 @@ model BorisConversation {
 
   messages       BorisMessage[]
   pendingActions BorisPendingAction[]
+  metrics        BorisMetrics[]
 
   @@index([userId, closedAt])
   @@index([userId, lastMessageAt])
@@ -1116,4 +1136,58 @@ model BorisPendingAction {
   createdAt      DateTime          @default(now())
 
   @@index([conversationId, executedAt, cancelledAt])
+}
+
+// ============================================================
+// BORIS BRIEFINGS (Спринт 7.16.B) — утренние брифинги в групповой
+// чат и пятничный самоанализ в личку ADMIN_PRO.
+// ============================================================
+
+model BorisBriefing {
+  id              String       @id @default(cuid())
+  type            BriefingType
+  generatedAt     DateTime     @default(now())
+  recipientUserId String?
+  recipient       User?        @relation("BorisBriefingRecipient", fields: [recipientUserId], references: [id], onDelete: SetNull)
+  recipientChatId String // TG chat id куда отправили (group или user)
+  content         String       @db.Text
+  contextData     Json? // что было на входе у LLM (для дебага и UI)
+  sentToTg        Boolean      @default(false)
+  tgMessageId     String?
+  errorMessage    String?
+  isDryRun        Boolean      @default(false)
+  inputTokens     Int          @default(0)
+  outputTokens    Int          @default(0)
+  costUsd         Decimal      @default(0) @db.Decimal(10, 6)
+  createdAt       DateTime     @default(now())
+
+  @@index([type, generatedAt(sort: Desc)])
+  @@index([recipientUserId])
+}
+
+// ============================================================
+// BORIS METRICS (Спринт 7.16.B) — per-call трекинг LLM-вызовов
+// Action-Бориса и его cron-генераторов.
+// ============================================================
+
+model BorisMetrics {
+  id             String             @id @default(cuid())
+  conversationId String?
+  conversation   BorisConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?              @relation("BorisMetricsUser", fields: [userId], references: [id], onDelete: SetNull)
+  toolName       String?
+  ok             Boolean
+  errorMessage   String?
+  durationMs     Int
+  inputTokens    Int                @default(0)
+  outputTokens   Int                @default(0)
+  costUsd        Decimal            @default(0) @db.Decimal(10, 6)
+  source         BorisMetricSource
+  createdAt      DateTime           @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([source, createdAt])
+  @@index([toolName, ok])
 }

@@ -21,6 +21,8 @@
  */
 
 import { prisma } from '@/lib/db/prisma'
+import { BorisMetricSource } from '@prisma/client'
+import { trackBorisCall } from './metrics/track'
 import {
   editOrderPortionsCore,
   cancelOrderCore,
@@ -79,6 +81,7 @@ export async function executePendingAction(
   const results: ExecuteResultItem[] = []
 
   for (const a of actions) {
+    const startedAt = Date.now()
     try {
       let r: { ok: boolean; error?: string; data?: unknown }
       switch (a.tool) {
@@ -109,11 +112,31 @@ export async function executePendingAction(
         error: !r.ok ? r.error : undefined,
         data: 'data' in r ? r.data : undefined,
       })
+      // Метрика по итерации (executor не делает LLM-вызовов, токены = 0).
+      await trackBorisCall({
+        userId,
+        conversationId: pending.conversationId,
+        toolName: a.tool,
+        ok: r.ok,
+        errorMessage: !r.ok ? r.error : undefined,
+        durationMs: Date.now() - startedAt,
+        source: BorisMetricSource.ACTION_EXECUTOR,
+      })
     } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e)
       results.push({
         tool: a.tool,
         ok: false,
-        error: e instanceof Error ? e.message : String(e),
+        error: errMsg,
+      })
+      await trackBorisCall({
+        userId,
+        conversationId: pending.conversationId,
+        toolName: a.tool,
+        ok: false,
+        errorMessage: errMsg,
+        durationMs: Date.now() - startedAt,
+        source: BorisMetricSource.ACTION_EXECUTOR,
       })
     }
   }

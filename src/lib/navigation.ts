@@ -15,6 +15,7 @@ import {
   Sparkles,
   ReceiptText,
   BarChart3,
+  Bot,
   type LucideIcon,
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
@@ -43,7 +44,7 @@ export interface NavItem {
   children?: NavItem[]
 }
 
-export type NavGroupId = 'daily' | 'production' | 'directory' | 'analytics'
+export type NavGroupId = 'daily' | 'production' | 'directory' | 'analytics' | 'boris'
 
 export interface NavGroup {
   id: NavGroupId
@@ -112,6 +113,13 @@ export const NAV_GROUPS: NavGroup[] = [
           { href: '/analytics',          label: 'Сводка',        icon: FileBarChart, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
         ],
       },
+    ],
+  },
+  {
+    id: 'boris',
+    title: 'Борис',
+    items: [
+      { href: '/boris', label: 'Борис', icon: Bot, roles: ['ADMIN_PRO'] },
     ],
   },
 ]

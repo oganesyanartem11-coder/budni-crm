@@ -46,6 +46,14 @@ export interface AgentLoopResult {
   toolCalls: Array<{ name: string; input: unknown; result: unknown }>
   iterations: number
   stopReason: string
+  /**
+   * Аккумулированный usage по всем iterations внутри loop'а.
+   * 7.16.B: нужно для metrics-трекинга (trackBorisCall) и для расчёта cost
+   * в self-analysis/morning brief. Каждый client.messages.create возвращает
+   * собственный usage; складываем все ответы внутри одного запуска агента.
+   */
+  inputTokens: number
+  outputTokens: number
 }
 
 function toAnthropicTool(tool: AgentTool): Anthropic.Messages.Tool {
@@ -113,6 +121,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const anthropicTools = tools.map(toAnthropicTool)
   const toolsByName = new Map(tools.map((t) => [t.name, t]))
   let iterations = 0
+  let inputTokens = 0
+  let outputTokens = 0
 
   console.log(
     `[agent-loop] iter=0 start model=${model} tools=${tools.length} maxIterations=${maxIterations}`
@@ -127,6 +137,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       messages,
     })
     iterations++
+    // Аккумулируем usage. response.usage всегда возвращается Anthropic SDK
+    // для non-streaming вызовов; на всякий случай default-им к 0.
+    inputTokens += response.usage?.input_tokens ?? 0
+    outputTokens += response.usage?.output_tokens ?? 0
 
     // Assistant-message в истории должен содержать оригинальные content-блоки
     // (включая tool_use), иначе следующий запрос упадёт на mismatch tool_use_id.
@@ -141,6 +155,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         toolCalls,
         iterations,
         stopReason: 'end_turn',
+        inputTokens,
+        outputTokens,
       }
     }
 
@@ -213,6 +229,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       toolCalls,
       iterations,
       stopReason,
+      inputTokens,
+      outputTokens,
     }
   }
 
@@ -228,5 +246,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     toolCalls,
     iterations,
     stopReason: 'max_iterations',
+    inputTokens,
+    outputTokens,
   }
 }

@@ -21,8 +21,9 @@ import { getBorisModel } from '@/lib/ai/models'
 import { getBorisSystemPrompt } from './personality'
 import { BORIS_TOOLS } from './tools'
 import { buildMultiActionPreview, type PendingActionForPreview } from './preview'
+import { trackBorisCall } from './metrics/track'
 import { prisma } from '@/lib/db/prisma'
-import type { Prisma } from '@prisma/client'
+import { BorisMetricSource, type Prisma } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000
@@ -88,17 +89,43 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
     },
   })
 
-  // 4. Запуск agent-loop.
-  const result = await runAgentLoop({
-    model: getBorisModel(),
-    systemPrompt: getBorisSystemPrompt(),
-    initialMessages: [...historyMessages, userMessage],
-    tools: BORIS_TOOLS,
-    maxIterations: 8,
-    maxTokens: 2048,
-    onToolCall: (name) => {
-      console.log('[boris] tool_use', name)
-    },
+  // 4. Запуск agent-loop. Оборачиваем в try/catch для metrics-трекинга —
+  // на исключении пишем fail-метрику и пробрасываем дальше (выше по стеку
+  // ловят telegram/boris-handler или web-route).
+  const startedAt = Date.now()
+  let result
+  try {
+    result = await runAgentLoop({
+      model: getBorisModel(),
+      systemPrompt: getBorisSystemPrompt(),
+      initialMessages: [...historyMessages, userMessage],
+      tools: BORIS_TOOLS,
+      maxIterations: 8,
+      maxTokens: 2048,
+      onToolCall: (name) => {
+        console.log('[boris] tool_use', name)
+      },
+    })
+  } catch (err) {
+    await trackBorisCall({
+      userId: input.userId,
+      conversationId: conversation.id,
+      ok: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+      durationMs: Date.now() - startedAt,
+      source: BorisMetricSource.ACTION_CHAT,
+    })
+    throw err
+  }
+
+  await trackBorisCall({
+    userId: input.userId,
+    conversationId: conversation.id,
+    ok: true,
+    durationMs: Date.now() - startedAt,
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    source: BorisMetricSource.ACTION_CHAT,
   })
 
   // 5. Собрать pending-actions из tool-результатов.
