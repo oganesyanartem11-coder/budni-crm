@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { dispatchCallback } from './callback-router'
 import { getTelegramEnv } from './env'
+import { handleBorisMessage } from './boris-handler'
 
 interface TelegramBotCache {
   bot: Bot
@@ -94,17 +95,14 @@ async function handleStart(ctx: CommandContext<Context>): Promise<void> {
   )
 }
 
-async function handleOtherMessage(ctx: Context): Promise<void> {
-  const text = ctx.message?.text ?? ''
-  // Команды (/что-то ещё) оставляем без ответа — пусть будут «немыми»
-  if (text.startsWith('/')) return
-  await ctx.reply('Я бот только для отправки уведомлений и сводок. Отвечать пока не умею.')
-}
-
 function registerHandlers(bot: Bot): void {
   bot.command('start', handleStart)
   bot.on('callback_query:data', dispatchCallback)
-  bot.on('message', handleOtherMessage)
+  // Sprint 7.16.A.2 (B3): любое нон-командное сообщение от менеджера
+  // обрабатывает Action-Борис (LLM-агент с tools для CRM-действий).
+  // Для не-менеджеров/незарегистрированных юзеров handleBorisMessage
+  // сам отвечает шаблонными репликами (см. boris-handler.ts).
+  bot.on('message', handleBorisMessage)
 }
 
 /**

@@ -12,6 +12,7 @@ import { orderDetailButton } from '@/lib/telegram/buttons'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { formatDateShort } from '@/lib/utils/format'
 import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
+import { MealType } from '@prisma/client'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -675,4 +676,323 @@ export async function changeOrderLegalEntity(
   revalidatePath('/orders')
   revalidatePath(`/orders/${orderId}`)
   return { ok: true, data: undefined }
+}
+
+// ============================================================
+// Sprint 7.16.A.2 — Action-Борис: restore / addNote / createOneTime
+// ============================================================
+
+const restoreOrderSchema = z.object({
+  orderId: z.string(),
+  expectedUpdatedAt: z.coerce.date().optional(),
+})
+
+/**
+ * Восстанавливает отменённый заказ: переводит CANCELLED → CONFIRMED.
+ * Если уже прошёл cut-off, выставляет editedAfterLockAt (визуальный маркер
+ * "правка после lock") и пишет специальный action в ActivityLog —
+ * кухня/курьер должны узнать что их данные снова актуальны.
+ */
+export async function restoreOrder(
+  formData: z.infer<typeof restoreOrderSchema>
+): Promise<ActionResult<{ editedAfterLock: boolean }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = restoreOrderSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const { orderId, expectedUpdatedAt } = parsed.data
+
+  try {
+    await assertOrderUpdatedAt(orderId, expectedUpdatedAt?.toISOString())
+  } catch (e) {
+    if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+    throw e
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      status: true,
+      deliveryDate: true,
+      editedAfterLockAt: true,
+    },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+  if (order.status !== 'CANCELLED') {
+    return { ok: false, error: 'Заказ не в статусе CANCELLED — нечего восстанавливать' }
+  }
+
+  const afterCutoff = isPastCutoff(order.deliveryDate)
+  const restoredAt = new Date()
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: 'CONFIRMED',
+      confirmedAt: restoredAt,
+      lockedAt: null,
+      ...(afterCutoff ? { editedAfterLockAt: restoredAt } : {}),
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: afterCutoff ? 'ORDER_RESTORED_AFTER_LOCK' : 'ORDER_RESTORED',
+      entityType: 'Order',
+      entityId: orderId,
+      payload: {
+        previousStatus: 'CANCELLED',
+        restoredAt: restoredAt.toISOString(),
+        afterCutoff,
+      },
+    },
+  })
+
+  revalidatePath('/orders')
+  revalidatePath(`/orders/${orderId}`)
+  return { ok: true, data: { editedAfterLock: afterCutoff } }
+}
+
+const addOrderNoteSchema = z.object({
+  orderId: z.string(),
+  note: z.string().min(1).max(500),
+  expectedUpdatedAt: z.coerce.date().optional(),
+})
+
+/**
+ * Добавляет заметку к заказу. Не перезаписывает существующие — аппендит
+ * с timestamp-разделителем, чтобы сохранять историю комментариев менеджеров
+ * (и Бориса).
+ *
+ * Не разрешено для CANCELLED/DELIVERED: финальные статусы, добавлять туда
+ * новые заметки — путать аудит.
+ */
+export async function addOrderNote(
+  formData: z.infer<typeof addOrderNoteSchema>
+): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = addOrderNoteSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const { orderId, note, expectedUpdatedAt } = parsed.data
+
+  try {
+    await assertOrderUpdatedAt(orderId, expectedUpdatedAt?.toISOString())
+  } catch (e) {
+    if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
+    throw e
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true, notes: true },
+  })
+  if (!order) return { ok: false, error: 'Заказ не найден' }
+  if (order.status === 'CANCELLED' || order.status === 'DELIVERED') {
+    return { ok: false, error: `Нельзя добавить заметку к заказу в статусе ${order.status}` }
+  }
+
+  const previousNotesLength = order.notes?.length ?? 0
+  const newNotes = order.notes && order.notes.length > 0
+    ? `${order.notes}\n---\n[${new Date().toISOString()}] ${note}`
+    : note
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { notes: newNotes },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'ORDER_NOTE_ADDED',
+      entityType: 'Order',
+      entityId: orderId,
+      payload: {
+        note,
+        previousNotesLength,
+      },
+    },
+  })
+
+  revalidatePath('/orders')
+  revalidatePath(`/orders/${orderId}`)
+  return { ok: true, data: undefined }
+}
+
+const createOneTimeOrderSchema = z.object({
+  clientId: z.string(),
+  locationId: z.string(),
+  mealType: z.nativeEnum(MealType),
+  deliveryDate: z.coerce.date(),
+  portions: z.number().int().positive(),
+  pricePerPortion: z.number().positive().optional(),
+})
+
+/**
+ * Создаёт разовый заказ от лица AI-агента "Борис". Резолвит цену из
+ * (1) переданного параметра → (2) активного ClientMealConfig → (3) последнего
+ * confirmed заказа клиента с таким же mealType. Если ничего не нашлось —
+ * ошибка, менеджер должен указать цену явно.
+ *
+ * Дубль-проверка по бизнес-ключу {clientId, locationId, mealType, deliveryDate}
+ * — иначе вместо createOneTimeOrder надо использовать editOrderPortions.
+ */
+export async function createOneTimeOrder(
+  formData: z.infer<typeof createOneTimeOrderSchema>
+): Promise<ActionResult<{ orderId: string }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const parsed = createOneTimeOrderSchema.safeParse(formData)
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? 'Неверные данные' }
+  }
+
+  const data = parsed.data
+  const deliveryDate = new Date(data.deliveryDate)
+  deliveryDate.setHours(0, 0, 0, 0)
+
+  const client = await prisma.client.findUnique({
+    where: { id: data.clientId },
+    select: { id: true, isActive: true },
+  })
+  if (!client) return { ok: false, error: 'Клиент не найден' }
+
+  const location = await prisma.clientLocation.findUnique({
+    where: { id: data.locationId },
+    select: { id: true, clientId: true, packaging: true, tags: true, isActive: true },
+  })
+  if (!location) return { ok: false, error: 'Точка не найдена' }
+  if (location.clientId !== data.clientId) {
+    return { ok: false, error: 'Локация не принадлежит клиенту' }
+  }
+
+  // Антидубль по бизнес-ключу
+  const dayEnd = new Date(deliveryDate)
+  dayEnd.setHours(23, 59, 59, 999)
+  const existing = await prisma.order.findFirst({
+    where: {
+      clientId: data.clientId,
+      locationId: data.locationId,
+      mealType: data.mealType,
+      deliveryDate: { gte: deliveryDate, lte: dayEnd },
+      status: { not: 'CANCELLED' },
+    },
+    select: { id: true },
+  })
+  if (existing) {
+    return {
+      ok: false,
+      error: `На эту дату уже есть заказ ${existing.id}, используй editOrderPortions`,
+    }
+  }
+
+  // Резолв цены: param → активный config → последний confirmed заказ
+  let pricePerPortion: number | null = null
+  let priceSource: 'param' | 'config' | 'last_order' | null = null
+
+  if (data.pricePerPortion !== undefined) {
+    pricePerPortion = data.pricePerPortion
+    priceSource = 'param'
+  } else {
+    const config = await prisma.clientMealConfig.findFirst({
+      where: {
+        clientId: data.clientId,
+        locationId: data.locationId,
+        mealType: data.mealType,
+        isActive: true,
+        validFrom: { lte: deliveryDate },
+        OR: [
+          { validTo: null },
+          { validTo: { gte: deliveryDate } },
+        ],
+      },
+      select: { pricePerPortion: true },
+      orderBy: { validFrom: 'desc' },
+    })
+
+    if (config) {
+      pricePerPortion = Number(config.pricePerPortion)
+      priceSource = 'config'
+    } else {
+      const lastOrder = await prisma.order.findFirst({
+        where: {
+          clientId: data.clientId,
+          mealType: data.mealType,
+          status: 'CONFIRMED',
+        },
+        orderBy: { deliveryDate: 'desc' },
+        select: { pricePerPortion: true },
+      })
+
+      if (lastOrder) {
+        pricePerPortion = Number(lastOrder.pricePerPortion)
+        priceSource = 'last_order'
+      }
+    }
+  }
+
+  if (pricePerPortion === null || priceSource === null) {
+    return {
+      ok: false,
+      error: 'Не удалось определить цену — укажи pricePerPortion явно',
+    }
+  }
+
+  const totalPrice = data.portions * pricePerPortion
+  const now = new Date()
+  const snapshot = await getOrderLegalEntitySnapshot(data.clientId)
+
+  const newOrder = await prisma.order.create({
+    data: {
+      clientId: data.clientId,
+      locationId: data.locationId,
+      mealType: data.mealType,
+      deliveryDate,
+      portions: data.portions,
+      pricePerPortion,
+      totalPrice,
+      packaging: location.packaging,
+      source: 'BORIS',
+      status: 'CONFIRMED',
+      confirmedAt: now,
+      ourLegalEntityId: snapshot.ourLegalEntityId,
+      vatRate: snapshot.vatRate,
+      tags: location.tags ?? [],
+      createdById: user.id,
+    },
+  })
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'ORDER_CREATED_BY_BORIS',
+      entityType: 'Order',
+      entityId: newOrder.id,
+      payload: {
+        clientId: data.clientId,
+        locationId: data.locationId,
+        mealType: data.mealType,
+        deliveryDate: deliveryDate.toISOString(),
+        portions: data.portions,
+        totalPrice,
+        pricePerPortion,
+        priceSource,
+      },
+    },
+  })
+
+  revalidatePath('/orders')
+  return { ok: true, data: { orderId: newOrder.id } }
 }

@@ -13,6 +13,7 @@ const DEFAULT_RECIPES_MODEL = 'claude-opus-4-7'
 const DEFAULT_INBOX_MODEL = 'claude-haiku-4-5-20251001'
 const DEFAULT_FALLBACK_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_VISION_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_BORIS_MODEL = 'claude-sonnet-4-6'
 
 /** parseMenuSchedule: разбор структуры меню из Excel/фото (Opus). */
 export function getParserModel(): string {
@@ -41,4 +42,13 @@ export function getFallbackModel(): string {
  */
 export function getVisionModel(): string {
   return process.env.ANTHROPIC_MODEL_VISION ?? DEFAULT_VISION_MODEL
+}
+
+/**
+ * Action-Борис (7.16.A.2): tool-calling AI-агент для менеджеров.
+ * Sonnet — баланс между качеством planning'а и скоростью; Haiku не тянет
+ * multi-tool reasoning, Opus дорог для частых разговоров.
+ */
+export function getBorisModel(): string {
+  return process.env.ANTHROPIC_MODEL_BORIS ?? DEFAULT_BORIS_MODEL
 }
