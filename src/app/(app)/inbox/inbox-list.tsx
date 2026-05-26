@@ -6,14 +6,28 @@ import { Inbox as InboxIcon } from 'lucide-react'
 import { formatDateShort, formatTime } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
 import { fetchInboxListFresh, type InboxClientCard } from './actions'
+import { ToneChip } from '@/components/inbox/ToneChip'
+import type { ToneLabel } from '@/lib/inbox/tone-labels'
 
 const POLL_INTERVAL_MS = 10_000
 
-export function InboxList({ initialItems }: { initialItems: InboxClientCard[] }) {
+interface Props {
+  initialItems: InboxClientCard[]
+  activeTone?: ToneLabel
+}
+
+export function InboxList({ initialItems, activeTone }: Props) {
   const [items, setItems] = useState(initialItems)
   const scrollAnchorRef = useRef<{ y: number; offsetTop: number; cardId: string | null }>({
     y: 0, offsetTop: 0, cardId: null,
   })
+
+  // При смене URL-фильтра ?tone= серверный page перерендерит и пришлёт новый
+  // initialItems. Без этого sync polling-стейт остался бы со старыми items
+  // до первого poll-цикла, и пользователь видел бы старый набор карточек.
+  useEffect(() => {
+    setItems(initialItems)
+  }, [initialItems])
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null
@@ -30,7 +44,7 @@ export function InboxList({ initialItems }: { initialItems: InboxClientCard[] })
           cardId: visibleEl.dataset.clientId ?? null,
         }
       }
-      const fresh = await fetchInboxListFresh()
+      const fresh = await fetchInboxListFresh(activeTone)
       if (!fresh) return
       setItems(fresh)
       requestAnimationFrame(() => {
@@ -68,7 +82,7 @@ export function InboxList({ initialItems }: { initialItems: InboxClientCard[] })
       stopPolling()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [])
+  }, [activeTone])
 
   if (items.length === 0) {
     return (
@@ -123,11 +137,12 @@ function ClientRow({ card }: { card: InboxClientCard }) {
       >
         <div className="flex items-start justify-between gap-3 mb-1">
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-base truncate flex items-center gap-1.5">
-              {card.clientName}
+            <p className="font-semibold text-base truncate flex items-center gap-1.5 flex-wrap">
+              <span className="truncate">{card.clientName}</span>
               {card.maxUsername && (
                 <span title="Есть MAX-аккаунт" className="text-info-fg text-xs">●</span>
               )}
+              {card.latestTone && <ToneChip tone={card.latestTone} size="sm" />}
               {hasUnread && (
                 <span className="ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold">
                   {card.unreadCount > 9 ? '9+' : card.unreadCount}

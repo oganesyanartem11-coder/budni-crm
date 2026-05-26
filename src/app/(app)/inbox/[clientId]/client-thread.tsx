@@ -13,6 +13,8 @@ import {
 } from '../actions'
 import { formatTime, formatDateShort } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
+import { ToneChip } from '@/components/inbox/ToneChip'
+import { isToneLabel } from '@/lib/inbox/tone-labels'
 import type {
   BotMessageDirection, InboxItemReason, InboxItemPriority,
   InboxItemStatus,
@@ -451,11 +453,11 @@ function MessageBubble({
           isClient ? 'bg-bg/60' : isBot ? 'bg-info-bg/50' : 'bg-accent text-accent-fg'
         )}
       >
-        <p className="text-xs opacity-70 mb-0.5 flex items-center gap-1">
+        <p className="text-xs opacity-70 mb-0.5 flex items-center gap-1 flex-wrap">
           {isClient && <User2 className="w-3 h-3" />}
           {author}
-          {message.toneLabel && message.toneLabel !== 'neutral' && (
-            <span className="ml-1 italic">· {message.toneLabel}</span>
+          {isClient && isToneLabel(message.toneLabel) && (
+            <ToneChip tone={message.toneLabel} size="sm" />
           )}
         </p>
         <p className="text-sm whitespace-pre-wrap">{message.text}</p>

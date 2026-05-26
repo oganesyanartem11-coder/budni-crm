@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/auth/current-user'
 import { generateDraftReply } from '@/lib/llm/draft-generator'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { logBotMessage } from '@/lib/bot/log-message'
+import { isToneLabel, type ToneLabel } from '@/lib/inbox/tone-labels'
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -22,7 +23,11 @@ export interface InboxClientCard {
   } | null
   unreadCount: number
   latestInboxItemId: string | null
+  /** Тон последнего IN-сообщения клиента за 24ч. null = нет тона / нет сообщений. */
+  latestTone?: ToneLabel | null
 }
+
+const TONE_LOOKBACK_MS = 24 * 60 * 60 * 1000
 
 /**
  * Список клиентов с историей переписки. Сортировка по времени последнего сообщения.
@@ -30,8 +35,12 @@ export interface InboxClientCard {
  *
  * 6.2: переписано на 4 batched-запроса вместо 2 + 3×N (N+1 был на 50 клиентах).
  * Каждый под-запрос идёт по списку clientIds — пагинация в БД, без map+Promise.all.
+ *
+ * 7.15-B: +1 batched-запрос за свежими IN-сообщениями (24ч окно) для определения
+ * latestTone каждого клиента; опциональный фильтр по tone применяется в JS после
+ * обогащения. По-прежнему НЕТ N+1: один доп. запрос на ВСЕХ clientIds.
  */
-export async function fetchInboxListData(): Promise<InboxClientCard[]> {
+export async function fetchInboxListData(tone?: ToneLabel): Promise<InboxClientCard[]> {
   await requireRole(['ADMIN', 'MANAGER'])
 
   const distinctClients = await prisma.botMessage.findMany({
@@ -41,7 +50,9 @@ export async function fetchInboxListData(): Promise<InboxClientCard[]> {
   const clientIds = distinctClients.map((c) => c.clientId)
   if (clientIds.length === 0) return []
 
-  const [clients, lastMessages, unreadGroups, latestInboxItems] = await Promise.all([
+  const toneCutoff = new Date(Date.now() - TONE_LOOKBACK_MS)
+
+  const [clients, lastMessages, unreadGroups, latestInboxItems, recentInMessages] = await Promise.all([
     prisma.client.findMany({
       where: { id: { in: clientIds } },
       select: { id: true, name: true, maxUsername: true },
@@ -64,11 +75,31 @@ export async function fetchInboxListData(): Promise<InboxClientCard[]> {
       distinct: ['clientId'],
       select: { clientId: true, id: true },
     }),
+    // 7.15-B: все IN-сообщения за 24ч для batch определения latestTone.
+    // НЕ фильтруем по toneLabel: { not: null } — нам важен ПОСЛЕДНИЙ IN,
+    // даже если у него tone == null (значит и latestTone карточки == null).
+    prisma.botMessage.findMany({
+      where: {
+        clientId: { in: clientIds },
+        direction: 'IN',
+        createdAt: { gte: toneCutoff },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { clientId: true, toneLabel: true },
+    }),
   ])
 
   const lastMsgByClient = new Map(lastMessages.map((m) => [m.clientId, m]))
   const unreadByClient = new Map(unreadGroups.map((g) => [g.clientId, g._count._all]))
   const latestInboxByClient = new Map(latestInboxItems.map((i) => [i.clientId, i.id]))
+
+  // Dedup: первый встреченный (= самый свежий по createdAt desc) выигрывает.
+  const latestToneByClient = new Map<string, ToneLabel | null>()
+  for (const m of recentInMessages) {
+    if (latestToneByClient.has(m.clientId)) continue
+    const t = isToneLabel(m.toneLabel) ? m.toneLabel : null
+    latestToneByClient.set(m.clientId, t)
+  }
 
   const enriched: InboxClientCard[] = clients.map((c) => {
     const lm = lastMsgByClient.get(c.id)
@@ -85,6 +116,7 @@ export async function fetchInboxListData(): Promise<InboxClientCard[]> {
         : null,
       unreadCount: unreadByClient.get(c.id) ?? 0,
       latestInboxItemId: latestInboxByClient.get(c.id) ?? null,
+      latestTone: latestToneByClient.get(c.id) ?? null,
     }
   })
 
@@ -94,13 +126,15 @@ export async function fetchInboxListData(): Promise<InboxClientCard[]> {
     return bDate - aDate
   })
 
-  return enriched
+  // 7.15-B: фильтр по тону применяется ПОСЛЕ обогащения, чтобы поведение было
+  // консистентно с тем, что показывает чип на карточке.
+  return tone ? enriched.filter((c) => c.latestTone === tone) : enriched
 }
 
 /** Server action wrapper для polling из клиентского компонента. */
-export async function fetchInboxListFresh(): Promise<InboxClientCard[] | null> {
+export async function fetchInboxListFresh(tone?: ToneLabel): Promise<InboxClientCard[] | null> {
   try {
-    return await fetchInboxListData()
+    return await fetchInboxListData(tone)
   } catch (err) {
     console.error('[inbox] fetchInboxListFresh failed:', err)
     // 7.12: репорт в in-house tracker (dynamic import — no circular dep).

@@ -7,6 +7,7 @@ import { isPastCutoff } from '@/lib/orders/cutoff'
 import { saveBotOrders } from './save-orders'
 import { createInboxItem } from './create-inbox-item'
 import { notifyManagersAboutInboxItem } from './notify-managers'
+import { notifyToneAlert } from './notify-tone-alert'
 import { logBotMessage } from './log-message'
 import {
   formatAcceptedReply,
@@ -119,6 +120,20 @@ async function handleBotResponse(
     llmReason: parsed.reason,
     toneLabel: parsed.toneLabel,
   })
+
+  // 7.15: TG-алёрт менеджерам при rude/urgent тоне. rude — c 15-мин cooldown
+  // на (clientId, tone) через ToneAlertLog; urgent — без cooldown (прорывается).
+  // Алёрт независим от веток ABCD ниже — нужен сам факт негатива в новом IN.
+  if (parsed.toneLabel === 'rude' || parsed.toneLabel === 'urgent') {
+    await notifyToneAlert({
+      clientId: client.id,
+      conversationId: conv.id,
+      tone: parsed.toneLabel,
+      messageText: text,
+    }).catch((e) => {
+      console.error('[bot] notifyToneAlert failed:', e)
+    })
+  }
 
   // Аномалии содержания (без cutoff — cutoff обрабатываем отдельно как кейс C
   // с сохранением заказа). isPastCutoff=false внутри detectAnomalies, чтобы

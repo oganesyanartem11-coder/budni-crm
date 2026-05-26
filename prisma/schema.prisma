@@ -326,6 +326,7 @@ model Client {
   botMessages      BotMessage[]
   inboxItems       InboxItem[]
   updDocuments     UpdDocument[]
+  toneAlerts       ToneAlertLog[]
 
   @@index([isActive])
   @@index([name])
@@ -1019,4 +1020,21 @@ model InvoiceLine {
 
   @@index([invoiceId, lineIndex])
   @@index([matchedIngredientId])
+}
+
+// ============================================================
+// TONE ALERTS (Спринт 7.15) — лог отправленных tone-алёртов
+// (rude/urgent) менеджерам в Telegram. Используется для cooldown
+// в notifyToneAlert (15 мин на пару clientId+tone для rude;
+// urgent игнорирует cooldown).
+// ============================================================
+
+model ToneAlertLog {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tone      String // 'rude' | 'urgent'
+  createdAt DateTime @default(now())
+
+  @@index([clientId, tone, createdAt])
 }
