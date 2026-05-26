@@ -4,7 +4,6 @@ import { useState, useTransition, useRef, type DragEvent, type ChangeEvent } fro
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Camera, ImageIcon, X, Loader2, AlertCircle } from 'lucide-react'
-import { upload } from '@vercel/blob/client'
 import { toast } from 'sonner'
 import { compressImage } from '@/lib/uploads/image-compress'
 import { extractExif } from '@/lib/uploads/exif'
@@ -103,28 +102,70 @@ export function UploadForm() {
     if (galleryInputRef.current) galleryInputRef.current.value = ''
   }
 
+  // Загружает файл на наш endpoint /api/uploads/invoice-blob через XHR.
+  // XHR используется вместо fetch потому что только он даёт onProgress upload-байтов.
+  // Endpoint сам ходит в Vercel Blob через put() (BLOB_READ_WRITE_TOKEN), обходя CORS.
+  function uploadToServer(
+    blobBody: Blob,
+    filename: string,
+    signal: AbortSignal,
+  ): Promise<{ url: string; pathname: string }> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      const form = new FormData()
+      form.append('file', blobBody, filename)
+
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          setUploadProgress(Math.round((event.loaded / event.total) * 100))
+        }
+      })
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status === 200) {
+          try {
+            const data = JSON.parse(xhr.responseText) as { url: string; pathname: string }
+            resolve(data)
+          } catch {
+            reject(new Error('Invalid response'))
+          }
+        } else {
+          let msg = `Upload failed with status ${xhr.status}`
+          try {
+            const data = JSON.parse(xhr.responseText) as { error?: string }
+            if (data.error) msg = data.error
+          } catch {}
+          if (xhr.status === 413) {
+            msg = `${msg} (too large)`
+          }
+          reject(new Error(msg))
+        }
+      })
+
+      xhr.addEventListener('error', () => reject(new Error('Network error')))
+      xhr.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+
+      const onAbort = () => xhr.abort()
+      signal.addEventListener('abort', onAbort)
+
+      xhr.open('POST', '/api/uploads/invoice-blob')
+      xhr.send(form)
+    })
+  }
+
   async function uploadWithRetry(
-    pathname: string,
-    body: Blob,
+    blobBody: Blob,
+    filename: string,
     signal: AbortSignal,
     retriesLeft = 1,
-  ): Promise<{ url: string }> {
+  ): Promise<{ url: string; pathname: string }> {
     try {
-      const result = await upload(pathname, body, {
-        access: 'public',
-        handleUploadUrl: '/api/uploads/invoice-token',
-        contentType: 'image/jpeg',
-        abortSignal: signal,
-        onUploadProgress: (event) => {
-          setUploadProgress(Math.round(event.percentage))
-        },
-      })
-      return { url: result.url }
+      return await uploadToServer(blobBody, filename, signal)
     } catch (err) {
       // НЕ retry-им если abort (по таймауту или пользователем) и НЕ 4xx.
       if (retriesLeft > 0 && !isAbortError(err) && !isTooLargeError(err) && isNetworkError(err)) {
         await new Promise((r) => setTimeout(r, 1000))
-        return uploadWithRetry(pathname, body, signal, retriesLeft - 1)
+        return uploadWithRetry(blobBody, filename, signal, retriesLeft - 1)
       }
       throw err
     }
@@ -162,9 +203,10 @@ export function UploadForm() {
       // 2. EXIF (best-effort).
       const exif = await extractExif(file).catch(() => ({ takenAt: null, isSuspicious: true }))
 
-      // 3. Upload в Vercel Blob с abortSignal + retry на сетевой ошибке.
-      const pathname = `invoices/${crypto.randomUUID()}.jpg`
-      const blob = await uploadWithRetry(pathname, compressed.blob, abortControllerRef.current.signal)
+      // 3. Upload через наш server-side endpoint (обходит CORS на vercel.com/api/blob).
+      //    Имя файла — UUID.jpg; реальный pathname в Blob формирует сервер.
+      const filename = `${crypto.randomUUID()}.jpg`
+      const blob = await uploadWithRetry(compressed.blob, filename, abortControllerRef.current.signal)
 
       // 4. Создаём Invoice — fire-and-forget orchestrator на сервере.
       startTransition(async () => {
