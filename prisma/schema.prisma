@@ -228,6 +228,11 @@ model User {
   telegramOnboardingToken     String?   @unique
   telegramOnboardingExpiresAt DateTime?
 
+  // 7.15 hotfix #1: получатель критичных tone-алёртов (rude/urgent) сверх
+  // дефолтного списка MANAGER. Включается явно — позволяет добавлять
+  // конкретных ADMIN_PRO/ADMIN/CHEF без расширения ролевой логики.
+  receivesToneAlerts Boolean @default(false)
+
   approvedMenus         MenuCycle[]   @relation("MenuApprovedBy")
   activityLogs          ActivityLog[]
   ordersCreated         Order[]       @relation("OrdersCreated")

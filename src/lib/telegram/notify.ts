@@ -163,6 +163,62 @@ export async function notifyAllAdminProDirect(
   return { sentTo, skippedNoTelegram, failed }
 }
 
+/**
+ * 7.15 hotfix #1: получатели tone-алёртов (rude/urgent).
+ *
+ * Список = все активные MANAGER ∪ все активные user c receivesToneAlerts=true.
+ * Дедуп по userId на уровне SQL (OR в where → один user не попадёт дважды).
+ * Покрывает кейс «алёрт должен видеть ADMIN_PRO», не размывая existing
+ * notifyAllManagersDirect (тот используется для общих сводок ADMIN+MANAGER).
+ *
+ * Возвращаемый тип идентичен notifyAllManagersDirect — точка замены чистая.
+ */
+export async function notifyToneRecipients(
+  text: string,
+  opts?: NotifyOptions
+): Promise<NotifyAllManagersResult> {
+  const recipients = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      OR: [{ role: 'MANAGER' }, { receivesToneAlerts: true }],
+    },
+    select: { id: true, telegramChatId: true },
+  })
+
+  const withTelegram = recipients.filter((u) => u.telegramChatId !== null)
+  const skippedNoTelegram = recipients.length - withTelegram.length
+
+  if (withTelegram.length === 0) {
+    console.warn(
+      `[telegram/notify] notifyToneRecipients: no recipients with telegramChatId ` +
+        `(total: ${recipients.length})`
+    )
+    return { sentTo: 0, skippedNoTelegram, failed: 0 }
+  }
+
+  const sends = await Promise.allSettled(
+    withTelegram.map((u) =>
+      sendTelegramMessage(u.telegramChatId as string, text, {
+        parseMode: opts?.parseMode ?? DEFAULT_PARSE_MODE,
+        replyMarkup: opts?.replyMarkup,
+      })
+    )
+  )
+
+  let sentTo = 0
+  let failed = 0
+  for (const s of sends) {
+    if (s.status === 'fulfilled' && s.value.ok) sentTo++
+    else failed++
+  }
+
+  console.log(
+    `[telegram/notify] notifyToneRecipients: sentTo=${sentTo} skippedNoTelegram=${skippedNoTelegram} failed=${failed}`
+  )
+
+  return { sentTo, skippedNoTelegram, failed }
+}
+
 export interface NotifyGroupResult {
   ok: boolean
   error?: string

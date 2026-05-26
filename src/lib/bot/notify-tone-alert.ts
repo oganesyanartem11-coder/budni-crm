@@ -1,12 +1,13 @@
 import { prisma } from '@/lib/db/prisma'
-import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
+import { notifyToneRecipients, escapeHtml } from '@/lib/telegram/notify'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import { TONE_CONFIG, shouldBypassCooldown } from '@/lib/inbox/tone-labels'
 
 const COOLDOWN_MIN = 15
 
 /**
- * Шлёт tone-алёрт всем активным ADMIN+MANAGER c Telegram-онбордингом.
+ * Шлёт tone-алёрт получателям из notifyToneRecipients
+ * (MANAGER ∪ User.receivesToneAlerts=true) c Telegram-онбордингом.
  *
  * Cooldown:
  *   - rude   → 15 мин на пару (clientId, tone) через ToneAlertLog
@@ -61,7 +62,7 @@ export async function notifyToneAlert(input: {
     `<a href="${link}">Открыть диалог</a>`,
   ].join('\n')
 
-  const result = await notifyAllManagersDirect(text, { parseMode: 'HTML' })
+  const result = await notifyToneRecipients(text, { parseMode: 'HTML' })
 
   await prisma.toneAlertLog.create({
     data: { clientId, tone },
