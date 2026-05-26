@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import Link from 'next/link'
 import { ReceiptText, ChevronRight, Sparkles, Search as SearchIcon } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -88,7 +89,9 @@ export function InvoicesList({
         </Link>
       )}
 
-      <SearchBar initial={activeQuery} />
+      <Suspense fallback={null}>
+        <SearchBar initial={activeQuery} />
+      </Suspense>
 
       <div className="flex flex-wrap gap-1.5">
         {STATUS_FILTERS.map((f) => {

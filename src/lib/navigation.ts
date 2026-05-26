@@ -8,11 +8,13 @@ import {
   ChefHat,
   Truck,
   FileBarChart,
+  FileText,
   TrendingUp,
   Inbox,
   Menu,
   Sparkles,
   ReceiptText,
+  BarChart3,
   type LucideIcon,
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
@@ -30,6 +32,15 @@ export interface NavItem {
   icon: LucideIcon
   roles: UserRole[]
   badge?: NavBadgeKey
+  /**
+   * Если задано — пункт рендерится как раскрываемый узел с под-ссылками.
+   * Сам href узла используется как «активный» матч (startsWith) и
+   * default-таргет клика (но клик по узлу открывает/закрывает аккордеон,
+   * не переходит — см. sidebar.tsx). Каждый child фильтруется по roles
+   * отдельно: ребёнок с роль-mismatch скрывается, а если ВСЕ дети скрыты,
+   * скрывается и сам узел.
+   */
+  children?: NavItem[]
 }
 
 export type NavGroupId = 'daily' | 'production' | 'directory' | 'analytics'
@@ -83,8 +94,24 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'analytics',
     title: 'Аналитика',
     items: [
-      { href: '/reports',   label: 'Отчёты',    icon: FileBarChart, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
-      { href: '/analytics', label: 'Аналитика', icon: TrendingUp,   roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
+      // 7.MEGA-CLEANUP / BLOCK A: единый раскрываемый узел «Аналитика» с под-ссылками.
+      // Сам узел не имеет своей страницы — href здесь используется только
+      // как ключ активного состояния (startsWith). Клик по узлу открывает
+      // аккордеон, переходов нет — переходы по children.
+      {
+        href: '/analytics',
+        label: 'Аналитика',
+        icon: BarChart3,
+        // Объединение всех ролей дочерних пунктов: если у роли есть хотя бы
+        // одна доступная подссылка — узел показывается.
+        roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'],
+        children: [
+          { href: '/analytics/cost',     label: 'Себестоимость', icon: TrendingUp,   roles: ['ADMIN_PRO', 'ADMIN'] },
+          { href: '/analytics/invoices', label: 'Приёмки',       icon: ReceiptText,  roles: ['ADMIN_PRO'] },
+          { href: '/reports',            label: 'Отчёты',        icon: FileText,     roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
+          { href: '/analytics',          label: 'Сводка',        icon: FileBarChart, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
+        ],
+      },
     ],
   },
 ]

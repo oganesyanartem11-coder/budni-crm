@@ -2,7 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
+import { prismaDirect } from '@/lib/db/prisma-direct'
 import { requireRole } from '@/lib/auth/current-user'
 
 const ingredientSchema = z.object({
@@ -155,6 +157,331 @@ export async function updateIngredient(id: string, formData: IngredientFormData)
 
   revalidatePath('/ingredients')
   return { ok: true, data: undefined }
+}
+
+// ============================================================
+// BULK-операции (Sprint 7.MEGA-CLEANUP, БЛОК B)
+// Доступны ТОЛЬКО ADMIN_PRO. Обычный ADMIN не может вызвать.
+// ============================================================
+
+type BrandVariant = {
+  rawName?: string
+  variant?: string
+  supplier?: string
+  seenAt?: string
+  lastSeenPrice?: number
+  lastSeenDate?: string
+}
+
+function mergeBrandVariantsList(lists: (unknown[] | null | undefined)[]): BrandVariant[] {
+  const result: BrandVariant[] = []
+  const seen = new Set<string>()
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue
+    for (const item of list as BrandVariant[]) {
+      if (!item) continue
+      const key = (item.rawName ?? item.variant ?? '').toLowerCase().trim()
+      if (!key) {
+        // Без ключа — добавляем без дедупа (не должно случаться, но defensive)
+        result.push(item)
+        continue
+      }
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(item)
+    }
+  }
+  return result
+}
+
+/**
+ * Объединить несколько APPROVED-ингредиентов в один. sourceIds → targetId.
+ *
+ * Конфликт-резолюция для @@unique([dishId, ingredientId]):
+ * source-DishIngredient'ы, у которых dishId уже есть у target, УДАЛЯЮТСЯ
+ * (приоритет за target — у него уже есть запись с brutto/netto на это блюдо).
+ * Остальные source-DishIngredient'ы перевешиваются на target.
+ *
+ * InvoiceLine.matchedIngredientId переносятся все — у InvoiceLine нет unique
+ * по (invoice, ingredient), конфликтов не будет.
+ */
+export async function mergeIngredients(
+  targetId: string,
+  sourceIds: string[]
+): Promise<ActionResult<{ mergedCount: number }>> {
+  const user = await requireRole(['ADMIN_PRO'])
+
+  // Guards
+  if (!Array.isArray(sourceIds) || sourceIds.length < 1) {
+    return { ok: false, error: 'Не выбрано ни одного исходного ингредиента' }
+  }
+  if (sourceIds.includes(targetId)) {
+    return { ok: false, error: 'Целевой ингредиент не может быть в списке источников' }
+  }
+  // Дедуп sourceIds на всякий случай
+  const uniqueSourceIds = Array.from(new Set(sourceIds))
+
+  const allIds = [targetId, ...uniqueSourceIds]
+  const ingredients = await prisma.ingredient.findMany({
+    where: { id: { in: allIds } },
+    select: { id: true, name: true, status: true, brandVariants: true },
+  })
+
+  if (ingredients.length !== allIds.length) {
+    return { ok: false, error: 'Один или несколько ингредиентов не найдены' }
+  }
+
+  const notApproved = ingredients.filter((i) => i.status !== 'APPROVED')
+  if (notApproved.length > 0) {
+    return {
+      ok: false,
+      error: `Все ингредиенты должны быть в статусе APPROVED. Не APPROVED: ${notApproved.map((i) => i.name).join(', ')}`,
+    }
+  }
+
+  const target = ingredients.find((i) => i.id === targetId)!
+  const sources = ingredients.filter((i) => i.id !== targetId)
+
+  try {
+    await prismaDirect.$transaction(async (tx) => {
+      // 1. Прочитать существующие DishIngredient у target (чтобы знать какие dishId уже занятые)
+      const targetDishLinks = await tx.dishIngredient.findMany({
+        where: { ingredientId: targetId },
+        select: { dishId: true },
+      })
+      const existingDishIds = new Set(targetDishLinks.map((d) => d.dishId))
+
+      // 2. Прочитать все DishIngredient у source
+      const sourceDishLinks = await tx.dishIngredient.findMany({
+        where: { ingredientId: { in: uniqueSourceIds } },
+        select: { id: true, dishId: true },
+      })
+
+      // 3. Разделить на конфликты (target уже имеет это блюдо → удалить source) и переносимые
+      const conflictIds: string[] = []
+      const migratableIds: string[] = []
+      for (const link of sourceDishLinks) {
+        if (existingDishIds.has(link.dishId)) {
+          conflictIds.push(link.id)
+        } else {
+          migratableIds.push(link.id)
+        }
+      }
+
+      // 4. Удалить конфликтные source-записи (у target уже есть свой brutto/netto на это блюдо)
+      if (conflictIds.length > 0) {
+        await tx.dishIngredient.deleteMany({
+          where: { id: { in: conflictIds } },
+        })
+      }
+
+      // 5. Перевесить остальные source-DishIngredient на target
+      if (migratableIds.length > 0) {
+        await tx.dishIngredient.updateMany({
+          where: { id: { in: migratableIds } },
+          data: { ingredientId: targetId },
+        })
+      }
+
+      // 6. Перенести InvoiceLine FK
+      await tx.invoiceLine.updateMany({
+        where: { matchedIngredientId: { in: uniqueSourceIds } },
+        data: { matchedIngredientId: targetId },
+      })
+
+      // 7. Удалить историю цен source'ов (история target остаётся как primary)
+      await tx.ingredientPriceHistory.deleteMany({
+        where: { ingredientId: { in: uniqueSourceIds } },
+      })
+
+      // 8. Смерджить brandVariants
+      const mergedVariants = mergeBrandVariantsList([
+        target.brandVariants as unknown[] | null,
+        ...sources.map((s) => s.brandVariants as unknown[] | null),
+      ])
+      await tx.ingredient.update({
+        where: { id: targetId },
+        data: {
+          brandVariants:
+            mergedVariants.length > 0
+              ? (mergedVariants as unknown as Prisma.InputJsonValue)
+              : Prisma.JsonNull,
+        },
+      })
+
+      // 9. Удалить source-ингредиенты (FK уже расцеплены)
+      await tx.ingredient.deleteMany({
+        where: { id: { in: uniqueSourceIds } },
+      })
+
+      // 10. Активити-лог
+      await tx.activityLog.create({
+        data: {
+          userId: user.id,
+          userRole: user.role,
+          action: 'INGREDIENT_BULK_MERGED',
+          entityType: 'Ingredient',
+          entityId: targetId,
+          payload: {
+            targetId,
+            targetName: target.name,
+            sourceIds: uniqueSourceIds,
+            sourceNames: sources.map((s) => s.name),
+            mergedCount: uniqueSourceIds.length,
+            conflictsResolved: conflictIds.length,
+            dishIngredientsMigrated: migratableIds.length,
+          },
+        },
+      })
+    })
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+
+  revalidatePath('/ingredients')
+  return { ok: true, data: { mergedCount: uniqueSourceIds.length } }
+}
+
+/**
+ * Удалить несколько APPROVED-ингредиентов. Жёсткая проверка связей:
+ * нельзя удалить ингредиент с активными DishIngredient или InvoiceLine.
+ * Если хоть один имеет связи — отказ операции целиком (без частичного успеха).
+ */
+export async function bulkDeleteIngredients(
+  ids: string[]
+): Promise<ActionResult<{ deletedCount: number }>> {
+  const user = await requireRole(['ADMIN_PRO'])
+
+  if (!Array.isArray(ids) || ids.length < 1) {
+    return { ok: false, error: 'Не выбрано ни одного ингредиента' }
+  }
+  const uniqueIds = Array.from(new Set(ids))
+
+  const ingredients = await prisma.ingredient.findMany({
+    where: { id: { in: uniqueIds } },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      _count: { select: { dishIngredients: true, invoiceLines: true } },
+    },
+  })
+
+  if (ingredients.length !== uniqueIds.length) {
+    return { ok: false, error: 'Один или несколько ингредиентов не найдены' }
+  }
+
+  const notApproved = ingredients.filter((i) => i.status !== 'APPROVED')
+  if (notApproved.length > 0) {
+    return {
+      ok: false,
+      error: `Все ингредиенты должны быть в статусе APPROVED. Не APPROVED: ${notApproved.map((i) => i.name).join(', ')}`,
+    }
+  }
+
+  const withLinks = ingredients.filter(
+    (i) => i._count.dishIngredients > 0 || i._count.invoiceLines > 0
+  )
+  if (withLinks.length > 0) {
+    return {
+      ok: false,
+      error: `Нельзя удалить ${withLinks.length} ингредиент(ов) со связями. Сначала очистите DishIngredient/InvoiceLine: ${withLinks.map((i) => i.name).join(', ')}`,
+    }
+  }
+
+  try {
+    await prismaDirect.$transaction(async (tx) => {
+      await tx.ingredientPriceHistory.deleteMany({
+        where: { ingredientId: { in: uniqueIds } },
+      })
+      // Defense-in-depth: повторно фильтруем по status='APPROVED' на случай,
+      // если за время между findMany и transaction статус подменили.
+      await tx.ingredient.deleteMany({
+        where: { id: { in: uniqueIds }, status: 'APPROVED' },
+      })
+      await tx.activityLog.create({
+        data: {
+          userId: user.id,
+          userRole: user.role,
+          action: 'INGREDIENT_BULK_DELETED',
+          entityType: 'Ingredient',
+          payload: {
+            ids: uniqueIds,
+            names: ingredients.map((i) => i.name),
+            count: uniqueIds.length,
+          },
+        },
+      })
+    })
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+
+  revalidatePath('/ingredients')
+  return { ok: true, data: { deletedCount: uniqueIds.length } }
+}
+
+/**
+ * Превью merge-операции: показывает сколько DishIngredient переедет,
+ * сколько конфликтов разрешится удалением, сколько InvoiceLine перенесётся,
+ * сколько priceHistory удалится. Read-only, не меняет данные.
+ */
+export async function getMergePreview(
+  targetId: string,
+  sourceIds: string[]
+): Promise<
+  ActionResult<{
+    dishIngredientsToMigrate: number
+    dishIngredientsToDelete: number
+    invoiceLinesToMigrate: number
+    priceHistoryToDelete: number
+  }>
+> {
+  await requireRole(['ADMIN_PRO'])
+
+  if (!Array.isArray(sourceIds) || sourceIds.length < 1) {
+    return { ok: false, error: 'Не выбрано ни одного исходного ингредиента' }
+  }
+  if (sourceIds.includes(targetId)) {
+    return { ok: false, error: 'Целевой ингредиент не может быть в списке источников' }
+  }
+  const uniqueSourceIds = Array.from(new Set(sourceIds))
+
+  const targetDishLinks = await prisma.dishIngredient.findMany({
+    where: { ingredientId: targetId },
+    select: { dishId: true },
+  })
+  const existingDishIds = new Set(targetDishLinks.map((d) => d.dishId))
+
+  const sourceDishLinks = await prisma.dishIngredient.findMany({
+    where: { ingredientId: { in: uniqueSourceIds } },
+    select: { dishId: true },
+  })
+
+  let dishIngredientsToDelete = 0
+  let dishIngredientsToMigrate = 0
+  for (const link of sourceDishLinks) {
+    if (existingDishIds.has(link.dishId)) {
+      dishIngredientsToDelete++
+    } else {
+      dishIngredientsToMigrate++
+    }
+  }
+
+  const [invoiceLinesToMigrate, priceHistoryToDelete] = await Promise.all([
+    prisma.invoiceLine.count({ where: { matchedIngredientId: { in: uniqueSourceIds } } }),
+    prisma.ingredientPriceHistory.count({ where: { ingredientId: { in: uniqueSourceIds } } }),
+  ])
+
+  return {
+    ok: true,
+    data: {
+      dishIngredientsToMigrate,
+      dishIngredientsToDelete,
+      invoiceLinesToMigrate,
+      priceHistoryToDelete,
+    },
+  }
 }
 
 export async function archiveIngredient(id: string): Promise<ActionResult> {

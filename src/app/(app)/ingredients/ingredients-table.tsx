@@ -10,6 +10,15 @@ import { formatMoney, formatDateLong, formatIngredients } from '@/lib/utils/form
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils/cn'
+import { BulkToolbar } from '@/components/ingredients/bulk-toolbar'
+import {
+  MergeIngredientsDialog,
+  type MergeCandidate,
+} from '@/components/ingredients/merge-ingredients-dialog'
+import {
+  BulkDeleteDialog,
+  type DeleteCandidate,
+} from '@/components/ingredients/bulk-delete-dialog'
 import type { Ingredient, IngredientPriceHistory } from '@prisma/client'
 
 type PriceFilter = 'all' | 'priced' | 'unpriced'
@@ -20,6 +29,7 @@ const UNIT_LABELS = { KG: 'кг', L: 'л', PCS: 'шт' } as const
 type SerializedIngredient = Omit<Ingredient, 'pricePerUnit'> & {
   pricePerUnit: number
   priceHistory: SerializedPriceHistory[]
+  _count?: { dishIngredients: number; invoiceLines: number }
 }
 
 type SerializedPriceHistory = Omit<IngredientPriceHistory, 'price'> & {
@@ -30,9 +40,10 @@ interface Props {
   ingredients: SerializedIngredient[]
   canSeePrices: boolean
   canEdit: boolean
+  isAdminPro: boolean
 }
 
-export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) {
+export function IngredientsTable({ ingredients, canSeePrices, canEdit, isAdminPro }: Props) {
   const [search, setSearch] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [priceFilter, setPriceFilter] = useState<PriceFilter>('all')
@@ -41,6 +52,11 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
   })
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [, startArchive] = useTransition()
+
+  // Multi-select state (только для ADMIN_PRO)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const filtered = useMemo(() => {
     return ingredients.filter((ing) => {
@@ -51,6 +67,71 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
       return true
     })
   }, [ingredients, search, showArchived, priceFilter, canSeePrices])
+
+  // Селектабельные = APPROVED-only (DRAFT исключаем из bulk-операций)
+  const selectableFiltered = useMemo(
+    () => (isAdminPro ? filtered.filter((i) => i.status === 'APPROVED') : []),
+    [filtered, isAdminPro]
+  )
+
+  const allVisibleSelected = useMemo(() => {
+    if (!isAdminPro || selectableFiltered.length === 0) return false
+    return selectableFiltered.every((i) => selectedIds.has(i.id))
+  }, [selectableFiltered, selectedIds, isAdminPro])
+
+  const someVisibleSelected = useMemo(() => {
+    if (!isAdminPro) return false
+    return selectableFiltered.some((i) => selectedIds.has(i.id))
+  }, [selectableFiltered, selectedIds, isAdminPro])
+
+  const selectedList = useMemo(() => {
+    if (!isAdminPro) return [] as SerializedIngredient[]
+    // Только APPROVED-ингредиенты — bulk-операции не для DRAFT
+    return ingredients.filter((i) => selectedIds.has(i.id) && i.status === 'APPROVED')
+  }, [ingredients, selectedIds, isAdminPro])
+
+  const mergeCandidates: MergeCandidate[] = useMemo(
+    () => selectedList.map((s) => ({ id: s.id, name: s.name, unit: s.unit })),
+    [selectedList]
+  )
+
+  const deleteCandidates: DeleteCandidate[] = useMemo(
+    () =>
+      selectedList.map((s) => ({
+        id: s.id,
+        name: s.name,
+        dishIngredientCount: s._count?.dishIngredients ?? 0,
+        invoiceLineCount: s._count?.invoiceLines ?? 0,
+      })),
+    [selectedList]
+  )
+
+  function toggleOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllVisible() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (allVisibleSelected) {
+        // Снять все видимые
+        for (const i of selectableFiltered) next.delete(i.id)
+      } else {
+        // Выбрать все видимые
+        for (const i of selectableFiltered) next.add(i.id)
+      }
+      return next
+    })
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+  }
 
   function handleArchive(id: string, name: string, currentlyActive: boolean) {
     startArchive(async () => {
@@ -98,6 +179,17 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
 
   return (
     <>
+      {isAdminPro && selectedIds.size >= 1 && (
+        <div className="mb-3">
+          <BulkToolbar
+            selectedCount={selectedIds.size}
+            onMerge={() => setMergeOpen(true)}
+            onDelete={() => setDeleteOpen(true)}
+            onClear={clearSelection}
+          />
+        </div>
+      )}
+
       <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
         {/* Панель управления */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-5 py-4 border-b border-border">
@@ -159,6 +251,21 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
             <table className="w-full">
               <thead className="bg-bg/50 text-xs uppercase tracking-wider text-fg-muted">
                 <tr>
+                  {isAdminPro && (
+                    <th className="px-3 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        aria-label="Выбрать все видимые"
+                        checked={allVisibleSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected
+                        }}
+                        onChange={toggleAllVisible}
+                        disabled={selectableFiltered.length === 0}
+                        className="rounded cursor-pointer disabled:cursor-not-allowed"
+                      />
+                    </th>
+                  )}
                   <th className="text-left px-5 py-3 font-medium">Название</th>
                   <th className="text-left px-3 py-3 font-medium w-20">Ед.</th>
                   {canSeePrices && <th className="text-right px-3 py-3 font-medium">Цена</th>}
@@ -170,6 +277,8 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
                 {filtered.map((ing) => {
                   const lastPriceChange = ing.priceHistory[0]
                   const isExpanded = expandedId === ing.id
+                  const isSelected = selectedIds.has(ing.id)
+                  const isSelectable = isAdminPro && ing.status === 'APPROVED'
 
                   return (
                     <FragmentRow
@@ -182,6 +291,10 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
                       lastPriceChange={lastPriceChange}
                       canSeePrices={canSeePrices}
                       canEdit={canEdit}
+                      isAdminPro={isAdminPro}
+                      isSelectable={isSelectable}
+                      isSelected={isSelected}
+                      onToggleSelect={() => toggleOne(ing.id)}
                     />
                   )
                 })}
@@ -204,6 +317,23 @@ export function IngredientsTable({ ingredients, canSeePrices, canEdit }: Props) 
         onClose={() => setModalState({ open: false })}
         canSeePrices={canSeePrices}
       />
+
+      {isAdminPro && (
+        <>
+          <MergeIngredientsDialog
+            open={mergeOpen}
+            onOpenChange={setMergeOpen}
+            selected={mergeCandidates}
+            onMerged={clearSelection}
+          />
+          <BulkDeleteDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            selected={deleteCandidates}
+            onDeleted={clearSelection}
+          />
+        </>
+      )}
     </>
   )
 }
@@ -217,6 +347,10 @@ function FragmentRow({
   lastPriceChange,
   canSeePrices,
   canEdit,
+  isAdminPro,
+  isSelectable,
+  isSelected,
+  onToggleSelect,
 }: {
   ingredient: SerializedIngredient
   isExpanded: boolean
@@ -226,11 +360,34 @@ function FragmentRow({
   lastPriceChange?: SerializedPriceHistory
   canSeePrices: boolean
   canEdit: boolean
+  isAdminPro: boolean
+  isSelectable: boolean
+  isSelected: boolean
+  onToggleSelect: () => void
 }) {
-  const totalCols = 3 + (canSeePrices ? 2 : 0)
+  const totalCols = 3 + (canSeePrices ? 2 : 0) + (isAdminPro ? 1 : 0)
   return (
     <>
-      <tr className={cn('hover:bg-bg/30 transition-colors', !ing.isActive && 'opacity-50')}>
+      <tr
+        className={cn(
+          'hover:bg-bg/30 transition-colors',
+          !ing.isActive && 'opacity-50',
+          isSelected && 'bg-accent/5'
+        )}
+      >
+        {isAdminPro && (
+          <td className="px-3 py-3 w-10">
+            <input
+              type="checkbox"
+              aria-label={`Выбрать «${ing.name}»`}
+              checked={isSelected}
+              onChange={onToggleSelect}
+              disabled={!isSelectable}
+              title={!isSelectable ? 'Только APPROVED-ингредиенты доступны для bulk-операций' : undefined}
+              className="rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+            />
+          </td>
+        )}
         <td className="px-5 py-3">
           <div className="flex items-center gap-2 flex-wrap">
             <Link href={`/ingredients/${ing.id}`} className="font-medium hover:underline">

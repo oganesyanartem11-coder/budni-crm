@@ -25,9 +25,12 @@ export function AnalyticsTabs({ tabs }: Props) {
         // /analytics — активна только если pathname точно совпадает
         // (иначе подсветится и на /analytics/cost).
         // /analytics/cost — активна на /analytics/cost и /analytics/cost/[id].
+        // /analytics/invoices — активна на /analytics/invoices (детальных
+        // страниц пока нет, но startsWith — на вырост).
         const isExact = pathname === t.href
-        const isCostBranch = t.href === '/analytics/cost' && pathname.startsWith('/analytics/cost')
-        const isActive = isExact || isCostBranch
+        const isBranch =
+          t.href !== '/analytics' && pathname.startsWith(t.href + '/')
+        const isActive = isExact || isBranch
 
         return (
           <Link

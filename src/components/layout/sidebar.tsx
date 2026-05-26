@@ -1,7 +1,9 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { ChevronDown } from 'lucide-react'
 import { NAV_GROUPS, HOME_BY_ROLE, type NavBadgeKey, type NavItem } from '@/lib/navigation'
 import { Logo } from './logo'
 import { ProfileMenu } from './profile-menu'
@@ -75,15 +77,29 @@ export function NavGroupList({
             <p className="px-3 mb-1 text-xs lg:text-[10px] uppercase tracking-wider text-fg-subtle font-semibold">
               {group.title}
             </p>
-            {visible.map((item) => (
-              <NavLinkRow
-                key={item.href}
-                item={item}
-                active={isActive(pathname, item.href)}
-                badge={item.badge ? counts[item.badge] : 0}
-                onClick={onItemClick}
-              />
-            ))}
+            {visible.map((item) => {
+              if (item.children && item.children.length > 0) {
+                return (
+                  <NavExpandableRow
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    userRole={userRole}
+                    counts={counts}
+                    onItemClick={onItemClick}
+                  />
+                )
+              }
+              return (
+                <NavLinkRow
+                  key={item.href}
+                  item={item}
+                  active={isActive(pathname, item.href)}
+                  badge={item.badge ? counts[item.badge] : 0}
+                  onClick={onItemClick}
+                />
+              )
+            })}
           </div>
         )
       })}
@@ -123,6 +139,136 @@ function NavLinkRow({
         </span>
       )}
     </Link>
+  )
+}
+
+/**
+ * Раскрываемый узел с дочерними ссылками. Состояние «развёрнут»:
+ *  - lazy initial: если pathname matches любой child — true
+ *  - дальше — localStorage ('sidebar.{href}.expanded')
+ *  - при навигации на child — auto-expand через effect (без mismatch:
+ *    initial уже учёл pathname)
+ *
+ * SSR-safety: lazy initializer вычисляется на сервере только из pathname
+ * (нет окна), на клиенте при первом рендере тоже — синхронный matching
+ * без чтения localStorage в initial. localStorage применяется в effect
+ * (после mount), но фолбэк-значение совпадает с pathname-вычислением, так
+ * что hydration mismatch не возникает.
+ */
+function NavExpandableRow({
+  item,
+  pathname,
+  userRole,
+  counts,
+  onItemClick,
+}: {
+  item: NavItem
+  pathname: string
+  userRole: UserRole
+  counts: Record<NavBadgeKey, number>
+  onItemClick?: () => void
+}) {
+  const visibleChildren = (item.children ?? []).filter((c) => c.roles.includes(userRole))
+  const pathMatches = visibleChildren.some((c) => isActive(pathname, c.href))
+  const parentActive = pathMatches || isActive(pathname, item.href)
+
+  // lazy initializer — детерминированно из pathname (одинаково на SSR и client).
+  const [expanded, setExpanded] = useState<boolean>(() => pathMatches)
+
+  // После mount — читаем localStorage (если был явно закрыт юзером). Если
+  // pathMatches — всегда показываем открытым (auto-expand при навигации).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (pathMatches) {
+      setExpanded(true)
+      return
+    }
+    try {
+      const stored = window.localStorage.getItem(`sidebar.${item.href}.expanded`)
+      if (stored === 'true') setExpanded(true)
+      else if (stored === 'false') setExpanded(false)
+    } catch {
+      // приватный режим Safari / отключённый storage — игнорируем.
+    }
+  }, [pathMatches, item.href])
+
+  function toggle() {
+    setExpanded((prev) => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(`sidebar.${item.href}.expanded`, String(next))
+        } catch {
+          // ignore
+        }
+      }
+      return next
+    })
+  }
+
+  if (visibleChildren.length === 0) return null
+
+  const Icon = item.icon
+
+  return (
+    <div className="space-y-0.5">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={expanded}
+        className={cn(
+          'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-base lg:text-sm transition-colors',
+          parentActive
+            ? 'bg-fg/5 text-fg font-medium'
+            : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
+        )}
+      >
+        <Icon
+          className="w-5 h-5 lg:w-4 lg:h-4 shrink-0"
+          strokeWidth={parentActive ? 2 : 1.75}
+        />
+        <span className="flex-1 truncate text-left">{item.label}</span>
+        <ChevronDown
+          className={cn(
+            'w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0 transition-transform text-fg-subtle',
+            expanded && 'rotate-180'
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="ml-3 pl-3 border-l border-border space-y-0.5">
+          {visibleChildren.map((child) => {
+            const ChildIcon = child.icon
+            const childActive = isActive(pathname, child.href)
+            const badge = child.badge ? counts[child.badge] : 0
+            return (
+              <Link
+                key={child.href + child.label}
+                href={child.href}
+                onClick={onItemClick}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm lg:text-xs transition-colors',
+                  childActive
+                    ? 'bg-fg/5 text-fg font-medium'
+                    : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
+                )}
+              >
+                <ChildIcon
+                  className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0"
+                  strokeWidth={childActive ? 2 : 1.75}
+                />
+                <span className="flex-1 truncate">{child.label}</span>
+                {badge > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold tabular-nums">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </Link>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
