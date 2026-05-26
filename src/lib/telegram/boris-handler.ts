@@ -3,6 +3,7 @@ import { identifyTelegramUser } from './identify-user'
 import { registerCallbackHandler } from './callback-router'
 import { chatWithBoris } from '@/lib/boris/agent'
 import { executePendingAction } from '@/lib/boris/executor'
+import { TOOL_TITLES } from '@/lib/boris/preview'
 import { prisma } from '@/lib/db/prisma'
 
 /**
@@ -170,9 +171,12 @@ registerCallbackHandler({
     if (action === 'confirm') {
       try {
         const result = await executePendingAction(id, user.id)
+        const titleFor = (tool: string) => TOOL_TITLES[tool] ?? tool
         const summary = result.results
           .map((r) =>
-            r.ok ? `✅ ${r.tool}` : `❌ ${r.tool}: ${r.error ?? 'ошибка'}`
+            r.ok
+              ? `✅ ${titleFor(r.tool)}`
+              : `❌ ${titleFor(r.tool)}: ${r.error ?? 'ошибка'}`
           )
           .join('\n')
         await ctx.editMessageText(`${pending.previewText}\n\n${summary}`, {

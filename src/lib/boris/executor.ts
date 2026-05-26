@@ -37,6 +37,22 @@ import {
   createOneTimeOrder,
 } from '@/app/(app)/orders/actions'
 
+/**
+ * Server actions внутри зовут revalidatePath/redirect — те бросают NEXT_REDIRECT
+ * "сигнал" (special error с digest='NEXT_REDIRECT;...'). В React Server Components
+ * этот сигнал ловит Next.js, но мы вызываем actions из контекста TG-бота — здесь
+ * сигнал долетает до нашего try/catch. Действие при этом уже совершилось в БД,
+ * просто навигационный signal не у дел. Трактуем как успех.
+ *
+ * Проверка через digest.startsWith — стабильный API (не зависит от internal
+ * Next-импорта next/dist/client/components/redirect-error).
+ */
+function isNextRedirect(e: unknown): boolean {
+  if (typeof e !== 'object' || e === null || !('digest' in e)) return false
+  const digest = (e as { digest?: unknown }).digest
+  return typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')
+}
+
 export interface ExecuteResultItem {
   tool: string
   ok: boolean
@@ -109,11 +125,15 @@ export async function executePendingAction(
         data: 'data' in r ? r.data : undefined,
       })
     } catch (e) {
-      results.push({
-        tool: a.tool,
-        ok: false,
-        error: e instanceof Error ? e.message : String(e),
-      })
+      if (isNextRedirect(e)) {
+        results.push({ tool: a.tool, ok: true })
+      } else {
+        results.push({
+          tool: a.tool,
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
     }
   }
 

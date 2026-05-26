@@ -33,7 +33,7 @@ export interface PreviewContext {
 /**
  * Заголовки по tool name. unknown tool → `Действие: ${tool}`.
  */
-const TOOL_TITLES: Record<string, string> = {
+export const TOOL_TITLES: Record<string, string> = {
   edit_order_portions: 'Изменение порций',
   cancel_order: 'Отмена заказа',
   restore_order: 'Восстановление заказа',
