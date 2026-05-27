@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
@@ -144,7 +145,7 @@ export async function markStopDelivered(
   //   4. Дедуп: `first_delivery:${clientId}` гарантирует один эмит на клиента,
   //      даже если race-condition попытается записать дважды (logBorisEvent
   //      внутри ловит P2002 и возвращает null).
-  void (async () => {
+  after(async () => {
     try {
       const ordersWithClient = await prisma.order.findMany({
         where: { id: { in: orderIds }, status: 'DELIVERED' },
@@ -183,7 +184,7 @@ export async function markStopDelivered(
     } catch (err) {
       console.error('[boris-team] first_delivery trigger failed', err)
     }
-  })()
+  })
 
   return { ok: true, data: { updated: updates } }
 }

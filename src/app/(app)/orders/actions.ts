@@ -1069,6 +1069,44 @@ export async function createOneTimeOrderCore(
     },
   })
 
+  // Уведомление в групповой чат «Будни — Команда». Системное событие
+  // (не голос Бориса) — менеджеры/шеф/курьер должны знать о разовом заказе.
+  // Push fire-and-forget: если упал — НЕ блокируем создание заказа.
+  try {
+    const userRow = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { name: true },
+    })
+    const userName = userRow?.name ?? 'неизвестно'
+
+    const clientRow = await prisma.client.findUnique({
+      where: { id: data.clientId },
+      select: { name: true },
+    })
+    const locationRow = await prisma.clientLocation.findUnique({
+      where: { id: data.locationId },
+      select: { name: true },
+    })
+
+    const text =
+      `🆕 <b>Разовый заказ</b>\n\n` +
+      `${escapeHtml(clientRow?.name ?? '???')} · ${escapeHtml(locationRow?.name ?? '???')}\n` +
+      `${MEAL_TYPE_LABELS[data.mealType]} на ${formatDateShort(deliveryDate)}\n\n` +
+      `Порций: <b>${data.portions}</b>\n` +
+      `Создал: ${escapeHtml(userName)}`
+
+    const pushResult = await notifyGroup(text, {
+      parseMode: 'HTML',
+      replyMarkup: orderDetailButton(newOrder.id),
+    })
+
+    if (!pushResult.ok) {
+      console.error(`[createOneTimeOrder] notifyGroup failed: ${pushResult.error}`)
+    }
+  } catch (err) {
+    console.error('[createOneTimeOrder] notify failed', err)
+  }
+
   return { ok: true, data: { orderId: newOrder.id } }
 }
 

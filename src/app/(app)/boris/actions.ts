@@ -25,6 +25,8 @@
  * намеренно (heartbeat — только для cron-runner'а Vercel).
  */
 
+import type { NextResponse } from 'next/server'
+
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { emitAlertPost } from '@/lib/boris/team-channels'
@@ -48,14 +50,43 @@ function buildSyntheticCronRequest(path: string): Request {
 }
 
 /**
- * Безопасно извлекает JSON-тело из ответа handler'а. Cron-handler'ы всегда
- * возвращают NextResponse.json(...), но clone+catch — на случай рефакторинга.
+ * Общая обвязка для cron-handler'ов: вызывает handler с синтетическим
+ * Request, аккуратно парсит JSON-ответ и нормализует поля briefingId /
+ * action / skipped / sentToTg / error. Используется ниже в
+ * triggerTeamEveningDigest и triggerTeamFriday — обе обёртки превращают
+ * результат в ActionResult со своими специфичными toast-сообщениями.
+ *
+ * Любой throw из handler'а ловится и возвращается как { ok: false }.
+ * Случай 200 OK + body.ok === false тоже трактуется как ошибка.
  */
-async function readJson(response: Response): Promise<Record<string, unknown> | null> {
+async function runViaSynthetic(
+  handler: (req: Request) => Promise<NextResponse>,
+  path: string,
+): Promise<{
+  ok: boolean
+  briefingId?: string
+  action?: string
+  skipped?: string
+  sentToTg?: unknown
+  error?: string
+}> {
   try {
-    return (await response.clone().json()) as Record<string, unknown>
-  } catch {
-    return null
+    const response = await handler(buildSyntheticCronRequest(path))
+    const body = (await response.clone().json().catch(() => ({}))) as Record<string, unknown>
+    if (!response.ok || body.ok === false) {
+      const error =
+        typeof body.error === 'string' ? body.error : `HTTP ${response.status}`
+      return { ok: false, error }
+    }
+    return {
+      ok: true,
+      briefingId: typeof body.briefingId === 'string' ? body.briefingId : undefined,
+      action: typeof body.action === 'string' ? body.action : undefined,
+      skipped: typeof body.skipped === 'string' ? body.skipped : undefined,
+      sentToTg: 'sentToTg' in body ? body.sentToTg : undefined,
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
@@ -68,33 +99,18 @@ export async function triggerTeamEveningDigest(): Promise<
 > {
   await requireRole(['ADMIN_PRO'])
 
-  let response: Response
-  try {
-    response = await runTeamEveningDigest(buildSyntheticCronRequest('/api/cron/boris-team-evening-digest'))
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    }
+  const result = await runViaSynthetic(runTeamEveningDigest, '/api/cron/boris-team-evening-digest')
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? 'Неизвестная ошибка' }
   }
 
-  const body = (await readJson(response)) ?? {}
-  if (!response.ok || body.ok === false) {
-    const errMsg =
-      'error' in body ? String(body.error ?? `HTTP ${response.status}`) : `HTTP ${response.status}`
-    return { ok: false, error: errMsg }
-  }
-
-  const briefingId = typeof body.briefingId === 'string' ? body.briefingId : undefined
-  const skipped = typeof body.skipped === 'string' ? body.skipped : undefined
-  const actionStr =
-    typeof body.action === 'string' ? body.action : skipped ? `SKIPPED:${skipped}` : 'OK'
-  const sentSuffix = body.sentToTg === undefined ? '' : `, sentToTg=${String(body.sentToTg)}`
+  const actionStr = result.action ?? (result.skipped ? `SKIPPED:${result.skipped}` : 'OK')
+  const sentSuffix = result.sentToTg === undefined ? '' : `, sentToTg=${String(result.sentToTg)}`
   return {
     ok: true,
-    data: { briefingId, action: actionStr },
-    message: briefingId
-      ? `Создан briefing ${briefingId}, action=${actionStr}${sentSuffix}`
+    data: { briefingId: result.briefingId, action: actionStr },
+    message: result.briefingId
+      ? `Создан briefing ${result.briefingId}, action=${actionStr}${sentSuffix}`
       : `Cron отработал: action=${actionStr}${sentSuffix}`,
   }
 }
@@ -102,33 +118,18 @@ export async function triggerTeamEveningDigest(): Promise<
 export async function triggerTeamFriday(): Promise<ActionResult<{ briefingId?: string }>> {
   await requireRole(['ADMIN_PRO'])
 
-  let response: Response
-  try {
-    response = await runTeamFridayDigest(buildSyntheticCronRequest('/api/cron/boris-team-friday'))
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    }
+  const result = await runViaSynthetic(runTeamFridayDigest, '/api/cron/boris-team-friday')
+  if (!result.ok) {
+    return { ok: false, error: result.error ?? 'Неизвестная ошибка' }
   }
 
-  const body = (await readJson(response)) ?? {}
-  if (!response.ok || body.ok === false) {
-    const errMsg =
-      'error' in body ? String(body.error ?? `HTTP ${response.status}`) : `HTTP ${response.status}`
-    return { ok: false, error: errMsg }
-  }
-
-  const briefingId = typeof body.briefingId === 'string' ? body.briefingId : undefined
-  const skipped = typeof body.skipped === 'string' ? body.skipped : undefined
-  const actionStr =
-    typeof body.action === 'string' ? body.action : skipped ? `SKIPPED:${skipped}` : 'OK'
-  const sentSuffix = body.sentToTg === undefined ? '' : `, sentToTg=${String(body.sentToTg)}`
+  const actionStr = result.action ?? (result.skipped ? `SKIPPED:${result.skipped}` : 'OK')
+  const sentSuffix = result.sentToTg === undefined ? '' : `, sentToTg=${String(result.sentToTg)}`
   return {
     ok: true,
-    data: { briefingId },
-    message: briefingId
-      ? `Создан friday-briefing ${briefingId}, action=${actionStr}${sentSuffix}`
+    data: { briefingId: result.briefingId },
+    message: result.briefingId
+      ? `Создан friday-briefing ${result.briefingId}, action=${actionStr}${sentSuffix}`
       : `Cron отработал: action=${actionStr}${sentSuffix}`,
   }
 }

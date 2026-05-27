@@ -19,6 +19,7 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
+import { after } from 'next/server'
 import type { BotConversation, MealType, Prisma } from '@prisma/client'
 
 const MEAL_TYPE_RU: Record<MealType, string> = {
@@ -144,17 +145,20 @@ async function handleBotResponse(
   if (effectiveTone === 'thanks') {
     const today = new Date()
     const yyyymmdd = today.toISOString().slice(0, 10)
-    void logBorisEvent({
-      eventType: 'THANKS',
-      eventDate: today,
-      clientId: client.id,
-      payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
-      deduplKey: `thanks:${client.id}:${yyyymmdd}`,
+    after(async () => {
+      try {
+        const event = await logBorisEvent({
+          eventType: 'THANKS',
+          eventDate: today,
+          clientId: client.id,
+          payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
+          deduplKey: `thanks:${client.id}:${yyyymmdd}`,
+        })
+        if (event) await emitLivePost(event)
+      } catch (err) {
+        console.error('[boris-team] thanks trigger failed', err)
+      }
     })
-      .then((event) => {
-        if (event) return emitLivePost(event)
-      })
-      .catch((err) => console.error('[boris-team] thanks trigger failed', err))
   }
 
   // 7.16.C: триггер ALERT — клиент написал «срочно» и у него есть заказ с
@@ -164,7 +168,7 @@ async function handleBotResponse(
   if (effectiveTone === 'urgent') {
     const now = new Date()
     const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
-    void (async () => {
+    after(async () => {
       try {
         const urgentOrder = await prisma.order.findFirst({
           where: {
@@ -192,7 +196,7 @@ async function handleBotResponse(
       } catch (err) {
         console.error('[boris-team] urgent alert failed', err)
       }
-    })()
+    })
   }
 
   // 7.15.B: tone-only алёрт (КЕЙС A — заказ принят, но клиент написал rude/urgent)
@@ -453,24 +457,27 @@ async function handleSpontaneous(
   if (spontaneousTone === 'thanks') {
     const today = new Date()
     const yyyymmdd = today.toISOString().slice(0, 10)
-    void logBorisEvent({
-      eventType: 'THANKS',
-      eventDate: today,
-      clientId: client.id,
-      payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
-      deduplKey: `thanks:${client.id}:${yyyymmdd}`,
+    after(async () => {
+      try {
+        const event = await logBorisEvent({
+          eventType: 'THANKS',
+          eventDate: today,
+          clientId: client.id,
+          payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
+          deduplKey: `thanks:${client.id}:${yyyymmdd}`,
+        })
+        if (event) await emitLivePost(event)
+      } catch (err) {
+        console.error('[boris-team] thanks trigger failed', err)
+      }
     })
-      .then((event) => {
-        if (event) return emitLivePost(event)
-      })
-      .catch((err) => console.error('[boris-team] thanks trigger failed', err))
   }
 
   // 7.16.C: триггер ALERT — urgent + заказ с доставкой в ближайшие 4 часа.
   if (spontaneousTone === 'urgent') {
     const now = new Date()
     const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
-    void (async () => {
+    after(async () => {
       try {
         const urgentOrder = await prisma.order.findFirst({
           where: {
@@ -498,7 +505,7 @@ async function handleSpontaneous(
       } catch (err) {
         console.error('[boris-team] urgent alert failed', err)
       }
-    })()
+    })
   }
 
   // 7.15.B: tone-сигнал шлём вместе с inbox-сигналом ниже через notifyClientSignal.

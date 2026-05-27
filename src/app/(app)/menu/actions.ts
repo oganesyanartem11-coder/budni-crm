@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
@@ -291,7 +292,7 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
   // Fire-and-forget: не блокирует ответ ADMIN'у. dishesCount считаем здесь,
   // а маржу цикла пропускаем (требует getMaterialCostForRange по validFrom..validTo
   // и довольно тяжёлая операция — в LIVE-канале AI обходится без неё).
-  void (async () => {
+  after(async () => {
     try {
       const dishesCount = await prisma.menuDayDish.count({
         where: { menuDay: { menuCycleId: cycleId } },
@@ -311,7 +312,7 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
     } catch (err) {
       console.error('[boris-team] menu_approved trigger failed', err)
     }
-  })()
+  })
 
   return { ok: true, data: undefined }
 }
