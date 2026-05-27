@@ -19,7 +19,6 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'reminder-and-summary-2',      scheduleUtc: '30 12 * * *', description: 'Reminder менеджеру #2',                maxAgeHours: 26 },
   { jobName: 'cutoff-notice',               scheduleUtc: '0 13 * * *',  description: 'Cut-off нотификация клиентам',         maxAgeHours: 26 },
   { jobName: 'production-summary',          scheduleUtc: '5 13 * * *',  description: 'Сводка для шефа в группу',             maxAgeHours: 26 },
-  { jobName: 'friday-week-digest',          scheduleUtc: '0 16 * * 5',  description: 'Недельный дайджест (пятница)',         maxAgeHours: 170 },
   { jobName: 'check-late-deliveries',       scheduleUtc: '*/10 6-19 * * *', description: 'Поздние доставки — алерт каждые 10 минут (9-22 МСК)', maxAgeHours: 14 },
   { jobName: 'unpriced-ingredients-digest', scheduleUtc: '0 9 * * 1',   description: 'Ингредиенты без цены (понедельник)',   maxAgeHours: 170 },
   { jobName: 'monitor-heartbeats',          scheduleUtc: '0 19 * * *',  description: 'Monitor cron heartbeats (себя не алертит)', maxAgeHours: 26 },
@@ -27,6 +26,8 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'cleanup-sessions',            scheduleUtc: '30 0 * * 1',  description: 'Очистка expired/revoked Session (понедельник)',     maxAgeHours: 170 },
   { jobName: 'cleanup-activity-log',        scheduleUtc: '0 1 * * 1',   description: 'Очистка ActivityLog/ErrorLog (понедельник)',        maxAgeHours: 200 },
   { jobName: 'market-check-reminder',       scheduleUtc: '0 7 * * 0',   description: 'Воскресная проверка рынка (овощи)',                 maxAgeHours: 170 },
+  { jobName: 'boris-team-evening-digest',   scheduleUtc: '0 17 * * 1-4', description: 'Итог дня в группу (Командный Боря)',                maxAgeHours: 26 },
+  { jobName: 'boris-team-friday',           scheduleUtc: '0 16 * * 5',  description: 'Пятничный недельный итог (Командный Боря)',         maxAgeHours: 170 },
 ]
 
 export const CRON_HEARTBEAT_ACTION = 'CRON_HEARTBEAT'

@@ -11,6 +11,7 @@ import {
   notifyGroupAboutApprovedMenu,
   notifyChefsAboutRejectedMenu,
 } from '@/lib/bot/notify-menu'
+import { logBorisEvent, emitLivePost } from '@/lib/boris/team-channels'
 import type { DishCategory, MealType, MenuStatus } from '@prisma/client'
 
 const createMenuSchema = z.object({
@@ -285,6 +286,32 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
     menuCycleId: cycleId,
     menuName: cycle.name,
   })
+
+  // 7.16.C: триггер Командного Бориса — меню утверждено.
+  // Fire-and-forget: не блокирует ответ ADMIN'у. dishesCount считаем здесь,
+  // а маржу цикла пропускаем (требует getMaterialCostForRange по validFrom..validTo
+  // и довольно тяжёлая операция — в LIVE-канале AI обходится без неё).
+  void (async () => {
+    try {
+      const dishesCount = await prisma.menuDayDish.count({
+        where: { menuDay: { menuCycleId: cycleId } },
+      })
+      const event = await logBorisEvent({
+        eventType: 'MENU_APPROVED',
+        eventDate: new Date(),
+        menuCycleId: cycleId,
+        payload: {
+          cycleName: cycle.name,
+          dishesCount,
+          validFrom: cycle.validFrom,
+        },
+        deduplKey: `menu_approved:${cycleId}`,
+      })
+      if (event) await emitLivePost(event)
+    } catch (err) {
+      console.error('[boris-team] menu_approved trigger failed', err)
+    }
+  })()
 
   return { ok: true, data: undefined }
 }

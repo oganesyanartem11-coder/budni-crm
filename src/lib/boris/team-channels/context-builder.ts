@@ -189,10 +189,16 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
     prisma.order.aggregate({
       where: { deliveryDate: { gte: weekFrom, lte: weekTo }, status: { in: TODAY_STATUSES } },
       _sum: { totalPrice: true, portions: true },
+      _count: { _all: true },
     }),
     prisma.order.findMany({
       where: { deliveryDate: { gte: weekFrom, lte: weekTo }, status: { in: TODAY_STATUSES } },
-      select: { portions: true, clientId: true, client: { select: { name: true } } },
+      select: {
+        portions: true,
+        clientId: true,
+        deliveryDate: true,
+        client: { select: { name: true } },
+      },
     }),
     prisma.order.aggregate({
       where: { deliveryDate: { gte: prevFrom, lte: prevTo }, status: { in: TODAY_STATUSES } },
@@ -206,7 +212,43 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
     getToneSummary(weekFrom, weekTo),
   ])
 
-  const topClients = aggregateByClient(weekOrders).slice(0, 5)
+  const byClientAgg = aggregateByClient(weekOrders)
+  const topClients = byClientAgg.slice(0, 5)
+
+  // Пиковый день: max портций; tie-break — раньше по дате.
+  const byDay = new Map<string, { date: Date; portions: number }>()
+  for (const o of weekOrders) {
+    const iso = o.deliveryDate.toISOString().slice(0, 10)
+    const cur = byDay.get(iso)
+    if (cur) cur.portions += o.portions
+    else byDay.set(iso, { date: o.deliveryDate, portions: o.portions })
+  }
+  const peakDay =
+    Array.from(byDay.values()).sort((a, b) => {
+      if (b.portions !== a.portions) return b.portions - a.portions
+      return a.date.getTime() - b.date.getTime()
+    })[0] ?? null
+
+  // Новые клиенты на этой неделе: те, у кого САМАЯ РАННЯ доставка попадает в [weekFrom, weekTo].
+  // Считаем по REVENUE-семантике (TODAY_STATUSES совпадает с REVENUE_STATUSES из старого
+  // friday-week-digest в части ACTIVE+DELIVERED — CANCELLED/DRAFT не считаются за «отгрузку»).
+  const candidateClientIds = byClientAgg.map((c) => c.clientId)
+  const earliestPerClient = await Promise.all(
+    candidateClientIds.map(async (clientId) => {
+      const earliest = await prisma.order.findFirst({
+        where: { clientId, status: { in: TODAY_STATUSES } },
+        orderBy: { deliveryDate: 'asc' },
+        select: { deliveryDate: true },
+      })
+      return { clientId, earliest: earliest?.deliveryDate ?? null }
+    }),
+  )
+  const newClientIds = new Set(
+    earliestPerClient
+      .filter((x) => x.earliest && x.earliest >= weekFrom && x.earliest <= weekTo)
+      .map((x) => x.clientId),
+  )
+  const newClients = byClientAgg.filter((c) => newClientIds.has(c.clientId))
 
   return {
     weekFrom,
@@ -215,7 +257,10 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
     revenueRub: Number(weekAgg._sum.totalPrice ?? 0),
     materialCostRub: materialCostWeek.totalCost,
     daysWithoutMenu: materialCostWeek.daysWithoutMenu,
+    ordersCount: weekAgg._count._all,
     topClients,
+    peakDay,
+    newClients,
     events,
     tones,
     prevWeekPortionsTotal: prevWeekAgg._sum.portions ?? 0,

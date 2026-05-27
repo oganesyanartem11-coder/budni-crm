@@ -9,7 +9,9 @@
  */
 
 import { prisma } from '@/lib/db/prisma'
-import type { BriefingType } from '@prisma/client'
+import { BorisMetricSource } from '@prisma/client'
+import type { BriefingType, BorisEventType } from '@prisma/client'
+import { getFinancialWeek } from '@/lib/utils/week'
 
 // ============================================================
 // Recent briefings
@@ -124,4 +126,164 @@ export async function getWeeklyMetricsSummary(): Promise<WeeklyMetricsSummary> {
     totalInputTokens,
     totalOutputTokens,
   }
+}
+
+// ============================================================
+// 7.16.C — Командный Борис: queries для UI таба «Команда»
+// ============================================================
+
+/**
+ * Briefings, относящиеся к 4 каналам Командного Бориса (TEAM_*).
+ * Используется на табе «Команда» в /boris.
+ *
+ * - types: подмножество BriefingType (default — все 4 team-типа).
+ * - limit: default 30.
+ * - Сортировка по generatedAt DESC, recipient include — как в listRecentBriefings.
+ */
+export async function listRecentBriefingsForChannels(opts?: {
+  types?: BriefingType[]
+  limit?: number
+}) {
+  const types =
+    opts?.types ??
+    (['TEAM_LIVE', 'TEAM_EVENING', 'TEAM_FRIDAY', 'TEAM_ALERT'] as BriefingType[])
+  const limit = opts?.limit ?? 30
+  return prisma.borisBriefing.findMany({
+    where: { type: { in: types } },
+    orderBy: { generatedAt: 'desc' },
+    take: limit,
+    include: {
+      recipient: { select: { id: true, name: true } },
+    },
+  })
+}
+
+export type TeamWeeklyMetrics = {
+  weekFrom: Date
+  weekTo: Date
+  byChannel: Array<{
+    source: 'TEAM_LIVE' | 'TEAM_EVENING' | 'TEAM_FRIDAY' | 'TEAM_ALERT'
+    callCount: number
+    costUsd: number
+    inputTokens: number
+    outputTokens: number
+  }>
+  eventCount: number
+  silentCount: number
+}
+
+/**
+ * Метрики Командного Бориса за финансовую неделю (Сб 00:00 МСК — Пт 23:59 МСК).
+ *
+ * - byChannel: groupBy по source ∈ TEAM_*, callCount + costUsd + tokens из BorisMetrics.
+ * - eventCount: count(BorisEventLog) c createdAt в этой неделе.
+ * - silentCount: count(BorisBriefing) c type ∈ TEAM_* и content='' в этой неделе
+ *   (SILENT-решения — Боря осознанно промолчал).
+ */
+export async function getTeamWeeklyMetrics(): Promise<TeamWeeklyMetrics> {
+  const { from, to } = getFinancialWeek(new Date())
+
+  const teamSources: BorisMetricSource[] = [
+    BorisMetricSource.TEAM_LIVE,
+    BorisMetricSource.TEAM_EVENING,
+    BorisMetricSource.TEAM_FRIDAY,
+    BorisMetricSource.TEAM_ALERT,
+  ]
+
+  const [metricsGrouped, eventCount, silentCount] = await Promise.all([
+    prisma.borisMetrics.groupBy({
+      by: ['source'],
+      where: {
+        createdAt: { gte: from, lte: to },
+        source: { in: teamSources },
+      },
+      _count: { _all: true },
+      _sum: {
+        costUsd: true,
+        inputTokens: true,
+        outputTokens: true,
+      },
+    }),
+    prisma.borisEventLog.count({
+      where: { createdAt: { gte: from, lte: to } },
+    }),
+    prisma.borisBriefing.count({
+      where: {
+        type: { in: ['TEAM_LIVE', 'TEAM_EVENING', 'TEAM_FRIDAY', 'TEAM_ALERT'] },
+        content: '',
+        generatedAt: { gte: from, lte: to },
+      },
+    }),
+  ])
+
+  // Нормализуем результат: гарантированно по записи на каждый из 4 каналов
+  // (0 если данных в этой неделе не было — UI рисует таблицу одинаково).
+  const byChannelMap = new Map<
+    BorisMetricSource,
+    {
+      callCount: number
+      costUsd: number
+      inputTokens: number
+      outputTokens: number
+    }
+  >()
+  for (const row of metricsGrouped) {
+    byChannelMap.set(row.source, {
+      callCount: row._count._all,
+      costUsd: Number(row._sum.costUsd ?? 0),
+      inputTokens: row._sum.inputTokens ?? 0,
+      outputTokens: row._sum.outputTokens ?? 0,
+    })
+  }
+
+  const byChannel = teamSources.map((source) => {
+    const v = byChannelMap.get(source) ?? {
+      callCount: 0,
+      costUsd: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    }
+    return {
+      source: source as 'TEAM_LIVE' | 'TEAM_EVENING' | 'TEAM_FRIDAY' | 'TEAM_ALERT',
+      ...v,
+    }
+  })
+
+  return {
+    weekFrom: from,
+    weekTo: to,
+    byChannel,
+    eventCount,
+    silentCount,
+  }
+}
+
+export type BorisEventWithRefs = Awaited<
+  ReturnType<typeof listRecentBorisEvents>
+>[number]
+
+/**
+ * Последние события Командного Бориса (журнал BorisEventLog).
+ * Используется на табе «Команда» (ADMIN_PRO only).
+ *
+ * - limit: default 50.
+ * - eventTypes: фильтр по подмножеству BorisEventType (default — все).
+ * - Сортировка по createdAt DESC.
+ * - include client/order/menuCycle (select id+name/...) для отображения связки.
+ */
+export async function listRecentBorisEvents(opts?: {
+  limit?: number
+  eventTypes?: BorisEventType[]
+}) {
+  const limit = opts?.limit ?? 50
+  return prisma.borisEventLog.findMany({
+    where: opts?.eventTypes ? { eventType: { in: opts.eventTypes } } : undefined,
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    include: {
+      client: { select: { id: true, name: true } },
+      order: { select: { id: true, deliveryDate: true, mealType: true } },
+      menuCycle: { select: { id: true, name: true } },
+    },
+  })
 }

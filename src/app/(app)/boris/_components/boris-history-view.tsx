@@ -3,11 +3,19 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { Sun, Brain, BarChart3 } from 'lucide-react'
+import { Sun, Brain, BarChart3, Users } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import { formatDateTimeMsk } from '@/lib/utils/format'
 import type { BriefingType } from '@prisma/client'
-import type { WeeklyMetricsSummary } from '@/lib/db/queries/boris-briefings'
+import type {
+  WeeklyMetricsSummary,
+  TeamWeeklyMetrics,
+} from '@/lib/db/queries/boris-briefings'
+import {
+  TeamTabView,
+  type SerializedTeamBriefing,
+  type SerializedTeamEvent,
+} from './team-tab-view'
 
 // ============================================================
 // Types
@@ -44,9 +52,16 @@ interface Props {
   briefingsMorning: SerializedBriefing[]
   briefingsSelfAnalysis: SerializedBriefing[]
   metricsWeek: WeeklyMetricsSummary
+  // 7.16.C: данные для таба «Команда» (Командный Борис).
+  teamBriefings: SerializedTeamBriefing[]
+  teamEvents: SerializedTeamEvent[]
+  teamMetricsWeek: TeamWeeklyMetrics & {
+    weekFrom: Date | string
+    weekTo: Date | string
+  }
 }
 
-type Tab = 'morning' | 'self_analysis' | 'metrics'
+type Tab = 'morning' | 'self_analysis' | 'metrics' | 'team'
 
 // ============================================================
 // Component
@@ -56,6 +71,9 @@ export function BorisHistoryView({
   briefingsMorning,
   briefingsSelfAnalysis,
   metricsWeek,
+  teamBriefings,
+  teamEvents,
+  teamMetricsWeek,
 }: Props) {
   const [tab, setTab] = useState<Tab>('morning')
   const router = useRouter()
@@ -121,6 +139,12 @@ export function BorisHistoryView({
           icon={BarChart3}
           label="Метрики Action-Бориса"
         />
+        <TabButton
+          active={tab === 'team'}
+          onClick={() => setTab('team')}
+          icon={Users}
+          label={`Команда · ${teamBriefings.length}`}
+        />
       </div>
 
       {tab === 'morning' && (
@@ -184,6 +208,14 @@ export function BorisHistoryView({
       )}
 
       {tab === 'metrics' && <MetricsTab metrics={metricsWeek} />}
+
+      {tab === 'team' && (
+        <TeamTabView
+          teamBriefings={teamBriefings}
+          teamEvents={teamEvents}
+          teamMetricsWeek={teamMetricsWeek}
+        />
+      )}
     </div>
   )
 }

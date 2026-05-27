@@ -95,8 +95,20 @@ export interface WeekContext {
   revenueRub: number
   materialCostRub: number
   daysWithoutMenu: number
+  /** Кол-во заказов недели — AI сам выведет средний чек если нужно. */
+  ordersCount: number
   /** Топ-клиенты недели по объёму. */
   topClients: ClientOrderAggregate[]
+  /**
+   * 7.16.C: пиковый день недели по объёму. Перенесено из удалённого
+   * friday-week-digest, чтобы AI мог упомянуть «лучший день» в пятничном посте.
+   */
+  peakDay: { date: Date; portions: number } | null
+  /**
+   * 7.16.C: клиенты, чья первая в истории отгрузка пришлась на эту неделю.
+   * Перенесено из friday-week-digest — даёт AI повод поприветствовать новеньких.
+   */
+  newClients: ClientOrderAggregate[]
   events: BorisEventLog[]
   tones: ToneSummary
   /** Сравнение с прошлой неделей. */

@@ -14,6 +14,7 @@ import {
   type DeliveryIssueReason,
 } from '@/lib/constants/delivery'
 import { formatDeliveryWindow } from '@/lib/utils/format'
+import { logBorisEvent, emitLivePost } from '@/lib/boris/team-channels'
 
 const markDeliveredSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1, 'Список заказов пуст'),
@@ -134,6 +135,56 @@ export async function markStopDelivered(
 
   revalidatePath('/delivery')
   revalidatePath('/orders')
+
+  // 7.16.C: триггер Командного Бориса — первая доставка клиенту.
+  // Fire-and-forget: не блокирует ответ курьеру. Логика:
+  //   1. Берём заказы, которые только что попали в DELIVERED.
+  //   2. Для каждого уникального клиента считаем общее число DELIVERED.
+  //   3. Если deliveredCount === 1 → это была первая доставка → emit.
+  //   4. Дедуп: `first_delivery:${clientId}` гарантирует один эмит на клиента,
+  //      даже если race-condition попытается записать дважды (logBorisEvent
+  //      внутри ловит P2002 и возвращает null).
+  void (async () => {
+    try {
+      const ordersWithClient = await prisma.order.findMany({
+        where: { id: { in: orderIds }, status: 'DELIVERED' },
+        select: {
+          id: true,
+          clientId: true,
+          portions: true,
+          mealType: true,
+          client: { select: { name: true } },
+          location: { select: { name: true } },
+        },
+      })
+      const seenClients = new Set<string>()
+      for (const o of ordersWithClient) {
+        if (seenClients.has(o.clientId)) continue
+        seenClients.add(o.clientId)
+        const deliveredCount = await prisma.order.count({
+          where: { clientId: o.clientId, status: 'DELIVERED' },
+        })
+        if (deliveredCount !== 1) continue
+        const event = await logBorisEvent({
+          eventType: 'FIRST_DELIVERY',
+          eventDate: new Date(),
+          clientId: o.clientId,
+          orderId: o.id,
+          payload: {
+            clientName: o.client.name,
+            portions: o.portions,
+            locationName: o.location.name,
+            mealType: o.mealType,
+          },
+          deduplKey: `first_delivery:${o.clientId}`,
+        })
+        if (event) await emitLivePost(event)
+      }
+    } catch (err) {
+      console.error('[boris-team] first_delivery trigger failed', err)
+    }
+  })()
+
   return { ok: true, data: { updated: updates } }
 }
 

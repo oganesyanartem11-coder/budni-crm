@@ -19,3 +19,4 @@ export type {
 export { buildDayContext, buildWeekContext } from './context-builder'
 export { formatTeamPost } from './ai-formatter'
 export { logBorisEvent } from './event-log'
+export { emitLivePost, emitAlertPost } from './emit'
