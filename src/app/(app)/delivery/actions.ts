@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { after } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
@@ -138,53 +138,58 @@ export async function markStopDelivered(
   revalidatePath('/orders')
 
   // 7.16.C: триггер Командного Бориса — первая доставка клиенту.
-  // Fire-and-forget: не блокирует ответ курьеру. Логика:
+  // 7.16.C.2: logBorisEvent синхронно (быстрые БД-запросы), emit через waitUntil.
+  // Логика:
   //   1. Берём заказы, которые только что попали в DELIVERED.
   //   2. Для каждого уникального клиента считаем общее число DELIVERED.
-  //   3. Если deliveredCount === 1 → это была первая доставка → emit.
+  //   3. Если deliveredCount === 1 → это была первая доставка → эмит.
   //   4. Дедуп: `first_delivery:${clientId}` гарантирует один эмит на клиента,
   //      даже если race-condition попытается записать дважды (logBorisEvent
   //      внутри ловит P2002 и возвращает null).
-  after(async () => {
-    try {
-      const ordersWithClient = await prisma.order.findMany({
-        where: { id: { in: orderIds }, status: 'DELIVERED' },
-        select: {
-          id: true,
-          clientId: true,
-          portions: true,
-          mealType: true,
-          client: { select: { name: true } },
-          location: { select: { name: true } },
-        },
+  try {
+    const ordersWithClient = await prisma.order.findMany({
+      where: { id: { in: orderIds }, status: 'DELIVERED' },
+      select: {
+        id: true,
+        clientId: true,
+        portions: true,
+        mealType: true,
+        client: { select: { name: true } },
+        location: { select: { name: true } },
+      },
+    })
+    const seenClients = new Set<string>()
+    for (const o of ordersWithClient) {
+      if (seenClients.has(o.clientId)) continue
+      seenClients.add(o.clientId)
+      const deliveredCount = await prisma.order.count({
+        where: { clientId: o.clientId, status: 'DELIVERED' },
       })
-      const seenClients = new Set<string>()
-      for (const o of ordersWithClient) {
-        if (seenClients.has(o.clientId)) continue
-        seenClients.add(o.clientId)
-        const deliveredCount = await prisma.order.count({
-          where: { clientId: o.clientId, status: 'DELIVERED' },
-        })
-        if (deliveredCount !== 1) continue
-        const event = await logBorisEvent({
-          eventType: 'FIRST_DELIVERY',
-          eventDate: new Date(),
-          clientId: o.clientId,
-          orderId: o.id,
-          payload: {
-            clientName: o.client.name,
-            portions: o.portions,
-            locationName: o.location.name,
-            mealType: o.mealType,
-          },
-          deduplKey: `first_delivery:${o.clientId}`,
-        })
-        if (event) await emitLivePost(event)
+      if (deliveredCount !== 1) continue
+      const event = await logBorisEvent({
+        eventType: 'FIRST_DELIVERY',
+        eventDate: new Date(),
+        clientId: o.clientId,
+        orderId: o.id,
+        payload: {
+          clientName: o.client.name,
+          portions: o.portions,
+          locationName: o.location.name,
+          mealType: o.mealType,
+        },
+        deduplKey: `first_delivery:${o.clientId}`,
+      })
+      if (event) {
+        waitUntil(
+          emitLivePost(event).catch((err) =>
+            console.error('[boris-team] first_delivery emit failed', err),
+          ),
+        )
       }
-    } catch (err) {
-      console.error('[boris-team] first_delivery trigger failed', err)
     }
-  })
+  } catch (err) {
+    console.error('[boris-team] first_delivery trigger failed', err)
+  }
 
   return { ok: true, data: { updated: updates } }
 }

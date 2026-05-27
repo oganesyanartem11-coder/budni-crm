@@ -19,7 +19,7 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
-import { after } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import type { BotConversation, MealType, Prisma } from '@prisma/client'
 
 const MEAL_TYPE_RU: Record<MealType, string> = {
@@ -145,20 +145,28 @@ async function handleBotResponse(
   if (effectiveTone === 'thanks') {
     const today = new Date()
     const yyyymmdd = today.toISOString().slice(0, 10)
-    after(async () => {
-      try {
-        const event = await logBorisEvent({
-          eventType: 'THANKS',
-          eventDate: today,
-          clientId: client.id,
-          payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
-          deduplKey: `thanks:${client.id}:${yyyymmdd}`,
-        })
-        if (event) await emitLivePost(event)
-      } catch (err) {
-        console.error('[boris-team] thanks trigger failed', err)
+    // 7.16.C.2: logBorisEvent — синхронно (быстрый INSERT, гарантия записи в БД
+    // даже если MAX-bot composer ломает AsyncLocalStorage для after()).
+    // emitLivePost — через waitUntil (низкоуровневый Vercel API, работает в любом
+    // async-контексте serverless invocation, не зависит от request scope).
+    try {
+      const event = await logBorisEvent({
+        eventType: 'THANKS',
+        eventDate: today,
+        clientId: client.id,
+        payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
+        deduplKey: `thanks:${client.id}:${yyyymmdd}`,
+      })
+      if (event) {
+        waitUntil(
+          emitLivePost(event).catch((err) =>
+            console.error('[boris-team] thanks emit failed', err),
+          ),
+        )
       }
-    })
+    } catch (err) {
+      console.error('[boris-team] thanks logBorisEvent failed', err)
+    }
   }
 
   // 7.16.C: триггер ALERT — клиент написал «срочно» и у него есть заказ с
@@ -168,17 +176,16 @@ async function handleBotResponse(
   if (effectiveTone === 'urgent') {
     const now = new Date()
     const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
-    after(async () => {
-      try {
-        const urgentOrder = await prisma.order.findFirst({
-          where: {
-            clientId: client.id,
-            deliveryDate: { gte: now, lte: in4h },
-            status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
-          },
-          select: { id: true, deliveryDate: true, mealType: true },
-        })
-        if (!urgentOrder) return
+    try {
+      const urgentOrder = await prisma.order.findFirst({
+        where: {
+          clientId: client.id,
+          deliveryDate: { gte: now, lte: in4h },
+          status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
+        },
+        select: { id: true, deliveryDate: true, mealType: true },
+      })
+      if (urgentOrder) {
         const event = await logBorisEvent({
           eventType: 'URGENT_NEAR_DELIVERY',
           eventDate: now,
@@ -192,11 +199,17 @@ async function handleBotResponse(
           },
           deduplKey: `urgent:${urgentOrder.id}:${now.getTime()}`,
         })
-        if (event) await emitAlertPost(event)
-      } catch (err) {
-        console.error('[boris-team] urgent alert failed', err)
+        if (event) {
+          waitUntil(
+            emitAlertPost(event).catch((err) =>
+              console.error('[boris-team] urgent emit failed', err),
+            ),
+          )
+        }
       }
-    })
+    } catch (err) {
+      console.error('[boris-team] urgent trigger failed', err)
+    }
   }
 
   // 7.15.B: tone-only алёрт (КЕЙС A — заказ принят, но клиент написал rude/urgent)
@@ -454,40 +467,44 @@ async function handleSpontaneous(
   })
 
   // 7.16.C: триггер Командного Бориса — «спасибо» от клиента (spontaneous-ветка).
+  // 7.16.C.2: logBorisEvent синхронно + emit через waitUntil — см. комментарий в handleBotResponse.
   if (spontaneousTone === 'thanks') {
     const today = new Date()
     const yyyymmdd = today.toISOString().slice(0, 10)
-    after(async () => {
-      try {
-        const event = await logBorisEvent({
-          eventType: 'THANKS',
-          eventDate: today,
-          clientId: client.id,
-          payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
-          deduplKey: `thanks:${client.id}:${yyyymmdd}`,
-        })
-        if (event) await emitLivePost(event)
-      } catch (err) {
-        console.error('[boris-team] thanks trigger failed', err)
+    try {
+      const event = await logBorisEvent({
+        eventType: 'THANKS',
+        eventDate: today,
+        clientId: client.id,
+        payload: { clientName: client.name, messageExcerpt: text.slice(0, 200) },
+        deduplKey: `thanks:${client.id}:${yyyymmdd}`,
+      })
+      if (event) {
+        waitUntil(
+          emitLivePost(event).catch((err) =>
+            console.error('[boris-team] thanks emit failed', err),
+          ),
+        )
       }
-    })
+    } catch (err) {
+      console.error('[boris-team] thanks logBorisEvent failed', err)
+    }
   }
 
   // 7.16.C: триггер ALERT — urgent + заказ с доставкой в ближайшие 4 часа.
   if (spontaneousTone === 'urgent') {
     const now = new Date()
     const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
-    after(async () => {
-      try {
-        const urgentOrder = await prisma.order.findFirst({
-          where: {
-            clientId: client.id,
-            deliveryDate: { gte: now, lte: in4h },
-            status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
-          },
-          select: { id: true, deliveryDate: true, mealType: true },
-        })
-        if (!urgentOrder) return
+    try {
+      const urgentOrder = await prisma.order.findFirst({
+        where: {
+          clientId: client.id,
+          deliveryDate: { gte: now, lte: in4h },
+          status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
+        },
+        select: { id: true, deliveryDate: true, mealType: true },
+      })
+      if (urgentOrder) {
         const event = await logBorisEvent({
           eventType: 'URGENT_NEAR_DELIVERY',
           eventDate: now,
@@ -501,11 +518,17 @@ async function handleSpontaneous(
           },
           deduplKey: `urgent:${urgentOrder.id}:${now.getTime()}`,
         })
-        if (event) await emitAlertPost(event)
-      } catch (err) {
-        console.error('[boris-team] urgent alert failed', err)
+        if (event) {
+          waitUntil(
+            emitAlertPost(event).catch((err) =>
+              console.error('[boris-team] urgent emit failed', err),
+            ),
+          )
+        }
       }
-    })
+    } catch (err) {
+      console.error('[boris-team] urgent trigger failed', err)
+    }
   }
 
   // 7.15.B: tone-сигнал шлём вместе с inbox-сигналом ниже через notifyClientSignal.

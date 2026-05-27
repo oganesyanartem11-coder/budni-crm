@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { after } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
@@ -289,30 +289,34 @@ export async function approveMenu(cycleId: string): Promise<ActionResult> {
   })
 
   // 7.16.C: триггер Командного Бориса — меню утверждено.
-  // Fire-and-forget: не блокирует ответ ADMIN'у. dishesCount считаем здесь,
-  // а маржу цикла пропускаем (требует getMaterialCostForRange по validFrom..validTo
-  // и довольно тяжёлая операция — в LIVE-канале AI обходится без неё).
-  after(async () => {
-    try {
-      const dishesCount = await prisma.menuDayDish.count({
-        where: { menuDay: { menuCycleId: cycleId } },
-      })
-      const event = await logBorisEvent({
-        eventType: 'MENU_APPROVED',
-        eventDate: new Date(),
-        menuCycleId: cycleId,
-        payload: {
-          cycleName: cycle.name,
-          dishesCount,
-          validFrom: cycle.validFrom,
-        },
-        deduplKey: `menu_approved:${cycleId}`,
-      })
-      if (event) await emitLivePost(event)
-    } catch (err) {
-      console.error('[boris-team] menu_approved trigger failed', err)
+  // 7.16.C.2: logBorisEvent + dishesCount синхронно (быстрые БД-запросы),
+  // emit через waitUntil (низкоуровневый Vercel API, не зависит от AsyncLocalStorage).
+  // Маржу цикла пропускаем — тяжёлая операция, в LIVE-канале AI обходится без неё.
+  try {
+    const dishesCount = await prisma.menuDayDish.count({
+      where: { menuDay: { menuCycleId: cycleId } },
+    })
+    const event = await logBorisEvent({
+      eventType: 'MENU_APPROVED',
+      eventDate: new Date(),
+      menuCycleId: cycleId,
+      payload: {
+        cycleName: cycle.name,
+        dishesCount,
+        validFrom: cycle.validFrom,
+      },
+      deduplKey: `menu_approved:${cycleId}`,
+    })
+    if (event) {
+      waitUntil(
+        emitLivePost(event).catch((err) =>
+          console.error('[boris-team] menu_approved emit failed', err),
+        ),
+      )
     }
-  })
+  } catch (err) {
+    console.error('[boris-team] menu_approved trigger failed', err)
+  }
 
   return { ok: true, data: undefined }
 }
