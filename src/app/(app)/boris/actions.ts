@@ -4,73 +4,58 @@
  * Server actions для таба «Команда» страницы /boris (Спринт 7.16.C ЭТАП 2 / C5).
  *
  * Три manual-trigger'а — все только ADMIN_PRO:
- *  1. triggerTeamEveningDigest — дёргает /api/cron/boris-team-evening-digest?force=true
- *  2. triggerTeamFriday        — дёргает /api/cron/boris-team-friday?force=true
+ *  1. triggerTeamEveningDigest — вызывает inner-handler из cron-роута
+ *     /api/cron/boris-team-evening-digest с принудительным force=true.
+ *  2. triggerTeamFriday        — вызывает inner-handler из cron-роута
+ *     /api/cron/boris-team-friday с принудительным force=true.
  *  3. triggerTestAlert         — создаёт fake BorisEventLog с eventType=URGENT_NEAR_DELIVERY
  *                                и вызывает emitAlertPost(event). РЕАЛЬНО шлёт в групповой чат.
  *
- * Подход: HTTP-вызов собственных cron-эндпоинтов с заголовком
- * `Authorization: Bearer ${CRON_SECRET}`. Прямой импорт handler'а невозможен —
- * handler внутри cron-route.ts не экспортирован (это inner-функция withCronHeartbeat),
- * а boris-team-friday/route.ts на момент написания пуст (его создаёт Subagent B).
+ * Hotfix 7.16.C.1 (БАГ 1): раньше action'ы делали HTTP-fetch на собственный cron-роут
+ * с Authorization: Bearer ${CRON_SECRET}. На Vercel этот вызов уходил во внешнюю сеть
+ * и стабильно ловил 401 (по разным причинам — либо CRON_SECRET не пробрасывался в
+ * runtime server-component-fetch, либо edge/region mismatch, либо просто не тот URL).
+ * Симметричный паттерн 7.16.B (test-morning, test-self-analysis) НЕ делал fetch —
+ * он жил в отдельном admin-route /api/admin/boris/test-* с requireRole внутри.
  *
- * Base URL: пробуем VERCEL_URL (production), затем NEXT_PUBLIC_APP_URL,
- * затем хардкод-fallback на budni-crm.vercel.app — это же значение
- * DEFAULT_APP_BASE_URL из settings/users/actions.ts. На локалке без env,
- * fetch уйдёт на prod — это намеренно (manual-trigger всегда бьёт по продакшну).
+ * Решение: cron-route'ы теперь экспортируют свой inner-handler. Server action
+ * вызывает его напрямую в одном процессе. Auth обеспечивается через
+ * requireRole(['ADMIN_PRO']) в самом action — Bearer-токен не нужен,
+ * HTTP-кругобежки не происходит, withCronHeartbeat-обёртка пропускается
+ * намеренно (heartbeat — только для cron-runner'а Vercel).
  */
 
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { emitAlertPost } from '@/lib/boris/team-channels'
+import {
+  runTeamEveningDigest,
+  runTeamFridayDigest,
+} from '@/lib/boris/team-channels/cron-handlers'
 
 type ActionResult<T = void> =
   | { ok: true; data?: T; message?: string }
   | { ok: false; error: string }
 
-const DEFAULT_APP_BASE_URL = 'https://budni-crm.vercel.app'
-
-function getBaseUrl(): string {
-  const fromVercel = process.env.VERCEL_URL?.trim()
-  if (fromVercel) {
-    return fromVercel.startsWith('http') ? fromVercel : `https://${fromVercel}`
-  }
-  const fromPublic = process.env.NEXT_PUBLIC_APP_URL?.trim()
-  if (fromPublic) return fromPublic.replace(/\/$/, '')
-  return DEFAULT_APP_BASE_URL
+/**
+ * Конструирует синтетический Request к cron-эндпоинту с force=true.
+ * URL служит ТОЛЬКО для парсинга searchParams внутри handler'а — за пределы
+ * текущего процесса не уходит. Хост произвольный (handler читает только pathname/search).
+ */
+function buildSyntheticCronRequest(path: string): Request {
+  const url = `http://internal.local${path}?force=true`
+  return new Request(url, { method: 'GET' })
 }
 
-async function fireCronInternally(
-  path: string,
-): Promise<{ ok: boolean; body: unknown; error?: string }> {
-  const secret = process.env.CRON_SECRET
-  if (!secret) {
-    return { ok: false, body: null, error: 'CRON_SECRET not configured' }
-  }
-  const baseUrl = getBaseUrl()
-  const url = `${baseUrl}${path}${path.includes('?') ? '&' : '?'}force=true`
-
+/**
+ * Безопасно извлекает JSON-тело из ответа handler'а. Cron-handler'ы всегда
+ * возвращают NextResponse.json(...), но clone+catch — на случай рефакторинга.
+ */
+async function readJson(response: Response): Promise<Record<string, unknown> | null> {
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { authorization: `Bearer ${secret}` },
-      cache: 'no-store',
-    })
-    const body = await res.json().catch(() => null)
-    if (!res.ok) {
-      const errMsg =
-        body && typeof body === 'object' && 'error' in body
-          ? String((body as { error?: unknown }).error ?? `HTTP ${res.status}`)
-          : `HTTP ${res.status}`
-      return { ok: false, body, error: errMsg }
-    }
-    return { ok: true, body }
-  } catch (err) {
-    return {
-      ok: false,
-      body: null,
-      error: err instanceof Error ? err.message : String(err),
-    }
+    return (await response.clone().json()) as Record<string, unknown>
+  } catch {
+    return null
   }
 }
 
@@ -83,52 +68,68 @@ export async function triggerTeamEveningDigest(): Promise<
 > {
   await requireRole(['ADMIN_PRO'])
 
-  const res = await fireCronInternally('/api/cron/boris-team-evening-digest')
-  if (!res.ok) {
-    return { ok: false, error: res.error ?? 'unknown_error' }
+  let response: Response
+  try {
+    response = await runTeamEveningDigest(buildSyntheticCronRequest('/api/cron/boris-team-evening-digest'))
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
-  const body = (res.body ?? {}) as {
-    briefingId?: string
-    action?: string
-    skipped?: string
-    sentToTg?: boolean
+
+  const body = (await readJson(response)) ?? {}
+  if (!response.ok || body.ok === false) {
+    const errMsg =
+      'error' in body ? String(body.error ?? `HTTP ${response.status}`) : `HTTP ${response.status}`
+    return { ok: false, error: errMsg }
   }
-  const briefingId = body.briefingId
-  const action = body.action ?? (body.skipped ? `SKIPPED:${body.skipped}` : 'OK')
-  const sentSuffix =
-    body.sentToTg === undefined ? '' : `, sentToTg=${String(body.sentToTg)}`
+
+  const briefingId = typeof body.briefingId === 'string' ? body.briefingId : undefined
+  const skipped = typeof body.skipped === 'string' ? body.skipped : undefined
+  const actionStr =
+    typeof body.action === 'string' ? body.action : skipped ? `SKIPPED:${skipped}` : 'OK'
+  const sentSuffix = body.sentToTg === undefined ? '' : `, sentToTg=${String(body.sentToTg)}`
   return {
     ok: true,
-    data: { briefingId, action },
+    data: { briefingId, action: actionStr },
     message: briefingId
-      ? `Создан briefing ${briefingId}, action=${action}${sentSuffix}`
-      : `Cron отработал: action=${action}${sentSuffix}`,
+      ? `Создан briefing ${briefingId}, action=${actionStr}${sentSuffix}`
+      : `Cron отработал: action=${actionStr}${sentSuffix}`,
   }
 }
 
 export async function triggerTeamFriday(): Promise<ActionResult<{ briefingId?: string }>> {
   await requireRole(['ADMIN_PRO'])
 
-  const res = await fireCronInternally('/api/cron/boris-team-friday')
-  if (!res.ok) {
-    return { ok: false, error: res.error ?? 'unknown_error' }
+  let response: Response
+  try {
+    response = await runTeamFridayDigest(buildSyntheticCronRequest('/api/cron/boris-team-friday'))
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
   }
-  const body = (res.body ?? {}) as {
-    briefingId?: string
-    action?: string
-    skipped?: string
-    sentToTg?: boolean
+
+  const body = (await readJson(response)) ?? {}
+  if (!response.ok || body.ok === false) {
+    const errMsg =
+      'error' in body ? String(body.error ?? `HTTP ${response.status}`) : `HTTP ${response.status}`
+    return { ok: false, error: errMsg }
   }
-  const briefingId = body.briefingId
-  const action = body.action ?? (body.skipped ? `SKIPPED:${body.skipped}` : 'OK')
-  const sentSuffix =
-    body.sentToTg === undefined ? '' : `, sentToTg=${String(body.sentToTg)}`
+
+  const briefingId = typeof body.briefingId === 'string' ? body.briefingId : undefined
+  const skipped = typeof body.skipped === 'string' ? body.skipped : undefined
+  const actionStr =
+    typeof body.action === 'string' ? body.action : skipped ? `SKIPPED:${skipped}` : 'OK'
+  const sentSuffix = body.sentToTg === undefined ? '' : `, sentToTg=${String(body.sentToTg)}`
   return {
     ok: true,
     data: { briefingId },
     message: briefingId
-      ? `Создан friday-briefing ${briefingId}, action=${action}${sentSuffix}`
-      : `Cron отработал: action=${action}${sentSuffix}`,
+      ? `Создан friday-briefing ${briefingId}, action=${actionStr}${sentSuffix}`
+      : `Cron отработал: action=${actionStr}${sentSuffix}`,
   }
 }
 

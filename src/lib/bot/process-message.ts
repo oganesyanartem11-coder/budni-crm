@@ -122,10 +122,26 @@ async function handleBotResponse(
     toneLabel: parsed.toneLabel,
   })
 
+  // 7.16.C.1 hotfix: parseClientResponse даёт неточный tone для нецифровых
+  // ответов (Haiku парсер сфокусирован на цифрах, tone — побочное правило).
+  // Для не-numeric — переклассифицируем через dedicated classifyMessageTone,
+  // тот же что используется в handleSpontaneous. Тон в БД-записи BotMessage
+  // оставляем какой дал парсер (для аудита) — переопределяем только
+  // бизнес-логику триггеров и алёртов.
+  let effectiveTone: typeof parsed.toneLabel = parsed.toneLabel
+  if (parsed.type !== 'numeric') {
+    try {
+      effectiveTone = await classifyMessageTone(text)
+    } catch (err) {
+      console.error('[boris-team] tone reclassify failed, fallback to parsed.toneLabel', err)
+      // effectiveTone остаётся parsed.toneLabel (fail-safe)
+    }
+  }
+
   // 7.16.C: триггер Командного Бориса — «спасибо» от клиента.
   // Деduplicate per (client, day) — даже если клиент благодарит дважды за день,
   // в групповой чат уходит максимум один LIVE-пост.
-  if (parsed.toneLabel === 'thanks') {
+  if (effectiveTone === 'thanks') {
     const today = new Date()
     const yyyymmdd = today.toISOString().slice(0, 10)
     void logBorisEvent({
@@ -145,7 +161,7 @@ async function handleBotResponse(
   // доставкой в ближайшие 4 часа. timestamp-based deduplKey ОК, потому что
   // дальше всё равно режется логикой findFirst (нет двух заказов одного клиента
   // в одну миллисекунду).
-  if (parsed.toneLabel === 'urgent') {
+  if (effectiveTone === 'urgent') {
     const now = new Date()
     const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
     void (async () => {
@@ -183,7 +199,7 @@ async function handleBotResponse(
   // отправляется НИЖЕ перед return-saved. Для КЕЙСОВ C/D алёрт объединён с
   // notifyClientSignal про InboxItem — отдельный tone-вызов не нужен.
   const alertTone =
-    parsed.toneLabel === 'rude' || parsed.toneLabel === 'urgent' ? parsed.toneLabel : null
+    effectiveTone === 'rude' || effectiveTone === 'urgent' ? effectiveTone : null
 
   // Аномалии содержания (без cutoff — cutoff обрабатываем отдельно как кейс C
   // с сохранением заказа). isPastCutoff=false внутри detectAnomalies, чтобы
