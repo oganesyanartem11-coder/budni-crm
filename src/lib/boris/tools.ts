@@ -527,13 +527,13 @@ async function buildOrderPreviewLine(orderId: string): Promise<string> {
     include: { client: { select: { name: true } }, location: { select: { name: true } } },
   })
   if (!o) return `Заказ ${orderId} (не найден)`
-  return `${o.client.name}, ${o.location.name}, ${formatDate(o.deliveryDate)}, ${o.mealType}`
+  return `${o.client.name}, ${o.location.name}, ${formatDate(o.deliveryDate)}, ${MEAL_TYPE_RU[o.mealType]}`
 }
 
 const editOrderPortionsTool: AgentTool = {
   name: 'edit_order_portions',
   description:
-    'Запланировать изменение количества порций в заказе. Требует подтверждения у пользователя.',
+    'Запланировать изменение количества порций в заказе. Требует подтверждения у пользователя. КРИТИЧНО: параметр portions — это АБСОЛЮТНОЕ финальное значение. Перед использованием этого tool ОБЯЗАТЕЛЬНО вызови find_orders для получения актуального portions из БД, даже если ты её получал ранее в этом разговоре. История conversation не отражает изменения БД от прошлых подтверждённых mutation или ручных правок через CRM. Передача устаревшего значения = финансовая ошибка на десятки порций.',
   input_schema: {
     type: 'object',
     properties: {
@@ -559,7 +559,7 @@ const editOrderPortionsTool: AgentTool = {
     if (!order) {
       return { pending: true, error: 'order_not_found', preview: `Заказ ${input.orderId} не найден` }
     }
-    const preview = `${order.client.name}, ${order.location.name}, ${formatDate(order.deliveryDate)}, ${order.mealType}: ${order.portions} → ${input.portions} порций`
+    const preview = `${order.client.name}, ${order.location.name}, ${formatDate(order.deliveryDate)}, ${MEAL_TYPE_RU[order.mealType]}: ${order.portions} → ${input.portions} порций`
     return {
       pending: true,
       action: { tool: 'edit_order_portions', input: input as unknown as Record<string, unknown> },
@@ -570,7 +570,8 @@ const editOrderPortionsTool: AgentTool = {
 
 const cancelOrderTool: AgentTool = {
   name: 'cancel_order',
-  description: 'Запланировать отмену заказа. Требует подтверждения у пользователя.',
+  description:
+    'Запланировать отмену заказа. Требует подтверждения у пользователя. Перед отменой убедись через find_orders что заказ всё ещё активен.',
   input_schema: {
     type: 'object',
     properties: {
@@ -595,7 +596,7 @@ const cancelOrderTool: AgentTool = {
 const restoreOrderTool: AgentTool = {
   name: 'restore_order',
   description:
-    'Запланировать восстановление ранее отменённого заказа. Требует подтверждения у пользователя.',
+    'Запланировать восстановление ранее отменённого заказа. Требует подтверждения у пользователя. Перед восстановлением убедись через find_orders что заказ всё ещё в CANCELLED статусе.',
   input_schema: {
     type: 'object',
     properties: {
@@ -658,7 +659,10 @@ const createOneTimeOrderTool: AgentTool = {
       }
     }
     const pricePart = input.pricePerPortion ? `, цена ${input.pricePerPortion} ₽/порция` : ''
-    const preview = `Новый разовый: ${client.name}, ${location.name}, ${input.deliveryDate}, ${input.mealType}, ${input.portions} порций${pricePart}`
+    // input.mealType приходит string из LLM, но enum-валидация в input_schema
+    // гарантирует, что это валидный MealType — cast безопасный.
+    const mealTypeRu = MEAL_TYPE_RU[input.mealType as MealType] ?? input.mealType
+    const preview = `Новый разовый: ${client.name}, ${location.name}, ${input.deliveryDate}, ${mealTypeRu}, ${input.portions} порций${pricePart}`
     return {
       pending: true,
       action: {
@@ -672,7 +676,8 @@ const createOneTimeOrderTool: AgentTool = {
 
 const rescheduleOrderTool: AgentTool = {
   name: 'reschedule_order',
-  description: 'Запланировать перенос заказа на другую дату. Требует подтверждения у пользователя.',
+  description:
+    'Запланировать перенос заказа на другую дату. Требует подтверждения у пользователя. Перед переносом вызови find_orders для актуального deliveryDate.',
   input_schema: {
     type: 'object',
     properties: {
@@ -691,7 +696,7 @@ const rescheduleOrderTool: AgentTool = {
     if (!order) {
       return { pending: true, error: 'order_not_found', preview: `Заказ ${input.orderId} не найден` }
     }
-    const preview = `Перенос: ${order.client.name}, ${order.location.name}, ${order.mealType}: ${formatDate(order.deliveryDate)} → ${input.newDate}`
+    const preview = `Перенос: ${order.client.name}, ${order.location.name}, ${MEAL_TYPE_RU[order.mealType]}: ${formatDate(order.deliveryDate)} → ${input.newDate}`
     return {
       pending: true,
       action: { tool: 'reschedule_order', input: input as unknown as Record<string, unknown> },
