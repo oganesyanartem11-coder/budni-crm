@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Sun, Brain, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import { formatDateTimeMsk } from '@/lib/utils/format'
+import type { BriefingType } from '@prisma/client'
 import type { WeeklyMetricsSummary } from '@/lib/db/queries/boris-briefings'
 
 // ============================================================
@@ -18,7 +19,10 @@ import type { WeeklyMetricsSummary } from '@/lib/db/queries/boris-briefings'
  */
 type SerializedBriefing = {
   id: string
-  type: 'MORNING' | 'SELF_ANALYSIS'
+  // 7.16.C: BriefingType расширен значениями TEAM_*. UI здесь показывает только
+  // MORNING/SELF_ANALYSIS, остальные просто игнорируются — но в типе должен
+  // лежать полный union из Prisma, иначе page.tsx не type-check'ится.
+  type: BriefingType
   generatedAt: Date | string
   recipientUserId: string | null
   recipient: { id: string; name: string } | null

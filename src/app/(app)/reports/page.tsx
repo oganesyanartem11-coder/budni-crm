@@ -15,7 +15,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   const params = await searchParams
 
-  // ?date=YYYY-MM-DD из Telegram-кнопок (production-summary, end-of-day-digest)
+  // ?date=YYYY-MM-DD из Telegram-кнопок (production-summary)
   // открывает отчёт за конкретный день. Невалидный формат игнорируем —
   // падаем на дефолтный preset.
   let preset: ReportPreset

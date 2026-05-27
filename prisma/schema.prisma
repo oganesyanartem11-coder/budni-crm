@@ -200,6 +200,11 @@ enum VatMode {
 enum BriefingType {
   MORNING
   SELF_ANALYSIS
+  // 7.16.C: Командный Борис — 4 канала для команды владельцев.
+  TEAM_LIVE
+  TEAM_EVENING
+  TEAM_FRIDAY
+  TEAM_ALERT
 }
 
 enum BorisMetricSource {
@@ -207,6 +212,35 @@ enum BorisMetricSource {
   ACTION_EXECUTOR
   MORNING
   SELF_ANALYSIS
+  // 7.16.C: per-call метрики для каждого из 4 каналов Командного Бориса.
+  TEAM_LIVE
+  TEAM_EVENING
+  TEAM_FRIDAY
+  TEAM_ALERT
+}
+
+// 7.16.C: тип события, которое Борис может зафиксировать и потом озвучить
+// команде в одном из 4 каналов. Сырьё — детектится триггерами этапа 2.
+enum BorisEventType {
+  THANKS
+  FIRST_DELIVERY
+  MENU_APPROVED
+  URGENT_NEAR_DELIVERY
+  RECORD_DAY
+  COMPLAINT_FREE_WEEK
+  // Заглушки на будущее — модель готова, триггеров пока нет.
+  ANNIVERSARY
+  COURIER_ON_TIME_STREAK
+  BIG_INVOICE
+  STABLE_PRICE
+}
+
+// 7.16.C: в какой канал ушло конкретное событие (или null = ещё не отправили).
+enum BorisEventChannel {
+  LIVE
+  EVENING
+  FRIDAY
+  ALERT
 }
 
 // ============================================================
@@ -356,6 +390,7 @@ model Client {
   updDocuments     UpdDocument[]
   toneAlerts       ToneAlertLog[]
   clientAlerts     ClientAlertLog[]
+  borisEvents      BorisEventLog[]
 
   @@index([isActive])
   @@index([name])
@@ -552,6 +587,7 @@ model MenuCycle {
 
   days        MenuDay[]
   menuImports MenuImport[]
+  borisEvents BorisEventLog[]
 
   // 7.6 B.2: на одну неделю — ровно один цикл (любого статуса).
   @@unique([validFrom])
@@ -671,6 +707,8 @@ model Order {
   vatRate          Decimal?        @db.Decimal(5, 2)
 
   updDocumentLink UpdDocumentOrder?
+
+  borisEvents BorisEventLog[]
 
   @@index([deliveryDate, status])
   @@index([clientId, deliveryDate])
@@ -1176,29 +1214,58 @@ model BorisBriefing {
 // ============================================================
 
 model BorisMetrics {
-  id             String             @id @default(cuid())
-  conversationId String?
-  conversation   BorisConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  userId         String?
-  user           User?              @relation("BorisMetricsUser", fields: [userId], references: [id], onDelete: SetNull)
-  toolName       String?
-  ok             Boolean
-  errorMessage   String?
-  durationMs     Int
-  inputTokens    Int                @default(0)
-  outputTokens   Int                @default(0)
+  id                       String             @id @default(cuid())
+  conversationId           String?
+  conversation             BorisConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  userId                   String?
+  user                     User?              @relation("BorisMetricsUser", fields: [userId], references: [id], onDelete: SetNull)
+  toolName                 String?
+  ok                       Boolean
+  errorMessage             String?
+  durationMs               Int
+  inputTokens              Int                @default(0)
+  outputTokens             Int                @default(0)
   // 7.16.D: prompt caching usage. Anthropic возвращает три отдельных счётчика
   // в response.usage. cache_creation = первый запрос с cache_control (×1.25 ценник),
   // cache_read = последующие hit'ы в течение ephemeral TTL 5 мин (×0.10 ценник).
   // inputTokens продолжает считать обычный uncached input (не пересекается).
-  cacheCreationInputTokens Int      @default(0)
-  cacheReadInputTokens     Int      @default(0)
-  costUsd        Decimal            @default(0) @db.Decimal(10, 6)
-  source         BorisMetricSource
-  createdAt      DateTime           @default(now())
+  cacheCreationInputTokens Int                @default(0)
+  cacheReadInputTokens     Int                @default(0)
+  costUsd                  Decimal            @default(0) @db.Decimal(10, 6)
+  source                   BorisMetricSource
+  createdAt                DateTime           @default(now())
 
   @@index([createdAt])
   @@index([userId, createdAt])
   @@index([source, createdAt])
   @@index([toolName, ok])
+}
+
+// ============================================================
+// BORIS EVENT LOG (Спринт 7.16.C) — сырое хранилище детектированных
+// событий для Командного Бориса. Триггеры (handleSpontaneous,
+// approveMenuCycle, доставка и т.п.) кладут сюда фактаж; cron-каналы
+// (LIVE / EVENING / FRIDAY / ALERT) читают и решают, что озвучить
+// команде. Дедуп через deduplKey (unique).
+// ============================================================
+
+model BorisEventLog {
+  id          String             @id @default(cuid())
+  eventType   BorisEventType
+  eventDate   DateTime
+  clientId    String?
+  client      Client?            @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  orderId     String?
+  order       Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  menuCycleId String?
+  menuCycle   MenuCycle?         @relation(fields: [menuCycleId], references: [id], onDelete: SetNull)
+  payload     Json
+  deduplKey   String             @unique
+  emittedTo   BorisEventChannel?
+  emittedAt   DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([eventDate])
+  @@index([eventType, eventDate])
+  @@index([clientId])
 }
