@@ -17,7 +17,7 @@ export async function notifyAdminsAboutPendingMenu(params: {
   try {
     const admins = await prisma.user.findMany({
       where: {
-        role: 'ADMIN',
+        role: { in: ['ADMIN', 'ADMIN_PRO'] },
         isActive: true,
         telegramChatId: { not: null },
       },

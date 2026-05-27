@@ -21,7 +21,7 @@ export async function notifyTelegramOnNewError(record: ErrorLog): Promise<void> 
   try {
     const admins = await prisma.user.findMany({
       where: {
-        role: 'ADMIN',
+        role: { in: ['ADMIN', 'ADMIN_PRO'] },
         isActive: true,
         telegramChatId: { not: null },
       },

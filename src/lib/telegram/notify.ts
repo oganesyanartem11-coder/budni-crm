@@ -76,7 +76,7 @@ export async function notifyAllManagersDirect(
   opts?: NotifyOptions
 ): Promise<NotifyAllManagersResult> {
   const allManagers = await prisma.user.findMany({
-    where: { isActive: true, role: { in: ['ADMIN', 'MANAGER'] } },
+    where: { isActive: true, role: { in: ['ADMIN', 'ADMIN_PRO', 'MANAGER'] } },
     select: { id: true, telegramChatId: true },
   })
 
