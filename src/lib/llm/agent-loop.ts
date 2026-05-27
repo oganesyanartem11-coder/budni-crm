@@ -54,6 +54,14 @@ export interface AgentLoopResult {
    */
   inputTokens: number
   outputTokens: number
+  /**
+   * 7.16.D: prompt caching. Anthropic возвращает три отдельных счётчика —
+   * input_tokens (обычный uncached), cache_creation_input_tokens (1.25× цены)
+   * и cache_read_input_tokens (0.10× цены). Они НЕ пересекаются.
+   * Аккумулируем по всем iterations.
+   */
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
 }
 
 function toAnthropicTool(tool: AgentTool): Anthropic.Messages.Tool {
@@ -62,6 +70,23 @@ function toAnthropicTool(tool: AgentTool): Anthropic.Messages.Tool {
     description: tool.description,
     input_schema: tool.input_schema,
   }
+}
+
+/**
+ * 7.16.D: маркируем последний tool в массиве как cache breakpoint. Anthropic
+ * кеширует ВСЁ что ДО (и включая) breakpoint — то есть system + tools[0..N-1].
+ * Так мы платим 1.25× за первый запрос беседы и 0.10× за каждый последующий
+ * в течение 5-мин ephemeral TTL.
+ */
+function applyToolsCacheControl(
+  tools: Anthropic.Messages.Tool[],
+): Anthropic.Messages.Tool[] {
+  if (tools.length === 0) return tools
+  return tools.map((t, i) =>
+    i === tools.length - 1
+      ? { ...t, cache_control: { type: 'ephemeral' as const } }
+      : t,
+  )
 }
 
 function extractText(content: Anthropic.Messages.ContentBlock[]): string {
@@ -118,11 +143,23 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const client = getAnthropicClient()
   const messages: Anthropic.Messages.MessageParam[] = [...initialMessages]
   const toolCalls: Array<{ name: string; input: unknown; result: unknown }> = []
-  const anthropicTools = tools.map(toAnthropicTool)
+  // 7.16.D: cache_control на последнем tool — система+tools[0..N-1] кешируются.
+  const anthropicTools = applyToolsCacheControl(tools.map(toAnthropicTool))
   const toolsByName = new Map(tools.map((t) => [t.name, t]))
+  // 7.16.D: system как array с cache_control. Конкатенирующийся префикс
+  // «system + tools» — один большой cacheable блок.
+  const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
+    {
+      type: 'text',
+      text: systemPrompt,
+      cache_control: { type: 'ephemeral' },
+    },
+  ]
   let iterations = 0
   let inputTokens = 0
   let outputTokens = 0
+  let cacheCreationInputTokens = 0
+  let cacheReadInputTokens = 0
 
   console.log(
     `[agent-loop] iter=0 start model=${model} tools=${tools.length} maxIterations=${maxIterations}`
@@ -132,7 +169,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     const response = await client.messages.create({
       model,
       max_tokens: maxTokens,
-      system: systemPrompt,
+      system: systemBlocks,
       tools: anthropicTools,
       messages,
     })
@@ -141,6 +178,10 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     // для non-streaming вызовов; на всякий случай default-им к 0.
     inputTokens += response.usage?.input_tokens ?? 0
     outputTokens += response.usage?.output_tokens ?? 0
+    // 7.16.D: cache-токены. Поля nullable у SDK (могут быть undefined для
+    // моделей/конфигов без caching) — default 0.
+    cacheCreationInputTokens += response.usage?.cache_creation_input_tokens ?? 0
+    cacheReadInputTokens += response.usage?.cache_read_input_tokens ?? 0
 
     // Assistant-message в истории должен содержать оригинальные content-блоки
     // (включая tool_use), иначе следующий запрос упадёт на mismatch tool_use_id.
@@ -157,6 +198,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         stopReason: 'end_turn',
         inputTokens,
         outputTokens,
+        cacheCreationInputTokens,
+        cacheReadInputTokens,
       }
     }
 
@@ -231,6 +274,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       stopReason,
       inputTokens,
       outputTokens,
+      cacheCreationInputTokens,
+      cacheReadInputTokens,
     }
   }
 
@@ -248,5 +293,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     stopReason: 'max_iterations',
     inputTokens,
     outputTokens,
+    cacheCreationInputTokens,
+    cacheReadInputTokens,
   }
 }

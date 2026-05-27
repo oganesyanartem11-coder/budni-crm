@@ -17,17 +17,25 @@
  */
 
 import { runAgentLoop } from '@/lib/llm/agent-loop'
+import { clipConversationWindow } from '@/lib/llm/conversation-window'
 import { getBorisModel } from '@/lib/ai/models'
 import { getBorisSystemPrompt } from './personality'
 import { BORIS_TOOLS } from './tools'
 import { buildMultiActionPreview, type PendingActionForPreview } from './preview'
 import { trackBorisCall } from './metrics/track'
+import { BORIS_HISTORY_WINDOW, BORIS_CONVERSATION_TTL_MINUTES } from './config'
 import { prisma } from '@/lib/db/prisma'
-import { BorisMetricSource, type Prisma } from '@prisma/client'
+import { BorisMetricSource, type BorisConversation, type Prisma } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000
-const HISTORY_LIMIT = 20
+
+/**
+ * 7.16.D: тянем из БД чуть больше, чем хотим в API — это даёт
+ * clipConversationWindow материал, чтобы при необходимости расширить окно
+ * назад и захватить parent assistant перед orphan tool_result.
+ */
+const HISTORY_DB_FETCH = BORIS_HISTORY_WINDOW + 5
 
 export interface ChatWithBorisInput {
   userId: string
@@ -42,38 +50,86 @@ export interface ChatWithBorisResult {
   preview?: string
 }
 
-export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWithBorisResult> {
-  // 1. Найти или создать открытую беседу.
-  let conversation = input.conversationId
-    ? await prisma.borisConversation.findFirst({
-        where: { id: input.conversationId, userId: input.userId, closedAt: null },
-      })
-    : await prisma.borisConversation.findFirst({
-        where: { userId: input.userId, closedAt: null },
-        orderBy: { lastMessageAt: 'desc' },
-      })
+/**
+ * 7.16.D: подобрать активную беседу с учётом TTL (BORIS_CONVERSATION_TTL_MINUTES).
+ *
+ * - Если передан explicit conversationId — переиспользуем его как есть
+ *   (внешний код знает что делает; не закрываем по TTL).
+ * - Иначе берём последнюю open беседу userId. Если lastMessageAt свежий —
+ *   reuse. Если stale — закрываем (closedAt=now, expiresAt=lastMessageAt+TTL)
+ *   и создаём новую. Если нет open беседы — создаём.
+ *
+ * Lazy auto-close работает per-request — фоновый cron не нужен.
+ */
+async function resolveActiveConversation(
+  userId: string,
+  conversationId?: string,
+  now: Date = new Date(),
+): Promise<BorisConversation> {
+  if (conversationId) {
+    const explicit = await prisma.borisConversation.findFirst({
+      where: { id: conversationId, userId, closedAt: null },
+    })
+    if (explicit) return explicit
+  }
 
-  if (!conversation) {
-    conversation = await prisma.borisConversation.create({
-      data: { userId: input.userId },
+  const ttlCutoff = new Date(now.getTime() - BORIS_CONVERSATION_TTL_MINUTES * 60_000)
+  const last = await prisma.borisConversation.findFirst({
+    where: { userId, closedAt: null },
+    orderBy: { lastMessageAt: 'desc' },
+  })
+
+  if (last && last.lastMessageAt >= ttlCutoff) {
+    return last
+  }
+
+  if (last) {
+    // Stale: фиксируем фактическое закрытие (closedAt=now) и теоретический
+    // expiry (lastMessageAt+TTL) для аудита «когда фактически истёк бы TTL».
+    const expiresAt = new Date(
+      last.lastMessageAt.getTime() + BORIS_CONVERSATION_TTL_MINUTES * 60_000,
+    )
+    await prisma.borisConversation.update({
+      where: { id: last.id },
+      data: { closedAt: now, expiresAt },
     })
   }
 
-  // 2. Загрузить последние HISTORY_LIMIT сообщений (asc по createdAt для модели).
+  return prisma.borisConversation.create({
+    data: { userId },
+  })
+}
+
+export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWithBorisResult> {
+  // 1. Подобрать беседу с учётом TTL.
+  const conversation = await resolveActiveConversation(
+    input.userId,
+    input.conversationId,
+  )
+
+  // 2. Загрузить чуть больше чем целевое окно (запас на расширение в clip).
   const history = await prisma.borisMessage.findMany({
     where: { conversationId: conversation.id },
     orderBy: { createdAt: 'desc' },
-    take: HISTORY_LIMIT,
+    take: HISTORY_DB_FETCH,
   })
   history.reverse()
 
-  const historyMessages: Anthropic.Messages.MessageParam[] = history
+  const rawMessages: Anthropic.Messages.MessageParam[] = history
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({
       role: m.role as 'user' | 'assistant',
       // content уже сохранён в Anthropic-формате (string или ContentBlock[]).
       content: m.content as Anthropic.Messages.MessageParam['content'],
     }))
+
+  // 7.16.D: безопасно обрезаем до BORIS_HISTORY_WINDOW (расширяем назад
+  // если граница попадает между tool_use и tool_result; дропаем orphan
+  // user-сообщения если расширение исчерпало лимит).
+  const historyMessages = clipConversationWindow(
+    rawMessages,
+    BORIS_HISTORY_WINDOW,
+  )
 
   const userMessage: Anthropic.Messages.MessageParam = {
     role: 'user',
@@ -125,6 +181,8 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
     durationMs: Date.now() - startedAt,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
+    cacheCreationInputTokens: result.cacheCreationInputTokens,
+    cacheReadInputTokens: result.cacheReadInputTokens,
     source: BorisMetricSource.ACTION_CHAT,
   })
 
