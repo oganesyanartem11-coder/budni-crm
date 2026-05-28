@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
 import { IssueDialog } from './_components/issue-dialog'
 import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, formatTime, pluralize } from '@/lib/utils/format'
-import { parseWindowToDate } from '@/lib/utils/msk-window'
+import { parseWindowToDate, getMskHoursMinutes } from '@/lib/utils/msk-window'
 import { cn } from '@/lib/utils/cn'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
@@ -436,12 +436,11 @@ function useWindowState(fromHHmm: string | null, toHHmm: string | null): WindowS
 
 function computeWindowState(fromHHmm: string | null, toHHmm: string | null): WindowState {
   if (!fromHHmm && !toHHmm) return 'unknown'
-  // Окно задано в МСК. Браузер пользователя где угодно — пересчитываем в МСК через UTC+3.
-  const now = new Date()
-  const mskNow = new Date(now.getTime() + (now.getTimezoneOffset() + 180) * 60_000)
+  // Окно задано в МСК. Браузер пользователя где угодно — пересчитываем в МСК через хелпер.
   const fromMins = fromHHmm ? hhmmToMinutes(fromHHmm) : null
   const toMins = toHHmm ? hhmmToMinutes(toHHmm) : null
-  const nowMins = mskNow.getHours() * 60 + mskNow.getMinutes()
+  const { hours, minutes } = getMskHoursMinutes()
+  const nowMins = hours * 60 + minutes
   if (fromMins !== null && nowMins < fromMins) return 'before'
   if (toMins !== null && nowMins > toMins + 30) return 'late'
   if (toMins !== null && nowMins > toMins) return 'after'

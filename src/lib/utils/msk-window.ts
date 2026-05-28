@@ -38,3 +38,9 @@ export function parseWindowToDate(hhmm: string | null, deliveryDate: Date): Date
 
   return fromZonedTime(localStr, MSK_TIMEZONE)
 }
+
+export function getMskHoursMinutes(now: Date = new Date()): { hours: number; minutes: number } {
+  // МСК = UTC+3, DST не действует с 2011. Прибавляем 3ч и читаем UTC-компоненты.
+  const mskMoment = new Date(now.getTime() + 3 * 60 * 60 * 1000)
+  return { hours: mskMoment.getUTCHours(), minutes: mskMoment.getUTCMinutes() }
+}

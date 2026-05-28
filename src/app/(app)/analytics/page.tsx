@@ -15,7 +15,7 @@ interface PageProps {
 }
 
 export default async function AnalyticsPage({ searchParams }: PageProps) {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN'])
 
   const params = await searchParams
   const preset = (params.preset ?? 'this_month') as ReportPreset

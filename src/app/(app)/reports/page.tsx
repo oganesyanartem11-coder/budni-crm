@@ -11,7 +11,7 @@ interface PageProps {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 export default async function ReportsPage({ searchParams }: PageProps) {
-  await requireRole(['ADMIN', 'MANAGER'])
+  await requireRole(['ADMIN'])
 
   const params = await searchParams
 
