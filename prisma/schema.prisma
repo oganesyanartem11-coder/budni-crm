@@ -228,6 +228,9 @@ enum BorisEventType {
   URGENT_NEAR_DELIVERY
   RECORD_DAY
   COMPLAINT_FREE_WEEK
+  // 7.16.C.3: негативная реакция клиента (rude tone). LIVE-канал озвучивает
+  // суть жалобы команде, дополняя личный tone-алёрт ADMIN_PRO из 7.15.
+  RUDE
   // Заглушки на будущее — модель готова, триггеров пока нет.
   ANNIVERSARY
   COURIER_ON_TIME_STREAK

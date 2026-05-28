@@ -83,10 +83,10 @@ export async function buildDayContext(now: Date = new Date()): Promise<DayContex
   const todayMsk = mskMidnightUtc(now, 0)
   const tomorrowMsk = mskMidnightUtc(now, 1)
 
-  // 48-часовое окно тонов: ловит и сегодняшние, и вчерашние реакции, чтобы
-  // EVENING-канал в 20:00 не пропустил «спасибо» пришедшее ночью.
-  const tonesFrom = new Date(now.getTime() - 48 * 60 * 60 * 1000)
-
+  // 7.16.C.3: окно тонов = СТРОГО сегодняшние МСК-сутки. Раньше было 48ч,
+  // из-за чего EVENING в 20:00 включал вчерашние реакции и Боря писал
+  // «на фоне 4 грубых тонов за день», хотя грубости были вчера. EVENING
+  // должен говорить только про факты текущего дня.
   const [todayAgg, todayOrders, tomorrowOrders, materialCostToday, events, tones] =
     await Promise.all([
       prisma.order.aggregate({
@@ -111,7 +111,7 @@ export async function buildDayContext(now: Date = new Date()): Promise<DayContex
         where: { eventDate: { gte: todayMsk, lt: tomorrowMsk } },
         orderBy: { createdAt: 'asc' },
       }),
-      getToneSummary(tonesFrom, now),
+      getToneSummary(todayMsk, tomorrowMsk),
     ])
 
   const portionsToday = todayAgg._sum.portions ?? 0

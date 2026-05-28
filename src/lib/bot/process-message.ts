@@ -212,6 +212,33 @@ async function handleBotResponse(
     }
   }
 
+  // 7.16.C.3: триггер RUDE — клиент написал в грубом тоне. В отличие от ALERT
+  // (urgent + доставка <4ч), RUDE идёт в LIVE-канал команде с СУТЬЮ жалобы
+  // из messageExcerpt. Дедуп 1 пост на клиента в день. Существующий
+  // notifyToneRecipients в личку ADMIN_PRO (7.15) продолжает работать рядом.
+  if (effectiveTone === 'rude') {
+    const today = new Date()
+    const yyyymmdd = today.toISOString().slice(0, 10)
+    try {
+      const event = await logBorisEvent({
+        eventType: 'RUDE',
+        eventDate: today,
+        clientId: client.id,
+        payload: { clientName: client.name, messageExcerpt: text.slice(0, 300) },
+        deduplKey: `rude:${client.id}:${yyyymmdd}`,
+      })
+      if (event) {
+        waitUntil(
+          emitLivePost(event).catch((err) =>
+            console.error('[boris-team] rude emit failed', err),
+          ),
+        )
+      }
+    } catch (err) {
+      console.error('[boris-team] rude logBorisEvent failed', err)
+    }
+  }
+
   // 7.15.B: tone-only алёрт (КЕЙС A — заказ принят, но клиент написал rude/urgent)
   // отправляется НИЖЕ перед return-saved. Для КЕЙСОВ C/D алёрт объединён с
   // notifyClientSignal про InboxItem — отдельный tone-вызов не нужен.
@@ -528,6 +555,32 @@ async function handleSpontaneous(
       }
     } catch (err) {
       console.error('[boris-team] urgent trigger failed', err)
+    }
+  }
+
+  // 7.16.C.3: триггер RUDE — клиент в грубом тоне → LIVE-канал с сутью жалобы.
+  // Симметрично handleBotResponse. notifyClientSignal ниже продолжает слать
+  // личный tone-алёрт в Telegram ADMIN_PRO (старое поведение 7.15).
+  if (spontaneousTone === 'rude') {
+    const today = new Date()
+    const yyyymmdd = today.toISOString().slice(0, 10)
+    try {
+      const event = await logBorisEvent({
+        eventType: 'RUDE',
+        eventDate: today,
+        clientId: client.id,
+        payload: { clientName: client.name, messageExcerpt: text.slice(0, 300) },
+        deduplKey: `rude:${client.id}:${yyyymmdd}`,
+      })
+      if (event) {
+        waitUntil(
+          emitLivePost(event).catch((err) =>
+            console.error('[boris-team] rude emit failed', err),
+          ),
+        )
+      }
+    } catch (err) {
+      console.error('[boris-team] rude logBorisEvent failed', err)
     }
   }
 

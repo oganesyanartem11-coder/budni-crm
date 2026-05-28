@@ -79,6 +79,7 @@ const EVENT_TYPE_LABELS_RU: Record<BorisEventType, string> = {
   FIRST_DELIVERY: 'Первая отгрузка',
   MENU_APPROVED: 'Меню утверждено',
   URGENT_NEAR_DELIVERY: 'Срочный сигнал',
+  RUDE: 'Негатив клиента',
   RECORD_DAY: 'Рекорд дня',
   COMPLAINT_FREE_WEEK: 'Неделя без жалоб',
   ANNIVERSARY: 'Юбилей',
