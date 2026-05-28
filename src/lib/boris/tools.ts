@@ -20,6 +20,7 @@
 
 import type { AgentTool } from '@/lib/llm/agent-loop'
 import { prisma } from '@/lib/db/prisma'
+import { escapeHtml } from '@/lib/telegram/notify'
 import type { MealType, Prisma } from '@prisma/client'
 import {
   MEAL_TYPE_RU,
@@ -527,7 +528,7 @@ async function buildOrderPreviewLine(orderId: string): Promise<string> {
     include: { client: { select: { name: true } }, location: { select: { name: true } } },
   })
   if (!o) return `Заказ ${orderId} (не найден)`
-  return `${o.client.name}, ${o.location.name}, ${formatDate(o.deliveryDate)}, ${MEAL_TYPE_RU[o.mealType]}`
+  return `${escapeHtml(o.client.name)}, ${escapeHtml(o.location.name)}, ${formatDate(o.deliveryDate)}, ${MEAL_TYPE_RU[o.mealType]}`
 }
 
 const editOrderPortionsTool: AgentTool = {
@@ -559,7 +560,7 @@ const editOrderPortionsTool: AgentTool = {
     if (!order) {
       return { pending: true, error: 'order_not_found', preview: `Заказ ${input.orderId} не найден` }
     }
-    const preview = `${order.client.name}, ${order.location.name}, ${formatDate(order.deliveryDate)}, ${MEAL_TYPE_RU[order.mealType]}: ${order.portions} → ${input.portions} порций`
+    const preview = `${escapeHtml(order.client.name)}, ${escapeHtml(order.location.name)}, ${formatDate(order.deliveryDate)}, ${MEAL_TYPE_RU[order.mealType]}: ${order.portions} → ${input.portions} порций`
     return {
       pending: true,
       action: { tool: 'edit_order_portions', input: input as unknown as Record<string, unknown> },
@@ -584,7 +585,7 @@ const cancelOrderTool: AgentTool = {
   execute: async (rawInput): Promise<PendingResult> => {
     const input = rawInput as { orderId: string; reason?: string; expectedUpdatedAt?: string }
     const line = await buildOrderPreviewLine(input.orderId)
-    const reasonPart = input.reason ? ` — причина: ${input.reason}` : ''
+    const reasonPart = input.reason ? ` — причина: ${escapeHtml(input.reason)}` : ''
     return {
       pending: true,
       action: { tool: 'cancel_order', input: input as unknown as Record<string, unknown> },
@@ -662,7 +663,7 @@ const createOneTimeOrderTool: AgentTool = {
     // input.mealType приходит string из LLM, но enum-валидация в input_schema
     // гарантирует, что это валидный MealType — cast безопасный.
     const mealTypeRu = MEAL_TYPE_RU[input.mealType as MealType] ?? input.mealType
-    const preview = `Новый разовый: ${client.name}, ${location.name}, ${input.deliveryDate}, ${mealTypeRu}, ${input.portions} порций${pricePart}`
+    const preview = `Новый разовый: ${escapeHtml(client.name)}, ${escapeHtml(location.name)}, ${escapeHtml(input.deliveryDate)}, ${mealTypeRu}, ${input.portions} порций${pricePart}`
     return {
       pending: true,
       action: {
@@ -696,7 +697,7 @@ const rescheduleOrderTool: AgentTool = {
     if (!order) {
       return { pending: true, error: 'order_not_found', preview: `Заказ ${input.orderId} не найден` }
     }
-    const preview = `Перенос: ${order.client.name}, ${order.location.name}, ${MEAL_TYPE_RU[order.mealType]}: ${formatDate(order.deliveryDate)} → ${input.newDate}`
+    const preview = `Перенос: ${escapeHtml(order.client.name)}, ${escapeHtml(order.location.name)}, ${MEAL_TYPE_RU[order.mealType]}: ${formatDate(order.deliveryDate)} → ${escapeHtml(input.newDate)}`
     return {
       pending: true,
       action: { tool: 'reschedule_order', input: input as unknown as Record<string, unknown> },
@@ -725,7 +726,7 @@ const addOrderNoteTool: AgentTool = {
     return {
       pending: true,
       action: { tool: 'add_order_note', input: input as unknown as Record<string, unknown> },
-      preview: `Заметка к ${line}: «${shortNote}»`,
+      preview: `Заметка к ${line}: «${escapeHtml(shortNote)}»`,
     }
   },
 }

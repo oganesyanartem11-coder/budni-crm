@@ -59,11 +59,19 @@ export async function executePendingAction(
   if (pending.conversation.userId !== userId) {
     return { ok: false, results: [{ tool: '_', ok: false, error: 'wrong_user' }] }
   }
-  if (pending.executedAt || pending.cancelledAt) {
-    return { ok: false, results: [{ tool: '_', ok: false, error: 'already_processed' }] }
-  }
   if (pending.expiresAt < new Date()) {
     return { ok: false, results: [{ tool: '_', ok: false, error: 'expired' }] }
+  }
+
+  // Атомарный захват: ставим executedAt тем же запросом, что проверяем «ещё не
+  // выполнен/отменён». Если параллельный callback (двойной тап) уже забрал
+  // запись — claim.count===0, мы выходим. Финансовые actions не выполнятся дважды.
+  const claim = await prisma.borisPendingAction.updateMany({
+    where: { id: pendingActionId, executedAt: null, cancelledAt: null },
+    data: { executedAt: new Date() },
+  })
+  if (claim.count === 0) {
+    return { ok: false, results: [{ tool: '_', ok: false, error: 'already_processed' }] }
   }
 
   const user = await prisma.user.findUnique({
@@ -140,11 +148,6 @@ export async function executePendingAction(
       })
     }
   }
-
-  await prisma.borisPendingAction.update({
-    where: { id: pendingActionId },
-    data: { executedAt: new Date() },
-  })
 
   return { ok: results.every((r) => r.ok), results }
 }
