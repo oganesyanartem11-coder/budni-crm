@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "crons": [
+    { "path": "/api/cron/keep-warm", "schedule": "56 0,4 * * *" },
     { "path": "/api/cron/extend-active-menu", "schedule": "0 1 * * *" },
     { "path": "/api/cron/generate-fixed-orders", "schedule": "0 3 * * *" },
     { "path": "/api/cron/daily-questions", "schedule": "0 8 * * *" },
@@ -18,7 +19,7 @@
     { "path": "/api/cron/cleanup-activity-log", "schedule": "0 1 * * 1" },
     { "path": "/api/cron/market-check-reminder", "schedule": "0 7 * * 0" },
     { "path": "/api/cron/boris-morning-briefing", "schedule": "0 5 * * 1-5" },
-    { "path": "/api/cron/boris-self-analysis", "schedule": "0 7 * * 6" },
+    { "path": "/api/cron/boris-self-analysis", "schedule": "0 7 * * 5" },
     { "path": "/api/cron/boris-team-evening-digest", "schedule": "0 17 * * 1-4" },
     { "path": "/api/cron/boris-team-friday", "schedule": "0 16 * * 5" }
   ]
