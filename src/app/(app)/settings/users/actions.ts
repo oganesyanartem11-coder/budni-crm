@@ -154,10 +154,19 @@ export async function regenerateUserPin(
   }
   const { pinHash, pinLookupHash } = await createPinFields(pin)
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { pinHash, pinLookupHash },
-  })
+  // MEGA-AUDIT-FIX-1 B5 (E-4): при смене PIN отзываем все активные сессии юзера.
+  // Иначе старая JWT-сессия живёт до expiresAt, и компрометация PIN не
+  // приводит к мгновенному вылогину. Массив-форма транзакции — pgbouncer-safe.
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: { pinHash, pinLookupHash },
+    }),
+    prisma.session.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ])
 
   revalidatePath('/settings/users')
   return { ok: true, data: { pin } }
@@ -175,7 +184,21 @@ export async function setUserActive(
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
   if (!user) return { ok: false, error: 'Пользователь не найден' }
 
-  await prisma.user.update({ where: { id: userId }, data: { isActive } })
+  if (!isActive) {
+    // MEGA-AUDIT-FIX-1 B4 (D-3): при деактивации сбрасываем привязки точек.
+    // Иначе точки остаются «у курьера-призрака» и не попадают в дефолтную
+    // выдачу «непривязанных» другим курьерам. Делаем атомарно через массив-форму
+    // транзакции (interactive-form через pgbouncer падает).
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data: { isActive: false } }),
+      prisma.clientLocation.updateMany({
+        where: { assignedCourierId: userId },
+        data: { assignedCourierId: null },
+      }),
+    ])
+  } else {
+    await prisma.user.update({ where: { id: userId }, data: { isActive: true } })
+  }
 
   revalidatePath('/settings/users')
   return { ok: true, data: undefined }

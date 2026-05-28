@@ -143,6 +143,15 @@ export async function notifyClientSignal(input: ClientSignalInput): Promise<void
     },
   })
 
+  // MEGA-AUDIT-FIX-1 C3 (D-7): схема ClientAlertLog не содержит recipientsCount
+  // (миграции в этом блоке запрещены), поэтому фактическое sentTo пишем явным
+  // ERROR-логом — нулевой охват = потеря сигнала, должен быть виден в логах.
+  if (result.sentTo === 0) {
+    console.error(
+      `[client-signal] LOST: clientId=${clientId} tone=${tone ?? 'none'} sentTo=0`
+    )
+  }
+
   console.log(
     `[bot] alert DONE: client=${clientId} sentTo=${result.sentTo} ` +
       `skippedNoTelegram=${result.skippedNoTelegram} failed=${result.failed}`

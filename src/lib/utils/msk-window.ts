@@ -44,3 +44,11 @@ export function getMskHoursMinutes(now: Date = new Date()): { hours: number; min
   const mskMoment = new Date(now.getTime() + 3 * 60 * 60 * 1000)
   return { hours: mskMoment.getUTCHours(), minutes: mskMoment.getUTCMinutes() }
 }
+
+export function startOfTodayMsk(now: Date = new Date()): Date {
+  // Начало текущего МСК-дня как UTC-момент.
+  // Прибавляем 3ч, обнуляем UTC-часы/мин/сек/мс, вычитаем 3ч обратно.
+  const mskMoment = new Date(now.getTime() + 3 * 60 * 60 * 1000)
+  mskMoment.setUTCHours(0, 0, 0, 0)
+  return new Date(mskMoment.getTime() - 3 * 60 * 60 * 1000)
+}

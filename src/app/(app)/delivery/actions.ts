@@ -68,6 +68,20 @@ export async function markStopDelivered(
     return { ok: false, error: 'Заказы не найдены' }
   }
 
+  // MEGA-AUDIT-FIX-1 C1 (D-4): status chain guard. «Доставлено» можно ставить
+  // только из IN_PRODUCTION или OUT_FOR_DELIVERY. NEW/CANCELLED/уже DELIVERED
+  // отсекаются — иначе курьер мог бы «доставить» отменённый или ещё не
+  // собранный заказ.
+  const wrongStatus = orders.find(
+    (o) => !['IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(o.status),
+  )
+  if (wrongStatus) {
+    return {
+      ok: false,
+      error: 'Нельзя пометить доставленным: заказ должен быть в производстве или в пути',
+    }
+  }
+
   // Защита: курьер не должен отмечать «Доставлено» раньше начала окна доставки.
   // Берём минимум из windowFrom по заказам остановки (одна точка → один from).
   // ADMIN/MANAGER пропускают проверку — для теста и аварийных правок.
@@ -372,6 +386,38 @@ export async function undoStopDelivered(orderIds: string[]): Promise<ActionResul
     where: { id: { in: orderIds } },
     select: { id: true, status: true, delivery: { select: { id: true } } },
   })
+
+  // MEGA-AUDIT-FIX-1 C2 (D-5): откат доставки разрешён только в течение 1 часа
+  // после фактической доставки. Берём самый поздний deliveredAt по остановке —
+  // если хоть один заказ доставлен > 60 мин назад, блокируем целиком.
+  const latestDelivery = await prisma.delivery.findFirst({
+    where: { orderId: { in: orderIds }, deliveredAt: { not: null } },
+    orderBy: { deliveredAt: 'desc' },
+    select: { deliveredAt: true },
+  })
+  if (
+    latestDelivery?.deliveredAt &&
+    Date.now() - latestDelivery.deliveredAt.getTime() > 60 * 60 * 1000
+  ) {
+    return {
+      ok: false,
+      error: 'Откатить можно только в течение часа после доставки',
+    }
+  }
+
+  // MEGA-AUDIT-FIX-1 C2 (D-5): если по любому из заказов уже выпущена УПД —
+  // откат запрещён (документ ушёл клиенту, изменение статуса разрушит
+  // отчётность). Блок A покрывает orders/actions.ts; здесь — undo доставки.
+  const updExists = await prisma.updDocumentOrder.findFirst({
+    where: { orderId: { in: orderIds } },
+    select: { id: true },
+  })
+  if (updExists) {
+    return {
+      ok: false,
+      error: 'Нельзя откатить: по заказу уже выпущена УПД',
+    }
+  }
 
   const updates = await prisma.$transaction(async (tx) => {
     let count = 0

@@ -20,6 +20,8 @@ import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
 import { waitUntil } from '@vercel/functions'
+import { sendTelegramMessage } from '@/lib/telegram/send'
+import { escapeHtml } from '@/lib/telegram/notify'
 import type { BotConversation, MealType, Prisma } from '@prisma/client'
 
 const MEAL_TYPE_RU: Record<MealType, string> = {
@@ -68,6 +70,27 @@ export async function processClientMessage(
   const client = await findClientByMaxChatId(maxChatId)
   if (!client) {
     console.warn(`[bot] unknown maxChatId=${maxChatId}, text="${text.slice(0, 100)}"`)
+    return { reply: null, action: 'unknown_client' }
+  }
+
+  // MEGA-AUDIT-FIX-1 B1 (D-1+D-10): архивный клиент написал.
+  // Сообщение не пишем в conversation, тон не классифицируем, Боря-триггеры не
+  // эмитим, InboxItem не создаём. Шлём личный алёрт всем активным ADMIN_PRO с
+  // привязанным Telegram — пусть решают, возвращать клиента или нет.
+  if (!client.isActive) {
+    const adminPros = await prisma.user.findMany({
+      where: { role: 'ADMIN_PRO', isActive: true, telegramChatId: { not: null } },
+      select: { telegramChatId: true },
+    })
+    const preview = text.length > 200 ? text.slice(0, 200) + '…' : text
+    const msg =
+      `🔔 Архивный клиент <b>${escapeHtml(client.name)}</b> написал — может, хочет вернуться?\n\n` +
+      `«${escapeHtml(preview)}»`
+    await Promise.allSettled(
+      adminPros.map((u) =>
+        sendTelegramMessage(u.telegramChatId as string, msg, { parseMode: 'HTML' })
+      )
+    )
     return { reply: null, action: 'unknown_client' }
   }
 

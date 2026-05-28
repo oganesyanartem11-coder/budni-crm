@@ -249,8 +249,11 @@ export async function notifyAlertRecipients(
   const skippedNoTelegram = recipients.length - withTelegram.length
 
   if (withTelegram.length === 0) {
-    console.warn(
-      `[telegram/notify] notifyAlertRecipients: no recipients with telegramChatId ` +
+    // MEGA-AUDIT-FIX-1 C3 (D-7): sentTo=0 — это потеря сигнала, а не ворнинг.
+    // Поднимаем уровень до error с явным префиксом LOST_SIGNAL, чтобы было
+    // легко фильтровать в логах Vercel.
+    console.error(
+      `[telegram/notify] LOST_SIGNAL notifyAlertRecipients: no recipients with telegramChatId ` +
         `(total: ${recipients.length})`
     )
     return { sentTo: 0, skippedNoTelegram, failed: 0 }

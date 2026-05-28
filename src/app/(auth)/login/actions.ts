@@ -21,6 +21,15 @@ export type LoginResult =
 const RATE_LIMIT_WINDOW_MIN = 5
 const RATE_LIMIT_MAX_FAILED = 20
 
+// D1: per-user lockout — после N неудачных bcrypt-сверок подряд блокируем
+// конкретного юзера на LOCKOUT_MIN минут. Срабатывает только если PIN был
+// сопоставлен с user через pinLookupHash, но финальная bcrypt-сверка не
+// прошла (т.е. мы знаем кого пытались логинить). Защищает от целевого
+// brute-force одного аккаунта; глобальный rate-limit выше остаётся для
+// brute-force разных PIN'ов.
+const PER_USER_LOCKOUT_THRESHOLD = 5
+const PER_USER_LOCKOUT_MIN = 15
+
 // Тайминг-safe заглушка чтобы miss и rate-limit не отличались по времени от
 // нормального match'а. Хэш заведомо невалидный, bcrypt.compare всё равно
 // тратит ~100мс на свою работу.
@@ -100,16 +109,57 @@ export async function loginAction(pin: string): Promise<LoginResult> {
 
   let matchedUser: LoginUserFields | null = null
   let usedFastPath = false
+  // D1: если fastCandidate найден и уже под per-user lockout — отдаём то же
+  // сообщение, что и для пройденной bcrypt-сверки в заблокированном состоянии
+  // (ниже). Сохраняем флаг, всё равно жжём bcrypt для тайминг-симметрии, но
+  // не инкрементируем счётчик и не пускаем дальше.
+  let fastCandidateLocked = false
 
   if (fastCandidate) {
-    // Lookup-индекс совпал, но всё равно подтверждаем bcrypt'ом: HMAC у нас
-    // 64 бита (теоретическая коллизия ничтожна, но дешевле перестраховаться,
-    // чем разбирать «логин чужим PIN'ом» в будущем).
-    const isMatch = await verifyPin(pin, fastCandidate.pinHash)
-    if (isMatch) {
-      matchedUser = fastCandidate
-      usedFastPath = true
+    if (
+      fastCandidate.loginLockedUntil &&
+      fastCandidate.loginLockedUntil.getTime() > Date.now()
+    ) {
+      // Тайминг-symmetry: всё равно выполняем bcrypt, чтобы lockout не
+      // отличался по времени отклика от обычной проверки.
+      await verifyPin(pin, fastCandidate.pinHash)
+      fastCandidateLocked = true
+    } else {
+      // Lookup-индекс совпал, но всё равно подтверждаем bcrypt'ом: HMAC у нас
+      // 64 бита (теоретическая коллизия ничтожна, но дешевле перестраховаться,
+      // чем разбирать «логин чужим PIN'ом» в будущем).
+      const isMatch = await verifyPin(pin, fastCandidate.pinHash)
+      if (isMatch) {
+        matchedUser = fastCandidate
+        usedFastPath = true
+      }
     }
+  }
+
+  // D1: fastCandidate под lockout — отвечаем тем же текстом, что и для
+  // manual-lock ниже. Логируем как LOGIN_LOCKED_ATTEMPT для audit-трейла.
+  if (fastCandidateLocked && fastCandidate) {
+    const untilMsk = fastCandidate.loginLockedUntil!.toLocaleTimeString('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    await prisma.loginAttempt.create({ data: { success: false, ipAddress } })
+    await prisma.activityLog.create({
+      data: {
+        userId: fastCandidate.id,
+        userRole: fastCandidate.role,
+        action: 'LOGIN_LOCKED_ATTEMPT',
+        entityType: 'User',
+        entityId: fastCandidate.id,
+        payload: {
+          lockedUntil: fastCandidate.loginLockedUntil!.toISOString(),
+          ipAddress,
+          reason: 'per_user_lockout',
+        },
+      },
+    })
+    return { ok: false, error: `Аккаунт заблокирован до ${untilMsk} МСК` }
   }
 
   // Slow path выполняем если fast не сработал ИЛИ если в БД остались юзеры
@@ -161,6 +211,48 @@ export async function loginAction(pin: string): Promise<LoginResult> {
   if (!matchedUser) {
     // Тайминг-сейф: фиктивная проверка чтобы время отклика не выдавало наличие пользователя
     await verifyPin(FAKE_PIN, FAKE_HASH)
+    // D1: per-user lockout. Если fastCandidate был найден (мы знаем кто
+    // пытался), но bcrypt не прошёл — инкрементируем счётчик неудач на этом
+    // user. При достижении PER_USER_LOCKOUT_THRESHOLD — ставим
+    // loginLockedUntil. Если fastCandidate'а нет (PIN ни к кому не подошёл),
+    // инкрементировать некого — глобальный rate-limit поверх это уже ловит.
+    if (fastCandidate) {
+      try {
+        const updated = await prisma.user.update({
+          where: { id: fastCandidate.id },
+          data: { failedLoginAttempts: { increment: 1 } },
+          select: { failedLoginAttempts: true },
+        })
+        if (updated.failedLoginAttempts >= PER_USER_LOCKOUT_THRESHOLD) {
+          const lockUntil = new Date(Date.now() + PER_USER_LOCKOUT_MIN * 60 * 1000)
+          await prisma.user.update({
+            where: { id: fastCandidate.id },
+            data: { loginLockedUntil: lockUntil },
+          })
+          await prisma.activityLog.create({
+            data: {
+              userId: fastCandidate.id,
+              userRole: fastCandidate.role,
+              action: 'LOGIN_AUTO_LOCKED',
+              entityType: 'User',
+              entityId: fastCandidate.id,
+              payload: {
+                attempts: updated.failedLoginAttempts,
+                lockedUntil: lockUntil.toISOString(),
+                lockMin: PER_USER_LOCKOUT_MIN,
+                ipAddress,
+              },
+            },
+          })
+        }
+      } catch (e) {
+        // Не валим логин из-за проблем с инкрементом — это вспомогательная
+        // защита, основной ответ всё равно «Неверный PIN». PIN/hash в лог
+        // не попадают по дизайну.
+        console.error('[login] failed to increment lockout counter')
+        void e
+      }
+    }
     await prisma.loginAttempt.create({ data: { success: false, ipAddress } })
     await prisma.activityLog.create({
       data: {

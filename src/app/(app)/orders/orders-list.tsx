@@ -243,6 +243,14 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                         >
                           {order.client.name}
                         </Link>
+                        {order.source === 'BORIS' && (
+                          <span
+                            className="shrink-0 text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
+                            title="Создано Борей"
+                          >
+                            Боря
+                          </span>
+                        )}
                         {!order.ourLegalEntityId && (
                           <span
                             title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"

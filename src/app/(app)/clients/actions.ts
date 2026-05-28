@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { generateOnboardingToken, buildOnboardingDeeplink } from '@/lib/bot/onboarding'
+import { startOfTodayMsk } from '@/lib/utils/msk-window'
 import {
   validateInn,
   validateOgrn,
@@ -354,25 +355,90 @@ export async function updateClient(
 }
 
 export async function archiveClient(id: string): Promise<ActionResult> {
-  const user = await requireRole(['ADMIN', 'MANAGER'])
+  // MEGA-AUDIT-FIX-1 B3 (E-3): только ADMIN/ADMIN_PRO. MANAGER не может архивировать
+  // клиента, у которого могут быть будущие заказы и активные конфиги.
+  const user = await requireRole(['ADMIN'])
   const current = await prisma.client.findUnique({ where: { id } })
   if (!current) return { ok: false, error: 'Клиент не найден' }
 
-  await prisma.client.update({
-    where: { id },
-    data: { isActive: !current.isActive },
-  })
+  // MEGA-AUDIT-FIX-1 B2 (D-2): при архивации в одной транзакции:
+  // 1) деактивируем клиента,
+  // 2) отменяем будущие заказы (статусы CONFIRMED/PENDING_CONFIRMATION/DRAFT
+  //    с deliveryDate >= сегодня по МСК),
+  // 3) деактивируем все ClientMealConfig клиента.
+  // При восстановлении (current.isActive === false) — только step 1, заказы и
+  // конфиги обратно не оживляем (это явное решение менеджера).
+  const willArchive = current.isActive
+  const todayMsk = startOfTodayMsk()
 
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      userRole: user.role,
-      action: current.isActive ? 'CLIENT_ARCHIVED' : 'CLIENT_RESTORED',
-      entityType: 'Client',
-      entityId: id,
-      payload: { name: current.name },
-    },
-  })
+  if (willArchive) {
+    // Пред-подсчёт счётчиков, чтобы положить их в payload ActivityLog внутри
+    // той же массив-транзакции (interactive-form через pgbouncer падает).
+    // Гонка минимальна: окно между count и updateMany — миллисекунды; даже
+    // если разойдётся на 1-2 заказа, это аудит-метка, не учёт.
+    const [cancellablePreCount, configsPreCount] = await Promise.all([
+      prisma.order.count({
+        where: {
+          clientId: id,
+          status: { in: ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT'] },
+          deliveryDate: { gte: todayMsk },
+        },
+      }),
+      prisma.clientMealConfig.count({
+        where: { clientId: id, isActive: true },
+      }),
+    ])
+
+    await prisma.$transaction([
+      prisma.client.update({
+        where: { id },
+        data: { isActive: false },
+      }),
+      prisma.order.updateMany({
+        where: {
+          clientId: id,
+          status: { in: ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT'] },
+          deliveryDate: { gte: todayMsk },
+        },
+        data: { status: 'CANCELLED' },
+      }),
+      prisma.clientMealConfig.updateMany({
+        where: { clientId: id, isActive: true },
+        data: { isActive: false },
+      }),
+      prisma.activityLog.create({
+        data: {
+          userId: user.id,
+          userRole: user.role,
+          action: 'CLIENT_ARCHIVED',
+          entityType: 'Client',
+          entityId: id,
+          payload: {
+            name: current.name,
+            cancelledOrders: cancellablePreCount,
+            deactivatedConfigs: configsPreCount,
+          },
+        },
+      }),
+    ])
+  } else {
+    await prisma.$transaction([
+      prisma.client.update({
+        where: { id },
+        data: { isActive: true },
+      }),
+      prisma.activityLog.create({
+        data: {
+          userId: user.id,
+          userRole: user.role,
+          action: 'CLIENT_RESTORED',
+          entityType: 'Client',
+          entityId: id,
+          payload: { name: current.name },
+        },
+      }),
+    ])
+  }
 
   revalidatePath('/clients')
   revalidatePath(`/clients/${id}`)

@@ -297,6 +297,14 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
               <OrderStatusBadge status={order.status} />
+              {order.source === 'BORIS' && (
+                <span
+                  className="text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
+                  title="Создано Борей"
+                >
+                  Боря
+                </span>
+              )}
               {wasEditedAfterLock && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-pill bg-danger-bg text-danger-fg text-xs font-medium">
                   <AlertTriangle className="w-3.5 h-3.5" />

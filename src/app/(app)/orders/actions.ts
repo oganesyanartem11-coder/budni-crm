@@ -12,6 +12,7 @@ import { orderDetailButton } from '@/lib/telegram/buttons'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { formatDateShort } from '@/lib/utils/format'
 import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
+import { startOfTodayMsk } from '@/lib/utils/msk-window'
 import { MealType, type UserRole } from '@prisma/client'
 
 const createOrderSchema = z.object({
@@ -52,6 +53,10 @@ export async function createOrder(
   const data = parsed.data
   const deliveryDate = new Date(data.deliveryDate)
   deliveryDate.setHours(0, 0, 0, 0)
+
+  if (deliveryDate < startOfTodayMsk()) {
+    return { ok: false, error: 'Нельзя создать или перенести заказ на прошедшую дату' }
+  }
 
   // Проверяем что точка принадлежит этому клиенту, и берём её packaging
   const location = await prisma.clientLocation.findFirst({
@@ -369,6 +374,9 @@ export async function editOrderPortionsCore(
   if (order.status === 'CANCELLED' || order.status === 'DELIVERED' || order.status === 'DRAFT') {
     return { ok: false, error: `Нельзя править заказ в статусе ${order.status}` }
   }
+  if (order.status === 'LOCKED') {
+    return { ok: false, error: 'Нельзя править: заказ заблокирован (LOCKED), снимите блокировку.' }
+  }
 
   if (portions === order.portions) {
     return { ok: true, data: { editedAfterLock: false } }
@@ -376,6 +384,14 @@ export async function editOrderPortionsCore(
 
   const afterCutoff = isPastCutoff(order.deliveryDate)
   const totalPrice = portions * Number(order.pricePerPortion)
+
+  const updExists = await prisma.updDocumentOrder.findFirst({
+    where: { orderId },
+    select: { id: true },
+  })
+  if (updExists) {
+    return { ok: false, error: 'Нельзя изменить: по заказу выпущена УПД. Сначала сторнируйте УПД.' }
+  }
 
   await prisma.order.update({
     where: { id: orderId },
@@ -496,6 +512,14 @@ export async function cancelOrderCore(
 
   const afterCutoff = isPastCutoff(order.deliveryDate)
 
+  const updExists = await prisma.updDocumentOrder.findFirst({
+    where: { orderId },
+    select: { id: true },
+  })
+  if (updExists) {
+    return { ok: false, error: 'Нельзя изменить: по заказу выпущена УПД. Сначала сторнируйте УПД.' }
+  }
+
   await prisma.order.update({
     where: { id: orderId },
     data: {
@@ -590,6 +614,11 @@ export async function rescheduleOrderCore(
     return { ok: false, error: 'Неверная дата' }
   }
   target.setHours(0, 0, 0, 0)
+
+  if (target < startOfTodayMsk()) {
+    return { ok: false, error: 'Нельзя создать или перенести заказ на прошедшую дату' }
+  }
+
   const targetEnd = new Date(target)
   targetEnd.setHours(23, 59, 59, 999)
 
@@ -616,6 +645,14 @@ export async function rescheduleOrderCore(
   // Перенос считается «после cut-off», если ИСХОДНАЯ дата уже за чертой
   // (правки уже могли уйти на кухню/курьеру).
   const afterCutoff = isPastCutoff(order.deliveryDate)
+
+  const updExists = await prisma.updDocumentOrder.findFirst({
+    where: { orderId },
+    select: { id: true },
+  })
+  if (updExists) {
+    return { ok: false, error: 'Нельзя изменить: по заказу выпущена УПД. Сначала сторнируйте УПД.' }
+  }
 
   await prisma.order.update({
     where: { id: orderId },
@@ -937,6 +974,10 @@ export async function createOneTimeOrderCore(
   const data = parsed.data
   const deliveryDate = new Date(data.deliveryDate)
   deliveryDate.setHours(0, 0, 0, 0)
+
+  if (deliveryDate < startOfTodayMsk()) {
+    return { ok: false, error: 'Нельзя создать или перенести заказ на прошедшую дату' }
+  }
 
   const client = await prisma.client.findUnique({
     where: { id: data.clientId },
