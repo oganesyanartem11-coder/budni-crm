@@ -309,6 +309,10 @@ model User {
   // 7.16.B: трекинг LLM-вызовов Action-Бориса для аналитики и self-analysis.
   borisMetrics BorisMetrics[] @relation("BorisMetricsUser")
 
+  // MEGA-BACKEND блок B: курьер опционально привязан к точкам клиента.
+  // Курьер видит свои точки + непривязанные. ADMIN/MANAGER — всё.
+  assignedLocations ClientLocation[] @relation("CourierLocations")
+
   @@index([role, isActive])
 }
 
@@ -410,6 +414,10 @@ model ClientLocation {
   deliveryWindowTo   String? // Формат "HH:mm", например "12:00"
   packaging          PackagingType @default(INDIVIDUAL)
   tags               String[]      @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
+  // MEGA-BACKEND блок B: опциональная привязка точки к курьеру.
+  // SetNull при удалении курьера — точка остаётся, становится «непривязанной».
+  assignedCourierId  String?
+  assignedCourier    User?         @relation("CourierLocations", fields: [assignedCourierId], references: [id], onDelete: SetNull)
   isActive           Boolean       @default(true)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
@@ -419,6 +427,7 @@ model ClientLocation {
   updDocuments UpdDocument[]
 
   @@index([clientId, isActive])
+  @@index([assignedCourierId])
 }
 
 // Конфигурация питания клиента/точки: что заказывает, по какому графику, по какой цене
@@ -718,6 +727,7 @@ model Order {
   @@index([locationId, deliveryDate])
   @@index([status])
   @@index([ourLegalEntityId])
+  @@index([clientId, locationId, mealType, deliveryDate])
 }
 
 // ============================================================

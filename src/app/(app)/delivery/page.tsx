@@ -15,7 +15,7 @@ export default async function DeliveryPage({ searchParams }: PageProps) {
   const targetDate = params.date ? new Date(params.date) : new Date()
   targetDate.setHours(0, 0, 0, 0)
 
-  const stops = await getDeliveriesForDate(targetDate)
+  const stops = await getDeliveriesForDate(targetDate, { role: user.role, id: user.id })
 
   return (
     <>

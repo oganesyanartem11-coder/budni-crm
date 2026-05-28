@@ -14,24 +14,33 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   await requireRole(['ADMIN', 'MANAGER'])
   const { id } = await params
 
-  const client = await prisma.client.findUnique({
-    where: { id },
-    include: {
-      locations: { orderBy: [{ isActive: 'desc' }, { name: 'asc' }] },
-      mealConfigs: {
-        orderBy: [{ isActive: 'desc' }, { mealType: 'asc' }],
-        include: {
-          location: { select: { id: true, name: true } },
+  // MEGA-BACKEND блок B: грузим активных курьеров параллельно с клиентом —
+  // их список нужен в LocationsTab для селекта «Курьер» у каждой точки.
+  const [client, couriers] = await Promise.all([
+    prisma.client.findUnique({
+      where: { id },
+      include: {
+        locations: { orderBy: [{ isActive: 'desc' }, { name: 'asc' }] },
+        mealConfigs: {
+          orderBy: [{ isActive: 'desc' }, { mealType: 'asc' }],
+          include: {
+            location: { select: { id: true, name: true } },
+          },
+        },
+        defaultOurLegalEntity: {
+          select: { id: true, shortName: true, entityType: true },
+        },
+        _count: {
+          select: { orders: true },
         },
       },
-      defaultOurLegalEntity: {
-        select: { id: true, shortName: true, entityType: true },
-      },
-      _count: {
-        select: { orders: true },
-      },
-    },
-  })
+    }),
+    prisma.user.findMany({
+      where: { role: 'COURIER', isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+  ])
 
   if (!client) notFound()
 
@@ -72,7 +81,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         onboardingToken={client.maxOnboardingToken}
         onboardedAt={null}
       />
-      <ClientDetail client={serialize(client)} analytics={serialize(analytics)} />
+      <ClientDetail client={serialize(client)} analytics={serialize(analytics)} couriers={couriers} />
     </>
   )
 }

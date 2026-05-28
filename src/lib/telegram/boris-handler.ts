@@ -26,29 +26,31 @@ const TEMPLATE_REPLIES = {
   notIdentified: 'Не нашёл тебя в системе. Обратись к админу за подключением.',
   wrongRole:
     'Привет, я Борис, помощник менеджеров. Тебе пока не нужен — если что-то нужно по работе, обратись к менеджеру напрямую.',
-  rateLimited: 'Слишком много запросов. Подожди минуту.',
+  rateLimited: 'Погоди, частишь. Отдышимся минуту — и поехали дальше. ✋',
   error: 'Что-то пошло не так. Попробуй переформулировать.',
 } as const
 
 const BORIS_ALLOWED_ROLES = ['ADMIN', 'ADMIN_PRO', 'MANAGER'] as const
 
-// In-memory rate limit (per-process — для MVP, не shared между Vercel instances).
-// На horizontal scale нужно вынести в Redis / БД, иначе лимит "20/мин" умножается
-// на количество инстансов. Для MVP-нагрузки приемлемо.
-const rateLimits = new Map<string, number[]>()
+// Rate-limit: 20 успешных запросов в минуту на пользователя.
+//
+// Источник истины — таблица BorisMetrics: chatWithBoris() пишет туда ровно
+// одну запись (source=ACTION_CHAT) на каждый прошедший этот guard запрос
+// (см. src/lib/boris/agent.ts:166-187). Поэтому шарды Vercel видят общий
+// счётчик, а отказы по rate-limit не самоусиливаются — в окно попадают
+// только реально пропущенные вызовы.
 const RATE_LIMIT_PER_MIN = 20
 
-function checkRateLimit(userId: string): boolean {
-  const now = Date.now()
-  const arr = rateLimits.get(userId) ?? []
-  const recent = arr.filter((t) => now - t < 60_000)
-  if (recent.length >= RATE_LIMIT_PER_MIN) {
-    rateLimits.set(userId, recent)
-    return false
-  }
-  recent.push(now)
-  rateLimits.set(userId, recent)
-  return true
+async function checkRateLimit(userId: string): Promise<boolean> {
+  const oneMinuteAgo = new Date(Date.now() - 60_000)
+  const count = await prisma.borisMetrics.count({
+    where: {
+      userId,
+      source: 'ACTION_CHAT',
+      createdAt: { gt: oneMinuteAgo },
+    },
+  })
+  return count < RATE_LIMIT_PER_MIN
 }
 
 export async function handleBorisMessage(ctx: Context): Promise<void> {
@@ -69,7 +71,7 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
     return
   }
 
-  if (!checkRateLimit(user.id)) {
+  if (!(await checkRateLimit(user.id))) {
     await ctx.reply(TEMPLATE_REPLIES.rateLimited)
     return
   }

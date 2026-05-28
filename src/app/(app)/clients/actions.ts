@@ -451,6 +451,37 @@ export async function archiveLocation(id: string): Promise<ActionResult> {
   return { ok: true, data: undefined }
 }
 
+/**
+ * MEGA-BACKEND блок B: назначение курьера на точку клиента.
+ * courierId === null → отвязать (точка станет «непривязанной» и попадёт всем курьерам).
+ * Видимость заказов курьеру в /delivery: свои точки + точки без курьера.
+ */
+export async function assignCourierToLocation(
+  locationId: string,
+  courierId: string | null
+): Promise<ActionResult> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  if (courierId !== null) {
+    const courier = await prisma.user.findUnique({
+      where: { id: courierId },
+      select: { role: true, isActive: true },
+    })
+    if (!courier || courier.role !== 'COURIER' || !courier.isActive) {
+      return { ok: false, error: 'Курьер не найден или неактивен' }
+    }
+  }
+
+  const loc = await prisma.clientLocation.update({
+    where: { id: locationId },
+    data: { assignedCourierId: courierId },
+    select: { clientId: true },
+  })
+
+  revalidatePath(`/clients/${loc.clientId}`)
+  return { ok: true, data: undefined }
+}
+
 // MEAL CONFIG =======================================================
 
 export async function updateMealConfig(

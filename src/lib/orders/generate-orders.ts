@@ -188,7 +188,7 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
         vatRate: snapshot.vatRate,
       }))
 
-      await prisma.order.createMany({ data: ordersData })
+      await prisma.order.createMany({ data: ordersData, skipDuplicates: true })
       stats.created += ordersData.length
       if (isFixed) {
         stats.createdFixed += ordersData.length

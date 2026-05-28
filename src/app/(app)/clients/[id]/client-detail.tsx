@@ -9,7 +9,7 @@ import { LocationModal } from './location-modal'
 import { MealConfigModal } from './meal-config-modal'
 import { ClientAnalyticsTab } from './client-analytics-tab'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
-import { archiveClient, archiveLocation, deleteMealConfig } from '../actions'
+import { archiveClient, archiveLocation, assignCourierToLocation, deleteMealConfig } from '../actions'
 import { formatDateMsk } from '@/lib/utils/format'
 import { formatMoney, formatDeliveryWindow, formatOrders } from '@/lib/utils/format'
 import {
@@ -52,6 +52,8 @@ interface SerializedClientDetail extends Omit<Client, never> {
 interface Props {
   client: SerializedClientDetail
   analytics: ClientAnalytics
+  // MEGA-BACKEND блок B: активные курьеры для селекта «Курьер» у каждой точки.
+  couriers: Array<{ id: string; name: string }>
 }
 
 type Tab = 'locations' | 'configs' | 'orders' | 'analytics'
@@ -62,7 +64,7 @@ function isTab(value: string | null): value is Tab {
   return value !== null && (VALID_TABS as readonly string[]).includes(value)
 }
 
-export function ClientDetail({ client, analytics }: Props) {
+export function ClientDetail({ client, analytics, couriers }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   // Sprint 7.11 O-7: ?tab=configs из онбординг-чеклиста скроллит и открывает нужный таб.
@@ -140,6 +142,7 @@ export function ClientDetail({ client, analytics }: Props) {
       {tab === 'locations' && (
         <LocationsTab
           locations={client.locations}
+          couriers={couriers}
           onAdd={() => setLocModal({ open: true })}
           onEdit={(loc) => setLocModal({ open: true, location: loc })}
           onArchive={handleArchiveLocation}
@@ -226,15 +229,27 @@ function TabButton({ active, onClick, icon: Icon, label }: { active: boolean; on
 
 function LocationsTab({
   locations,
+  couriers,
   onAdd,
   onEdit,
   onArchive,
 }: {
   locations: ClientLocation[]
+  // MEGA-BACKEND блок B: список активных курьеров для селекта «Курьер».
+  couriers: Array<{ id: string; name: string }>
   onAdd: () => void
   onEdit: (loc: ClientLocation) => void
   onArchive: (id: string, name: string, isActive: boolean) => void
 }) {
+  const [, startTransition] = useTransition()
+
+  function handleAssignCourier(locationId: string, courierId: string | null) {
+    startTransition(async () => {
+      const r = await assignCourierToLocation(locationId, courierId)
+      if (!r.ok) toast.error(r.error)
+    })
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -290,6 +305,20 @@ function LocationsTab({
                   ))}
                 </div>
               )}
+              {/* MEGA-BACKEND блок B: назначение курьера на точку. Пустое значение = «не назначен» (точку видят все курьеры). */}
+              <div className="mt-3 flex items-center gap-2">
+                <label className="text-xs text-fg-muted shrink-0">Курьер:</label>
+                <select
+                  value={loc.assignedCourierId ?? ''}
+                  onChange={(e) => handleAssignCourier(loc.id, e.target.value || null)}
+                  className="flex-1 min-w-0 text-sm px-3 py-1.5 rounded-pill bg-bg border border-border text-fg focus:outline-none focus:ring-2 focus:ring-accent"
+                >
+                  <option value="">Не назначен</option>
+                  {couriers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           ))}
         </div>

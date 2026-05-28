@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
-import type { OrderStatus, MealType, PackagingType } from '@prisma/client'
+import type { OrderStatus, MealType, PackagingType, UserRole } from '@prisma/client'
 
 const DELIVERY_STATUSES: OrderStatus[] = [
   'CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY', 'DELIVERED',
@@ -42,16 +42,31 @@ export interface DeliveryStop {
   issueComment: string | null
 }
 
-export async function getDeliveriesForDate(targetDate: Date): Promise<DeliveryStop[]> {
+export async function getDeliveriesForDate(
+  targetDate: Date,
+  viewer?: { role: UserRole; id: string }
+): Promise<DeliveryStop[]> {
   const date = new Date(targetDate)
   date.setHours(0, 0, 0, 0)
   const dayEnd = new Date(date)
   dayEnd.setHours(23, 59, 59, 999)
 
+  // MEGA-BACKEND блок B: COURIER видит только свои точки + непривязанные.
+  // ADMIN/MANAGER (или вызов без viewer) — поведение как было, без фильтра по локации.
+  const locationFilter =
+    viewer?.role === 'COURIER'
+      ? {
+          location: {
+            OR: [{ assignedCourierId: viewer.id }, { assignedCourierId: null }],
+          },
+        }
+      : {}
+
   const orders = await prisma.order.findMany({
     where: {
       deliveryDate: { gte: date, lte: dayEnd },
       status: { in: DELIVERY_STATUSES },
+      ...locationFilter,
     },
     include: {
       client: { select: { id: true, name: true, contactPhone: true } },
