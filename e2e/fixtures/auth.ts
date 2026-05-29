@@ -49,9 +49,9 @@ async function loginViaPin(page: Page, pin: string): Promise<void> {
 }
 
 async function ensureAuthState(page: Page): Promise<void> {
-  const pin = process.env.PLAYWRIGHT_ADMIN_PIN
+  const pin = process.env.E2E_BOT_PIN ?? process.env.PLAYWRIGHT_ADMIN_PIN
   if (!pin) {
-    throw new Error('PLAYWRIGHT_ADMIN_PIN not set in env')
+    throw new Error('E2E_BOT_PIN or PLAYWRIGHT_ADMIN_PIN not set in env')
   }
 
   if (!fs.existsSync(AUTH_DIR)) {

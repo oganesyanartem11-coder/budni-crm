@@ -1,0 +1,42 @@
+name: Daily Smoke
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 06:00 МСК = 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - name: Run CI smoke
+        id: smoke
+        env:
+          PLAYWRIGHT_BASE_URL: https://budni-crm.vercel.app
+          E2E_BOT_PIN: ${{ secrets.E2E_BOT_PIN }}
+          HEALTH_CHECK_SECRET: ${{ secrets.HEALTH_CHECK_SECRET }}
+        run: npx playwright test --grep @ci
+      - name: Notify Boris on failure
+        if: failure()
+        env:
+          HEALTH_CHECK_SECRET: ${{ secrets.HEALTH_CHECK_SECRET }}
+        run: |
+          curl -X POST https://budni-crm.vercel.app/api/internal/boris-alert \
+            -H "Authorization: Bearer $HEALTH_CHECK_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"kind\":\"failure\",\"summary\":\"Утренний smoke упал\",\"detail\":\"Job: ${{ github.job }}, run: ${{ github.run_id }}\",\"runUrl\":\"https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}"
+      - name: Upload trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: test-results/
+          retention-days: 7

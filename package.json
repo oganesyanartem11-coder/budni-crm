@@ -23,6 +23,7 @@
     "test:e2e": "dotenv -e .env.test -- playwright test",
     "test:e2e:ui": "dotenv -e .env.test -- playwright test --ui",
     "test:e2e:smoke": "dotenv -e .env.test -- playwright test --grep @smoke",
+    "test:e2e:ci": "dotenv -e .env.test -- playwright test --grep @ci",
     "test:e2e:report": "playwright show-report",
     "telegram:setup-webhook": "dotenv -e .env.local -- tsx scripts/setup-telegram-webhook.ts",
     "generate-icons": "tsx scripts/generate-icons.ts"
