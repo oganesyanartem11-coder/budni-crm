@@ -18,8 +18,9 @@ const MSK_OFFSET_MS = 3 * 3600 * 1000
  * Логика per-day идентична getIngredientsSummary (production.ts:200-342),
  * без хардкода статусов (передаются параметром).
  *
- * Использует ТЕКУЩУЮ цену Ingredient.pricePerUnit (не historical) —
- * historical price на эту итерацию вне scope (см. отчёт разведки 6.5).
+ * Использует историческую цену — для каждого дня цена ингредиента берётся
+ * на этот день (priceHistory). Для дат когда истории нет — fallback на
+ * текущую pricePerUnit.
  * Учитывает MealSetItem.quantity (Sprint 7.11 O-3): набор может включать
  * несколько штук одной категории (например, 2 хлеба на обед).
  *
@@ -27,6 +28,37 @@ const MSK_OFFSET_MS = 3 * 3600 * 1000
  * MenuCycle. Передаётся наверх, чтобы вызывающий мог пометить маржу как
  * частичную («есть N дней без меню — себестоимость занижена»).
  */
+async function buildPriceMapAtDate(
+  asOfDate: Date,
+  ingredientIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>()
+  if (ingredientIds.length === 0) return map
+
+  const histRows = await prisma.ingredientPriceHistory.findMany({
+    where: { ingredientId: { in: ingredientIds }, validFrom: { lte: asOfDate } },
+    orderBy: { validFrom: 'desc' },
+    select: { ingredientId: true, price: true },
+  })
+  for (const ph of histRows) {
+    if (!map.has(ph.ingredientId)) {
+      map.set(ph.ingredientId, Number(ph.price))
+    }
+  }
+
+  const orphans = ingredientIds.filter((id) => !map.has(id))
+  if (orphans.length > 0) {
+    const current = await prisma.ingredient.findMany({
+      where: { id: { in: orphans } },
+      select: { id: true, pricePerUnit: true },
+    })
+    for (const c of current) {
+      map.set(c.id, Number(c.pricePerUnit))
+    }
+  }
+  return map
+}
+
 export async function getMaterialCostForRange(
   from: Date,
   to: Date,
@@ -132,6 +164,19 @@ export async function getMaterialCostForRange(
       portionsByMealType[o.mealType] += o.portions
     }
 
+    // 3.5. Собрать ingredientIds для этого дня и построить per-day priceMap
+    //      на dayStart (историческая цена). Fallback на pricePerUnit внутри
+    //      buildPriceMapAtDate (legacy seeds без priceHistory).
+    const dayIngredientIds = new Set<string>()
+    for (const day of menu.days) {
+      for (const menuDish of day.dishes) {
+        for (const di of menuDish.dish.ingredients) {
+          dayIngredientIds.add(di.ingredientId)
+        }
+      }
+    }
+    const priceMap = await buildPriceMapAtDate(dayStart, Array.from(dayIngredientIds))
+
     // 4. Считаем стоимость дня: по всем MenuDay (mealType-ам) для которых
     //    есть порции — суммируем по блюдам и их ингредиентам.
     //    Учитываем MealSetItem.quantity на slotCategory (Sprint 7.11 O-3).
@@ -152,7 +197,7 @@ export async function getMaterialCostForRange(
         const dish = menuDish.dish
         for (const di of dish.ingredients) {
           const brutto = Number(di.bruttoGrams)
-          const price = Number(di.ingredient.pricePerUnit)
+          const price = priceMap.get(di.ingredientId) ?? Number(di.ingredient.pricePerUnit)
           const costPerPortion =
             di.ingredient.unit === 'PCS' ? brutto * price : (brutto / 1000) * price
           totalCost += costPerPortion * effectivePortions

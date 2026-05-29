@@ -20,6 +20,58 @@ import type {
   Prisma,
 } from '@prisma/client'
 
+/**
+ * Резолвер цены ингредиента на конкретный момент времени.
+ * Возвращает цену за единицу (как в Ingredient.pricePerUnit).
+ * Используется computeDishCost для расчёта по историческим ценам.
+ */
+export type PriceResolver = (ingredientId: string) => number
+
+/**
+ * Построить PriceResolver для конкретной даты.
+ * Один пакетный запрос priceHistory + один pacted fallback на pricePerUnit
+ * для «осиротевших» ингредиентов (для которых нет записи validFrom <= asOfDate).
+ *
+ * Инвариант: для asOfDate=now() результат идентичен Number(ingredient.pricePerUnit).
+ */
+export async function buildPriceResolverForDate(
+  asOfDate: Date,
+  ingredientIds: string[]
+): Promise<PriceResolver> {
+  const map = new Map<string, number>()
+  if (ingredientIds.length === 0) {
+    return () => 0
+  }
+
+  const histRows = await prisma.ingredientPriceHistory.findMany({
+    where: {
+      ingredientId: { in: ingredientIds },
+      validFrom: { lte: asOfDate },
+    },
+    orderBy: { validFrom: 'desc' },
+    select: { ingredientId: true, price: true },
+  })
+  for (const ph of histRows) {
+    if (!map.has(ph.ingredientId)) {
+      map.set(ph.ingredientId, Number(ph.price))
+    }
+  }
+
+  // Fallback для ингредиентов БЕЗ истории <= asOfDate (legacy seeds, новые).
+  const orphans = ingredientIds.filter((id) => !map.has(id))
+  if (orphans.length > 0) {
+    const current = await prisma.ingredient.findMany({
+      where: { id: { in: orphans } },
+      select: { id: true, pricePerUnit: true },
+    })
+    for (const c of current) {
+      map.set(c.id, Number(c.pricePerUnit))
+    }
+  }
+
+  return (id: string) => map.get(id) ?? 0
+}
+
 // Статусы заказов, попадающих в production. Дублируем константу из
 // queries/production.ts (там она private). Согласовано с эталоном:
 // REVENUE_STATUSES + LOCKED − DELIVERED. Здесь нужен счёт порций «которые
@@ -91,13 +143,77 @@ type DishWithIngredients = Prisma.DishGetPayload<{
   include: { ingredients: { include: { ingredient: true } } }
 }>
 
-function computeDishCost(dish: DishWithIngredients): DishCostResult {
+/**
+ * @deprecated TEMP: используется только для прод-проверки инварианта
+ * (вызовы прод-отчёта через legacy vs новой версии должны давать ту же цифру
+ * для asOfDate=now()). Удалить в следующем коммите после успешной проверки.
+ */
+export function computeDishCostLegacy(dish: DishWithIngredients): DishCostResult {
   const breakdown: IngredientBreakdown[] = []
   let totalCostPerBaseUnit = 0
 
   for (const di of dish.ingredients) {
     const brutto = Number(di.bruttoGrams)
     const price = Number(di.ingredient.pricePerUnit)
+    // Эталон формулы — material-cost.ts:156-157. PCS → штучная цена,
+    // KG/L → грамм/мл, перевод в базу через /1000.
+    const costContribution =
+      di.ingredient.unit === 'PCS' ? brutto * price : (brutto / 1000) * price
+
+    breakdown.push({
+      ingredientId: di.ingredient.id,
+      name: di.ingredient.name,
+      unit: di.ingredient.unit,
+      bruttoGrams: brutto,
+      pricePerUnit: price,
+      costContribution,
+    })
+    totalCostPerBaseUnit += costContribution
+  }
+
+  const portionSize = dish.portionSize ?? null
+  let costPerPortion: number | null
+  if (dish.unit === 'PORTION' || dish.unit === 'PIECE') {
+    // PORTION — техкарта дана per порцию. PIECE — per штуку (хлеб, блинчик):
+    // bruttoGrams уже на одну единицу, как и для PORTION.
+    costPerPortion = totalCostPerBaseUnit
+  } else if (portionSize !== null) {
+    // LITER / KG — техкарта на 1 л / 1 кг. Переводим в порцию через
+    // portionSize (в граммах/мл) ÷ 1000.
+    costPerPortion = totalCostPerBaseUnit * (portionSize / 1000)
+  } else {
+    costPerPortion = null
+  }
+
+  const hasPlaceholderPrices = breakdown.some(b => b.pricePerUnit === 0)
+
+  return {
+    dishId: dish.id,
+    dishName: dish.name,
+    category: dish.category,
+    dishUnit: dish.unit,
+    portionSize,
+    costPerPortion,
+    breakdown,
+    hasPlaceholderPrices,
+    // Заполняются позже через bulkEnrichDishMetrics (требуют пакетных запросов).
+    sellPrice: null,
+    marginRub: null,
+    marginPercent: null,
+    growth30dPercent: null,
+  }
+}
+
+function computeDishCost(
+  dish: DishWithIngredients,
+  resolver?: PriceResolver,
+): DishCostResult {
+  const breakdown: IngredientBreakdown[] = []
+  let totalCostPerBaseUnit = 0
+
+  for (const di of dish.ingredients) {
+    const brutto = Number(di.bruttoGrams)
+    const price = resolver ? resolver(di.ingredient.id) : Number(di.ingredient.pricePerUnit)
     // Эталон формулы — material-cost.ts:156-157. PCS → штучная цена,
     // KG/L → грамм/мл, перевод в базу через /1000.
     const costContribution =
@@ -306,13 +422,25 @@ async function bulkEnrichDishMetrics(
 // [A.1] getDishCostNow / getDishCostList
 // ============================================================
 
-export async function getDishCostNow(dishId: string): Promise<DishCostResult | null> {
+export async function getDishCostNow(
+  dishId: string,
+  asOfDate?: Date,
+): Promise<DishCostResult | null> {
   const dish = await prisma.dish.findUnique({
     where: { id: dishId },
     include: { ingredients: { include: { ingredient: true } } },
   })
   if (!dish) return null
-  const result = computeDishCost(dish)
+
+  let result: DishCostResult
+  if (asOfDate) {
+    const ingredientIds = dish.ingredients.map(di => di.ingredient.id)
+    const resolver = await buildPriceResolverForDate(asOfDate, ingredientIds)
+    result = computeDishCost(dish, resolver)
+  } else {
+    result = computeDishCost(dish)
+  }
+
   // Enrich тем же путём что и list — три пакетных запроса даже на одно блюдо
   // не дороже, чем сейчас делает /analytics/cost/[id]/page.tsx.
   await bulkEnrichDishMetrics([result])
@@ -337,6 +465,7 @@ export async function getDishCostList(options?: {
   category?: DishCategory
   mealType?: MealType
   includeInactive?: boolean
+  asOfDate?: Date
 }): Promise<DishCostResult[]> {
   const where: Prisma.DishWhereInput = {}
 
@@ -360,7 +489,18 @@ export async function getDishCostList(options?: {
     orderBy: [{ category: 'asc' }, { name: 'asc' }],
   })
 
-  const results = dishes.map(computeDishCost)
+  let results: DishCostResult[]
+  if (options?.asOfDate) {
+    // Один пакетный запрос priceHistory на всю выборку.
+    const allIds = Array.from(
+      new Set(dishes.flatMap(d => d.ingredients.map(di => di.ingredient.id))),
+    )
+    const resolver = await buildPriceResolverForDate(options.asOfDate, allIds)
+    results = dishes.map(d => computeDishCost(d, resolver))
+  } else {
+    results = dishes.map(d => computeDishCost(d))
+  }
+
   await bulkEnrichDishMetrics(results, { mealType: options?.mealType })
   return results
 }
@@ -376,11 +516,50 @@ export async function getDishCostList(options?: {
  *   - в orders.findMany добавляется where.mealType
  *   - при суммировании дня учитывается только день.mealType === mealType
  *
+ * Использует историческую цену — для каждого дня цена ингредиента берётся
+ * на этот день (priceHistory). Для дат когда истории нет — fallback на
+ * текущую pricePerUnit.
+ *
  * Сделано отдельной функцией, чтобы НЕ менять сигнатуру / поведение
  * существующего getMaterialCostForRange (см. note в шапке).
  */
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const MSK_OFFSET_MS = 3 * 3600 * 1000
+
+// Локальный helper для per-day исторической цены — намеренное дублирование
+// с buildPriceResolverForDate (блок A) и аналогичными хелперами в
+// material-cost.ts / ingredients-consumption.ts. Объединение в общий
+// helper-файл — следующая волна.
+async function buildPriceMapAtDateForRange(
+  asOfDate: Date,
+  ingredientIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>()
+  if (ingredientIds.length === 0) return map
+
+  const histRows = await prisma.ingredientPriceHistory.findMany({
+    where: { ingredientId: { in: ingredientIds }, validFrom: { lte: asOfDate } },
+    orderBy: { validFrom: 'desc' },
+    select: { ingredientId: true, price: true },
+  })
+  for (const ph of histRows) {
+    if (!map.has(ph.ingredientId)) {
+      map.set(ph.ingredientId, Number(ph.price))
+    }
+  }
+
+  const orphans = ingredientIds.filter((id) => !map.has(id))
+  if (orphans.length > 0) {
+    const current = await prisma.ingredient.findMany({
+      where: { id: { in: orphans } },
+      select: { id: true, pricePerUnit: true },
+    })
+    for (const c of current) {
+      map.set(c.id, Number(c.pricePerUnit))
+    }
+  }
+  return map
+}
 
 export async function getMaterialCostForRangeByMealType(
   from: Date,
@@ -471,6 +650,19 @@ export async function getMaterialCostForRangeByMealType(
       portionsByMealType[o.mealType] += o.portions
     }
 
+    // Собрать ingredientIds для этого дня и построить per-day priceMap
+    // на dayStart (историческая цена). Fallback на pricePerUnit внутри
+    // buildPriceMapAtDateForRange (legacy seeds без priceHistory).
+    const dayIngredientIds = new Set<string>()
+    for (const day of menu.days) {
+      for (const menuDish of day.dishes) {
+        for (const di of menuDish.dish.ingredients) {
+          dayIngredientIds.add(di.ingredientId)
+        }
+      }
+    }
+    const priceMap = await buildPriceMapAtDateForRange(dayStart, Array.from(dayIngredientIds))
+
     for (const day of menu.days) {
       const portions = portionsByMealType[day.mealType]
       if (portions === 0) continue
@@ -488,7 +680,7 @@ export async function getMaterialCostForRangeByMealType(
         const dish = menuDish.dish
         for (const di of dish.ingredients) {
           const brutto = Number(di.bruttoGrams)
-          const price = Number(di.ingredient.pricePerUnit)
+          const price = priceMap.get(di.ingredientId) ?? Number(di.ingredient.pricePerUnit)
           const costPerPortion =
             di.ingredient.unit === 'PCS' ? brutto * price : (brutto / 1000) * price
           totalCost += costPerPortion * effectivePortions

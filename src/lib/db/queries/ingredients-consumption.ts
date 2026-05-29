@@ -9,8 +9,8 @@ export interface IngredientConsumptionRow {
   ingredientName: string
   unit: 'KG' | 'L' | 'PCS'
   totalNeeded: number // суммарный расход за период в единицах ингредиента
-  pricePerUnit: number // CURRENT цена (как и в material-cost — historical отложен)
-  totalCost: number // totalNeeded × pricePerUnit
+  pricePerUnit: number // текущая цена (для отображения в UI; в totalCost — историческая per-day)
+  totalCost: number // sum по дням: needed-of-day × price-of-day (историческая цена per day)
 }
 
 export interface IngredientsConsumptionResult {
@@ -31,13 +31,46 @@ export interface IngredientsConsumptionResult {
  *     KG/L: needed = (bruttoGrams / 1000) × portions
  *     PCS:  needed = bruttoGrams × portions
  *
- * Использует CURRENT Ingredient.pricePerUnit (historical отложен в тех-долг).
+ * Использует историческую цену — для каждого дня цена ингредиента берётся
+ * на этот день (priceHistory). Для дат когда истории нет — fallback на
+ * текущую pricePerUnit.
  * Учитывает MealSetItem.quantity (Sprint 7.11 O-3): набор может включать
  * несколько штук одной категории (например, 2 хлеба на обед).
  *
  * MSK-нормализация границ обязательна: на UTC-сервере setHours(0,0,0,0)
  * к from/to от getFinancialWeek даёт неверный totalDays и dayOfWeek.
  */
+async function buildPriceMapAtDate(
+  asOfDate: Date,
+  ingredientIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>()
+  if (ingredientIds.length === 0) return map
+
+  const histRows = await prisma.ingredientPriceHistory.findMany({
+    where: { ingredientId: { in: ingredientIds }, validFrom: { lte: asOfDate } },
+    orderBy: { validFrom: 'desc' },
+    select: { ingredientId: true, price: true },
+  })
+  for (const ph of histRows) {
+    if (!map.has(ph.ingredientId)) {
+      map.set(ph.ingredientId, Number(ph.price))
+    }
+  }
+
+  const orphans = ingredientIds.filter((id) => !map.has(id))
+  if (orphans.length > 0) {
+    const current = await prisma.ingredient.findMany({
+      where: { id: { in: orphans } },
+      select: { id: true, pricePerUnit: true },
+    })
+    for (const c of current) {
+      map.set(c.id, Number(c.pricePerUnit))
+    }
+  }
+  return map
+}
+
 export async function getIngredientsConsumptionForRange(
   from: Date,
   to: Date,
@@ -127,6 +160,19 @@ export async function getIngredientsConsumptionForRange(
       portionsByMealType.set(o.mealType, (portionsByMealType.get(o.mealType) ?? 0) + o.portions)
     }
 
+    // Собрать ingredientIds для этого дня и построить per-day priceMap
+    // на dayStart (историческая цена). Fallback на pricePerUnit внутри
+    // buildPriceMapAtDate (legacy seeds без priceHistory).
+    const dayIngredientIds = new Set<string>()
+    for (const day of menu.days) {
+      for (const menuDish of day.dishes) {
+        for (const di of menuDish.dish.ingredients) {
+          dayIngredientIds.add(di.ingredientId)
+        }
+      }
+    }
+    const priceMap = await buildPriceMapAtDate(dayStart, Array.from(dayIngredientIds))
+
     for (const menuDay of menu.days) {
       const portions = portionsByMealType.get(menuDay.mealType) ?? 0
       if (portions === 0) continue
@@ -145,7 +191,7 @@ export async function getIngredientsConsumptionForRange(
 
         for (const di of mdd.dish.ingredients) {
           const brutto = Number(di.bruttoGrams)
-          const price = Number(di.ingredient.pricePerUnit)
+          const price = priceMap.get(di.ingredientId) ?? Number(di.ingredient.pricePerUnit)
           const unit = di.ingredient.unit as 'KG' | 'L' | 'PCS'
 
           const needed = unit === 'PCS' ? brutto * effectivePortions : (brutto / 1000) * effectivePortions
@@ -161,7 +207,9 @@ export async function getIngredientsConsumptionForRange(
               ingredientName: di.ingredient.name,
               unit,
               totalNeeded: needed,
-              pricePerUnit: price,
+              // pricePerUnit в row — текущая (для отображения «цена ингредиента сейчас»);
+              // totalCost — суммированный по дням с per-day исторической ценой.
+              pricePerUnit: Number(di.ingredient.pricePerUnit),
               totalCost: cost,
             })
           }

@@ -18,6 +18,7 @@
     "db:seed:prod": "tsx scripts/setup-prod.ts",
     "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts",
     "test:llm": "dotenv -e .env.local -- tsx scripts/test-llm-parser.ts",
+    "test:margin": "dotenv -e .env.test -- tsx scripts/test-historical-margin.ts",
     "telegram:setup-webhook": "dotenv -e .env.local -- tsx scripts/setup-telegram-webhook.ts",
     "generate-icons": "tsx scripts/generate-icons.ts"
   },
