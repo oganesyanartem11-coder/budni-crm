@@ -143,67 +143,6 @@ type DishWithIngredients = Prisma.DishGetPayload<{
   include: { ingredients: { include: { ingredient: true } } }
 }>
 
-/**
- * @deprecated TEMP: используется только для прод-проверки инварианта
- * (вызовы прод-отчёта через legacy vs новой версии должны давать ту же цифру
- * для asOfDate=now()). Удалить в следующем коммите после успешной проверки.
- */
-export function computeDishCostLegacy(dish: DishWithIngredients): DishCostResult {
-  const breakdown: IngredientBreakdown[] = []
-  let totalCostPerBaseUnit = 0
-
-  for (const di of dish.ingredients) {
-    const brutto = Number(di.bruttoGrams)
-    const price = Number(di.ingredient.pricePerUnit)
-    // Эталон формулы — material-cost.ts:156-157. PCS → штучная цена,
-    // KG/L → грамм/мл, перевод в базу через /1000.
-    const costContribution =
-      di.ingredient.unit === 'PCS' ? brutto * price : (brutto / 1000) * price
-
-    breakdown.push({
-      ingredientId: di.ingredient.id,
-      name: di.ingredient.name,
-      unit: di.ingredient.unit,
-      bruttoGrams: brutto,
-      pricePerUnit: price,
-      costContribution,
-    })
-    totalCostPerBaseUnit += costContribution
-  }
-
-  const portionSize = dish.portionSize ?? null
-  let costPerPortion: number | null
-  if (dish.unit === 'PORTION' || dish.unit === 'PIECE') {
-    // PORTION — техкарта дана per порцию. PIECE — per штуку (хлеб, блинчик):
-    // bruttoGrams уже на одну единицу, как и для PORTION.
-    costPerPortion = totalCostPerBaseUnit
-  } else if (portionSize !== null) {
-    // LITER / KG — техкарта на 1 л / 1 кг. Переводим в порцию через
-    // portionSize (в граммах/мл) ÷ 1000.
-    costPerPortion = totalCostPerBaseUnit * (portionSize / 1000)
-  } else {
-    costPerPortion = null
-  }
-
-  const hasPlaceholderPrices = breakdown.some(b => b.pricePerUnit === 0)
-
-  return {
-    dishId: dish.id,
-    dishName: dish.name,
-    category: dish.category,
-    dishUnit: dish.unit,
-    portionSize,
-    costPerPortion,
-    breakdown,
-    hasPlaceholderPrices,
-    // Заполняются позже через bulkEnrichDishMetrics (требуют пакетных запросов).
-    sellPrice: null,
-    marginRub: null,
-    marginPercent: null,
-    growth30dPercent: null,
-  }
-}
-
 function computeDishCost(
   dish: DishWithIngredients,
   resolver?: PriceResolver,

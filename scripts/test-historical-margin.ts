@@ -4,9 +4,7 @@
  * Готовит минимальный набор MARGIN_TEST_*-данных, прогоняет
  * getMaterialCostForRange за три дня с разными ценами ингредиента в
  * priceHistory и сверяет с ожидаемой суммой 450₽ (100 + 150 + 200).
- * Дополнительно проверяет инвариант: за один последний день
- * (25.05.2026) расчёт через новую функцию совпадает с расчётом через
- * computeDishCostLegacy (которая использует текущую pricePerUnit).
+ * Дополнительно — sanity-проверка одного дня (25.05.2026 = 200₽).
  *
  * Запуск: `npm run test:margin`. Требует .env.test с локальным
  * Postgres.app. На прод НИКОГДА не должен быть наведён.
@@ -14,7 +12,6 @@
 
 import { prisma } from '../src/lib/db/prisma'
 import { getMaterialCostForRange } from '../src/lib/digest/material-cost'
-import { computeDishCostLegacy } from '../src/lib/db/queries/dish-cost'
 import type { DishCategory } from '@prisma/client'
 
 const PREFIX = 'MARGIN_TEST_'
@@ -281,11 +278,8 @@ async function main() {
       `✅ Historical margin: 3 days × different prices = ${result.totalCost}₽ as expected`,
     )
 
-    // === ШАГ 3. Инвариант: один день 25.05 ===
-    // На 25.05 priceHistory даёт цену 20₽/кг (последняя запись validFrom<=25.05).
-    // Текущая Ingredient.pricePerUnit — тоже 20₽/кг (см. seed выше).
-    // Значит computeDishCostLegacy (использует текущую цену) даст ту же стоимость
-    // одной порции, а помножив на 10 — должны получить тот же 200₽.
+    // === ШАГ 3. Sanity: один день 25.05 ===
+    // На 25.05 priceHistory даёт 20₽/кг, 10 порций × 1кг = 200₽.
     const oneDay = await getMaterialCostForRange(
       new Date('2026-05-25T00:00:00.000Z'),
       new Date('2026-05-25T23:59:59.999Z'),
@@ -297,26 +291,7 @@ async function main() {
       )
       process.exit(1)
     }
-
-    const dishFresh = await prisma.dish.findUnique({
-      where: { id: created.dishId! },
-      include: { ingredients: { include: { ingredient: true } } },
-    })
-    if (!dishFresh) {
-      console.error('❌ FAIL: тестовое блюдо не найдено для legacy-инварианта')
-      process.exit(1)
-    }
-    const legacy = computeDishCostLegacy(dishFresh)
-    const legacyTotal = (legacy.costPerPortion ?? 0) * 10
-    if (Math.abs(legacyTotal - oneDay.totalCost) > 0.01) {
-      console.error(
-        `❌ FAIL: legacy (${legacyTotal}₽) ≠ new (${oneDay.totalCost}₽) для 25.05`,
-      )
-      process.exit(1)
-    }
-    console.log(
-      `✅ Single-day invariant: 25 мая new=${oneDay.totalCost}₽ == legacy×10=${legacyTotal}₽`,
-    )
+    console.log(`✅ Single-day sanity: 25 мая = ${oneDay.totalCost}₽`)
   } catch (err) {
     console.error('❌ Скрипт упал:', err)
     process.exit(1)
