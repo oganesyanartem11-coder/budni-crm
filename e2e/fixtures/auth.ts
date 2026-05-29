@@ -18,22 +18,33 @@ const AUTH_FILE = path.join(AUTH_DIR, 'admin.json')
 
 async function loginViaPin(page: Page, pin: string): Promise<void> {
   await page.goto('/login')
-  // Локатор поля PIN: предполагаем input[type=password] или
-  // input[name=pin]. UI логина — простой, не SSO.
-  const pinInput = page
-    .locator('input[name="pin"], input[type="password"], input[inputmode="numeric"]')
-    .first()
-  await pinInput.fill(pin)
 
-  // Submit: либо нажатие Enter, либо кнопка "Войти".
+  // PIN-форма — 4 раздельных OTP-поля. Кликаем в первое, дальше браузер сам
+  // переводит фокус между ними при вводе. page.keyboard.type работает через
+  // активный элемент, что и нужно для OTP-инпутов.
+  const firstSlot = page
+    .locator('input[inputmode="numeric"], input[type="password"], input[name="pin"]')
+    .first()
+  await firstSlot.waitFor({ state: 'visible', timeout: 10_000 })
+  await firstSlot.click()
+  await page.keyboard.type(pin, { delay: 50 })
+
+  // Многие OTP-формы сабмитят автоматически после ввода последней цифры.
+  // Даём 1.5с на авто-сабмит; если редирект не пришёл — пробуем найти кнопку
+  // или жмём Enter.
+  try {
+    await page.waitForURL(/\/dashboard/, { timeout: 1_500 })
+    return
+  } catch {
+    // авто-сабмит не сработал — продолжаем вручную
+  }
+
   const submitBtn = page.locator('button[type="submit"]').first()
   if (await submitBtn.isVisible().catch(() => false)) {
     await submitBtn.click()
   } else {
-    await pinInput.press('Enter')
+    await page.keyboard.press('Enter')
   }
-
-  // Ждём редирект на /dashboard. Таймаут 15с — на холодный старт.
   await page.waitForURL(/\/dashboard/, { timeout: 15_000 })
 }
 
