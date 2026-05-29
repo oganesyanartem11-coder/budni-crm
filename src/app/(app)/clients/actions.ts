@@ -174,6 +174,9 @@ const mealConfigSchema = z.object({
   pricePerPortion: z.number().nonnegative('Цена не может быть отрицательной'),
   validFrom: z.string().nullable().optional(), // ISO
   validTo: z.string().nullable().optional(),
+  // E-блок MEGA-AUDIT-FIX-2: при изменении fixedPortions показываем менеджеру
+  // счётчик будущих DRAFT/PENDING заказов и даём выбор — обновить или оставить.
+  confirmDraftPortions: z.enum(['keep', 'update']).optional(),
 })
 
 export type ClientFormData = z.infer<typeof clientSchema>
@@ -183,6 +186,21 @@ export type MealConfigFormData = z.infer<typeof mealConfigSchema>
 export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
+
+// E-блок MEGA-AUDIT-FIX-2: расширенный результат для updateMealConfig — когда
+// меняется fixedPortions, action возвращает needsConfirmation с числом затронутых
+// будущих DRAFT/PENDING заказов, чтобы UI спросил подтверждение у менеджера.
+export type UpdateMealConfigResult =
+  | { ok: true; data: undefined }
+  | { ok: false; error: string }
+  | {
+      ok: false
+      needsConfirmation: true
+      affectedOrders: number
+      oldPortions: number
+      newPortions: number
+      error: string
+    }
 
 // Нормализация: '' / undefined / null → null; не-пустая строка остаётся как есть.
 function s(v: string | null | undefined): string | null {
@@ -553,7 +571,7 @@ export async function assignCourierToLocation(
 export async function updateMealConfig(
   id: string,
   formData: MealConfigFormData
-): Promise<ActionResult> {
+): Promise<UpdateMealConfigResult> {
   await requireRole(['ADMIN', 'MANAGER'])
 
   const parsed = mealConfigSchema.safeParse(formData)
@@ -562,20 +580,112 @@ export async function updateMealConfig(
     return { ok: false, error: firstError?.message ?? 'Неверные данные питания' }
   }
 
+  // E-блок MEGA-AUDIT-FIX-2: считаем будущие DRAFT/PENDING заказы с устаревшим
+  // значением fixedPortions, чтобы дать менеджеру выбор «обновить N заказов» или
+  // «оставить только конфиг». НЕ авто-обновляем.
+  const existing = await prisma.clientMealConfig.findUnique({
+    where: { id },
+    select: { fixedPortions: true, clientId: true },
+  })
+  if (!existing) {
+    return { ok: false, error: 'Питание не найдено' }
+  }
+
+  const oldFixedPortions = existing.fixedPortions
+  const newFixedPortions = parsed.data.fixedPortions ?? null
+  const portionsChanged =
+    parsed.data.orderType === 'FIXED' &&
+    newFixedPortions !== null &&
+    oldFixedPortions !== null &&
+    newFixedPortions !== oldFixedPortions
+
+  const updateData = {
+    locationId: parsed.data.locationId ?? null,
+    mealType: parsed.data.mealType,
+    orderType: parsed.data.orderType,
+    deliveryHorizon: parsed.data.deliveryHorizon,
+    scheduleType: parsed.data.scheduleType,
+    scheduleData: parsed.data.scheduleData ?? undefined,
+    fixedPortions: newFixedPortions,
+    pricePerPortion: parsed.data.pricePerPortion,
+    validFrom: parsed.data.validFrom ? new Date(parsed.data.validFrom) : undefined,
+    validTo: parsed.data.validTo ? new Date(parsed.data.validTo) : null,
+  }
+
+  if (portionsChanged && !parsed.data.confirmDraftPortions) {
+    const affected = await prisma.order.count({
+      where: {
+        sourceConfigId: id,
+        status: { in: ['DRAFT', 'PENDING_CONFIRMATION'] },
+        deliveryDate: { gte: startOfTodayMsk() },
+      },
+    })
+    if (affected > 0) {
+      return {
+        ok: false,
+        needsConfirmation: true,
+        affectedOrders: affected,
+        oldPortions: oldFixedPortions!,
+        newPortions: newFixedPortions!,
+        error: `${affected} будущих заказов с устаревшим значением. Подтвердите действие.`,
+      }
+    }
+    // affected === 0 → молча апдейтим только конфиг
+    const config = await prisma.clientMealConfig.update({
+      where: { id },
+      data: updateData,
+    })
+    revalidatePath(`/clients/${config.clientId}`)
+    return { ok: true, data: undefined }
+  }
+
+  if (portionsChanged && parsed.data.confirmDraftPortions === 'update') {
+    // Variant A: читаем затронутые заказы (id + pricePerPortion), затем массив-форма
+    // $transaction([config.update, ...orderUpdates]). pricePerPortion индивидуален
+    // per-order (snapshot), поэтому totalPrice пересчитываем отдельно на каждый.
+    const orders = await prisma.order.findMany({
+      where: {
+        sourceConfigId: id,
+        status: { in: ['DRAFT', 'PENDING_CONFIRMATION'] },
+        deliveryDate: { gte: startOfTodayMsk() },
+      },
+      select: { id: true, pricePerPortion: true },
+    })
+
+    // Защита от слишком крупных транзакций (pgbouncer + Prisma batching).
+    const LIMIT = 100
+    if (orders.length > LIMIT) {
+      return {
+        ok: false,
+        error: `Слишком много заказов для массового обновления (${orders.length} > ${LIMIT}). Отмените их вручную.`,
+      }
+    }
+
+    const orderUpdates = orders.map((o) =>
+      prisma.order.update({
+        where: { id: o.id },
+        data: {
+          portions: newFixedPortions!,
+          // totalPrice = portions * pricePerPortion (snapshot per-order).
+          totalPrice: o.pricePerPortion.mul(newFixedPortions!),
+        },
+      })
+    )
+
+    const [config] = await prisma.$transaction([
+      prisma.clientMealConfig.update({ where: { id }, data: updateData }),
+      ...orderUpdates,
+    ])
+
+    revalidatePath(`/clients/${config.clientId}`)
+    return { ok: true, data: undefined }
+  }
+
+  // Все остальные случаи (portions не менялись, либо confirmDraftPortions === 'keep'):
+  // обновляем только конфиг, заказы не трогаем.
   const config = await prisma.clientMealConfig.update({
     where: { id },
-    data: {
-      locationId: parsed.data.locationId ?? null,
-      mealType: parsed.data.mealType,
-      orderType: parsed.data.orderType,
-      deliveryHorizon: parsed.data.deliveryHorizon,
-      scheduleType: parsed.data.scheduleType,
-      scheduleData: parsed.data.scheduleData ?? undefined,
-      fixedPortions: parsed.data.fixedPortions ?? null,
-      pricePerPortion: parsed.data.pricePerPortion,
-      validFrom: parsed.data.validFrom ? new Date(parsed.data.validFrom) : undefined,
-      validTo: parsed.data.validTo ? new Date(parsed.data.validTo) : null,
-    },
+    data: updateData,
   })
 
   revalidatePath(`/clients/${config.clientId}`)

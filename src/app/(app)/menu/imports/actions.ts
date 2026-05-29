@@ -506,6 +506,49 @@ export async function approveMenuImport(
           throw new Error('Нет данных для разворачивания')
         }
 
+        // F1: проверка наличия подтверждённых заказов на удаляемых неделях
+        // перед сносом циклов чужих импортов. Чтобы не оставить «висящие»
+        // заказы по уже несуществующему меню — блокируем approve.
+        const cyclesToDelete = await tx.menuCycle.findMany({
+          where: {
+            validFrom: { gte: startDate },
+            menuImportId: { not: parsed.data.menuImportId },
+          },
+          select: { validFrom: true, validTo: true },
+        })
+
+        if (cyclesToDelete.length > 0) {
+          const minValidFrom = cyclesToDelete.reduce(
+            (min, c) => (c.validFrom < min ? c.validFrom : min),
+            cyclesToDelete[0].validFrom
+          )
+          const maxValidTo = cyclesToDelete.reduce(
+            (max, c) => (c.validTo > max ? c.validTo : max),
+            cyclesToDelete[0].validTo
+          )
+
+          const blocking = await tx.order.count({
+            where: {
+              deliveryDate: { gte: minValidFrom, lte: maxValidTo },
+              status: {
+                in: [
+                  'CONFIRMED',
+                  'LOCKED',
+                  'IN_PRODUCTION',
+                  'OUT_FOR_DELIVERY',
+                  'DELIVERED',
+                ],
+              },
+            },
+          })
+
+          if (blocking > 0) {
+            throw new Error(
+              `На этих неделях уже есть ${blocking} подтверждённых заказов по прежнему меню. Архивируйте предыдущий импорт через UI или отмените заказы.`
+            )
+          }
+        }
+
         // Сносим будущие циклы ЧУЖИХ импортов на этом или позже понедельнике —
         // MenuDay/MenuDayDish уйдут каскадно (Cascade на menuCycleId/menuDayId).
         // Циклы текущего импорта в обрезку не попадают (filter menuImportId != X);

@@ -398,6 +398,24 @@ export async function unapproveMenu(cycleId: string): Promise<ActionResult> {
     return { ok: false, error: 'Отозвать можно только утверждённое меню' }
   }
 
+  // F4: нельзя вернуть в DRAFT меню, по которому уже есть подтверждённые заказы —
+  // иначе они «провиснут» по несуществующему утверждённому меню. У MenuCycle
+  // есть нативное поле validTo (воскресенье недели), используем его.
+  const blocking = await prisma.order.count({
+    where: {
+      deliveryDate: { gte: cycle.validFrom, lte: cycle.validTo },
+      status: {
+        in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY', 'DELIVERED'],
+      },
+    },
+  })
+  if (blocking > 0) {
+    return {
+      ok: false,
+      error: `По этому меню уже ${blocking} подтверждённых заказов. Невозможно вернуть в черновик.`,
+    }
+  }
+
   await prisma.menuCycle.update({
     where: { id: cycleId },
     data: {

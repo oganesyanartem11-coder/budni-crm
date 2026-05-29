@@ -12,6 +12,16 @@ import {
   WEEKDAY_NAMES_SHORT,
 } from '@/lib/constants/client'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils/cn'
 import type { ClientLocation, MealType, OrderType, ScheduleType, DeliveryHorizon, Prisma } from '@prisma/client'
 
@@ -94,6 +104,14 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     config?.validTo ? new Date(config.validTo).toISOString().slice(0, 10) : ''
   )
 
+  // E-блок MEGA-AUDIT-FIX-2: подтверждение изменения fixedPortions при наличии
+  // будущих DRAFT/PENDING заказов с устаревшим значением.
+  const [confirmState, setConfirmState] = useState<{
+    affectedOrders: number
+    oldPortions: number
+    newPortions: number
+  } | null>(null)
+
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
@@ -116,6 +134,70 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
   function toggleCustomDay(d: number) {
     setCustomDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort())
+  }
+
+  // E-блок MEGA-AUDIT-FIX-2: единый submit для редактирования. Принимает опциональный
+  // confirmDraftPortions, чтобы повторно отправить запрос с выбором менеджера после
+  // показа AlertDialog.
+  async function submitUpdate(
+    data: Parameters<typeof updateMealConfig>[1],
+    confirm?: 'keep' | 'update'
+  ) {
+    if (!config) return
+    const result = await updateMealConfig(config.id, {
+      ...data,
+      confirmDraftPortions: confirm,
+    })
+    if (result.ok) {
+      toast.success('Питание обновлено')
+      setConfirmState(null)
+      onClose()
+      return
+    }
+    if ('needsConfirmation' in result && result.needsConfirmation) {
+      setConfirmState({
+        affectedOrders: result.affectedOrders,
+        oldPortions: result.oldPortions,
+        newPortions: result.newPortions,
+      })
+      return
+    }
+    toast.error(result.error)
+  }
+
+  // Текущий data-payload для редактирования — используется и из формы, и из
+  // AlertDialog (повторный submit с confirm). Считается «лениво», только если
+  // мы в режиме редактирования.
+  function buildEditPayload(): Parameters<typeof updateMealConfig>[1] | null {
+    if (!isEditing || !config) return null
+    const mt = config.mealType
+    let scheduleData: Record<string, unknown> | null = null
+    if (scheduleType === 'CUSTOM_DAYS') {
+      scheduleData = { daysOfWeek: customDays }
+    } else if (scheduleType === 'INTERVAL') {
+      const interval = parseInt(intervalDays, 10)
+      if (interval > 0) scheduleData = { intervalDays: interval }
+    }
+    return {
+      locationId,
+      mealType: mt,
+      orderType,
+      deliveryHorizon,
+      scheduleType,
+      scheduleData,
+      fixedPortions: orderType === 'FIXED' ? parseInt(portionsByType[mt] || '0', 10) : null,
+      pricePerPortion: parseFloat(pricesByType[mt] || '0'),
+      validFrom: validFrom || null,
+      validTo: validTo || null,
+    }
+  }
+
+  function handleConfirmChoice(confirm: 'keep' | 'update') {
+    const payload = buildEditPayload()
+    if (!payload) return
+    startTransition(async () => {
+      await submitUpdate(payload, confirm)
+    })
   }
 
   // Предупреждение: для FIXED у нескольких типов порции должны совпадать (правило ТЗ)
@@ -195,13 +277,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           validFrom: validFrom || null,
           validTo: validTo || null,
         }
-        const result = await updateMealConfig(config.id, data)
-        if (result.ok) {
-          toast.success('Питание обновлено')
-          onClose()
-        } else {
-          toast.error(result.error)
-        }
+        await submitUpdate(data)
       } else {
         // Создание — bulk
         const pricesNumbers: Record<string, number> = {}
@@ -244,6 +320,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
   }
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-fg/30 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
@@ -446,5 +523,41 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
         </form>
       </div>
     </div>
+
+    {/* E-блок MEGA-AUDIT-FIX-2: подтверждение изменения fixedPortions */}
+    <AlertDialog
+      open={confirmState !== null}
+      onOpenChange={(o) => { if (!o) setConfirmState(null) }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Обновить порции в будущих заказах?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {confirmState && (
+              <>
+                У этого конфига {confirmState.affectedOrders} будущих DRAFT/PENDING
+                заказов с {confirmState.oldPortions} порций. Поменять порции в
+                заказах на {confirmState.newPortions} или оставить старые значения?
+              </>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel
+            disabled={isPending}
+            onClick={() => handleConfirmChoice('keep')}
+          >
+            Только конфиг
+          </AlertDialogCancel>
+          <AlertDialogAction
+            disabled={isPending}
+            onClick={() => handleConfirmChoice('update')}
+          >
+            {confirmState ? `Обновить ${confirmState.affectedOrders} заказов` : 'Обновить заказы'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }

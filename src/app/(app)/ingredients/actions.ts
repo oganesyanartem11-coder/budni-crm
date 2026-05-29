@@ -289,9 +289,13 @@ export async function mergeIngredients(
         data: { matchedIngredientId: targetId },
       })
 
-      // 7. Удалить историю цен source'ов (история target остаётся как primary)
-      await tx.ingredientPriceHistory.deleteMany({
+      // 7. F3: ПЕРЕНОСИМ историю цен source'ов на target (а не удаляем).
+      // IngredientPriceHistory не имеет поля notes/comment/metadata, поэтому
+      // per-record-метку «mergedFromId» поставить негде без миграции схемы —
+      // фиксируем факт переноса только в batch-payload ActivityLog (см. шаг 10).
+      const movedHistory = await tx.ingredientPriceHistory.updateMany({
         where: { ingredientId: { in: uniqueSourceIds } },
+        data: { ingredientId: targetId },
       })
 
       // 8. Смерджить brandVariants
@@ -330,6 +334,12 @@ export async function mergeIngredients(
             mergedCount: uniqueSourceIds.length,
             conflictsResolved: conflictIds.length,
             dishIngredientsMigrated: migratableIds.length,
+            // F3: история цен переносится, а не удаляется.
+            // Per-record метку поставить негде (нет notes/comment/metadata
+            // в IngredientPriceHistory), фиксируем только batch-счётчик.
+            movedHistoryCount: movedHistory.count,
+            targetIngredientId: targetId,
+            sourceIngredientIds: uniqueSourceIds,
           },
         },
       })

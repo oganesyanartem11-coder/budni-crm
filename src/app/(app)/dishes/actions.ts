@@ -97,7 +97,10 @@ export async function updateDish(id: string, formData: DishFormData): Promise<Ac
     }
   }
 
-  const current = await prisma.dish.findUnique({ where: { id } })
+  const current = await prisma.dish.findUnique({
+    where: { id },
+    include: { ingredients: true },
+  })
   if (!current) {
     return { ok: false, error: 'Блюдо не найдено' }
   }
@@ -114,6 +117,43 @@ export async function updateDish(id: string, formData: DishFormData): Promise<Ac
     })
     if (conflict) {
       return { ok: false, error: 'Блюдо с таким названием уже существует в этой категории' }
+    }
+  }
+
+  // F2: если состав (DishIngredient) изменился — нельзя редактировать блюдо,
+  // которое уже используется в утверждённом меню. name/description/category/etc.
+  // не блокируем (для метаданных правка свободная). Сравниваем по нормализованному
+  // ключу (ingredientId + brutto + netto), а не по id записей.
+  const normalizeLine = (l: {
+    ingredientId: string
+    bruttoGrams: number | { toString(): string }
+    nettoGrams: number | { toString(): string }
+  }) =>
+    `${l.ingredientId}|${Number(l.bruttoGrams).toString()}|${Number(l.nettoGrams).toString()}`
+
+  const currentKey = current.ingredients
+    .map((l) =>
+      normalizeLine({
+        ingredientId: l.ingredientId,
+        bruttoGrams: Number(l.bruttoGrams),
+        nettoGrams: Number(l.nettoGrams),
+      })
+    )
+    .sort()
+    .join(',')
+  const nextKey = parsed.data.ingredients.map(normalizeLine).sort().join(',')
+
+  if (currentKey !== nextKey) {
+    const usedInApproved = await prisma.menuDayDish.findFirst({
+      where: { dishId: id, menuDay: { menuCycle: { status: 'APPROVED' } } },
+      select: { id: true },
+    })
+    if (usedInApproved) {
+      return {
+        ok: false,
+        error:
+          'Это блюдо используется в утверждённом меню. Чтобы изменить состав, продублируйте блюдо как новое.',
+      }
     }
   }
 
