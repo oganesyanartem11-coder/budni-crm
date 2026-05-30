@@ -404,13 +404,13 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
                     }
                   }}
                   disabled={isPending}
-                  className="w-24 px-2 py-1 rounded-lg bg-bg border border-accent text-sm tabular-nums focus:outline-none disabled:opacity-50"
+                  className="w-24 px-2 py-2 sm:py-1 rounded-lg bg-surface border border-brand-green text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-brand-green/30 disabled:opacity-50"
                 />
                 <button
                   type="button"
                   onClick={isPending_ ? handleConfirm : handleEditPortions}
                   disabled={isPending}
-                  className="px-2 py-1 rounded-lg bg-accent text-accent-fg text-xs hover:opacity-90 disabled:opacity-50"
+                  className="px-3 py-2 sm:py-1 rounded-lg bg-brand-green text-white text-xs font-medium hover:bg-brand-green-deep disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
                 >
                   OK
                 </button>
@@ -502,7 +502,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
                       setSelectedLegalEntityId('')
                       setLegalEntityDialogOpen(true)
                     }}
-                    className="px-2.5 py-1 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90"
+                    className="px-2.5 py-1 rounded-lg bg-brand-orange text-white text-xs font-medium hover:bg-brand-orange-dark transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40"
                   >
                     Выбрать юрлицо
                   </button>
@@ -578,7 +578,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
                 type="button"
                 onClick={() => setRescheduleOpen(true)}
                 disabled={isPending}
-                className="w-full px-4 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full px-4 py-2.5 rounded-xl bg-brand-green-light text-brand-green-deep font-medium text-sm hover:bg-brand-green-light/70 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
               >
                 <CalendarClock className="w-4 h-4" />
                 Перенести на другую дату
@@ -589,7 +589,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
                 type="button"
                 onClick={() => setCancelOpen(true)}
                 disabled={isPending}
-                className="w-full px-4 py-2.5 rounded-pill bg-danger-bg/40 hover:bg-danger-bg text-danger-fg font-medium text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full px-4 py-2.5 rounded-xl bg-danger-bg/40 hover:bg-danger-bg text-danger-fg font-medium text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
               >
                 <X className="w-4 h-4" />
                 Отменить заказ
@@ -618,7 +618,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
               placeholder="Например: клиент перенёс совещание"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm resize-none"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors text-sm resize-none"
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
@@ -626,7 +626,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               type="button"
               onClick={() => setCancelOpen(false)}
               disabled={isPending}
-              className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-brand-green-light text-brand-green-deep font-medium text-sm hover:bg-brand-green-light/70 transition-colors disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
             >
               Закрыть
             </button>
@@ -634,7 +634,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               type="button"
               onClick={handleCancel}
               disabled={isPending}
-              className="px-5 py-2.5 rounded-pill bg-danger text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-danger text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40"
             >
               {isPending ? 'Отменяем…' : 'Подтвердить отмену'}
             </button>
@@ -654,7 +654,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               type="date"
               value={newDate}
               onChange={(e) => setNewDate(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors"
             />
             <p className="text-xs text-fg-subtle">
               Если на эту дату уже есть заказ для этой точки и типа — перенос не сработает.
@@ -665,7 +665,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               type="button"
               onClick={() => setRescheduleOpen(false)}
               disabled={isPending}
-              className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-brand-green-light text-brand-green-deep font-medium text-sm hover:bg-brand-green-light/70 transition-colors disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
             >
               Отмена
             </button>
@@ -673,7 +673,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               type="button"
               onClick={handleReschedule}
               disabled={isPending}
-              className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40"
             >
               {isPending ? 'Переносим…' : 'Перенести'}
             </button>
@@ -718,7 +718,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               onValueChange={(v) => setSelectedLegalEntityId(v === '__none__' ? '' : v)}
               disabled={legalEntities.length === 0}
             >
-              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                 <SelectValue
                   placeholder={
                     legalEntities.length === 0
@@ -754,7 +754,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               type="button"
               onClick={handleChangeLegalEntity}
               disabled={isPending || !selectedLegalEntityId}
-              className="px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+              className="px-4 py-2 rounded-xl bg-brand-orange text-white text-sm font-medium hover:bg-brand-orange-dark transition-colors disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40"
             >
               {isPending ? 'Сохраняем…' : 'Сменить'}
             </button>
@@ -776,7 +776,7 @@ function Row({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="w-8 h-8 rounded-full bg-bg flex items-center justify-center shrink-0 mt-0.5">
+      <div className="w-8 h-8 rounded-full bg-surface-2 flex items-center justify-center shrink-0 mt-0.5">
         <Icon className="w-4 h-4 text-fg-muted" strokeWidth={1.75} />
       </div>
       <div className="flex-1 min-w-0">
@@ -854,7 +854,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+            className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]"
           >
             <X className="w-4 h-4" />
           </button>

@@ -58,7 +58,7 @@ export function OrdersWeek({ orders, weekStart }: Props) {
 
   if (data.clients.length === 0) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div className="rounded-xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
         <p>На этой неделе нет заказов</p>
       </div>
     )
@@ -68,12 +68,12 @@ export function OrdersWeek({ orders, weekStart }: Props) {
   today.setHours(0, 0, 0, 0)
 
   return (
-    <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
-      <div className="overflow-x-auto">
+    <div className="rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div className="overflow-x-auto snap-x snap-mandatory">
         <table className="w-full text-sm border-collapse">
           <thead>
-            <tr className="bg-bg/50">
-              <th className="text-left px-3 py-3 text-xs uppercase tracking-wider text-fg-muted font-medium sticky left-0 bg-bg/50 min-w-[180px]">
+            <tr className="bg-surface-2/60">
+              <th className="text-left px-3 py-3 text-xs uppercase tracking-wider text-fg-muted font-medium sticky left-0 bg-surface-2/60 min-w-[180px] z-10">
                 Клиент
               </th>
               {[1, 2, 3, 4, 5, 6, 7].map((dow) => {
@@ -81,11 +81,11 @@ export function OrdersWeek({ orders, weekStart }: Props) {
                 const isToday = dayDate.getTime() === today.getTime()
                 return (
                   <th key={dow} className={cn(
-                    'text-left px-3 py-3 text-xs uppercase tracking-wider font-medium min-w-[110px]',
-                    isToday ? 'bg-warning-bg/30 text-warning-fg' : 'text-fg-muted'
+                    'text-left px-3 py-3 text-xs uppercase tracking-wider font-medium min-w-[110px] snap-start',
+                    isToday ? 'bg-brand-green-light text-brand-green-deep border-b-2 border-brand-green' : 'text-fg-muted'
                   )}>
                     <div>{WEEKDAY_NAMES_SHORT[dow]}</div>
-                    <div className="text-fg-subtle font-normal mt-0.5">
+                    <div className={cn('font-normal mt-0.5', isToday ? 'text-brand-green-deep/70' : 'text-fg-subtle')}>
                       {dayDate.getDate()}.{(dayDate.getMonth() + 1).toString().padStart(2, '0')}
                     </div>
                   </th>
@@ -96,7 +96,7 @@ export function OrdersWeek({ orders, weekStart }: Props) {
           <tbody className="divide-y divide-border">
             {data.clients.map((client) => (
               <tr key={client.id}>
-                <td className="px-3 py-3 align-top sticky left-0 bg-surface">
+                <td className="px-3 py-3 align-top sticky left-0 bg-surface z-10">
                   <Link href={`/clients/${client.id}`} className="font-medium hover:underline">
                     {client.name}
                   </Link>
@@ -108,8 +108,8 @@ export function OrdersWeek({ orders, weekStart }: Props) {
 
                   return (
                     <td key={dow} className={cn(
-                      'px-3 py-3 align-top',
-                      isToday && 'bg-warning-bg/10'
+                      'px-3 py-3 align-top snap-start',
+                      isToday && 'bg-brand-green-light/40'
                     )}>
                       {cell ? (
                         <div className="space-y-0.5">

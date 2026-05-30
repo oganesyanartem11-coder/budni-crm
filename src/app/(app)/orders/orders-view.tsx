@@ -136,7 +136,7 @@ export function OrdersView({
         className="relative rounded-2xl bg-surface border border-border p-3 pr-12 flex items-center gap-3 flex-wrap"
         style={{ boxShadow: 'var(--shadow-card)' }}
       >
-        <div className="flex gap-1 p-1 bg-bg rounded-pill">
+        <div className="flex gap-1 p-1 bg-surface-2 rounded-pill">
           <ViewToggleButton active={view === 'list'} onClick={() => setView('list')} icon={List} label="Список" />
           <ViewToggleButton active={view === 'week'} onClick={() => setView('week')} icon={CalendarDays} label="Неделя" />
         </div>
@@ -209,7 +209,7 @@ function DateNav({
         type="button"
         onClick={onPrev}
         aria-label="Предыдущий день"
-        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+        className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
       >
         <ChevronLeft className="w-4 h-4" />
       </button>
@@ -217,8 +217,8 @@ function DateNav({
         type="button"
         onClick={onJumpToday}
         className={cn(
-          'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-          isToday ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+          'px-3 py-2 sm:py-1.5 rounded-pill text-xs font-medium transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
+          isToday ? 'bg-brand-green-light text-brand-green-deep' : 'text-fg-muted hover:text-fg hover:bg-surface-2'
         )}
       >
         Сегодня
@@ -227,8 +227,8 @@ function DateNav({
         type="button"
         onClick={onJumpTomorrow}
         className={cn(
-          'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-          isTomorrow ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+          'px-3 py-2 sm:py-1.5 rounded-pill text-xs font-medium transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
+          isTomorrow ? 'bg-brand-green-light text-brand-green-deep' : 'text-fg-muted hover:text-fg hover:bg-surface-2'
         )}
       >
         Завтра
@@ -239,7 +239,7 @@ function DateNav({
         type="button"
         onClick={onNext}
         aria-label="Следующий день"
-        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+        className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
       >
         <ChevronRight className="w-4 h-4" />
       </button>
@@ -264,7 +264,7 @@ function WeekNav({
         type="button"
         onClick={onPrev}
         aria-label="Предыдущая неделя"
-        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+        className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
       >
         <ChevronLeft className="w-4 h-4" />
       </button>
@@ -276,7 +276,7 @@ function WeekNav({
         type="button"
         onClick={onNext}
         aria-label="Следующая неделя"
-        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+        className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
       >
         <ChevronRight className="w-4 h-4" />
       </button>
@@ -300,8 +300,8 @@ function ViewToggleButton({
       type="button"
       onClick={onClick}
       className={cn(
-        'px-4 py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-2',
-        active ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg'
+        'px-4 py-2 sm:py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-2 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
+        active ? 'bg-brand-green text-white' : 'text-fg-muted hover:text-fg'
       )}
     >
       <Icon className="w-4 h-4" />
@@ -345,7 +345,7 @@ function ServiceMenu() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="Сервисные действия"
-        className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
+        className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
       >
         <MoreVertical className="w-4 h-4" />
       </button>
@@ -364,7 +364,7 @@ function ServiceMenu() {
               type="button"
               onClick={handleRegenerate}
               disabled={isPending}
-              className="w-full text-left px-3 py-2 rounded-xl hover:bg-bg transition-colors disabled:opacity-50"
+              className="w-full text-left px-3 py-2 rounded-xl hover:bg-surface-2 transition-colors disabled:opacity-50 [touch-action:manipulation]"
             >
               <div className="text-sm font-medium">
                 {isPending ? 'Генерируем…' : 'Сгенерировать заказы на завтра'}

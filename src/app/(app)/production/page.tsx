@@ -1,3 +1,5 @@
+import Link from 'next/link'
+import { Printer } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { ProductionView } from './production-view'
 import { requireRole } from '@/lib/auth/current-user'
@@ -68,6 +70,16 @@ export default async function ProductionPage({ searchParams }: PageProps) {
       <PageHeader
         title="Производство"
         subtitle={dateLabel}
+        actions={
+          <Link
+            href={`/production/print?date=${targetDate.toISOString().slice(0, 10)}`}
+            style={{ touchAction: 'manipulation' }}
+            className="inline-flex min-h-[44px] items-center gap-2 rounded-pill bg-brand-green-light px-4 text-sm font-medium text-brand-green-deep transition-colors hover:bg-brand-green-light/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+          >
+            <Printer className="h-4 w-4" aria-hidden="true" />
+            Печать
+          </Link>
+        }
       />
       <ProductionView
         summary={safeSummary}

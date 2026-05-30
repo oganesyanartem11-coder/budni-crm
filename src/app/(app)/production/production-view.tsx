@@ -2,8 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import Link from 'next/link'
-import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info, Printer } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info } from 'lucide-react'
 import { formatDateShort, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
@@ -58,23 +57,31 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
 
   return (
     <div className="space-y-5">
-      {/* Единая панель: навигация по дате + кнопка печати */}
-      <div className="rounded-2xl bg-surface border border-border p-3 flex items-center gap-3 flex-wrap" style={{ boxShadow: 'var(--shadow-card)' }}>
+      {/* Панель навигации по дате */}
+      <div
+        className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-3 sm:justify-start sm:gap-3"
+        style={{ boxShadow: 'var(--shadow-card)' }}
+      >
+        <button
+          type="button"
+          onClick={() => shiftDate(-1)}
+          aria-label="Предыдущий день"
+          style={{ touchAction: 'manipulation' }}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        >
+          <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+        </button>
+
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => shiftDate(-1)}
-            aria-label="Предыдущий день"
-            className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
             onClick={() => jumpTo(today)}
+            aria-pressed={isToday}
+            style={{ touchAction: 'manipulation' }}
             className={cn(
-              'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-              isToday ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+              'rounded-pill px-3 py-1.5 text-xs font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+              isToday ? 'bg-brand-green-deep text-surface' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
             )}
           >
             Сегодня
@@ -82,37 +89,36 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
           <button
             type="button"
             onClick={() => jumpTo(tomorrow)}
+            aria-pressed={isTomorrow}
+            style={{ touchAction: 'manipulation' }}
             className={cn(
-              'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-              isTomorrow ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg hover:bg-bg'
+              'rounded-pill px-3 py-1.5 text-xs font-medium transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+              isTomorrow ? 'bg-brand-green-deep text-surface' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
             )}
           >
             Завтра
           </button>
-          <span className="px-2 text-sm text-fg-muted">·</span>
-          <p className="font-semibold text-sm capitalize whitespace-nowrap">{formatDateShort(targetDate)}</p>
-          <button
-            type="button"
-            onClick={() => shiftDate(1)}
-            aria-label="Следующий день"
-            className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
         </div>
-        <div className="ml-auto">
-          <Link
-            href={`/production/print?date=${targetDateIso.slice(0, 10)}`}
-            className="px-3 py-1.5 rounded-pill bg-bg hover:bg-border text-fg-muted hover:text-fg text-xs font-medium transition-colors flex items-center gap-1.5"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Печать</span>
-          </Link>
-        </div>
+
+        <span className="hidden px-1 text-sm text-fg-subtle sm:inline" aria-hidden="true">·</span>
+        <p className="order-last w-full text-center text-sm font-semibold capitalize text-fg sm:order-none sm:w-auto sm:whitespace-nowrap">
+          {formatDateShort(targetDate)}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => shiftDate(1)}
+          aria-label="Следующий день"
+          style={{ touchAction: 'manipulation' }}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        >
+          <ChevronRight className="h-5 w-5" aria-hidden="true" />
+        </button>
       </div>
 
       {/* Агрегаты + табы */}
-      <div className={cn('flex flex-row gap-2 lg:grid lg:gap-3', canSeePrices ? 'lg:grid-cols-3' : 'lg:grid-cols-2')}>
+      <div className={cn('grid grid-cols-1 gap-3 sm:grid-cols-2', canSeePrices ? 'lg:grid-cols-3' : 'lg:grid-cols-2')}>
         <AggregateCard label="Всего порций" value={summary.totalPortions.toString()} />
         {canSeePrices && <AggregateCard label="Сумма" value={formatMoney(summary.totalRevenue)} />}
         <AggregateCard
@@ -125,13 +131,13 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
 
       {/* Предупреждение про PENDING */}
       {summary.pendingPortions > 0 && (
-        <div className="rounded-2xl bg-warning-bg/40 border border-warning/20 px-4 py-3 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-warning-fg shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0 text-sm">
+        <div className="flex items-start gap-3 rounded-xl border border-warning/20 bg-warning-bg/40 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-warning-fg" aria-hidden="true" />
+          <div className="min-w-0 flex-1 text-sm">
             <p className="font-medium text-warning-fg">
               На эту дату ещё {formatPortions(summary.pendingPortions)} ждут подтверждения
             </p>
-            <p className="text-xs text-warning-fg/80 mt-0.5">
+            <p className="mt-0.5 text-xs text-warning-fg/80">
               Эти заказы могут увеличить потребности после ввода менеджером. Дождитесь подтверждений к 16:00.
             </p>
           </div>
@@ -140,13 +146,13 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
 
       {/* Предупреждение про отсутствующее меню */}
       {!summary.hasMenu && summary.totalPortions > 0 && (
-        <div className="rounded-2xl bg-danger-bg/40 border border-danger/20 px-4 py-3 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-danger-fg shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0 text-sm">
+        <div className="flex items-start gap-3 rounded-xl border border-danger/20 bg-danger-bg/40 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger-fg" aria-hidden="true" />
+          <div className="min-w-0 flex-1 text-sm">
             <p className="font-medium text-danger-fg">
               Меню на эту дату не утверждено
             </p>
-            <p className="text-xs text-danger-fg/80 mt-0.5">
+            <p className="mt-0.5 text-xs text-danger-fg/80">
               Заказы есть ({formatPortions(summary.totalPortions)}), но непонятно какие блюда готовить. Утвердите меню в разделе «Меню».
             </p>
           </div>
@@ -154,7 +160,11 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
       )}
 
       {/* Табы Блюда / Сырьё */}
-      <div className="flex items-center gap-1 p-1 bg-bg rounded-pill w-fit">
+      <div
+        role="group"
+        aria-label="Вид производства"
+        className="inline-flex w-fit items-center gap-0.5 rounded-pill border border-border bg-bg p-0.5"
+      >
         <TabButton
           active={tab === 'dishes'}
           onClick={() => updateParams({ tab: null })} // dishes — дефолт, убираем из URL
@@ -180,79 +190,84 @@ function DishesTab({ summary, canSeePrices }: { summary: ProductionSummary; canS
   const hasAnyOrders = summary.totalPortions > 0
   if (!hasAnyOrders) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <ChefHat className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-        <p className="font-medium text-fg mb-1">На эту дату нет активных заказов</p>
+      <div className="rounded-xl border border-border bg-surface p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <ChefHat className="mx-auto mb-3 h-10 w-10 text-fg-subtle" aria-hidden="true" />
+        <p className="mb-1 font-medium text-fg">На эту дату нет активных заказов</p>
         <p className="text-sm">Производство не требуется.</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {MEAL_TYPE_ORDER.map((mt) => {
         const data = summary.mealTypes[mt]
         if (data.totalPortions === 0) return null
 
         return (
-          <div key={mt} className="space-y-3">
-            <div className="flex items-baseline justify-between gap-3 flex-wrap">
-              <h2 className="text-lg font-semibold">
+          <section key={mt} className="space-y-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="text-lg font-semibold text-fg">
                 {MEAL_TYPE_LABELS[mt]}
-                <span className="ml-2 text-fg-muted text-sm font-normal">
+                <span className="ml-2 text-sm font-normal text-fg-muted">
                   · {formatPortions(data.totalPortions)}
                 </span>
               </h2>
               {!data.menuApproved && data.totalPortions > 0 && (
-                <span className="text-xs text-danger-fg flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5" />
+                <span className="flex items-center gap-1.5 text-xs text-danger-fg">
+                  <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
                   Меню не утверждено
                 </span>
               )}
             </div>
 
             {data.dishes.length === 0 ? (
-              <div className="rounded-2xl bg-bg/40 border border-border border-dashed p-6 text-center text-sm text-fg-muted">
+              <div className="rounded-xl border border-dashed border-border bg-surface-2/40 p-6 text-center text-sm text-fg-muted">
                 Меню для этого типа питания не задано или не утверждено
               </div>
             ) : (
-              <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+              <div className="space-y-4">
                 {/* Группируем блюда по slot category для красивой подачи */}
-                {groupByCategory(data.dishes).map((group, idx) => (
-                  <div key={group.category} className={cn(idx > 0 && 'border-t border-border')}>
-                    {group.dishes.map((dish, dishIdx) => (
-                      <div
-                        key={dish.dishId + '-' + dishIdx}
-                        className={cn(
-                          'p-4 flex items-center gap-3',
-                          dishIdx > 0 && 'border-t border-border/50'
-                        )}
-                      >
-                        <div className="w-10 h-10 rounded-full bg-bg flex items-center justify-center text-lg shrink-0" aria-hidden>
-                          {DISH_CATEGORY_ICONS[dish.category as DishCategory]}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium truncate">{dish.dishName}</div>
-                          <div className="text-xs text-fg-muted">
-                            {DISH_CATEGORY_LABELS[dish.category as DishCategory]}
+                {groupByCategory(data.dishes).map((group) => (
+                  <div key={group.category} className="space-y-2">
+                    <p className="text-[11px] font-medium uppercase tracking-widest text-fg-muted">
+                      {DISH_CATEGORY_LABELS[group.category as DishCategory]}
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      {group.dishes.map((dish, dishIdx) => (
+                        <div
+                          key={dish.dishId + '-' + dishIdx}
+                          className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4"
+                          style={{ boxShadow: 'var(--shadow-card)' }}
+                        >
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-2 text-lg" aria-hidden>
+                            {DISH_CATEGORY_ICONS[dish.category as DishCategory]}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium text-fg">{dish.dishName}</div>
+                            <div className="text-xs text-fg-muted">
+                              {DISH_CATEGORY_LABELS[dish.category as DishCategory]}
+                            </div>
+                          </div>
+                          <div className="shrink-0 text-right">
+                            <div className="font-display text-2xl font-extrabold tabular-nums text-fg-strong">
+                              {dish.totalPortions}
+                            </div>
+                            <div className="text-xs text-fg-muted">порций</div>
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="text-2xl font-bold tabular-nums">{dish.totalPortions}</div>
-                          <div className="text-xs text-fg-muted">порций</div>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 ))}
-                <div className="px-4 py-3 bg-bg/30 border-t border-border text-xs text-fg-muted flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5" />
+                <p className="flex items-center gap-1.5 px-1 text-xs text-fg-subtle">
+                  <Info className="h-3.5 w-3.5" aria-hidden="true" />
                   {formatOrders(data.dishes[0]?.ordersCount ?? 0)} · {formatLocations(data.dishes[0]?.locationsCount ?? 0)}
                   {canSeePrices && ` · сумма ${formatMoney(data.totalRevenue)}`}
-                </div>
+                </p>
               </div>
             )}
-          </div>
+          </section>
         )
       })}
     </div>
@@ -287,19 +302,21 @@ function AggregateCard({
 }) {
   const toneClasses = {
     neutral: 'bg-surface border-border',
-    warning: 'bg-warning-bg/30 border-warning/20',
-    info: 'bg-info-bg/30 border-info/20',
+    warning: 'bg-warning-bg/40 border-warning/20',
+    info: 'bg-info-bg/40 border-info/20',
   }
   return (
     <div
-      className={cn('flex-1 rounded-2xl border p-3 lg:p-4', toneClasses[tone])}
+      className={cn('rounded-xl border p-4', toneClasses[tone])}
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
-      <p className="text-[10px] uppercase tracking-wider text-fg-muted lg:text-xs lg:normal-case lg:tracking-normal truncate">
+      <p className="truncate text-[11px] font-medium uppercase tracking-widest text-fg-muted">
         {label}
       </p>
-      <p className="text-xl font-bold tabular-nums mt-1 lg:text-2xl">{value}</p>
-      {hint && <p className="text-[10px] text-fg-subtle mt-0.5 lg:text-xs truncate">{hint}</p>}
+      <p className="mt-1.5 font-display text-2xl font-extrabold tabular-nums text-fg-strong lg:text-3xl">
+        {value}
+      </p>
+      {hint && <p className="mt-0.5 truncate text-xs text-fg-subtle">{hint}</p>}
     </div>
   )
 }
@@ -319,12 +336,15 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
+      style={{ touchAction: 'manipulation' }}
       className={cn(
-        'px-4 py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-2',
-        active ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg'
+        'flex min-h-[44px] items-center gap-2 rounded-pill px-4 text-sm font-medium transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+        active ? 'bg-brand-green-deep text-surface' : 'text-fg-muted hover:text-fg'
       )}
     >
-      <Icon className="w-4 h-4" />
+      <Icon className="h-4 w-4" aria-hidden="true" />
       {label}
     </button>
   )
@@ -333,9 +353,9 @@ function TabButton({
 function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary; canSeePrices: boolean }) {
   if (!summary.hasMenu) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <Carrot className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-        <p className="font-medium text-fg mb-1">Меню не утверждено</p>
+      <div className="rounded-xl border border-border bg-surface p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <Carrot className="mx-auto mb-3 h-10 w-10 text-fg-subtle" aria-hidden="true" />
+        <p className="mb-1 font-medium text-fg">Меню не утверждено</p>
         <p className="text-sm">Без утверждённого меню невозможно посчитать потребности по сырью.</p>
       </div>
     )
@@ -343,9 +363,9 @@ function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary
 
   if (summary.rows.length === 0) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <Carrot className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-        <p className="font-medium text-fg mb-1">Нет потребностей в сырье</p>
+      <div className="rounded-xl border border-border bg-surface p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <Carrot className="mx-auto mb-3 h-10 w-10 text-fg-subtle" aria-hidden="true" />
+        <p className="mb-1 font-medium text-fg">Нет потребностей в сырье</p>
         <p className="text-sm">На эту дату не нашлось активных заказов или блюд с тех. картами.</p>
       </div>
     )
@@ -355,7 +375,7 @@ function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary
     <div className="space-y-4">
       {/* Маржа сверху */}
       {canSeePrices && (
-        <div className="flex flex-row gap-2 lg:grid lg:grid-cols-3 lg:gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <AggregateCard label="Выручка" value={formatMoney(summary.totalRevenue)} tone="info" />
           <AggregateCard
             label="Закупка"
@@ -376,16 +396,16 @@ function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary
       )}
 
       {/* Таблица ингредиентов */}
-      <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div className="overflow-hidden rounded-xl border border-border bg-surface" style={{ boxShadow: 'var(--shadow-card)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-bg/50 text-xs uppercase tracking-wider text-fg-muted">
+            <thead className="bg-surface-2/50 text-[11px] uppercase tracking-widest text-fg-muted">
               <tr>
-                {canSeePrices && <th className="text-left px-4 py-3 font-medium w-10"></th>}
-                <th className="text-left px-3 py-3 font-medium">Ингредиент</th>
-                <th className="text-right px-3 py-3 font-medium">Нужно</th>
-                {canSeePrices && <th className="text-right px-3 py-3 font-medium hidden md:table-cell">Цена</th>}
-                {canSeePrices && <th className="text-right px-3 py-3 font-medium">Стоимость</th>}
+                {canSeePrices && <th className="w-10 px-4 py-3 text-left font-medium"></th>}
+                <th className="px-3 py-3 text-left font-medium">Ингредиент</th>
+                <th className="px-3 py-3 text-right font-medium">Нужно</th>
+                {canSeePrices && <th className="hidden px-3 py-3 text-right font-medium md:table-cell">Цена</th>}
+                {canSeePrices && <th className="px-3 py-3 text-right font-medium">Стоимость</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -395,11 +415,11 @@ function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary
             </tbody>
             {canSeePrices && (
               <tfoot>
-                <tr className="bg-bg/30 border-t-2 border-border">
-                  <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold">
+                <tr className="border-t-2 border-border bg-surface-2/40">
+                  <td colSpan={4} className="px-4 py-3 text-right text-sm font-semibold text-fg">
                     Итого закупка:
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums font-bold text-base">
+                  <td className="px-3 py-3 text-right font-display text-base font-extrabold tabular-nums text-fg-strong">
                     {formatMoney(summary.totalCost)}
                   </td>
                 </tr>
@@ -409,7 +429,7 @@ function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary
         </div>
       </div>
 
-      <p className="text-xs text-fg-subtle text-center">
+      <p className="text-center text-xs text-fg-subtle">
         * Расчёт по тех. картам блюд (брутто).{canSeePrices && ' Цены из последней записи в справочнике сырья.'}
       </p>
     </div>
@@ -429,33 +449,33 @@ function IngredientRow({ row, canSeePrices }: { row: IngredientProductionRow; ca
   return (
     <>
       <tr
-        className="hover:bg-bg/30 transition-colors cursor-pointer"
+        className="cursor-pointer transition-colors hover:bg-surface-2/40"
         onClick={() => setExpanded((v) => !v)}
       >
         {canSeePrices && (
           <td className="px-4 py-3 text-fg-subtle">
-            {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
           </td>
         )}
-        <td className="px-3 py-3 font-medium">{row.ingredientName}</td>
-        <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
+        <td className="px-3 py-3 font-medium text-fg">{row.ingredientName}</td>
+        <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
           {formatAmount(row.totalNeeded)} {unitLabel}
         </td>
         {canSeePrices && (
-          <td className="px-3 py-3 text-right tabular-nums text-fg-muted hidden md:table-cell whitespace-nowrap">
+          <td className="hidden whitespace-nowrap px-3 py-3 text-right tabular-nums text-fg-muted md:table-cell">
             {formatMoney(row.pricePerUnit)} / {unitLabel}
           </td>
         )}
         {canSeePrices && (
-          <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap">
+          <td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums text-fg">
             {formatMoney(row.totalCost)}
           </td>
         )}
       </tr>
       {expanded && canSeePrices && (
-        <tr className="bg-bg/20">
+        <tr className="bg-surface-2/30">
           <td colSpan={totalCols} className="px-12 py-3">
-            <p className="text-xs uppercase tracking-wider text-fg-subtle mb-2">
+            <p className="mb-2 text-[11px] uppercase tracking-widest text-fg-subtle">
               Используется в блюдах
             </p>
             <ul className="space-y-1.5 text-xs">
@@ -463,11 +483,11 @@ function IngredientRow({ row, canSeePrices }: { row: IngredientProductionRow; ca
                 <li key={u.dishId + '-' + idx} className="flex items-baseline justify-between gap-3">
                   <span className="text-fg">
                     <span className="font-medium">{u.dishName}</span>
-                    <span className="text-fg-muted ml-2">
+                    <span className="ml-2 text-fg-muted">
                       {u.bruttoPerPortion} {u.unit === 'PCS' ? 'шт' : 'г'} × {formatPortions(u.portions)}
                     </span>
                   </span>
-                  <span className="text-fg-muted tabular-nums whitespace-nowrap">
+                  <span className="whitespace-nowrap tabular-nums text-fg-muted">
                     = {formatAmount(u.totalNeeded)} {unitLabel}
                   </span>
                 </li>

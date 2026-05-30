@@ -48,9 +48,9 @@ export function ConfirmList({ orders }: Props) {
 
   if (orders.length === 0) {
     return (
-      <div className="rounded-2xl bg-surface border border-border p-12 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="w-16 h-16 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-4">
-          <Check className="w-8 h-8 text-success-fg" />
+      <div className="rounded-xl bg-surface border border-border p-12 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="w-16 h-16 mx-auto rounded-full bg-brand-green-light flex items-center justify-center mb-4">
+          <Check className="w-8 h-8 text-brand-green-deep" />
         </div>
         <h2 className="text-xl font-semibold mb-2">Все заказы подтверждены</h2>
         <p className="text-fg-muted">Нет заказов, ожидающих подтверждения, на ближайшие дни.</p>
@@ -83,7 +83,7 @@ export function ConfirmList({ orders }: Props) {
               </h2>
               <CutoffBadge cutoff={cutoff} />
             </div>
-            <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <div className="rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
               {dateOrders.map((o, idx) => (
                 <div key={o.id} className={cn(idx > 0 && 'border-t border-border')}>
                   <ConfirmRow order={o} pastCutoff={cutoff.isPastCutoff} onChanged={() => router.refresh()} />
@@ -199,7 +199,7 @@ function ConfirmRow({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap md:flex-nowrap justify-end">
         <input
           type="number"
           min="0"
@@ -214,7 +214,7 @@ function ConfirmRow({
           }}
           placeholder="порций"
           disabled={isPending}
-          className="w-24 px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm tabular-nums text-right"
+          className="w-24 min-h-[44px] px-3 py-2 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors text-sm tabular-nums text-right"
         />
         <div className="text-sm font-medium tabular-nums w-24 text-right text-fg-muted">
           {totalPrice > 0 ? formatMoney(totalPrice) : '—'}
@@ -223,7 +223,7 @@ function ConfirmRow({
           type="button"
           onClick={handleConfirm}
           disabled={isPending || portionsNum <= 0}
-          className="px-3 py-2 rounded-pill bg-success text-accent-fg text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
+          className="px-4 min-h-[44px] rounded-xl bg-brand-green text-white text-sm font-medium hover:bg-brand-green-deep transition-colors disabled:opacity-50 flex items-center gap-1.5 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
         >
           <Check className="w-4 h-4" />
           OK
@@ -234,7 +234,7 @@ function ConfirmRow({
           disabled={isPending}
           aria-label="Клиент отказался"
           title="Клиент отказался — заказ не пойдёт на кухню"
-          className="w-9 h-9 rounded-full hover:bg-danger-bg/40 text-fg-muted hover:text-danger-fg transition-colors flex items-center justify-center"
+          className="w-11 h-11 rounded-full hover:bg-danger-bg/40 text-fg-muted hover:text-danger-fg transition-colors flex items-center justify-center shrink-0 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
         >
           <X className="w-4 h-4" />
         </button>

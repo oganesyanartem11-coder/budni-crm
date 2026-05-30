@@ -127,37 +127,41 @@ function ClientRow({ card }: { card: InboxClientCard }) {
     : null
 
   return (
-    <Link href={`/inbox/${card.clientId}`} data-client-id={card.clientId}>
+    <Link
+      href={`/inbox/${card.clientId}`}
+      data-client-id={card.clientId}
+      className="block [touch-action:manipulation] rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+    >
       <div
         className={cn(
-          'rounded-2xl bg-surface border p-4 transition-all hover:border-border-strong cursor-pointer',
-          hasUnread ? 'border-info/30' : 'border-border',
+          'min-h-11 rounded-xl bg-surface border border-border p-4 transition-colors hover:bg-surface-2 cursor-pointer',
+          hasUnread && 'border-l-4 border-l-brand-green bg-brand-green-light/40',
         )}
         style={{ boxShadow: 'var(--shadow-card)' }}
       >
         <div className="flex items-start justify-between gap-3 mb-1">
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-base truncate flex items-center gap-1.5 flex-wrap">
+            <p className="font-display font-semibold text-base truncate flex items-center gap-1.5 flex-wrap">
               <span className="truncate">{card.clientName}</span>
               {card.maxUsername && (
                 <span title="Есть MAX-аккаунт" className="text-info-fg text-xs">●</span>
               )}
               {card.latestTone && <ToneChip tone={card.latestTone} size="sm" />}
               {hasUnread && (
-                <span className="ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold">
+                <span className="ml-1 inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-surface text-[10px] font-bold">
                   {card.unreadCount > 9 ? '9+' : card.unreadCount}
                 </span>
               )}
             </p>
           </div>
           {lastDate && (
-            <p className="text-xs text-fg-subtle shrink-0">
+            <p className="text-xs text-fg-subtle tabular-nums shrink-0">
               {sameDay ? formatTime(lastDate) : formatDateShort(lastDate)}
             </p>
           )}
         </div>
         {preview ? (
-          <p className={cn('text-sm line-clamp-1', hasUnread ? 'text-fg' : 'text-fg-muted')}>
+          <p className={cn('text-sm line-clamp-2', hasUnread ? 'text-fg' : 'text-fg-muted')}>
             {preview}
           </p>
         ) : (

@@ -80,7 +80,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
         actions={
           <Link
             href="/orders/new"
-            className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2"
+            className="px-4 sm:px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40 [touch-action:manipulation]"
           >
             <Plus className="w-4 h-4" />
             <span className="hidden sm:inline">Создать заказ</span>

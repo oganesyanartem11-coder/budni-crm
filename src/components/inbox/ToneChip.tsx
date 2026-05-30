@@ -7,10 +7,10 @@ interface Props {
 }
 
 const VARIANT_CLASSES: Record<typeof TONE_CONFIG[ToneLabel]['variant'], string> = {
-  success: 'bg-success/15 text-success-fg',
-  muted:   'bg-fg/5 text-fg-muted',
-  warning: 'bg-warning/15 text-warning-fg',
-  danger:  'bg-danger/15 text-danger-fg',
+  success: 'bg-success-bg text-success-fg',
+  muted:   'bg-neutral-bg text-neutral-fg',
+  warning: 'bg-warning-bg text-warning-fg',
+  danger:  'bg-danger-bg text-danger-fg',
 }
 
 export function ToneChip({ tone, size = 'md' }: Props) {

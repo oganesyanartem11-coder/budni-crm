@@ -319,7 +319,12 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
         </div>
 
         {messages.length === 0 ? (
-          <div className="rounded-xl bg-bg/40 p-3 text-sm">
+          <div
+            className={cn(
+              'rounded-xl p-3 text-sm',
+              activeItem?.status === 'UNREAD' ? 'bg-brand-green-light/20' : 'bg-surface-2',
+            )}
+          >
             <p className="text-xs text-fg-muted mb-1">
               {activeItem ? formatDateShort(new Date(activeItem.createdAt)) : '—'}
             </p>
@@ -449,8 +454,8 @@ function MessageBubble({
     <div className={cn('flex flex-col', isClient ? 'items-start' : 'items-end')}>
       <div
         className={cn(
-          'max-w-[80%] rounded-2xl px-3 py-2',
-          isClient ? 'bg-bg/60' : isBot ? 'bg-info-bg/50' : 'bg-accent text-accent-fg'
+          'max-w-[80%] rounded-2xl p-3',
+          isClient ? 'bg-surface-2 text-fg' : 'bg-brand-green-deep text-surface'
         )}
       >
         <p className="text-xs opacity-70 mb-0.5 flex items-center gap-1 flex-wrap">
@@ -462,7 +467,7 @@ function MessageBubble({
         </p>
         <p className="text-sm whitespace-pre-wrap">{message.text}</p>
       </div>
-      <p className="text-[10px] text-fg-subtle mt-0.5 px-1">
+      <p className="text-xs text-fg-subtle mt-0.5 px-1">
         {formatTime(new Date(message.createdAt))}
       </p>
     </div>

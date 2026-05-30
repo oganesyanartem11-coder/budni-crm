@@ -62,6 +62,17 @@ function statusDotClass(status: OrderStatus): string {
   return VARIANT_DOT_BG[ORDER_STATUS_VARIANT[status]]
 }
 
+// «В работе» = заказ подтверждён и его дата доставки — сегодня.
+// Для таких показываем пульсирующую точку (живой статус).
+function isOrderLive(order: SerializedOrder): boolean {
+  if (order.status !== 'CONFIRMED') return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const d = new Date(order.deliveryDate)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime() === today.getTime()
+}
+
 export function OrdersList({ orders, clients, filters, onFilterChange, isPending }: Props) {
   const router = useRouter()
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -91,11 +102,12 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
         <button
           type="button"
           onClick={() => setFiltersOpen((v) => !v)}
+          aria-expanded={filtersOpen}
           className={cn(
-            'px-3 py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-1.5',
+            'px-3 py-2 sm:py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-1.5 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
             hasFilters
-              ? 'bg-accent text-accent-fg'
-              : 'bg-surface border border-border text-fg-muted hover:text-fg hover:bg-bg'
+              ? 'bg-brand-green-light text-brand-green-deep'
+              : 'bg-surface border border-border text-fg-muted hover:text-fg hover:bg-surface-2'
           )}
         >
           <Filter className="w-3.5 h-3.5" />
@@ -107,7 +119,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
           <button
             type="button"
             onClick={clearAll}
-            className="px-3 py-1.5 rounded-pill text-sm text-fg-muted hover:text-fg hover:bg-bg transition-colors flex items-center gap-1.5"
+            className="px-3 py-2 sm:py-1.5 rounded-pill text-sm text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors flex items-center gap-1.5 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
           >
             <X className="w-3.5 h-3.5" />
             Сбросить
@@ -125,7 +137,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                 placeholder="Поиск по клиенту или точке"
                 defaultValue={filters.search}
                 onChange={(e) => onFilterChange({ search: e.target.value || null })}
-                className="w-full pl-10 pr-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+                className="w-full pl-10 pr-3 py-2.5 sm:py-2 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors text-sm"
               />
             </div>
 
@@ -133,7 +145,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
               value={filters.clientId || '__all__'}
               onValueChange={(v) => onFilterChange({ clientId: v === '__all__' ? null : v })}
             >
-              <SelectTrigger className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 sm:py-2 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors text-sm data-placeholder:text-fg-muted">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -148,7 +160,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
               value={filters.mealType || '__all__'}
               onValueChange={(v) => onFilterChange({ mealType: v === '__all__' ? null : v })}
             >
-              <SelectTrigger className="w-full !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+              <SelectTrigger className="w-full !h-auto px-3 py-2.5 sm:py-2 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors text-sm data-placeholder:text-fg-muted">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -164,7 +176,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
             value={filters.status || '__all__'}
             onValueChange={(v) => onFilterChange({ status: v === '__all__' ? null : v })}
           >
-            <SelectTrigger className="w-full md:w-auto !h-auto px-3 py-2 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors text-sm data-placeholder:text-fg-muted">
+            <SelectTrigger className="w-full md:w-auto !h-auto px-3 py-2.5 sm:py-2 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors text-sm data-placeholder:text-fg-muted">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -188,13 +200,13 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
 
       {/* Таблица */}
       {orders.length === 0 ? (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
           <p>Заказов на эту дату не найдено</p>
           {hasFilters && (
             <button
               type="button"
               onClick={clearAll}
-              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill text-sm text-fg-muted hover:text-fg hover:bg-bg transition-colors"
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 sm:py-1.5 rounded-pill text-sm text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
             >
               <X className="w-3.5 h-3.5" />
               Сбросить фильтры
@@ -202,44 +214,129 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
           )}
         </div>
       ) : (
-        <div className={cn('rounded-2xl bg-surface border border-border overflow-hidden transition-opacity', isPending && 'opacity-50')} style={{ boxShadow: 'var(--shadow-card)' }}>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-bg/50 text-[10px] lg:text-xs uppercase tracking-wider text-fg-muted">
-                <tr>
-                  <th className="text-left px-2 py-2 lg:px-4 lg:py-3 font-medium">Клиент / Точка</th>
-                  <th className="text-left px-2 py-2 lg:px-3 lg:py-3 font-medium">Тип</th>
-                  <th className="text-center px-2 py-2 lg:px-3 lg:py-3 font-medium">Порций</th>
-                  <th className="text-right px-3 py-3 font-medium hidden md:table-cell">Цена</th>
-                  <th className="text-right px-2 py-2 lg:px-3 lg:py-3 font-medium">Сумма</th>
-                  <th className="text-left px-2 py-2 lg:px-3 lg:py-3 font-medium hidden md:table-cell">Статус</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {orders.map((order) => (
-                  <tr
-                    key={order.id}
-                    className="group hover:bg-bg/30 transition-colors cursor-pointer align-middle"
-                    onClick={(e) => {
-                      // Не переходим если кликнули по интерактивному элементу внутри строки
+        <div className={cn('transition-opacity', isPending && 'opacity-50 pointer-events-none')}>
+          {/* lg+ : таблица */}
+          <div className="hidden lg:block rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-surface-2/60 text-xs uppercase tracking-wider text-fg-muted">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium">Клиент / Точка</th>
+                    <th className="text-left px-3 py-3 font-medium">Тип</th>
+                    <th className="text-center px-3 py-3 font-medium">Порций</th>
+                    <th className="text-right px-3 py-3 font-medium">Цена</th>
+                    <th className="text-right px-3 py-3 font-medium">Сумма</th>
+                    <th className="text-left px-3 py-3 font-medium">Статус</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {orders.map((order) => (
+                    <tr
+                      key={order.id}
+                      className="group hover:bg-surface-2/40 transition-colors cursor-pointer align-middle"
+                      onClick={(e) => {
+                        // Не переходим если кликнули по интерактивному элементу внутри строки
+                        const target = e.target as HTMLElement
+                        if (target.closest('a, button, input')) return
+                        router.push(`/orders/${order.id}`)
+                      }}
+                    >
+                      <td className="px-4 py-3 align-middle">
+                        <span className="flex items-center gap-2">
+                          <Link
+                            href={`/clients/${order.client.id}`}
+                            className="hover:underline font-medium text-base break-words"
+                          >
+                            {order.client.name}
+                          </Link>
+                          {order.source === 'BORIS' && (
+                            <span
+                              className="shrink-0 text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
+                              title="Создано Борей"
+                            >
+                              Боря
+                            </span>
+                          )}
+                          {!order.ourLegalEntityId && (
+                            <span
+                              title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
+                              className="shrink-0 inline-flex items-center text-warning-fg"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </span>
+                        <div className="text-xs text-fg-muted truncate">{order.location.name}</div>
+                      </td>
+                      <td className="px-3 py-3 text-fg-muted text-sm align-middle whitespace-nowrap">
+                        {MEAL_TYPE_LABELS[order.mealType]}
+                      </td>
+                      <td className="px-3 py-3 text-center tabular-nums font-medium text-sm align-middle">
+                        <PortionsCell order={order} />
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums text-fg-muted whitespace-nowrap align-middle">
+                        {formatMoney(order.pricePerPortion)}
+                      </td>
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap text-sm align-middle">
+                        {formatMoney(order.totalPrice)}
+                      </td>
+                      <td className="px-3 py-3 align-middle">
+                        <div className="flex items-center gap-1.5">
+                          <OrderStatusBadge status={order.status} />
+                          {order.delivery?.issueReportedAt && (
+                            <AlertTriangle
+                              className="w-3.5 h-3.5 text-danger-fg shrink-0"
+                              aria-label="Курьер сообщил о проблеме"
+                            >
+                              <title>Курьер сообщил о проблеме</title>
+                            </AlertTriangle>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* <lg : карточки */}
+          <div className="lg:hidden space-y-3">
+            {orders.map((order) => {
+              const live = isOrderLive(order)
+              return (
+                <div
+                  key={order.id}
+                  role="link"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement
+                    if (target.closest('a, button, input')) return
+                    router.push(`/orders/${order.id}`)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
                       const target = e.target as HTMLElement
                       if (target.closest('a, button, input')) return
                       router.push(`/orders/${order.id}`)
-                    }}
-                  >
-                    <td className="px-2 py-3 lg:px-4 align-middle">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            'md:hidden inline-block w-2 h-2 rounded-full shrink-0',
-                            statusDotClass(order.status)
-                          )}
-                          title={ORDER_STATUS_LABELS[order.status]}
-                          aria-label={ORDER_STATUS_LABELS[order.status]}
-                        />
+                    }
+                  }}
+                  className="group rounded-xl border border-border bg-surface p-4 flex flex-col gap-3 cursor-pointer transition-colors hover:bg-surface-2/40 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
+                  style={{ boxShadow: 'var(--shadow-card)' }}
+                >
+                  {/* header: имя клиента + статус */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2 flex-wrap">
+                        {live && (
+                          <span
+                            className={cn('inline-block w-2 h-2 rounded-full shrink-0 animate-pulse motion-reduce:animate-none', statusDotClass(order.status))}
+                            aria-hidden="true"
+                          />
+                        )}
                         <Link
                           href={`/clients/${order.client.id}`}
-                          className="hover:underline font-medium text-sm lg:text-base break-words"
+                          className="hover:underline font-semibold text-base break-words"
                         >
                           {order.client.name}
                         </Link>
@@ -260,37 +357,47 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                           </span>
                         )}
                       </span>
-                      <div className="text-xs text-fg-muted truncate">{order.location.name}</div>
-                    </td>
-                    <td className="px-2 py-3 lg:px-3 text-fg-muted text-xs lg:text-sm align-middle whitespace-nowrap">
-                      {MEAL_TYPE_LABELS[order.mealType]}
-                    </td>
-                    <td className="px-2 py-3 lg:px-3 text-center tabular-nums font-medium text-xs lg:text-sm align-middle">
-                      <PortionsCell order={order} />
-                    </td>
-                    <td className="px-2 py-3 lg:px-3 text-right tabular-nums text-fg-muted hidden md:table-cell whitespace-nowrap align-middle">
-                      {formatMoney(order.pricePerPortion)}
-                    </td>
-                    <td className="px-2 py-3 lg:px-3 text-right tabular-nums font-semibold whitespace-nowrap text-xs lg:text-sm align-middle">
-                      {formatMoney(order.totalPrice)}
-                    </td>
-                    <td className="px-2 py-3 lg:px-3 align-middle hidden md:table-cell">
-                      <div className="flex items-center gap-1.5">
-                        <OrderStatusBadge status={order.status} />
-                        {order.delivery?.issueReportedAt && (
-                          <AlertTriangle
-                            className="w-3.5 h-3.5 text-danger-fg shrink-0"
-                            aria-label="Курьер сообщил о проблеме"
-                          >
-                            <title>Курьер сообщил о проблеме</title>
-                          </AlertTriangle>
-                        )}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <OrderStatusBadge status={order.status} />
+                      {order.delivery?.issueReportedAt && (
+                        <AlertTriangle
+                          className="w-3.5 h-3.5 text-danger-fg shrink-0"
+                          aria-label="Курьер сообщил о проблеме"
+                        >
+                          <title>Курьер сообщил о проблеме</title>
+                        </AlertTriangle>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* тип питания */}
+                  <div className="text-sm text-fg-muted">
+                    {MEAL_TYPE_LABELS[order.mealType]}
+                  </div>
+
+                  {/* порции (инлайн-ввод) + сумма */}
+                  <div className="flex items-center justify-between gap-3 border-t border-border-subtle pt-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-xs uppercase tracking-wider text-fg-subtle shrink-0">Порций</span>
+                      {/* отступ справа под absolute-кнопку редактирования (44px) */}
+                      <div className="tabular-nums font-medium text-base pr-12">
+                        <PortionsCell order={order} />
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-xs text-fg-muted tabular-nums">{formatMoney(order.pricePerPortion)} / порц.</div>
+                      <div className="font-semibold tabular-nums text-base">{formatMoney(order.totalPrice)}</div>
+                    </div>
+                  </div>
+
+                  {/* точка доставки */}
+                  <div className="text-xs text-fg-muted truncate">
+                    {order.location.name}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -301,7 +408,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
 function AggregateCard({ label, value }: { label: string; value: string }) {
   return (
     <div
-      className="rounded-2xl bg-surface border border-border p-3 lg:p-4 min-w-0"
+      className="rounded-xl bg-surface border border-border p-3 lg:p-4 min-w-0"
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <p className="text-[10px] uppercase tracking-wider text-fg-muted lg:text-xs lg:normal-case lg:tracking-normal truncate">
@@ -385,16 +492,16 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
             }
           }}
           disabled={isPending}
-          className="w-20 px-2 py-1 rounded-lg bg-bg border border-accent text-sm text-right tabular-nums focus:outline-none disabled:opacity-50"
+          className="w-20 px-2 py-2.5 lg:py-1 rounded-lg bg-surface border border-brand-green text-sm text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-brand-green/30 disabled:opacity-50"
         />
         <button
           type="button"
           onClick={handleSubmit}
           disabled={isPending}
           aria-label="Сохранить"
-          className="w-7 h-7 rounded-full bg-accent text-accent-fg flex items-center justify-center hover:opacity-90 disabled:opacity-50"
+          className="w-11 h-11 lg:w-7 lg:h-7 rounded-full bg-brand-green text-white flex items-center justify-center hover:bg-brand-green-deep disabled:opacity-50 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40"
         >
-          <Check className="w-3.5 h-3.5" />
+          <Check className="w-4 h-4 lg:w-3.5 lg:h-3.5" />
         </button>
       </div>
     )
@@ -422,14 +529,14 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
               type="button"
               onClick={() => setEditing(true)}
               aria-label="Редактировать порции"
-              className="absolute left-full ml-1 opacity-0 group-hover:opacity-100 w-6 h-6 rounded-full hover:bg-bg flex items-center justify-center text-fg-subtle hover:text-fg transition-all"
+              className="absolute left-full ml-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 w-11 h-11 lg:w-6 lg:h-6 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-subtle hover:text-fg transition-all [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
             >
-              <Edit2 className="w-3 h-3" />
+              <Edit2 className="w-3.5 h-3.5 lg:w-3 lg:h-3" />
             </button>
           )}
         </div>
         {wasEditedAfterLock && (
-          <span className="md:hidden text-[10px] leading-none text-danger-fg font-medium">
+          <span className="lg:hidden text-[10px] leading-none text-danger-fg font-medium">
             правка
           </span>
         )}

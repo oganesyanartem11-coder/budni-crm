@@ -185,7 +185,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
 
           <Field label="Клиент *">
             <Select value={clientId || undefined} onValueChange={(v) => setClientId(v)}>
-              <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                 <SelectValue placeholder="— выберите —" />
               </SelectTrigger>
               <SelectContent>
@@ -201,7 +201,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
               <SelectTrigger
                 aria-required="true"
                 disabled={!client || isLoadingClient}
-                className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted disabled:opacity-50"
+                className="w-full !h-auto px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted disabled:opacity-50"
               >
                 <SelectValue placeholder={!client ? 'Сначала выберите клиента' : '— выберите —'} />
               </SelectTrigger>
@@ -219,12 +219,12 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
                 type="date"
                 value={deliveryDate}
                 onChange={(e) => setDeliveryDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors"
               />
             </Field>
             <Field label="Тип питания *">
               <Select value={mealType} onValueChange={(v) => setMealType(v as MealType)}>
-                <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-2 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -261,7 +261,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
                 min="1"
                 value={portions}
                 onChange={(e) => setPortions(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors tabular-nums"
+                className="w-full px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors tabular-nums"
               />
             </Field>
             <Field
@@ -277,7 +277,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
                   setPricePerPortion(e.target.value)
                   setOverridePrice(true)
                 }}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors tabular-nums"
+                className="w-full px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors tabular-nums"
               />
             </Field>
           </div>
@@ -288,7 +288,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Особые пожелания клиента"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors resize-none"
+              className="w-full px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:ring-2 focus:ring-brand-green/30 focus:border-brand-green transition-colors resize-none"
             />
           </Field>
         </div>
@@ -344,13 +344,13 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
             <button
               type="submit"
               disabled={isPending || !clientId || !locationId || portionsNum <= 0 || (!!duplicate && !dupAcknowledged)}
-              className="w-full px-5 py-3 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-5 py-3 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40"
             >
               {isPending ? 'Создаём…' : 'Создать заказ'}
             </button>
             <Link
               href="/orders"
-              className="block text-center w-full px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors"
+              className="block text-center w-full px-5 py-2.5 rounded-xl bg-brand-green-light text-brand-green-deep font-medium text-sm hover:bg-brand-green-light/70 transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
             >
               Отмена
             </Link>
