@@ -1,34 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import type { TodayHeroData, TomorrowHeroData } from '@/lib/db/queries/dashboard-hero'
 import { pluralize } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
-
-/* ─────────────────────────────────────────────────────────────
-   usePrefersReducedMotion — подписка на media-query через
-   useSyncExternalStore (SSR-safe: на сервере → false).
-   Экспортируется для переиспользования в finance-week-block.tsx.
-   ───────────────────────────────────────────────────────────── */
-const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
-
-function subscribeReducedMotion(callback: () => void): () => void {
-  if (typeof window === 'undefined' || !window.matchMedia) return () => {}
-  const mql = window.matchMedia(REDUCED_MOTION_QUERY)
-  mql.addEventListener('change', callback)
-  return () => mql.removeEventListener('change', callback)
-}
-
-export function usePrefersReducedMotion(): boolean {
-  return useSyncExternalStore(
-    subscribeReducedMotion,
-    () => (typeof window !== 'undefined' && window.matchMedia
-      ? window.matchMedia(REDUCED_MOTION_QUERY).matches
-      : false),
-    () => false,
-  )
-}
+import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
+import { useCountUp } from '@/lib/hooks/useCountUp'
+import { ConfettiBurst } from '@/components/shared/ConfettiBurst'
 
 /* ─────────────────────────────────────────────────────────────
    Текущий час МСК (дробный, для позиции progress-полосы).
@@ -191,56 +170,6 @@ export function HeroTodayTomorrow({ today, tomorrow, dailyRecord }: Props) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   D — count-up hook. Spring-ish easeOutBack, ~600ms, один раз.
-   useRef-гейт «уже анимировали» → не перезапускается на ре-рендерах.
-   reduced-motion → значение мгновенно.
-   ───────────────────────────────────────────────────────────── */
-function easeOutBack(t: number): number {
-  const c1 = 1.70158
-  const c3 = c1 + 1
-  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2)
-}
-
-function useCountUp(target: number, reduced: boolean): number {
-  const [value, setValue] = useState(reduced ? target : 0)
-  const animated = useRef(false)
-
-  useEffect(() => {
-    if (animated.current) return
-    animated.current = true
-
-    if (reduced || target <= 0) {
-      setValue(target)
-      return
-    }
-
-    const duration = 600
-    let raf = 0
-    let start: number | null = null
-
-    const tick = (ts: number) => {
-      if (start === null) start = ts
-      const elapsed = ts - start
-      const progress = Math.min(1, elapsed / duration)
-      const eased = easeOutBack(progress)
-      // easeOutBack может слегка перелетать — клампим к target вверху
-      setValue(Math.min(target, Math.round(eased * target)))
-      if (progress < 1) {
-        raf = requestAnimationFrame(tick)
-      } else {
-        setValue(target)
-      }
-    }
-
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  return value
-}
-
-/* ─────────────────────────────────────────────────────────────
    Строка «завтра»: легче/больше на N%. Без % если today==0.
    ───────────────────────────────────────────────────────────── */
 function buildTomorrowLine(todayPortions: number, tomorrowPortions: number): string | null {
@@ -249,42 +178,6 @@ function buildTomorrowLine(todayPortions: number, tomorrowPortions: number): str
   if (diffPct === 0) return 'столько же'
   if (diffPct > 0) return `больше на ${diffPct}%`
   return `легче на ${Math.abs(diffPct)}%`
-}
-
-/* ─────────────────────────────────────────────────────────────
-   F — ConfettiBurst: CSS-частицы, БЕЗ библиотек. Inline в файле.
-   ───────────────────────────────────────────────────────────── */
-const CONFETTI_PIECES = Array.from({ length: 18 }, (_, i) => i)
-const CONFETTI_COLORS = [
-  'var(--color-brand-orange)',
-  'var(--color-brand-green-accent)',
-  'var(--color-brand-yellow)',
-  'var(--color-brand-green)',
-]
-
-function ConfettiBurst() {
-  return (
-    <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden" aria-hidden="true">
-      {CONFETTI_PIECES.map((i) => {
-        const left = (i * 53) % 100 // псевдо-разброс по X
-        const delay = (i % 6) * 60
-        const color = CONFETTI_COLORS[i % CONFETTI_COLORS.length]
-        const drift = (i % 2 === 0 ? 1 : -1) * (20 + (i % 5) * 14)
-        return (
-          <span
-            key={i}
-            className="hero-confetti-piece absolute top-2 block h-2 w-1.5 rounded-[1px]"
-            style={{
-              left: `${left}%`,
-              background: color,
-              animationDelay: `${delay}ms`,
-              ['--confetti-drift' as string]: `${drift}px`,
-            }}
-          />
-        )
-      })}
-    </div>
-  )
 }
 
 /* ─────────────────────────────────────────────────────────────

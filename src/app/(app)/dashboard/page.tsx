@@ -10,7 +10,9 @@ import {
 } from '@/lib/db/queries/dashboard-hero'
 import {
   getAdminDashboardData,
+  getMarginForPeriod,
   type AdminDashboardData,
+  type PeriodMargin,
 } from '@/lib/db/queries/dashboard-stats'
 import { GreetingRow } from './_components/greeting-row'
 import { HeroTodayTomorrow } from './_components/hero-today-tomorrow'
@@ -68,21 +70,28 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const { from, to } = resolveFinanceRange(preset)
   const withWoW = preset === 'this_week'
 
-  const [today, tomorrow, dailyRecord, financeData, hasUnreadInbox] = await Promise.all([
-    getTodayHeroData(),
-    getTomorrowHeroData(),
-    getRoughDailyRecord(),
-    canSeeFinance
-      ? getAdminDashboardData(from, to, { withWoW })
-      : Promise.resolve<AdminDashboardData | null>(null),
-    // Inbox-индикатор для приветствия. Тот же запрос, что в src/app/(app)/layout.tsx
-    // (botMessage.count direction IN + readAt null). Только для admin/manager.
-    canSeeFinance
-      ? prisma.botMessage
-          .count({ where: { direction: 'IN', readAt: null } })
-          .then((n) => n > 0)
-      : Promise.resolve(false),
-  ])
+  const [today, tomorrow, dailyRecord, financeData, marginData, hasUnreadInbox] =
+    await Promise.all([
+      getTodayHeroData(),
+      getTomorrowHeroData(),
+      getRoughDailyRecord(),
+      canSeeFinance
+        ? getAdminDashboardData(from, to, { withWoW })
+        : Promise.resolve<AdminDashboardData | null>(null),
+      // Маржа — только для admin-like (карточка маржи в FinanceWeekBlock
+      // показывается лишь при isAdminLikeUser; MANAGER не видит себестоимость).
+      // ТЕ ЖЕ from/to, что у financeData.
+      isAdminLikeUser
+        ? getMarginForPeriod(from, to)
+        : Promise.resolve<PeriodMargin | null>(null),
+      // Inbox-индикатор для приветствия. Тот же запрос, что в src/app/(app)/layout.tsx
+      // (botMessage.count direction IN + readAt null). Только для admin/manager.
+      canSeeFinance
+        ? prisma.botMessage
+            .count({ where: { direction: 'IN', readAt: null } })
+            .then((n) => n > 0)
+        : Promise.resolve(false),
+    ])
 
   // userName: первое слово из user.name (firstName в модели нет).
   const userName = user.name.split(' ')[0]
@@ -104,6 +113,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         {financeData && (
           <FinanceWeekBlock
             data={financeData}
+            margin={marginData}
             preset={preset}
             isAdminLikeUser={isAdminLikeUser}
           />

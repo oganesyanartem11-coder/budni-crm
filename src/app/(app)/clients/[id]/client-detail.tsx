@@ -3,7 +3,8 @@
 import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User } from 'lucide-react'
+import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User, UtensilsCrossed } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { toast } from 'sonner'
 import { LocationModal } from './location-modal'
 import { MealConfigModal } from './meal-config-modal'
@@ -365,10 +366,11 @@ function LocationsTab({
       </div>
 
       {locations.length === 0 ? (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <MapPin className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p>Нет точек. Добавьте первую.</p>
-        </div>
+        <EmptyState
+          icon={MapPin}
+          title="Точек пока нет"
+          description="Добавьте первую точку доставки клиента"
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {locations.map((loc) => (
@@ -488,10 +490,11 @@ function ConfigsTab({
           Сначала добавьте хотя бы одну точку — питание привязывается к ней.
         </div>
       ) : configs.length === 0 ? (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <Settings className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p>Питание не настроено. Добавьте первое.</p>
-        </div>
+        <EmptyState
+          icon={UtensilsCrossed}
+          title="Расписаний питания пока нет"
+          description="Настройте FIX-расписание для регулярных заказов"
+        />
       ) : (
         <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
           <div className="overflow-x-auto">

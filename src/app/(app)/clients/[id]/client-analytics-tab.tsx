@@ -8,7 +8,7 @@ import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ChartCard } from '@/components/charts/chart-card'
 import { cn } from '@/lib/utils/cn'
-import { usePrefersReducedMotion } from '@/app/(app)/dashboard/_components/hero-today-tomorrow'
+import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 
 const MEAL_TYPE_COLORS: Record<string, string> = {

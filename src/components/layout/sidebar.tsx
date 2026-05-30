@@ -169,6 +169,7 @@ function NavLinkRow({
       className={cn(
         'relative flex items-center gap-3 min-h-10 px-3 py-2.5 rounded-[9px] text-sm',
         'transition-colors motion-reduce:transition-none',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2',
         active
           ? 'bg-brand-green text-sidebar-foreground font-medium'
           : 'text-sidebar-muted hover:bg-sidebar-accent'
@@ -281,6 +282,7 @@ function NavExpandableRow({
         className={cn(
           'w-full relative flex items-center gap-3 min-h-10 px-3 py-2.5 rounded-[9px] text-sm',
           'transition-colors motion-reduce:transition-none',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2',
           parentActive
             ? 'bg-brand-green text-sidebar-foreground font-medium'
             : 'text-sidebar-muted hover:bg-sidebar-accent'
@@ -317,6 +319,7 @@ function NavExpandableRow({
                 className={cn(
                   'relative flex items-center gap-3 min-h-10 px-3 py-1.5 rounded-[9px] text-sm',
                   'transition-colors motion-reduce:transition-none',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2',
                   childActive
                     ? 'bg-brand-green text-sidebar-foreground font-medium'
                     : 'text-sidebar-muted hover:bg-sidebar-accent'

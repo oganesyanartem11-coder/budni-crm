@@ -36,7 +36,7 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
       <button
         type="button"
         aria-label="Меню профиля"
-        className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-fg/5 transition-colors text-left"
+        className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-fg/5 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2"
       >
         <div
           title={name}
@@ -54,7 +54,7 @@ export function ProfileMenu({ name, initials, role, variant = 'desktop' }: Props
         type="button"
         aria-label="Меню профиля"
         title={name}
-        className="w-9 h-9 rounded-full bg-accent text-accent-fg flex items-center justify-center text-xs font-semibold hover:opacity-90 transition-opacity"
+        className="w-9 h-9 rounded-full bg-accent text-accent-fg flex items-center justify-center text-xs font-semibold hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-1"
       >
         {initials}
       </button>

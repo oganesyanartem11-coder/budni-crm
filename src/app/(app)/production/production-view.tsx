@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Wheat, Info } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { formatDateShort, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
@@ -190,11 +191,11 @@ function DishesTab({ summary, canSeePrices }: { summary: ProductionSummary; canS
   const hasAnyOrders = summary.totalPortions > 0
   if (!hasAnyOrders) {
     return (
-      <div className="rounded-xl border border-border bg-surface p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <ChefHat className="mx-auto mb-3 h-10 w-10 text-fg-subtle" aria-hidden="true" />
-        <p className="mb-1 font-medium text-fg">На эту дату нет активных заказов</p>
-        <p className="text-sm">Производство не требуется.</p>
-      </div>
+      <EmptyState
+        icon={ChefHat}
+        title="На эту дату нет активных заказов"
+        description="Производство не требуется."
+      />
     )
   }
 
@@ -353,21 +354,21 @@ function TabButton({
 function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary; canSeePrices: boolean }) {
   if (!summary.hasMenu) {
     return (
-      <div className="rounded-xl border border-border bg-surface p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <Carrot className="mx-auto mb-3 h-10 w-10 text-fg-subtle" aria-hidden="true" />
-        <p className="mb-1 font-medium text-fg">Меню не утверждено</p>
-        <p className="text-sm">Без утверждённого меню невозможно посчитать потребности по сырью.</p>
-      </div>
+      <EmptyState
+        icon={Wheat}
+        title="Меню не утверждено"
+        description="Без утверждённого меню невозможно посчитать потребности по сырью."
+      />
     )
   }
 
   if (summary.rows.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-surface p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <Carrot className="mx-auto mb-3 h-10 w-10 text-fg-subtle" aria-hidden="true" />
-        <p className="mb-1 font-medium text-fg">Нет потребностей в сырье</p>
-        <p className="text-sm">На эту дату не нашлось активных заказов или блюд с тех. картами.</p>
-      </div>
+      <EmptyState
+        icon={Wheat}
+        title="Нет потребностей в сырье"
+        description="На эту дату не нашлось активных заказов или блюд с тех. картами."
+      />
     )
   }
 

@@ -37,7 +37,10 @@ export function Logo({ href = '/dashboard', size = 'md', className, onDark = fal
 
   if (!href) return inner
   return (
-    <Link href={href} className="inline-flex hover:opacity-80 transition-opacity">
+    <Link
+      href={href}
+      className="inline-flex rounded-sm hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2"
+    >
       {inner}
     </Link>
   )

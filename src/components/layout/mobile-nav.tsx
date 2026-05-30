@@ -54,6 +54,7 @@ export function MobileNav({
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'flex flex-col items-center gap-1 py-1.5 min-h-[44px] [touch-action:manipulation] transition-colors motion-reduce:transition-none',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-1',
                 active ? 'text-brand-green-deep' : 'text-fg-subtle'
               )}
             >

@@ -4,15 +4,17 @@ import { useId, useTransition } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts'
-import type { AdminDashboardData } from '@/lib/db/queries/dashboard-stats'
+import type { AdminDashboardData, PeriodMargin } from '@/lib/db/queries/dashboard-stats'
 import { formatMoney } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
-import { usePrefersReducedMotion } from './hero-today-tomorrow'
+import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 
 type FinancePreset = 'this_week' | 'this_month' | 'this_quarter'
 
 interface Props {
   data: AdminDashboardData
+  /** Маржа за тот же период. null → нет данных/нет доступа → fallback «—». */
+  margin?: PeriodMargin | null
   preset: FinancePreset
   isAdminLikeUser: boolean
 }
@@ -29,7 +31,7 @@ const PERIOD_TITLE: Record<FinancePreset, string> = {
   this_quarter: 'этого квартала',
 }
 
-export function FinanceWeekBlock({ data, preset, isAdminLikeUser }: Props) {
+export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -152,10 +154,14 @@ export function FinanceWeekBlock({ data, preset, isAdminLikeUser }: Props) {
               aria-hidden="true"
             />
             <p className="text-[11px] font-medium uppercase tracking-widest text-fg-muted">Маржа</p>
-            {/* TODO Волна 6: подключить getMarginForPeriod */}
             <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3">
-              <span className="font-display text-2xl font-bold tabular-nums text-fg-subtle sm:text-3xl">—</span>
-              <span className="text-xs text-fg-subtle">появится скоро</span>
+              {margin ? (
+                <span className="font-display text-2xl font-extrabold tabular-nums text-fg-strong">
+                  {margin.marginPct === null ? '—' : `${margin.marginPct}%`}
+                </span>
+              ) : (
+                <span className="font-display text-2xl font-bold tabular-nums text-fg-subtle sm:text-3xl">—</span>
+              )}
             </div>
           </div>
         )}

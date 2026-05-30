@@ -52,3 +52,31 @@ export function startOfTodayMsk(now: Date = new Date()): Date {
   mskMoment.setUTCHours(0, 0, 0, 0)
   return new Date(mskMoment.getTime() - 3 * 60 * 60 * 1000)
 }
+
+/**
+ * МСК-полночь (00:00:00.000) начала суток, в которые попадает `date`, как
+ * UTC-момент. Обобщение startOfTodayMsk на произвольную дату (та же
+ * арифметика: +3ч, обнулить UTC-компоненты, −3ч). DST не действует (MSK=UTC+3).
+ */
+export function getMskDayStart(date: Date): Date {
+  const mskMoment = new Date(date.getTime() + 3 * 60 * 60 * 1000)
+  mskMoment.setUTCHours(0, 0, 0, 0)
+  return new Date(mskMoment.getTime() - 3 * 60 * 60 * 1000)
+}
+
+/**
+ * Конец МСК-суток, в которые попадает `date`, как UTC-момент.
+ *
+ * СЕМАНТИКА: последняя миллисекунда суток — МСК 23:59:59.999 (т.е.
+ * getMskDayStart(date) + 24ч − 1мс). Выбрано для согласованности с
+ * inclusive-границами в digest/material-cost.ts (там dayEnd = dayStart +
+ * ONE_DAY_MS − 1, фильтр `lte: dayEnd`) и endOfDay() в dashboard-stats.ts.
+ * Предназначено для запросов вида `deliveryDate: { lte: getMskDayEnd(...) }`.
+ *
+ * NB: для half-open границ `lt: <след. полночь>` используйте вместо этого
+ * getMskDayStart(addDays(date, 1)) — это начало СЛЕДУЮЩИХ суток.
+ */
+export function getMskDayEnd(date: Date): Date {
+  const dayStart = getMskDayStart(date)
+  return new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1)
+}

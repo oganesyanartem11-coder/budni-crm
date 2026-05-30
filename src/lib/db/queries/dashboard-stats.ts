@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { getFinancialWeek } from '@/lib/utils/week'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
+import { getMaterialCostForRange } from '@/lib/digest/material-cost'
 
 export interface DailyRevenuePoint {
   date: string
@@ -219,4 +220,37 @@ export async function getAdminDashboardData(
     wow,
     topClients,
   }
+}
+
+export interface PeriodMargin {
+  marginAbsolute: number
+  marginPct: number | null
+  totalRevenue: number
+  totalCost: number
+}
+
+/**
+ * Маржа за период [from, to]: выручка − себестоимость сырья.
+ *
+ * Выручка и себестоимость считаются по ОДНОМУ набору статусов
+ * (REVENUE_STATUSES) — getMaterialCostForRange принимает статусы параметром,
+ * поэтому маржа не «съезжает» из-за рассинхрона выборок (тот же приём, что в
+ * src/app/(app)/analytics/page.tsx).
+ *
+ * marginPct округляется до 0.1% (×1000/10). При нулевой выручке → null
+ * (а не деление на ноль / ложный 0%); UI трактует null как «—».
+ */
+export async function getMarginForPeriod(from: Date, to: Date): Promise<PeriodMargin> {
+  const [data, materialCost] = await Promise.all([
+    getAdminDashboardData(from, to),
+    getMaterialCostForRange(from, to, REVENUE_STATUSES),
+  ])
+
+  const totalRevenue = data.thisPeriod.totalRevenue
+  const totalCost = materialCost.totalCost
+  const marginAbsolute = totalRevenue - totalCost
+  const marginPct =
+    totalRevenue > 0 ? Math.round((marginAbsolute / totalRevenue) * 1000) / 10 : null
+
+  return { marginAbsolute, marginPct, totalRevenue, totalCost }
 }

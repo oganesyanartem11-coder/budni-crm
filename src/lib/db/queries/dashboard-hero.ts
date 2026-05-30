@@ -1,6 +1,7 @@
 import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
+import { getMskDayStart } from '@/lib/utils/msk-window'
 
 // «Реальные» заказы дня: в работе + доставленные. Исключает DRAFT и CANCELLED.
 // Тот же набор, что в src/app/(app)/dashboard/page.tsx — чтобы hero-цифры
@@ -20,15 +21,13 @@ export type TomorrowHeroData = {
   status: 'pending' | 'confirmed'
 }
 
-// Границы суток — локальное время сервера, как в текущем page.tsx
-// (new Date().setHours(0,0,0,0)). deliveryDate в схеме — @db.Date (date-only),
-// поэтому время в границах фактически не важно; главное — совпасть с дашбордом.
-// Возвращаем [start, end) — start включительно, end (= след. полночь) нет.
+// Границы суток в МСК (а не в локали сервера). deliveryDate в схеме — @db.Date
+// (date-only), но на UTC-сервере локальный setHours(0,0,0,0) мог дать UTC-момент
+// предыдущей МСК-даты; getMskDayStart считает МСК-полночь как UTC-момент (MSK=UTC+3).
+// Возвращаем [start, end) — start включительно, end (= след. МСК-полночь) нет.
 function dayBounds(base: Date): { start: Date; end: Date } {
-  const start = new Date(base)
-  start.setHours(0, 0, 0, 0)
-  const end = new Date(start)
-  end.setDate(end.getDate() + 1)
+  const start = getMskDayStart(base)
+  const end = getMskDayStart(addDays(base, 1))
   return { start, end }
 }
 

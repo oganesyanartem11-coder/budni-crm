@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, X, Clock, AlertTriangle } from 'lucide-react'
+import { Check, X, Clock, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 import { toast } from 'sonner'
 import { confirmDynamicOrder } from '../actions'
 import { getCutoffMoment } from '@/lib/orders/cutoff'
@@ -48,13 +49,11 @@ export function ConfirmList({ orders }: Props) {
 
   if (orders.length === 0) {
     return (
-      <div className="rounded-xl bg-surface border border-border p-12 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
-        <div className="w-16 h-16 mx-auto rounded-full bg-brand-green-light flex items-center justify-center mb-4">
-          <Check className="w-8 h-8 text-brand-green-deep" />
-        </div>
-        <h2 className="text-xl font-semibold mb-2">Все заказы подтверждены</h2>
-        <p className="text-fg-muted">Нет заказов, ожидающих подтверждения, на ближайшие дни.</p>
-      </div>
+      <EmptyState
+        icon={CheckCircle2}
+        title="Все заказы подтверждены"
+        description="Нет заказов, ожидающих подтверждения, на ближайшие дни."
+      />
     )
   }
 

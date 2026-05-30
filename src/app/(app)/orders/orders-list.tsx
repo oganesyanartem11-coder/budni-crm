@@ -518,7 +518,7 @@ function PortionsCell({ order }: { order: SerializedOrder }) {
           {wasEditedAfterLock && (
             <span
               title="Правлено после 16:00 — кухню и курьера может задеть"
-              className="absolute right-full mr-1 text-danger-fg"
+              className="hidden lg:inline-flex lg:absolute lg:right-full lg:mr-1 text-danger-fg"
             >
               <AlertTriangle className="w-3.5 h-3.5" />
             </span>

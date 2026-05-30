@@ -13,6 +13,7 @@ import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
 import { showActionError } from '@/lib/ui/optimistic-lock-toast'
+import { EmptyState } from '@/components/ui/empty-state'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
 import type { UserRole } from '@prisma/client'
 
@@ -114,11 +115,11 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
       )}
 
       {stops.length === 0 ? (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <MapPin className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
-          <p className="font-medium text-fg mb-1">На эту дату нет доставок</p>
-          <p className="text-sm">Заказы либо отсутствуют, либо все отменены.</p>
-        </div>
+        <EmptyState
+          icon={MapPin}
+          title="На эту дату нет доставок"
+          description="Заказы либо отсутствуют, либо все отменены."
+        />
       ) : activeStops.length === 0 ? (
         <div className="rounded-2xl bg-success-bg/40 border border-success/20 p-8 text-center">
           <div className="w-16 h-16 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-4">
