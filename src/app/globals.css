@@ -5,63 +5,93 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  /* Шрифты */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* === ШРИФТЫ === */
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-manrope);
+  --font-mono: ui-monospace, SFMono-Regular, Monaco, Consolas, monospace;
 
-  /* Палитра «Будни» — основная */
-  --color-bg: #F5F3EE;           /* Тёплый off-white фон страницы */
-  --color-surface: #FFFFFF;       /* Белые карточки */
-  --color-surface-2: #FAF8F3;     /* Альтернативный фон секций */
-  --color-fg: #1A1A1A;            /* Основной текст — графит */
-  --color-fg-muted: #6B6B68;      /* Вторичный текст */
-  --color-fg-subtle: #9A9A95;     /* Приглушённый текст / placeholder */
-  --color-border: #E8E5DF;        /* Светлые границы */
-  --color-border-strong: #D4D1CB; /* Усиленные границы / hover */
+  /* === SURFACE — кремовое семейство из стен домика лого === */
+  --color-bg: #F8F4E8;              /* основной фон страницы */
+  --color-surface: #FFFEF8;         /* карточки (тёплый белый) */
+  --color-surface-2: #F2EBD8;       /* приглушённые подложки, hover */
+  --color-surface-pure: #FFFFFF;    /* чистый белый — для редких случаев (модалки) */
 
-  /* Акценты — чёрный для CTA и активных состояний */
-  --color-accent: #0F0F0F;
-  --color-accent-fg: #FFFFFF;
+  /* === INK — тёплый графит, не холодный чёрный === */
+  --color-fg: #1F1F1A;
+  --color-fg-strong: #0A0A09;
+  --color-fg-muted: #4F4E45;
+  --color-fg-subtle: #7A7869;
+  --color-fg-faint: #9E9C8C;
 
-  /* Бренд — тёплая охра, использовать ТОЛЬКО для логотипа и максимум одного элемента */
+  /* === BORDERS === */
+  --color-border: #DCD6BE;
+  --color-border-strong: #C2BFAC;
+  --color-border-subtle: #E8E2C7;
+
+  /* === БРЕНД — ЗЕЛЁНЫЙ (главный фирменный, из листвы лого) === */
+  --color-brand-green: #2E7D32;
+  --color-brand-green-deep: #1F5F2A;     /* sidebar background */
+  --color-brand-green-accent: #3D9F44;   /* live pulse, success */
+  --color-brand-green-light: #E5EFE6;    /* fills, tints */
+
+  /* === БРЕНД — ТЕРРАКОТОВЫЙ (КАК ДОМА, primary CTA) === */
+  --color-brand-orange: #E85D2A;
+  --color-brand-orange-dark: #C84A1C;
+  --color-brand-orange-light: #FCE6DA;
+
+  /* === БРЕНД — ЖЁЛТЫЙ (солнце, warning, cut-off) === */
+  --color-brand-yellow: #E5A227;
+  --color-brand-yellow-light: #FCEDC9;
+
+  /* === DEPRECATED ALIAS — старый brand, не удалять до финальной волны === */
   --color-brand: #C97B3F;
+  --color-brand-fg: #FFFFFF;
 
-  /* Семантика статусов — приглушённая палитра */
-  --color-success: #5B8C5A;       /* Подтверждено, доставлено */
-  --color-success-bg: #E9F0E8;    /* Светлый фон для бейджей */
-  --color-success-fg: #2F4A2E;    /* Текст на светлом фоне */
+  /* === SEMANTIC — статусы === */
+  --color-success: #2E7D32;
+  --color-success-bg: #E5EFE6;
+  --color-success-fg: #1F5F2A;
 
-  --color-warning: #D4A24C;       /* Ждём подтверждения */
-  --color-warning-bg: #F7EFDE;
-  --color-warning-fg: #6B4F1F;
+  --color-warning: #A67A1F;
+  --color-warning-bg: #FCEDC9;
+  --color-warning-fg: #6B4F17;
 
-  --color-danger: #C85450;        /* Просрочено, ошибка */
-  --color-danger-bg: #F6E2E1;
-  --color-danger-fg: #6B2A28;
+  --color-danger: #B73420;
+  --color-danger-bg: #F5DDD7;
+  --color-danger-fg: #8B1F0F;
 
-  --color-info: #5B7FB8;          /* Фикс, информация */
-  --color-info-bg: #E2EAF4;
-  --color-info-fg: #2A3F5C;
+  --color-info: #3D6172;
+  --color-info-bg: #DDE7EC;
+  --color-info-fg: #2A4350;
 
-  --color-neutral: #B8B5AE;       /* Черновик, отменено */
-  --color-neutral-bg: #EFEDE7;
-  --color-neutral-fg: #5A5854;
+  --color-neutral: #7A7869;
+  --color-neutral-bg: #F2EBD8;
+  --color-neutral-fg: #4F4E45;
 
-  /* Радиусы по референсу SugarCRM */
+  /* === ACCENT (тёмный контраст для основных кнопок/табов/бейджей) === */
+  --color-accent: #1F1F1A;
+  --color-accent-fg: #FFFEF8;
+
+  /* === RADII === */
   --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-2xl: 24px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
   --radius-pill: 999px;
 
-  /* Тени — мягкие, многослойные */
-  --shadow-card: 0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.04);
-  --shadow-card-hover: 0 1px 2px rgba(0,0,0,0.06), 0 12px 32px rgba(0,0,0,0.06);
-  --shadow-popover: 0 4px 8px rgba(0,0,0,0.06), 0 16px 48px rgba(0,0,0,0.08);
+  /* === SHADOWS === */
+  --shadow-card: 0 1px 2px rgba(31, 31, 26, 0.04);
+  --shadow-card-hover: 0 1px 3px rgba(31, 31, 26, 0.04), 0 8px 24px rgba(31, 31, 26, 0.05);
+  --shadow-popover: 0 4px 12px rgba(31, 31, 26, 0.08), 0 16px 48px rgba(31, 31, 26, 0.10);
+  --shadow-brand: 0 1px 2px rgba(232, 93, 42, 0.20), 0 4px 12px rgba(232, 93, 42, 0.20);
 
-  /* Размеры и spacing */
+  /* === LAYOUT === */
   --container-page: 1280px;
+
+  /* === FOCUS RING (Vercel rule) === */
+  --color-ring-green: rgba(46, 125, 50, 0.35);
+  --color-ring-orange: rgba(232, 93, 42, 0.35);
 }
 
 /* ============================================================
@@ -71,35 +101,54 @@
    ============================================================ */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
+  /* Мост shadcn → Будни-токены. shadcn компоненты автоматически
+     перекрашиваются в палитру Будни через эти алиасы. */
+
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-fg);
+
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-fg);
+
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-fg);
+
+  --color-primary: var(--color-brand-green-deep);
+  --color-primary-foreground: var(--color-surface);
+
+  --color-secondary: var(--color-surface-2);
+  --color-secondary-foreground: var(--color-fg);
+
+  --color-muted: var(--color-surface-2);
+  --color-muted-foreground: var(--color-fg-muted);
+
+  /* accent НЕ перехватываем зелёным — берём тёмный --color-accent (#1F1F1A) из
+     Будни-блока: основные кнопки/табы/бейджи (bg-accent text-accent-fg) и shadcn-hover
+     (dropdown/select) станут тёмными. accent-foreground = кремовый, чтобы текст читался. */
+  --color-accent-foreground: var(--color-accent-fg);
+
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: var(--color-surface);
+
+  --color-input: var(--color-border);
+  --color-ring: var(--color-ring-green);
+
+  /* Sidebar shadcn-токены — указывают на тёмно-зелёный sidebar */
+  --color-sidebar: var(--color-brand-green-deep);
+  --color-sidebar-foreground: #F5F0DC;
+  --color-sidebar-primary: var(--color-brand-green-accent);
+  --color-sidebar-primary-foreground: #F5F0DC;
+  --color-sidebar-accent: rgba(255, 252, 230, 0.06);
+  --color-sidebar-accent-foreground: #F5F0DC;
+  --color-sidebar-border: rgba(255, 252, 230, 0.08);
+  --color-sidebar-ring: var(--color-brand-green-accent);
+
+  /* Charts — recharts палитра */
+  --color-chart-1: var(--color-brand-green);
+  --color-chart-2: var(--color-brand-orange);
+  --color-chart-3: var(--color-brand-yellow);
+  --color-chart-4: var(--color-info);
+  --color-chart-5: var(--color-fg-muted);
 }
 
 :root {
@@ -135,6 +184,10 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+/* TODO: dark mode — поднять отдельной волной после 7.20.
+   Сейчас next-themes используется только sonner для тостов;
+   приложение в light-only режиме. */
+/*
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -166,6 +219,7 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }
+*/
 
 /* ============================================================
    Общие глобальные стили «Будни»
@@ -186,8 +240,9 @@ body {
 
 /* Заголовки — типографическая шкала */
 h1, h2, h3, h4, h5, h6 {
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 /* Скроллбар в стиле macOS */
