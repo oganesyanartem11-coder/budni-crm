@@ -38,3 +38,74 @@ export function getCutoffMoment(deliveryDate: Date): Date {
 export function isPastCutoff(deliveryDate: Date, now: Date = new Date()): boolean {
   return now.getTime() >= getCutoffMoment(deliveryDate).getTime()
 }
+
+/**
+ * Момент cut-off (CUTOFF_HOUR_MSK по Europe/Moscow) СЕГОДНЯШНЕГО дня по МСК,
+ * как UTC Date. «Сегодня» определяется по календарной дате в зоне МСК (а не
+ * по локальному времени сервера — на Vercel это UTC, и после 21:00 МСК UTC-дата
+ * уже «завтра»). Поэтому день берём из now, отформатированного в МСК.
+ */
+function getTodayCutoffMomentMsk(now: Date): Date {
+  // ru-RU + явный TZ даёт стабильный 'dd.mm.yyyy' в зоне МСК.
+  const parts = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: MSK_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  const yyyy = get('year')
+  const mm = get('month')
+  const dd = get('day')
+  const hh = String(CUTOFF_HOUR_MSK).padStart(2, '0')
+  // fromZonedTime трактует строку как локальное МСК-время → корректный UTC.
+  return fromZonedTime(`${yyyy}-${mm}-${dd}T${hh}:00:00`, MSK_TIMEZONE)
+}
+
+export interface CutoffCountdown {
+  hoursLeft: number
+  minutesLeft: number
+  totalMinutesLeft: number
+  isPast: boolean
+  isToday: boolean
+}
+
+/**
+ * Сколько осталось до cut-off (16:00 МСК). Чистая функция (без I/O).
+ *
+ * - deliveryDate задан → cut-off = день ПЕРЕД доставкой в 16:00 МСК (getCutoffMoment).
+ * - deliveryDate не задан/null → cut-off = СЕГОДНЯ 16:00 МСК (по календарю МСК).
+ *
+ * totalMinutesLeft — округлённые минуты от now до cut-off (может быть < 0).
+ * hoursLeft/minutesLeft клампятся к 0. isPast = cut-off уже наступил/прошёл.
+ * isToday — момент cut-off попадает в сегодняшние сутки по МСК (всегда true,
+ * когда deliveryDate не задан, т.к. там cut-off строится именно на сегодня).
+ */
+export function getCutoffCountdown(
+  deliveryDate?: Date | null,
+  now: Date = new Date()
+): CutoffCountdown {
+  const cutoffMoment = deliveryDate
+    ? getCutoffMoment(deliveryDate)
+    : getTodayCutoffMomentMsk(now)
+
+  const diffMs = cutoffMoment.getTime() - now.getTime()
+  const totalMinutesLeft = Math.round(diffMs / 60_000)
+  const clamped = Math.max(0, totalMinutesLeft)
+  const hoursLeft = Math.floor(clamped / 60)
+  const minutesLeft = clamped % 60
+  const isPast = totalMinutesLeft <= 0
+
+  // isToday: совпадает ли календарная дата cut-off-момента с «сегодня» по МСК.
+  // Сравниваем dd.mm.yyyy в зоне МСК, чтобы не зависеть от TZ сервера.
+  const fmt = (d: Date) =>
+    new Intl.DateTimeFormat('ru-RU', {
+      timeZone: MSK_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d)
+  const isToday = fmt(cutoffMoment) === fmt(now)
+
+  return { hoursLeft, minutesLeft, totalMinutesLeft, isPast, isToday }
+}

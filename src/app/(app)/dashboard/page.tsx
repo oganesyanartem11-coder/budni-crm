@@ -1,239 +1,114 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowRight, ChevronRight } from 'lucide-react'
-import type { OrderStatus } from '@prisma/client'
-import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
-import { prisma } from '@/lib/db/prisma'
-import { pluralize } from '@/lib/utils/format'
-import { getGreeting } from '@/lib/utils/greeting'
-import { getAdminDashboardData } from '@/lib/db/queries/dashboard-stats'
-import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
-import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
-import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
-import { getOnboardingStatus } from '@/lib/clients/onboarding'
 import { isAdminLike } from '@/lib/auth/role-helpers'
-import { AdminWeekBlock } from './admin-week-block'
-import { AvgDishCostCards } from './avg-dish-cost-cards'
+import { prisma } from '@/lib/db/prisma'
+import { getPresetRange } from '@/lib/utils/week'
+import {
+  getTodayHeroData,
+  getTomorrowHeroData,
+  getRoughDailyRecord,
+} from '@/lib/db/queries/dashboard-hero'
+import {
+  getAdminDashboardData,
+  type AdminDashboardData,
+} from '@/lib/db/queries/dashboard-stats'
+import { GreetingRow } from './_components/greeting-row'
+import { HeroTodayTomorrow } from './_components/hero-today-tomorrow'
+import { ActionRequiredBlock } from './_components/action-required-block'
+import { FinanceWeekBlock } from './_components/finance-week-block'
 
-// Подмножество пресетов, доступных в переключателе дашборда. WoW-бокс
-// активен только для week-периодов — для остальных скрываем индикатор.
-const DASHBOARD_PRESETS: ReportPreset[] = [
-  'this_week', 'last_week', 'this_month', 'this_year', 'custom',
-]
-const WOW_PRESETS: ReportPreset[] = ['this_week', 'last_week']
+// Пресеты финансового блока дашборда. Подмножество ReportPreset; квартал
+// считается вручную (см. ниже), остальные — через getPresetRange.
+type FinancePreset = 'this_week' | 'this_month' | 'this_quarter'
+const FINANCE_PRESETS: FinancePreset[] = ['this_week', 'this_month', 'this_quarter']
 
-// Все «реальные» заказы дня: в работе + уже доставленные. Исключает DRAFT
-// (черновики менеджера) и CANCELLED (клиент отменил) — они не должны попадать
-// в «сколько у нас сегодня/завтра заказов».
-const REAL_ORDER_STATUSES: OrderStatus[] = [...ACTIVE_ORDER_STATUSES, 'DELIVERED']
-
-// force-dynamic: приветствие зависит от текущего часа.
+// force-dynamic: hero/приветствие зависят от текущего момента (сегодня/завтра).
 export const dynamic = 'force-dynamic'
 
 interface PageProps {
   searchParams: Promise<{ period?: string; from?: string; to?: string }>
 }
 
+/**
+ * Диапазон финансового блока по пресету.
+ * this_week / this_month → getPresetRange (Date-границы).
+ * this_quarter → считаем вручную: getPresetRange НЕ входит в замороженный
+ * контракт по кварталу, поэтому начало календарного квартала + конец сегодня
+ * вычисляем тут Date-математикой.
+ */
+function resolveFinanceRange(preset: FinancePreset): { from: Date; to: Date } {
+  if (preset === 'this_quarter') {
+    const now = new Date()
+    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3
+    const from = new Date(now.getFullYear(), quarterStartMonth, 1, 0, 0, 0, 0)
+    const to = new Date(now)
+    to.setHours(23, 59, 59, 999)
+    return { from, to }
+  }
+  const range = getPresetRange(preset)
+  return { from: range.from, to: range.to }
+}
+
 export default async function DashboardPage({ searchParams }: PageProps) {
   const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
 
-  // CHEF не имеет дашборд-содержимого (только ADMIN+MANAGER блоки) — отправляем на свой home.
+  // CHEF не имеет дашборд-содержимого — отправляем на свой home.
   if (user.role === 'CHEF') {
     redirect('/production')
   }
 
-  const todayStart = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
-  const todayEnd = (() => { const d = new Date(); d.setHours(23,59,59,999); return d })()
-  const tomorrowStart = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(0,0,0,0); return d })()
-  const tomorrowEnd = (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(23,59,59,999); return d })()
-  const todayIso = todayStart.toISOString().slice(0, 10)
-  const tomorrowIso = tomorrowStart.toISOString().slice(0, 10)
+  const isAdminLikeUser = isAdminLike(user.role)
+  // MANAGER тоже видит выручку (маржу/себестоимость — нет, это решает FinanceWeekBlock).
+  const canSeeFinance = isAdminLikeUser || user.role === 'MANAGER'
 
-  const [todayAgg, tomorrowAgg, pendingOrders, clientsForOnboarding] = await Promise.all([
-    prisma.order.aggregate({
-      where: { deliveryDate: { gte: todayStart, lt: todayEnd }, status: { in: REAL_ORDER_STATUSES } },
-      _count: { id: true },
-      _sum: { portions: true },
-    }),
-    prisma.order.aggregate({
-      where: { deliveryDate: { gte: tomorrowStart, lt: tomorrowEnd }, status: { in: REAL_ORDER_STATUSES } },
-      _count: { id: true },
-      _sum: { portions: true },
-    }),
-    // Фильтр согласован с listPendingConfirmation: тот же [today, tomorrowEnd],
-    // иначе счётчик и список расходятся (счётчик > список → клик → пусто).
-    countPendingConfirmationToday(),
-    // Активные клиенты для счётчика «в настройке». Запрашиваем только для ADMIN/ADMIN_PRO
-    // (на дашборде MANAGER эту карточку не показываем).
-    isAdminLike(user.role)
-      ? prisma.client.findMany({
-          where: { isActive: true },
-          select: {
-            id: true,
-            contactPhone: true,
-            defaultOurLegalEntityId: true,
-            maxChatId: true,
-            locations: { select: { isActive: true } },
-            mealConfigs: { select: { isActive: true } },
-          },
-        })
-      : Promise.resolve([]),
+  // Финансовый пресет из URL, дефолт this_week. Невалидный → this_week.
+  const params = await searchParams
+  const periodParam = (params.period ?? 'this_week') as FinancePreset
+  const preset: FinancePreset = FINANCE_PRESETS.includes(periodParam) ? periodParam : 'this_week'
+  const { from, to } = resolveFinanceRange(preset)
+  const withWoW = preset === 'this_week'
+
+  const [today, tomorrow, dailyRecord, financeData, hasUnreadInbox] = await Promise.all([
+    getTodayHeroData(),
+    getTomorrowHeroData(),
+    getRoughDailyRecord(),
+    canSeeFinance
+      ? getAdminDashboardData(from, to, { withWoW })
+      : Promise.resolve<AdminDashboardData | null>(null),
+    // Inbox-индикатор для приветствия. Тот же запрос, что в src/app/(app)/layout.tsx
+    // (botMessage.count direction IN + readAt null). Только для admin/manager.
+    canSeeFinance
+      ? prisma.botMessage
+          .count({ where: { direction: 'IN', readAt: null } })
+          .then((n) => n > 0)
+      : Promise.resolve(false),
   ])
 
-  const todayCount = todayAgg._count.id
-  const todayPortions = todayAgg._sum.portions ?? 0
-  const tomorrowCount = tomorrowAgg._count.id
-  const tomorrowPortions = tomorrowAgg._sum.portions ?? 0
-
-  const clientsInSetup = clientsForOnboarding.filter(
-    (c) => !getOnboardingStatus(c).isComplete
-  ).length
-
-  const isAdminOrManager = isAdminLike(user.role) || user.role === 'MANAGER'
-
-  // Финансовый блок: пресет из URL, дефолт this_week. Невалидный preset →
-  // тоже this_week (без падения).
-  const params = await searchParams
-  const presetParam = (params.period ?? 'this_week') as ReportPreset
-  const preset: ReportPreset = DASHBOARD_PRESETS.includes(presetParam) ? presetParam : 'this_week'
-  const range = getPresetRange(preset, params.from, params.to)
-  const withWoW = WOW_PRESETS.includes(preset)
-
-  const adminData = isAdminOrManager
-    ? await getAdminDashboardData(range.from, range.to, { withWoW })
-    : null
+  // userName: первое слово из user.name (firstName в модели нет).
+  const userName = user.name.split(' ')[0]
 
   return (
     <>
-      <PageHeader
-        title={`${getGreeting()}, ${user.name.split(' ')[0]}`}
-        subtitle="Сводка по системе"
-      />
-
       <div className="space-y-6">
-        {/* Заказы — самое важное в работе */}
-        {isAdminOrManager && (
-          <section className="space-y-3">
-            <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Заказы</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <StatCard
-                href={`/orders?date=${todayIso}`}
-                label="На сегодня"
-                value={todayCount}
-                hint={
-                  todayCount === 0
-                    ? 'Заказов на сегодня нет'
-                    : `${pluralize(todayPortions, ['порция', 'порции', 'порций'])}`
-                }
-                tone={todayCount > 0 ? 'info' : 'neutral'}
-              />
-              <StatCard
-                href={`/orders?date=${tomorrowIso}`}
-                label="На завтра"
-                value={tomorrowCount}
-                hint={
-                  tomorrowCount === 0
-                    ? 'Заказов на завтра пока нет'
-                    : `${pluralize(tomorrowPortions, ['порция', 'порции', 'порций'])}`
-                }
-                tone={tomorrowCount > 0 ? 'info' : 'neutral'}
-              />
-              {pendingOrders > 0 ? (
-                <Link
-                  href="/orders/confirm"
-                  className="block rounded-2xl border p-5 transition-all bg-warning-bg/40 border-warning/30 hover:shadow-md cursor-pointer"
-                  style={{ boxShadow: 'var(--shadow-card)' }}
-                >
-                  <p className="text-sm text-fg-muted mb-2">Ждут подтверждения</p>
-                  <p className="text-3xl font-bold tracking-tight tabular-nums text-warning-fg">{pendingOrders}</p>
-                  <p className="text-xs mt-1 font-semibold text-[#1A1A1A] inline-flex items-center gap-1">
-                    Подтвердить до 16:00
-                    <ArrowRight className="w-4 h-4" strokeWidth={2} />
-                  </p>
-                </Link>
-              ) : (
-                <div
-                  className="block rounded-2xl border p-5 bg-surface border-border"
-                  style={{ boxShadow: 'var(--shadow-card)' }}
-                >
-                  <p className="text-sm text-fg-muted mb-2">Ждут подтверждения</p>
-                  <p className="text-3xl font-bold tracking-tight tabular-nums">{pendingOrders}</p>
-                  <p className="text-xs mt-1 text-fg-subtle">Все на сегодня подтверждены</p>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
+        <GreetingRow userName={userName} hasUnreadInbox={hasUnreadInbox} />
 
-        {isAdminLike(user.role) && clientsInSetup > 0 && (
-          <section className="space-y-3">
-            <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">Онбординг</h2>
-            <Link
-              href="/clients?status=incomplete"
-              className="block rounded-2xl bg-surface border border-border p-5 hover:bg-bg/50 transition-colors group"
-              style={{ boxShadow: 'var(--shadow-card)' }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-fg-muted">Клиенты в настройке</p>
-                  <p className="text-2xl font-semibold text-fg mt-1 tabular-nums">{clientsInSetup}</p>
-                </div>
-                <ChevronRight className="w-5 h-5 text-fg-subtle group-hover:text-fg-muted group-hover:translate-x-0.5 transition-all" />
-              </div>
-            </Link>
-          </section>
-        )}
+        <HeroTodayTomorrow today={today} tomorrow={tomorrow} dailyRecord={dailyRecord} />
 
-        {isAdminOrManager && adminData && (
-          <AdminWeekBlock
-            data={adminData}
+        <ActionRequiredBlock />
+
+        {/* TODO Волна 6: секция «Клиенты под риском» (отток/давно не заказывали). */}
+        {/* TODO Волна 6: спарклайн «Месяц / 12 месяцев» — динамика выручки. */}
+
+        {/* TODO Волна 6: переосмыслить размещение онбординг-секции */}
+
+        {financeData && (
+          <FinanceWeekBlock
+            data={financeData}
             preset={preset}
-            periodLabel={range.label}
-            customFromIso={params.from}
-            customToIso={params.to}
+            isAdminLikeUser={isAdminLikeUser}
           />
         )}
-
-        {/* Себестоимость порции по mealType — только ADMIN (MANAGER не видит цены).
-            Виджеты идут после финансового блока: финансы — головная метрика,
-            себестоимость — дополнительный разрез по типам приёма пищи. */}
-        {isAdminLike(user.role) && <AvgDishCostCards />}
       </div>
     </>
   )
 }
-
-function StatCard({
-  href,
-  label,
-  value,
-  hint,
-  tone = 'neutral',
-}: {
-  href: string
-  label: string
-  value: number
-  hint?: string
-  tone?: 'neutral' | 'info' | 'warning' | 'success'
-}) {
-  const toneClasses = {
-    neutral: 'bg-surface border-border',
-    info: 'bg-info-bg/30 border-info/20',
-    warning: 'bg-warning-bg/30 border-warning/20',
-    success: 'bg-success-bg/30 border-success/20',
-  }
-
-  return (
-    <Link
-      href={href}
-      className={`block rounded-2xl border p-5 transition-all hover:shadow-md ${toneClasses[tone]}`}
-      style={{ boxShadow: 'var(--shadow-card)' }}
-    >
-      <p className="text-sm text-fg-muted mb-2">{label}</p>
-      <p className="text-3xl font-bold tracking-tight tabular-nums">{value}</p>
-      {hint && <p className="text-xs text-fg-subtle mt-1">{hint}</p>}
-    </Link>
-  )
-}
-
