@@ -5,6 +5,13 @@ interface LogoProps {
   href?: string
   size?: 'sm' | 'md' | 'lg'
   className?: string
+  /**
+   * Вариант под тёмный фон (тёмно-зелёный sidebar Волны 2). При true:
+   *  - текст «Будни» → var(--color-sidebar-foreground) (#F5F0DC), иначе невидим на тёмном;
+   *  - dot → var(--color-brand-orange) (#E85D2A) — контрастный акцент.
+   * По умолчанию (false) — поведение для светлого фона не меняется.
+   */
+  onDark?: boolean
 }
 
 const SIZES = {
@@ -13,13 +20,18 @@ const SIZES = {
   lg: { dot: 'w-7 h-7', text: 'text-2xl font-bold', gap: 'gap-3' },
 } as const
 
-export function Logo({ href = '/dashboard', size = 'md', className }: LogoProps) {
+export function Logo({ href = '/dashboard', size = 'md', className, onDark = false }: LogoProps) {
   const s = SIZES[size]
 
   const inner = (
     <span className={cn('flex items-center', s.gap, className)}>
-      <span className={cn(s.dot, 'rounded-full bg-brand shrink-0')} aria-hidden />
-      <span className={cn(s.text, 'tracking-tight text-fg')}>Будни</span>
+      <span
+        className={cn(s.dot, 'rounded-full shrink-0', onDark ? 'bg-brand-orange' : 'bg-brand')}
+        aria-hidden
+      />
+      <span className={cn(s.text, 'tracking-tight', onDark ? 'text-sidebar-foreground' : 'text-fg')}>
+        Будни
+      </span>
     </span>
   )
 

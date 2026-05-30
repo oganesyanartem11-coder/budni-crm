@@ -142,6 +142,9 @@
   --color-sidebar-accent-foreground: #F5F0DC;
   --color-sidebar-border: rgba(255, 252, 230, 0.08);
   --color-sidebar-ring: var(--color-brand-green-accent);
+  /* Волна 2 (Subagent B): muted-цвет неактивных пунктов + низ градиента sidebar */
+  --color-sidebar-muted: #A6BFA4;
+  --color-sidebar-bg-end: #143818;
 
   /* Charts — recharts палитра */
   --color-chart-1: var(--color-brand-green);

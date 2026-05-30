@@ -4,7 +4,14 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ChevronDown } from 'lucide-react'
-import { NAV_GROUPS, HOME_BY_ROLE, type NavBadgeKey, type NavItem } from '@/lib/navigation'
+import {
+  TOP_NAV,
+  NAV_GROUPS,
+  BOTTOM_NAV,
+  HOME_BY_ROLE,
+  type NavBadgeKey,
+  type NavItem,
+} from '@/lib/navigation'
 import { Logo } from './logo'
 import { ProfileMenu } from './profile-menu'
 import { cn } from '@/lib/utils/cn'
@@ -19,6 +26,15 @@ interface SidebarProps {
   invoicesAwaitingCount: number
 }
 
+/**
+ * Десктоп-Sidebar (Волна 2 — вариант A «Bento Editorial»).
+ *
+ * Collapsed icon-only 72px → hover-expand 232px. Тёмно-зелёный градиент
+ * (from-sidebar → to-sidebar-bg-end). Раскрытие управляется CSS `group`-hover
+ * на <aside>: ширина анимируется transition-[width], а лейблы/заголовки групп
+ * проявляются через opacity 0→100 на group-hover. Все transition отключаются
+ * при prefers-reduced-motion (motion-reduce:transition-none).
+ */
 export function Sidebar({
   userRole,
   userName,
@@ -34,76 +50,104 @@ export function Sidebar({
     invoicesAwaitingCount,
   }
 
+  const topVisible = TOP_NAV.filter((it) => it.roles.includes(userRole))
+  const bottomVisible = BOTTOM_NAV.filter((it) => it.roles.includes(userRole))
+
   return (
-    <aside className="no-print hidden lg:flex w-[220px] shrink-0 h-screen sticky top-0 flex-col border-r border-border bg-bg">
-      <div className="flex items-center px-5 py-5">
-        <Logo size="md" href={HOME_BY_ROLE[userRole]} />
+    <aside
+      className={cn(
+        'no-print group hidden lg:flex shrink-0 h-screen sticky top-0 flex-col overflow-x-hidden',
+        'w-[72px] hover:w-[232px] transition-[width] duration-200 ease-out motion-reduce:transition-none',
+        'border-r border-sidebar-border bg-linear-to-b from-sidebar to-sidebar-bg-end text-sidebar-foreground'
+      )}
+    >
+      {/* Лого + wordmark «Будни / КАК ДОМА» (подзаголовок проявляется на hover) */}
+      <div className="flex items-center px-3 h-16 shrink-0 overflow-hidden">
+        <Logo size="md" href={HOME_BY_ROLE[userRole]} onDark />
+        <span
+          className={cn(
+            'ml-2 text-[10px] uppercase tracking-wider font-semibold text-sidebar-muted whitespace-nowrap',
+            'opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none'
+          )}
+        >
+          Как дома
+        </span>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-5">
-        <NavGroupList pathname={pathname} userRole={userRole} counts={counts} />
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 space-y-4">
+        {/* TOP_NAV — Дашборд (перед группами) */}
+        {topVisible.length > 0 && (
+          <div className="space-y-0.5">
+            {topVisible.map((item) => (
+              <NavLinkRow
+                key={item.href}
+                item={item}
+                active={isActive(pathname, item.href)}
+                badge={item.badge ? counts[item.badge] : 0}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* NAV_GROUPS — sales / production / more */}
+        {NAV_GROUPS.map((group) => {
+          const visible = group.items.filter((it) => it.roles.includes(userRole))
+          if (visible.length === 0) return null
+          return (
+            <div key={group.id} className="space-y-0.5">
+              <p
+                className={cn(
+                  'px-3 mb-1 text-[10px] uppercase tracking-wider font-semibold text-sidebar-muted',
+                  'opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none',
+                  'whitespace-nowrap truncate'
+                )}
+              >
+                {group.title}
+              </p>
+              {visible.map((item) => {
+                if (item.children && item.children.length > 0) {
+                  return (
+                    <NavExpandableRow
+                      key={item.href}
+                      item={item}
+                      pathname={pathname}
+                      userRole={userRole}
+                      counts={counts}
+                    />
+                  )
+                }
+                return (
+                  <NavLinkRow
+                    key={item.href}
+                    item={item}
+                    active={isActive(pathname, item.href)}
+                    badge={item.badge ? counts[item.badge] : 0}
+                  />
+                )
+              })}
+            </div>
+          )
+        })}
+
+        {/* BOTTOM_NAV — Борис (после групп) */}
+        {bottomVisible.length > 0 && (
+          <div className="space-y-0.5">
+            {bottomVisible.map((item) => (
+              <NavLinkRow
+                key={item.href}
+                item={item}
+                active={isActive(pathname, item.href)}
+                badge={item.badge ? counts[item.badge] : 0}
+              />
+            ))}
+          </div>
+        )}
       </nav>
 
-      <div className="border-t border-border px-3 py-3">
+      <div className="border-t border-sidebar-border px-2 py-2">
         <ProfileMenu name={userName} initials={initials} role={userRole} variant="desktop" />
       </div>
     </aside>
-  )
-}
-
-/**
- * Общий рендер групп навигации — переиспользуется в Sidebar (десктоп) и
- * MobileDrawer. В групе видны только пункты с подходящей ролью; пустая
- * группа после фильтрации не показывается вовсе.
- */
-export function NavGroupList({
-  pathname,
-  userRole,
-  counts,
-  onItemClick,
-}: {
-  pathname: string
-  userRole: UserRole
-  counts: Record<NavBadgeKey, number>
-  onItemClick?: () => void
-}) {
-  return (
-    <>
-      {NAV_GROUPS.map((group) => {
-        const visible = group.items.filter((it) => it.roles.includes(userRole))
-        if (visible.length === 0) return null
-        return (
-          <div key={group.id} className="space-y-0.5">
-            <p className="px-3 mb-1 text-xs lg:text-[10px] uppercase tracking-wider text-fg-subtle font-semibold">
-              {group.title}
-            </p>
-            {visible.map((item) => {
-              if (item.children && item.children.length > 0) {
-                return (
-                  <NavExpandableRow
-                    key={item.href}
-                    item={item}
-                    pathname={pathname}
-                    userRole={userRole}
-                    counts={counts}
-                    onItemClick={onItemClick}
-                  />
-                )
-              }
-              return (
-                <NavLinkRow
-                  key={item.href}
-                  item={item}
-                  active={isActive(pathname, item.href)}
-                  badge={item.badge ? counts[item.badge] : 0}
-                  onClick={onItemClick}
-                />
-              )
-            })}
-          </div>
-        )
-      })}
-    </>
   )
 }
 
@@ -111,30 +155,45 @@ function NavLinkRow({
   item,
   active,
   badge,
-  onClick,
 }: {
   item: NavItem
   active: boolean
   badge: number
-  onClick?: () => void
 }) {
   const Icon = item.icon
   const showBadge = badge > 0
   return (
     <Link
       href={item.href}
-      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex items-center gap-3 px-3 py-2 rounded-xl text-base lg:text-sm transition-colors',
+        'relative flex items-center gap-3 min-h-10 px-3 py-2.5 rounded-[9px] text-sm',
+        'transition-colors motion-reduce:transition-none',
         active
-          ? 'bg-fg/5 text-fg font-medium'
-          : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
+          ? 'bg-brand-green text-sidebar-foreground font-medium'
+          : 'text-sidebar-muted hover:bg-sidebar-accent'
       )}
     >
-      <Icon className="w-5 h-5 lg:w-4 lg:h-4 shrink-0" strokeWidth={active ? 2 : 1.75} />
-      <span className="flex-1 truncate">{item.label}</span>
+      <span className="relative shrink-0">
+        <Icon className="w-[18px] h-[18px]" strokeWidth={active ? 2 : 1.7} />
+        {/* collapsed: бейдж абсолютно у иконки (виден всегда, и в collapsed) */}
+        {showBadge && (
+          <span className="group-hover:hidden absolute -top-1 -right-1 inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-brand-orange text-white text-[9px] font-extrabold tabular-nums">
+            {badge > 9 ? '9+' : badge}
+          </span>
+        )}
+      </span>
+      <span
+        className={cn(
+          'flex-1 truncate whitespace-nowrap',
+          'opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none'
+        )}
+      >
+        {item.label}
+      </span>
+      {/* expanded: бейдж справа от лейбла */}
       {showBadge && (
-        <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold tabular-nums">
+        <span className="hidden group-hover:inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-brand-orange text-white text-[9px] font-extrabold tabular-nums opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none">
           {badge > 9 ? '9+' : badge}
         </span>
       )}
@@ -154,19 +213,22 @@ function NavLinkRow({
  * без чтения localStorage в initial. localStorage применяется в effect
  * (после mount), но фолбэк-значение совпадает с pathname-вычислением, так
  * что hydration mismatch не возникает.
+ *
+ * В collapsed (72px) состоянии раскрытый список детей всё равно отрендерен
+ * в DOM, но визуально это поведение приемлемо: лейблы детей скрыты opacity,
+ * а сам узел читается как обычный пункт (иконка + collapsed-бейдж). Логика
+ * expand/collapse не тронута — только перекрашено под DNA.
  */
 function NavExpandableRow({
   item,
   pathname,
   userRole,
   counts,
-  onItemClick,
 }: {
   item: NavItem
   pathname: string
   userRole: UserRole
   counts: Record<NavBadgeKey, number>
-  onItemClick?: () => void
 }) {
   const visibleChildren = (item.children ?? []).filter((c) => c.roles.includes(userRole))
   const pathMatches = visibleChildren.some((c) => isActive(pathname, c.href))
@@ -217,26 +279,32 @@ function NavExpandableRow({
         onClick={toggle}
         aria-expanded={expanded}
         className={cn(
-          'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-base lg:text-sm transition-colors',
+          'w-full relative flex items-center gap-3 min-h-10 px-3 py-2.5 rounded-[9px] text-sm',
+          'transition-colors motion-reduce:transition-none',
           parentActive
-            ? 'bg-fg/5 text-fg font-medium'
-            : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
+            ? 'bg-brand-green text-sidebar-foreground font-medium'
+            : 'text-sidebar-muted hover:bg-sidebar-accent'
         )}
       >
-        <Icon
-          className="w-5 h-5 lg:w-4 lg:h-4 shrink-0"
-          strokeWidth={parentActive ? 2 : 1.75}
-        />
-        <span className="flex-1 truncate text-left">{item.label}</span>
+        <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={parentActive ? 2 : 1.7} />
+        <span
+          className={cn(
+            'flex-1 truncate whitespace-nowrap text-left',
+            'opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none'
+          )}
+        >
+          {item.label}
+        </span>
         <ChevronDown
           className={cn(
-            'w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0 transition-transform text-fg-subtle',
+            'w-3.5 h-3.5 shrink-0 text-sidebar-muted',
+            'opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none',
             expanded && 'rotate-180'
           )}
         />
       </button>
       {expanded && (
-        <div className="ml-3 pl-3 border-l border-border space-y-0.5">
+        <div className="ml-3 pl-3 border-l border-sidebar-border space-y-0.5">
           {visibleChildren.map((child) => {
             const ChildIcon = child.icon
             const childActive = isActive(pathname, child.href)
@@ -245,21 +313,33 @@ function NavExpandableRow({
               <Link
                 key={child.href + child.label}
                 href={child.href}
-                onClick={onItemClick}
+                aria-current={childActive ? 'page' : undefined}
                 className={cn(
-                  'flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm lg:text-xs transition-colors',
+                  'relative flex items-center gap-3 min-h-10 px-3 py-1.5 rounded-[9px] text-sm',
+                  'transition-colors motion-reduce:transition-none',
                   childActive
-                    ? 'bg-fg/5 text-fg font-medium'
-                    : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
+                    ? 'bg-brand-green text-sidebar-foreground font-medium'
+                    : 'text-sidebar-muted hover:bg-sidebar-accent'
                 )}
               >
-                <ChildIcon
-                  className="w-4 h-4 lg:w-3.5 lg:h-3.5 shrink-0"
-                  strokeWidth={childActive ? 2 : 1.75}
-                />
-                <span className="flex-1 truncate">{child.label}</span>
+                <span className="relative shrink-0">
+                  <ChildIcon className="w-[18px] h-[18px]" strokeWidth={childActive ? 2 : 1.7} />
+                  {badge > 0 && (
+                    <span className="group-hover:hidden absolute -top-1 -right-1 inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-brand-orange text-white text-[9px] font-extrabold tabular-nums">
+                      {badge > 9 ? '9+' : badge}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    'flex-1 truncate whitespace-nowrap',
+                    'opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none'
+                  )}
+                >
+                  {child.label}
+                </span>
                 {badge > 0 && (
-                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full bg-danger text-accent-fg text-[10px] font-bold tabular-nums">
+                  <span className="hidden group-hover:inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-brand-orange text-white text-[9px] font-extrabold tabular-nums opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50 motion-reduce:transition-none">
                     {badge > 9 ? '9+' : badge}
                   </span>
                 )}
