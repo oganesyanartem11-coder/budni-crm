@@ -72,21 +72,21 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
   return (
     <div
       id="max-chat-id-section"
-      className="rounded-2xl bg-surface border border-border p-5 mb-5 scroll-mt-24"
+      className="rounded-xl bg-surface border border-border p-4 mb-5 scroll-mt-24"
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <div className="flex items-center gap-2 mb-4">
-        <MessageSquare className="w-4 h-4 text-fg-muted" />
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-fg-muted">MAX-бот</h3>
+        <MessageSquare className="w-4 h-4 text-brand-green" />
+        <h3 className="font-display text-xs font-bold uppercase tracking-wider text-fg-muted">MAX-бот</h3>
       </div>
 
       {currentValue ? (
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-xl bg-success-bg/30 border border-success/20 p-3">
+          <div className="flex items-start gap-2 rounded-xl bg-success-bg border border-success/20 p-3">
             <CheckCircle2 className="w-4 h-4 text-success-fg shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
               <p className="text-sm text-success-fg">
-                Привязан · chat_id <span className="font-mono">{currentValue}</span>
+                Привязан · chat_id <span className="font-mono tabular-nums">{currentValue}</span>
               </p>
               {onboardedAt && (
                 <p className="text-xs text-success-fg/80 mt-0.5">
@@ -98,7 +98,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
               type="button"
               onClick={handleUnbind}
               disabled={isPending}
-              className="shrink-0 px-3 py-1.5 rounded-pill border border-danger/30 text-danger-fg text-xs font-medium hover:bg-danger-bg/40 disabled:opacity-50"
+              style={{ touchAction: 'manipulation' }}
+              className="shrink-0 min-h-[36px] px-3 py-1.5 rounded-pill border border-danger/30 text-danger-fg text-xs font-medium hover:bg-danger-bg disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
             >
               Отвязать
             </button>
@@ -111,7 +112,7 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
               <p className="text-sm text-fg-muted">
                 Отправьте эту ссылку клиенту. После клика бот сам привяжется к чату.
               </p>
-              <div className="flex items-center gap-2 rounded-xl bg-bg/40 border border-border px-3 py-2">
+              <div className="flex items-center gap-2 rounded-xl bg-surface-2 border border-border px-3 py-2">
                 <LinkIcon className="w-3.5 h-3.5 text-fg-muted shrink-0" />
                 <code className="text-xs font-mono flex-1 truncate" title={deeplink}>
                   {deeplink}
@@ -119,7 +120,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-surface border border-border-strong text-xs hover:bg-bg"
+                  style={{ touchAction: 'manipulation' }}
+                  className="shrink-0 inline-flex items-center gap-1 min-h-[36px] px-2.5 py-1 rounded-pill bg-surface border border-border-strong text-xs hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                 >
                   <Copy className="w-3 h-3" />
                   Копировать
@@ -129,7 +131,7 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
                 href={deeplink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-block text-xs text-info-fg hover:underline"
+                className="inline-block text-xs text-brand-green font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded"
               >
                 Открыть ссылку →
               </a>
@@ -141,7 +143,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
                 type="button"
                 onClick={handleGenerate}
                 disabled={isPending}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+                style={{ touchAction: 'manipulation' }}
+                className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 rounded-xl bg-brand-orange text-white text-xs font-medium hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
               >
                 <LinkIcon className="w-3.5 h-3.5" />
                 {isPending ? 'Генерируем…' : 'Получить ссылку для онбординга'}
@@ -156,7 +159,9 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
         <button
           type="button"
           onClick={() => setManualOpen((v) => !v)}
-          className="text-xs text-fg-muted hover:text-fg flex items-center gap-1"
+          aria-expanded={manualOpen}
+          style={{ touchAction: 'manipulation' }}
+          className="text-xs text-fg-muted hover:text-fg flex items-center gap-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         >
           {manualOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           Расширенные настройки (ручной chat_id)
@@ -171,13 +176,14 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
               value={manualValue}
               onChange={(e) => setManualValue(e.target.value)}
               disabled={isPending}
-              className="flex-1 min-w-[160px] px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm font-mono"
+              className="flex-1 min-w-[160px] min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm font-mono tabular-nums"
             />
             <button
               type="button"
               onClick={handleManualSave}
               disabled={isPending}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90 disabled:opacity-50"
+              style={{ touchAction: 'manipulation' }}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 rounded-xl bg-brand-orange text-white text-xs font-medium hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
             >
               <Save className="w-3.5 h-3.5" />
               Сохранить
@@ -189,7 +195,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
                 setManualValue(currentValue ?? '')
               }}
               disabled={isPending}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-pill text-fg-muted text-xs hover:text-fg disabled:opacity-50"
+              style={{ touchAction: 'manipulation' }}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-3 py-2.5 rounded-xl text-fg-muted text-xs hover:text-fg hover:bg-surface-2 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
             >
               <X className="w-3.5 h-3.5" />
               Отмена

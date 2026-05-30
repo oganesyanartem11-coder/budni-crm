@@ -1,7 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { Edit2, ArrowLeft } from 'lucide-react'
-import { PageHeader } from '@/components/layout/page-header'
+import { ArrowLeft } from 'lucide-react'
 import { ClientDetail } from './client-detail'
 import { MaxChatIdSection } from './max-chat-id-section'
 import { OnboardingChecklist } from './onboarding-checklist'
@@ -51,29 +50,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       <div className="mb-6">
         <Link
           href="/clients"
-          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg transition-colors"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-surface border border-border text-sm font-medium text-fg-muted hover:text-fg hover:bg-surface-2 transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]"
         >
           <ArrowLeft className="w-4 h-4" />
           Все клиенты
         </Link>
       </div>
-      <PageHeader
-        title={client.name}
-        subtitle={
-          client.contactName
-            ? `${client.contactName}${client.contactPhone ? ` · ${client.contactPhone}` : ''}`
-            : 'Карточка клиента'
-        }
-        actions={
-          <Link
-            href={`/clients/${client.id}/edit`}
-            className="px-4 py-2 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors flex items-center gap-2"
-          >
-            <Edit2 className="w-4 h-4" />
-            Редактировать
-          </Link>
-        }
-      />
       <OnboardingChecklist client={client} />
       <MaxChatIdSection
         clientId={client.id}

@@ -1,18 +1,19 @@
 'use client'
 
 import { useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { TrendingUp, ShoppingCart, Coffee, MapPin, type LucideIcon } from 'lucide-react'
 import { formatMoney, formatPortions, formatOrders, pluralize } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ChartCard } from '@/components/charts/chart-card'
 import { cn } from '@/lib/utils/cn'
+import { usePrefersReducedMotion } from '@/app/(app)/dashboard/_components/hero-today-tomorrow'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 
 const MEAL_TYPE_COLORS: Record<string, string> = {
-  BREAKFAST: 'var(--color-warning)',
-  LUNCH: 'var(--color-success)',
+  BREAKFAST: 'var(--color-brand-yellow)',
+  LUNCH: 'var(--color-brand-green)',
   DINNER: 'var(--color-info)',
 }
 
@@ -22,6 +23,7 @@ interface Props {
 
 export function ClientAnalyticsTab({ analytics }: Props) {
   const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly')
+  const prefersReducedMotion = usePrefersReducedMotion()
   const data = period === 'weekly' ? analytics.weekly : analytics.monthly
 
   const hasData = analytics.totalOrders > 0
@@ -60,9 +62,9 @@ export function ClientAnalyticsTab({ analytics }: Props) {
       </div>
 
       <ChartCard
-        title={<span className="text-base font-semibold">Динамика выручки</span>}
+        title={<span className="font-display text-base font-bold text-fg-strong">Динамика выручки</span>}
         action={
-          <div className="flex gap-1 p-1 bg-bg rounded-pill">
+          <div role="group" aria-label="Период" className="inline-flex items-center gap-0.5 p-0.5 bg-bg border border-border rounded-pill">
             <PeriodToggle active={period === 'weekly'} onClick={() => setPeriod('weekly')} label="Недели" />
             <PeriodToggle active={period === 'monthly'} onClick={() => setPeriod('monthly')} label="Месяцы" />
           </div>
@@ -72,6 +74,7 @@ export function ClientAnalyticsTab({ analytics }: Props) {
       >
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 5, right: 12, bottom: 5, left: 12 }}>
+            <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="3 3" />
             <XAxis
               dataKey="label"
               axisLine={false}
@@ -99,10 +102,11 @@ export function ClientAnalyticsTab({ analytics }: Props) {
             <Line
               type="monotone"
               dataKey="revenue"
-              stroke="var(--color-accent)"
+              stroke="var(--color-brand-green)"
               strokeWidth={2.5}
-              dot={{ fill: 'var(--color-accent)', r: 3 }}
+              dot={{ fill: 'var(--color-brand-green)', r: 3 }}
               activeDot={{ r: 5 }}
+              isAnimationActive={!prefersReducedMotion}
             />
           </LineChart>
         </ResponsiveContainer>
@@ -113,8 +117,8 @@ export function ClientAnalyticsTab({ analytics }: Props) {
         return (
           <ChartCard
             title={
-              <span className="text-base font-semibold flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-fg-muted" />
+              <span className="font-display text-base font-bold text-fg-strong flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-brand-green" />
                 Разбивка по точкам доставки
               </span>
             }
@@ -127,11 +131,12 @@ export function ClientAnalyticsTab({ analytics }: Props) {
                 return (
                   <div
                     key={loc.locationId}
-                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-bg/40"
+                    className="relative flex items-center justify-between gap-3 pl-4 pr-3 py-2.5 rounded-xl bg-surface-2"
                   >
-                    <span className="font-medium truncate min-w-0">{loc.locationName}</span>
+                    <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand-green" aria-hidden="true" />
+                    <span className="font-medium truncate min-w-0 text-fg">{loc.locationName}</span>
                     <span className="flex items-center gap-3 text-xs text-fg-muted tabular-nums shrink-0">
-                      <span className="text-fg">{formatMoney(loc.revenue)}</span>
+                      <span className="font-display font-bold text-fg-strong">{formatMoney(loc.revenue)}</span>
                       <span>{loc.portions} порц.</span>
                       <span>{formatOrders(loc.ordersCount)}</span>
                       <span className="text-fg-subtle">{sharePct}%</span>
@@ -146,21 +151,21 @@ export function ClientAnalyticsTab({ analytics }: Props) {
 
       {analytics.mealTypes.length > 0 && (
         <ChartCard
-          title={<span className="text-base font-semibold">Структура заказов</span>}
+          title={<span className="font-display text-base font-bold text-fg-strong">Структура заказов</span>}
           height="auto"
           bodyClassName="h-32 -ml-2 -mr-2"
           footer={
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
               {analytics.mealTypes.map((mt) => (
-                <div key={mt.mealType} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-bg/40">
+                <div key={mt.mealType} className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-surface-2">
                   <span className="flex items-center gap-2 min-w-0">
                     <span
                       className="w-2.5 h-2.5 rounded-full shrink-0"
                       style={{ background: MEAL_TYPE_COLORS[mt.mealType] }}
                     />
-                    <span className="truncate font-medium">{MEAL_TYPE_LABELS[mt.mealType]}</span>
+                    <span className="truncate font-medium text-fg">{MEAL_TYPE_LABELS[mt.mealType]}</span>
                   </span>
-                  <span className="text-fg-muted tabular-nums shrink-0 text-xs">
+                  <span className="text-fg-muted tabular-nums shrink-0 text-xs font-display font-bold">
                     {formatMoney(mt.revenue)}
                   </span>
                 </div>
@@ -196,7 +201,7 @@ export function ClientAnalyticsTab({ analytics }: Props) {
                 }}
                 formatter={(value) => [Number(value).toString(), 'Порций']}
               />
-              <Bar dataKey="portions" radius={[0, 6, 6, 0]}>
+              <Bar dataKey="portions" radius={[0, 6, 6, 0]} isAnimationActive={!prefersReducedMotion}>
                 {analytics.mealTypes.map((mt) => (
                   <Cell key={mt.mealType} fill={MEAL_TYPE_COLORS[mt.mealType]} />
                 ))}
@@ -224,18 +229,18 @@ function SummaryCard({
 }) {
   const toneClasses = {
     neutral: 'bg-surface border-border',
-    info: 'bg-info-bg/30 border-info/20',
-    warning: 'bg-warning-bg/30 border-warning/20',
-    success: 'bg-success-bg/30 border-success/20',
+    info: 'bg-info-bg border-info/20',
+    warning: 'bg-warning-bg border-warning/20',
+    success: 'bg-success-bg border-success/20',
   }
   return (
     <div className={cn('rounded-2xl border p-4', toneClasses[tone])} style={{ boxShadow: 'var(--shadow-card)' }}>
       <div className="flex items-start justify-between gap-2 mb-2">
-        <p className="text-xs text-fg-muted">{label}</p>
-        <Icon className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
+        <p className="text-[11px] font-medium uppercase tracking-widest text-fg-muted">{label}</p>
+        <Icon className="w-3.5 h-3.5 text-fg-subtle shrink-0" aria-hidden="true" />
       </div>
-      <p className="text-xl font-bold tabular-nums">{value}</p>
-      {hint && <p className="text-xs text-fg-subtle mt-0.5">{hint}</p>}
+      <p className="font-display text-2xl font-bold tabular-nums text-fg-strong">{value}</p>
+      {hint && <p className="text-xs text-fg-subtle mt-0.5 tabular-nums">{hint}</p>}
     </div>
   )
 }
@@ -245,9 +250,12 @@ function PeriodToggle({ active, onClick, label }: { active: boolean; onClick: ()
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
+      style={{ touchAction: 'manipulation' }}
       className={cn(
-        'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors',
-        active ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg'
+        'min-h-[44px] rounded-pill px-3 text-xs font-medium transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+        active ? 'bg-brand-green-deep text-surface' : 'text-fg-muted hover:text-fg'
       )}
     >
       {label}

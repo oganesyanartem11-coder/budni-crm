@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3 } from 'lucide-react'
+import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { LocationModal } from './location-modal'
 import { MealConfigModal } from './meal-config-modal'
@@ -121,21 +121,35 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
     !!client.contractNumber ||
     !!client.defaultOurLegalEntity
 
+  const configsCount = client.mealConfigs.filter((c) => c.isActive).length
+
   return (
     <div id="client-tabs" className="space-y-5 scroll-mt-24">
-      {client.notes && (
-        <div className="rounded-2xl bg-warning-bg/30 border border-warning/20 px-5 py-4">
-          <p className="text-xs uppercase tracking-wider text-warning-fg/80 font-medium mb-1">Заметки</p>
-          <p className="text-sm text-fg whitespace-pre-line">{client.notes}</p>
+      <ClientHero client={client} analytics={analytics} />
+
+      {(client.notes || hasRequisites) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          {client.notes && (
+            <div className="rounded-xl bg-surface border border-border p-4 shadow-card">
+              <div className="flex items-center gap-2 mb-2">
+                <StickyNote className="w-4 h-4 text-warning-fg" />
+                <p className="text-xs uppercase tracking-wide text-fg-subtle font-bold">Заметки</p>
+              </div>
+              <p className="text-sm text-fg whitespace-pre-line">{client.notes}</p>
+            </div>
+          )}
+          {hasRequisites && <RequisitesBlock client={client} />}
         </div>
       )}
 
-      {hasRequisites && <RequisitesBlock client={client} />}
-
-      <div className="flex items-center gap-1 p-1 bg-bg rounded-pill w-fit overflow-x-auto">
-        <TabButton active={tab === 'locations'} onClick={() => setTab('locations')} icon={MapPin} label={`Точки · ${activeLocations.length}`} />
-        <TabButton active={tab === 'configs'} onClick={() => setTab('configs')} icon={Settings} label={`Питание · ${client.mealConfigs.filter((c) => c.isActive).length}`} />
-        <TabButton active={tab === 'orders'} onClick={() => setTab('orders')} icon={ClipboardList} label={`Заказы · ${client._count.orders}`} />
+      <div
+        role="tablist"
+        aria-label="Разделы клиента"
+        className="inline-flex w-full lg:w-auto bg-surface-2 rounded-xl p-1 gap-1 overflow-x-auto scrollbar-none"
+      >
+        <TabButton active={tab === 'locations'} onClick={() => setTab('locations')} icon={MapPin} label="Точки" count={activeLocations.length} />
+        <TabButton active={tab === 'configs'} onClick={() => setTab('configs')} icon={Settings} label="Питание" count={configsCount} />
+        <TabButton active={tab === 'orders'} onClick={() => setTab('orders')} icon={ClipboardList} label="Заказы" count={client._count.orders} />
         <TabButton active={tab === 'analytics'} onClick={() => setTab('analytics')} icon={BarChart3} label="Аналитика" />
       </div>
 
@@ -160,7 +174,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
       )}
 
       {tab === 'orders' && (
-        <div className="rounded-2xl bg-surface border border-border p-8 text-center" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-2xl bg-surface border border-border p-8 text-center shadow-card">
           <ClipboardList className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
           <p className="font-medium text-fg mb-1">{formatOrders(client._count.orders)} в истории</p>
           <p className="text-sm text-fg-muted mb-5">
@@ -168,10 +182,11 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
           </p>
           <Link
             href={`/orders?clientId=${client.id}`}
-            className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]"
           >
             <ClipboardList className="w-4 h-4" />
             Открыть все заказы
+            <ArrowRight className="w-4 h-4" />
           </Link>
         </div>
       )}
@@ -183,10 +198,10 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
           type="button"
           onClick={handleArchiveClient}
           className={cn(
-            'inline-flex items-center gap-2 px-4 py-2 rounded-pill text-sm font-medium transition-colors',
+            'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]',
             client.isActive
-              ? 'text-danger-fg bg-danger-bg/40 hover:bg-danger-bg'
-              : 'text-success-fg bg-success-bg/40 hover:bg-success-bg'
+              ? 'bg-surface text-danger-fg border border-danger/30 hover:bg-danger-bg'
+              : 'bg-success text-white border border-transparent hover:opacity-90'
           )}
         >
           {client.isActive ? <><Archive className="w-4 h-4" /> Архивировать клиента</> : <><ArchiveRestore className="w-4 h-4" /> Восстановить клиента</>}
@@ -211,18 +226,109 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
   )
 }
 
-function TabButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; label: string }) {
+function ClientHero({ client, analytics }: { client: SerializedClientDetail; analytics: ClientAnalytics }) {
+  const contactBits: Array<{ icon: React.ComponentType<{ className?: string }>; text: string }> = []
+  if (client.contactName) contactBits.push({ icon: User, text: client.contactName })
+  if (client.contactPhone) contactBits.push({ icon: Phone, text: client.contactPhone })
+  if (client.contactMessenger) contactBits.push({ icon: AtSign, text: client.contactMessenger })
+
+  return (
+    <div className="rounded-2xl bg-surface border border-border p-6 shadow-card">
+      {/* Заголовок + CTA */}
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-display font-extrabold text-3xl lg:text-4xl text-fg-strong leading-tight">
+              {client.name}
+            </h1>
+            {!client.isActive && (
+              <span className="shrink-0 px-2.5 py-1 rounded-full bg-neutral-bg text-neutral-fg text-xs font-bold uppercase tracking-wide">
+                Архив
+              </span>
+            )}
+          </div>
+          {contactBits.length > 0 && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 text-sm text-fg-muted">
+              {contactBits.map((bit, i) => (
+                <span key={i} className="inline-flex items-center gap-1.5">
+                  <bit.icon className="w-4 h-4 text-fg-subtle" />
+                  {bit.text}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 lg:shrink-0">
+          {/* «Написать в MAX» намеренно опущена: единственный паттерн открытия чата
+              (https://max.ru/<maxUsername>) завязан на maxUsername, а не на maxChatId.
+              URL из maxChatId не выдумываем. См. todosForArtem. */}
+          <Link
+            href={`/clients/${client.id}/edit`}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-surface border border-border text-fg font-medium text-sm hover:bg-surface-2 transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]"
+          >
+            <Edit2 className="w-4 h-4" />
+            Редактировать
+          </Link>
+        </div>
+      </div>
+
+      {/* Большая метрика */}
+      <div className="mt-6">
+        <p className="text-xs uppercase tracking-wide text-fg-subtle font-bold">Всего от клиента</p>
+        <p className="font-display font-extrabold text-5xl text-fg-strong tabular-nums leading-none mt-1.5">
+          {formatMoney(analytics.totalRevenue)}
+        </p>
+      </div>
+
+      {/* Мини-метрики */}
+      <div className="grid grid-cols-3 gap-3 mt-5">
+        <HeroStat value={analytics.totalOrders.toLocaleString('ru-RU')} label="заказов" />
+        <HeroStat value={analytics.totalPortions.toLocaleString('ru-RU')} label="порций" />
+        <HeroStat value={formatMoney(analytics.averageOrder)} label="средний чек" />
+      </div>
+
+      {/* Бейджи */}
+      <div className="flex flex-wrap gap-2 mt-5">
+        <span className="inline-flex items-center px-3 py-1 rounded-full bg-surface-2 text-fg-muted text-xs font-medium">
+          Создан {formatDateMsk(client.createdAt)}
+        </span>
+        {/* Бейдж «Последний заказ N дней назад» опущен: ClientAnalytics не содержит
+            даты последнего заказа (только weekly/monthly ряды). Query не добавляем. */}
+      </div>
+    </div>
+  )
+}
+
+function HeroStat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="bg-surface-2 rounded-xl p-3">
+      <p className="font-display font-bold text-xl text-fg-strong tabular-nums leading-tight">{value}</p>
+      <p className="text-xs text-fg-muted mt-0.5">{label}</p>
+    </div>
+  )
+}
+
+function TabButton({ active, onClick, icon: Icon, label, count }: { active: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string }>; label: string; count?: number }) {
   return (
     <button
       type="button"
+      role="tab"
       onClick={onClick}
+      aria-pressed={active}
+      aria-selected={active}
       className={cn(
-        'shrink-0 px-4 py-2 rounded-pill text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap',
-        active ? 'bg-accent text-accent-fg' : 'text-fg-muted hover:text-fg'
+        'shrink-0 flex-1 lg:flex-none px-4 py-2.5 rounded-lg min-h-[44px] [touch-action:manipulation] text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]',
+        active ? 'bg-surface shadow-card text-fg' : 'text-fg-muted hover:text-fg'
       )}
     >
       <Icon className="w-4 h-4" />
       {label}
+      {count !== undefined && (
+        <span className="bg-brand-orange text-white px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums leading-none">
+          {count}
+        </span>
+      )}
     </button>
   )
 }
@@ -253,7 +359,7 @@ function LocationsTab({
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <button type="button" onClick={onAdd} className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2">
+        <button type="button" onClick={onAdd} className="px-4 py-2 min-h-[44px] rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors flex items-center justify-center gap-2 [touch-action:manipulation]">
           <Plus className="w-4 h-4" /> Добавить точку
         </button>
       </div>
@@ -280,10 +386,10 @@ function LocationsTab({
                   <p className="text-sm text-fg-muted">{loc.address}</p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button type="button" onClick={() => onEdit(loc)} aria-label="Редактировать" className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors">
+                  <button type="button" onClick={() => onEdit(loc)} aria-label="Редактировать" className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]">
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button type="button" onClick={() => onArchive(loc.id, loc.name, loc.isActive)} aria-label={loc.isActive ? 'В архив' : 'Восстановить'} className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors">
+                  <button type="button" onClick={() => onArchive(loc.id, loc.name, loc.isActive)} aria-label={loc.isActive ? 'В архив' : 'Восстановить'} className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]">
                     {loc.isActive ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
                   </button>
                 </div>
@@ -372,7 +478,7 @@ function ConfigsTab({
         <p className="text-sm text-fg-muted">
           Питание определяет, что и куда поставлять клиенту: тип, график, цену.
         </p>
-        <button type="button" onClick={onAdd} disabled={locations.length === 0} className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50">
+        <button type="button" onClick={onAdd} disabled={locations.length === 0} className="px-4 py-2 min-h-[44px] rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors flex items-center justify-center gap-2 [touch-action:manipulation] disabled:opacity-50">
           <Plus className="w-4 h-4" /> Добавить питание
         </button>
       </div>
@@ -419,10 +525,10 @@ function ConfigsTab({
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button type="button" onClick={() => onEdit(cfg)} aria-label="Редактировать" className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors">
+                        <button type="button" onClick={() => onEdit(cfg)} aria-label="Редактировать" className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]">
                           <Edit2 className="w-4 h-4" />
                         </button>
-                        <button type="button" onClick={() => onArchive(cfg.id, cfg.isActive)} aria-label={cfg.isActive ? 'Отключить' : 'Включить'} className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors">
+                        <button type="button" onClick={() => onArchive(cfg.id, cfg.isActive)} aria-label={cfg.isActive ? 'Отключить' : 'Включить'} className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]">
                           {cfg.isActive ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
                         </button>
                       </div>
@@ -442,11 +548,8 @@ function RequisitesBlock({ client }: { client: SerializedClientDetail }) {
   const contractDateStr = client.contractDate ? formatDateMsk(client.contractDate) : null
 
   return (
-    <div
-      className="rounded-2xl bg-surface border border-border p-5 space-y-4"
-      style={{ boxShadow: 'var(--shadow-card)' }}
-    >
-      <h3 className="text-sm font-semibold uppercase tracking-wider text-fg-muted">
+    <div className="rounded-xl bg-surface border border-border p-4 space-y-4 shadow-card">
+      <h3 className="text-xs font-bold uppercase tracking-wide text-fg-subtle">
         Реквизиты
       </h3>
 

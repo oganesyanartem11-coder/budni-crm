@@ -3,11 +3,12 @@
 import { useState, useMemo, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { Search, Building2, MapPin, ClipboardList } from 'lucide-react'
+import { Search, Users } from 'lucide-react'
 import { cn } from '@/lib/utils/cn'
 import { formatClients } from '@/lib/utils/format'
 import { ORDER_TYPE_SHORT, MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { getOnboardingStatus, type ClientForOnboarding } from '@/lib/clients/onboarding'
+import { EmptyState } from '@/components/ui/empty-state'
 import type { Client, ClientLocation, MealType, OrderType } from '@prisma/client'
 
 type SerializedClient = Omit<Client, never> & {
@@ -83,15 +84,15 @@ export function ClientsList({ clients }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl bg-surface border border-border p-4 flex flex-col md:flex-row md:items-center gap-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div className="rounded-2xl bg-surface border border-border p-4 flex flex-col md:flex-row md:items-center gap-3 shadow-card">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle pointer-events-none" aria-hidden="true" />
           <input
             type="search"
             placeholder="Поиск по названию клиента, контакту, точке"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+            className="w-full min-h-[44px] pl-10 pr-3 py-2.5 rounded-xl bg-surface border border-border text-sm text-fg placeholder:text-fg-subtle focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors [touch-action:manipulation]"
           />
         </div>
         <div className="inline-flex rounded-pill border border-border p-0.5 bg-bg text-xs">
@@ -99,9 +100,9 @@ export function ClientsList({ clients }: Props) {
             type="button"
             onClick={() => setStatusFilter('all')}
             className={cn(
-              'px-3 py-1 rounded-pill transition-colors',
+              'min-h-[36px] px-3.5 rounded-pill transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
               statusFilter === 'all'
-                ? 'bg-accent text-accent-fg font-medium'
+                ? 'bg-brand-green-deep text-white font-medium'
                 : 'text-fg-muted hover:text-fg'
             )}
           >
@@ -111,32 +112,50 @@ export function ClientsList({ clients }: Props) {
             type="button"
             onClick={() => setStatusFilter('incomplete')}
             className={cn(
-              'px-3 py-1 rounded-pill transition-colors',
+              'min-h-[36px] px-3.5 rounded-pill transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
               statusFilter === 'incomplete'
-                ? 'bg-accent text-accent-fg font-medium'
+                ? 'bg-brand-green-deep text-white font-medium'
                 : 'text-fg-muted hover:text-fg'
             )}
           >
             В настройке
           </button>
         </div>
-        <label className="flex items-center gap-2 text-sm text-fg-muted cursor-pointer select-none">
+        <label className="flex items-center gap-2.5 min-h-[44px] px-1 text-sm text-fg-muted cursor-pointer select-none [touch-action:manipulation]">
           <input
             type="checkbox"
             checked={showArchived}
             onChange={(e) => setShowArchived(e.target.checked)}
-            className="rounded"
+            className="w-5 h-5 rounded-md border-border text-brand-green-deep accent-brand-green-deep focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30 cursor-pointer"
           />
           Показать архивных
         </label>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="rounded-2xl bg-surface border border-border p-12 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
-          {search ? `Ничего не найдено по запросу «${search}»` : 'Нет клиентов'}
-        </div>
+        search ? (
+          <EmptyState
+            icon={Search}
+            title="Ничего не найдено"
+            description={`По запросу «${search}» клиентов нет. Попробуйте изменить условия поиска.`}
+          />
+        ) : (
+          <EmptyState
+            icon={Users}
+            title="Клиентов пока нет"
+            description="Добавьте первого клиента — заведите точки доставки, расписание и цены."
+            cta={
+              <Link
+                href="/clients/new"
+                className="inline-flex items-center justify-center min-h-[44px] px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40 focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+              >
+                Добавить клиента
+              </Link>
+            }
+          />
+        )
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((c) => (
             <ClientCard key={c.id} client={c} />
           ))}
@@ -160,41 +179,54 @@ function ClientCard({ client }: { client: SerializedClient }) {
     .join('')
     .toUpperCase()
 
+  // «На онбординге» — только для активных клиентов, по той же чистой
+  // функции, что используется фильтром «В настройке» выше. Новой логики не вводим.
+  const isOnboarding =
+    client.isActive && !getOnboardingStatus(client as ClientForOnboarding).isComplete
+
   return (
     <Link
       href={`/clients/${client.id}`}
       className={cn(
-        'block rounded-2xl bg-surface border p-5 transition-all',
-        client.isActive
-          ? 'border-border hover:border-border-strong'
-          : 'border-border opacity-60'
+        'block rounded-2xl bg-surface border border-border p-5 shadow-card hover:shadow-card-hover transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30 [touch-action:manipulation]',
+        !client.isActive && 'opacity-60'
       )}
-      style={{ boxShadow: 'var(--shadow-card)' }}
     >
-      <div className="flex items-start gap-3 mb-3">
-        <div className="w-12 h-12 rounded-full bg-info-bg text-info-fg flex items-center justify-center font-semibold shrink-0">
+      <div className="flex items-start gap-3 mb-4">
+        <div className="w-12 h-12 rounded-full bg-info-bg text-info-fg flex items-center justify-center font-display font-bold shrink-0">
           {initials}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold truncate">{client.name}</h3>
+          <h3 className="font-display font-bold text-lg text-fg-strong truncate leading-tight">
+            {client.name}
+          </h3>
           {client.contactName && (
-            <p className="text-xs text-fg-muted truncate">
+            <p className="text-sm text-fg-muted truncate">
               {client.contactName}
               {client.contactPhone && ` · ${client.contactPhone}`}
             </p>
           )}
         </div>
-        {!client.isActive && (
-          <span className="px-2 py-0.5 rounded-pill bg-neutral-bg text-neutral-fg text-xs font-medium shrink-0">
-            Архив
-          </span>
+        {(!client.isActive || isOnboarding) && (
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            {!client.isActive && (
+              <span className="px-2 py-0.5 rounded-full bg-neutral-bg text-neutral-fg text-xs font-bold uppercase tracking-wide">
+                Архив
+              </span>
+            )}
+            {isOnboarding && (
+              <span className="px-2 py-0.5 rounded-full bg-warning-bg text-warning-fg text-xs whitespace-nowrap">
+                На онбординге
+              </span>
+            )}
+          </div>
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
-        <Stat icon={MapPin} label="Точек" value={client._count.locations} />
-        <Stat icon={Building2} label="Питаний" value={client._count.mealConfigs} />
-        <Stat icon={ClipboardList} label="Заказов" value={client._count.orders} />
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <Stat label="Заказов" value={client._count.orders} />
+        <Stat label="Точек" value={client._count.locations} />
+        <Stat label="Конфигов" value={client._count.mealConfigs} />
       </div>
 
       {client.mealConfigs.length > 0 && (
@@ -202,7 +234,7 @@ function ClientCard({ client }: { client: SerializedClient }) {
           {client.mealConfigs.slice(0, 3).map((cfg) => (
             <span
               key={cfg.id}
-              className="text-xs px-2 py-0.5 rounded-pill bg-bg text-fg-muted"
+              className="text-xs px-2 py-0.5 rounded-pill bg-surface-2 text-fg-muted"
             >
               {MEAL_TYPE_LABELS[cfg.mealType]} · {ORDER_TYPE_SHORT[cfg.orderType]}
               {cfg.fixedPortions ? ` · ${cfg.fixedPortions}` : ''}
@@ -219,13 +251,15 @@ function ClientCard({ client }: { client: SerializedClient }) {
   )
 }
 
-function Stat({ icon: Icon, label, value }: { icon: React.ComponentType<{ className?: string }>; label: string; value: number }) {
+function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center gap-1.5 text-fg-muted">
-      <Icon className="w-3.5 h-3.5 shrink-0" />
-      <span>
-        <span className="font-semibold text-fg">{value}</span> {label.toLowerCase()}
-      </span>
+    <div className="bg-surface-2 rounded-lg p-2.5 text-center">
+      <div className="font-display font-extrabold text-fg-strong tabular-nums leading-none">
+        {value}
+      </div>
+      <div className="mt-1 text-[9px] uppercase tracking-wide text-fg-subtle leading-none">
+        {label}
+      </div>
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { createClient, updateClient } from './actions'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -51,6 +51,15 @@ interface Props {
 }
 
 const NO_LEGAL_ENTITY = '__none__'
+
+// Общие классы инпутов в DNA «Bento Editorial»
+const INPUT_CLASS =
+  'w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-surface border border-border text-fg placeholder:text-fg-subtle focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors [touch-action:manipulation]'
+const TEXTAREA_CLASS = INPUT_CLASS + ' resize-none'
+const SELECT_TRIGGER_CLASS =
+  'w-full !h-auto min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border-border text-fg focus-visible:border-brand-green focus-visible:ring-1 focus-visible:ring-brand-green/30 focus-visible:outline-none transition-colors data-placeholder:text-fg-subtle [touch-action:manipulation]'
+const CARD_CLASS = 'rounded-2xl bg-surface border border-border p-6 space-y-5 shadow-card'
+const SECTION_TITLE_CLASS = 'font-display font-bold text-lg text-fg-strong'
 
 function dateToInputValue(d: Date | string | null | undefined): string {
   if (!d) return ''
@@ -188,7 +197,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
       <div className="mb-6">
         <Link
           href={client ? `/clients/${client.id}` : '/clients'}
-          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-strong transition-colors rounded-lg [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
         >
           <ArrowLeft className="w-4 h-4" />
           {client ? 'К карточке клиента' : 'Все клиенты'}
@@ -196,8 +205,8 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="rounded-2xl bg-surface border border-border p-6 space-y-5" style={{ boxShadow: 'var(--shadow-card)' }}>
-          <h2 className="text-lg font-semibold">Основное</h2>
+        <div className={CARD_CLASS}>
+          <h2 className={SECTION_TITLE_CLASS}>Основное</h2>
 
           <Field label="Название клиента *" error={error}>
             <input
@@ -205,7 +214,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -215,7 +224,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                 type="text"
                 value={contactName}
                 onChange={(e) => setContactName(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className={INPUT_CLASS}
               />
             </Field>
             <Field label="Телефон" error={phoneError}>
@@ -233,7 +242,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={contactMessenger}
               onChange={(e) => setContactMessenger(e.target.value)}
               placeholder="@username"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -243,7 +252,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Особенности клиента, договорённости"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors resize-none"
+              className={TEXTAREA_CLASS}
             />
           </Field>
         </div>
@@ -251,14 +260,13 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
         {/* === Юридические данные === */}
         <div
           className={cn(
-            'rounded-2xl bg-surface border p-6 space-y-5 transition-colors',
+            'rounded-2xl bg-surface border p-6 space-y-5 shadow-card transition-colors',
             innFilled ? 'border-warning' : 'border-border'
           )}
-          style={{ boxShadow: 'var(--shadow-card)' }}
         >
           <div>
-            <h2 className="text-lg font-semibold">Юридические данные</h2>
-            <p className="text-xs text-fg-muted mt-1">
+            <h2 className={SECTION_TITLE_CLASS}>Юридические данные</h2>
+            <p className="text-xs text-fg-subtle mt-1">
               Заполните, если клиент — юрлицо или ИП. ИНН — главное поле: при его
               заполнении остальные станут обязательными.
             </p>
@@ -271,7 +279,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={inn}
               onChange={(e) => setInn(e.target.value)}
               placeholder="7751330460 / 500305443459"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={cn(INPUT_CLASS, innFilled && 'border-warning focus:border-warning focus:ring-warning/30')}
             />
           </Field>
 
@@ -281,7 +289,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={legalName}
               onChange={(e) => setLegalName(e.target.value)}
               placeholder='Общество с ограниченной ответственностью "Ромашка"'
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -293,7 +301,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                 value={kpp}
                 onChange={(e) => setKpp(e.target.value)}
                 placeholder="775101001"
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className={INPUT_CLASS}
               />
             </Field>
           )}
@@ -305,7 +313,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={ogrn}
               onChange={(e) => setOgrn(e.target.value)}
               placeholder={isIEByInn ? '325774600667211' : '1247700624753'}
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -315,7 +323,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={legalAddress}
               onChange={(e) => setLegalAddress(e.target.value)}
               placeholder="123456, г. Москва, ул. Ленина, д. 10, оф. 5"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors resize-none"
+              className={TEXTAREA_CLASS}
             />
           </Field>
 
@@ -330,7 +338,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               }
               disabled={legalEntities.length === 0}
             >
-              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger className={SELECT_TRIGGER_CLASS}>
                 <SelectValue placeholder={legalEntities.length === 0 ? 'Нет активных юрлиц — добавьте их в Настройках' : '— Выберите наше юрлицо —'} />
               </SelectTrigger>
               <SelectContent>
@@ -346,10 +354,10 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
         </div>
 
         {/* === Банковские реквизиты клиента === */}
-        <div className="rounded-2xl bg-surface border border-border p-6 space-y-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className={CARD_CLASS}>
           <div>
-            <h2 className="text-lg font-semibold">Банковские реквизиты клиента</h2>
-            <p className="text-xs text-fg-muted mt-1">
+            <h2 className={SECTION_TITLE_CLASS}>Банковские реквизиты клиента</h2>
+            <p className="text-xs text-fg-subtle mt-1">
               Опционально. Если оставить пустым — в УПД будет прочерк. Заполнять надо все четыре поля сразу.
             </p>
           </div>
@@ -360,7 +368,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={bankName}
               onChange={(e) => setBankName(e.target.value)}
               placeholder='АО "АЛЬФА-БАНК"'
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -371,7 +379,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={bankBic}
               onChange={(e) => setBankBic(e.target.value)}
               placeholder="044525593"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -382,7 +390,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={bankAccount}
               onChange={(e) => setBankAccount(e.target.value)}
               placeholder="40702810801300049855"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
 
@@ -393,16 +401,16 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               value={bankCorrAccount}
               onChange={(e) => setBankCorrAccount(e.target.value)}
               placeholder="30101810200000000593"
-              className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+              className={INPUT_CLASS}
             />
           </Field>
         </div>
 
         {/* === Договор === */}
-        <div className="rounded-2xl bg-surface border border-border p-6 space-y-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className={CARD_CLASS}>
           <div>
-            <h2 className="text-lg font-semibold">Договор</h2>
-            <p className="text-xs text-fg-muted mt-1">
+            <h2 className={SECTION_TITLE_CLASS}>Договор</h2>
+            <p className="text-xs text-fg-subtle mt-1">
               Опционально. Если заполнить — в УПД появится строка «По договору № X от DD.MM.YYYY».
             </p>
           </div>
@@ -414,7 +422,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                 value={contractNumber}
                 onChange={(e) => setContractNumber(e.target.value)}
                 placeholder="2024-001"
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className={INPUT_CLASS}
               />
             </Field>
             <Field label="Дата договора">
@@ -422,17 +430,17 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                 type="date"
                 value={contractDate}
                 onChange={(e) => setContractDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className={INPUT_CLASS}
               />
             </Field>
           </div>
         </div>
 
         {isNew && (
-          <div className="rounded-2xl bg-surface border border-border p-6 space-y-5" style={{ boxShadow: 'var(--shadow-card)' }}>
+          <div className={CARD_CLASS}>
             <div>
-              <h2 className="text-lg font-semibold">Первая точка</h2>
-              <p className="text-xs text-fg-muted mt-1">Можно создать сразу или добавить потом из карточки клиента</p>
+              <h2 className={SECTION_TITLE_CLASS}>Первая точка</h2>
+              <p className="text-xs text-fg-subtle mt-1">Можно создать сразу или добавить потом из карточки клиента</p>
             </div>
 
             <Field label="Название точки">
@@ -441,7 +449,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                 value={locName}
                 onChange={(e) => setLocName(e.target.value)}
                 placeholder="Например, Главный офис"
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className={INPUT_CLASS}
               />
             </Field>
 
@@ -451,7 +459,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                 value={locAddress}
                 onChange={(e) => setLocAddress(e.target.value)}
                 placeholder="Улица, дом, офис"
-                className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                className={INPUT_CLASS}
               />
             </Field>
 
@@ -461,7 +469,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                   type="time"
                   value={locFrom}
                   onChange={(e) => setLocFrom(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                  className={INPUT_CLASS}
                 />
               </Field>
               <Field label="Окно до" hint="HH:MM">
@@ -469,12 +477,12 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
                   type="time"
                   value={locTo}
                   onChange={(e) => setLocTo(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors"
+                  className={INPUT_CLASS}
                 />
               </Field>
               <Field label="Упаковка">
                 <Select value={locPackaging} onValueChange={(v) => setLocPackaging(v as 'INDIVIDUAL' | 'BULK')}>
-                  <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                  <SelectTrigger className={SELECT_TRIGGER_CLASS}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -490,14 +498,14 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
         <div className="flex justify-end gap-2">
           <Link
             href={client ? `/clients/${client.id}` : '/clients'}
-            className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors"
+            className="inline-flex items-center justify-center min-h-[44px] px-5 py-2.5 rounded-xl border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-surface-2 hover:text-fg-strong transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
           >
             Отмена
           </Link>
           <button
             type="submit"
             disabled={isPending}
-            className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="inline-flex items-center justify-center min-h-[44px] px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-orange/40 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
           >
             {isPending ? 'Сохраняем…' : isNew ? 'Создать клиента' : 'Сохранить'}
           </button>
@@ -509,11 +517,16 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
 
 function Field({ label, hint, error, children }: { label: string; hint?: string; error?: string | null; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <label className="text-sm font-medium">{label}</label>
+    <div>
+      <label className="block text-fg-muted uppercase text-xs font-bold tracking-wide mb-1.5">{label}</label>
       {children}
-      {hint && !error && <p className="text-xs text-fg-subtle">{hint}</p>}
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {hint && !error && <p className="text-fg-subtle text-xs mt-1">{hint}</p>}
+      {error && (
+        <p className="text-danger-fg text-sm flex items-center gap-1 mt-1" role="alert">
+          <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+          {error}
+        </p>
+      )}
     </div>
   )
 }

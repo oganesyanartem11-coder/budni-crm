@@ -327,19 +327,19 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     >
       <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl bg-surface border border-border" style={{ boxShadow: 'var(--shadow-popover)' }}>
         <div className="flex items-center justify-between p-5 border-b border-border">
-          <h2 className="text-lg font-semibold">{isEditing ? 'Редактировать питание' : 'Новое питание'}</h2>
-          <button type="button" onClick={onClose} aria-label="Закрыть" className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors">
+          <h2 className="font-display text-lg font-bold text-fg-strong">{isEditing ? 'Редактировать питание' : 'Новое питание'}</h2>
+          <button type="button" onClick={onClose} aria-label="Закрыть" style={{ touchAction: 'manipulation' }} className="min-h-[44px] min-w-[44px] w-11 h-11 -mr-2 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">
               Точка <span className="text-danger-fg">*</span>
             </label>
             <Select value={locationId || undefined} onValueChange={(v) => setLocationId(v)}>
-              <SelectTrigger aria-required="true" className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger aria-required="true" className="w-full !h-auto min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-1 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                 <SelectValue placeholder="Выберите локацию…" />
               </SelectTrigger>
               <SelectContent>
@@ -353,12 +353,12 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
           {/* Типы питания — чекбоксы при создании, статичный текст при редактировании */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">
               Типы питания
-              {!isEditing && <span className="text-fg-subtle font-normal"> (можно несколько)</span>}
+              {!isEditing && <span className="text-fg-subtle font-normal normal-case tracking-normal"> (можно несколько)</span>}
             </label>
             {isEditing ? (
-              <div className="px-3 py-2.5 rounded-xl bg-bg/50 border border-border text-sm">
+              <div className="min-h-[44px] flex items-center px-3 py-2.5 rounded-xl bg-surface-2 border border-border text-sm">
                 {MEAL_TYPE_LABELS[config!.mealType]}
                 <span className="text-xs text-fg-subtle ml-2">(нельзя сменить при редактировании)</span>
               </div>
@@ -369,11 +369,14 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
                     key={mt}
                     type="button"
                     onClick={() => toggleType(mt)}
+                    aria-pressed={selectedTypes.includes(mt)}
+                    style={{ touchAction: 'manipulation' }}
                     className={cn(
-                      'px-3 py-2.5 rounded-xl text-sm font-medium transition-colors border',
+                      'min-h-[44px] px-3 py-2.5 rounded-xl text-sm font-medium transition-colors border',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                       selectedTypes.includes(mt)
-                        ? 'bg-accent text-accent-fg border-accent'
-                        : 'bg-bg text-fg-muted border-border hover:text-fg hover:border-border-strong'
+                        ? 'bg-brand-green text-white border-brand-green'
+                        : 'bg-surface text-fg-muted border-border hover:text-fg hover:border-border-strong'
                     )}
                   >
                     {MEAL_TYPE_LABELS[mt]}
@@ -384,9 +387,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Тип заказа</label>
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Тип заказа</label>
             <Select value={orderType} onValueChange={(v) => setOrderType(v as OrderType)}>
-              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger className="w-full !h-auto min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-1 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -398,8 +401,8 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
           {/* Поля цены и порций — по каждому выбранному типу */}
           {selectedTypes.map((mt) => (
-            <div key={mt} className="bg-bg/40 rounded-xl p-3 space-y-3">
-              <p className="text-xs uppercase tracking-wider text-fg-muted font-medium">
+            <div key={mt} className="bg-surface-2 rounded-xl p-4 mb-4 space-y-3">
+              <p className="font-display text-xs font-bold uppercase tracking-wider text-fg-muted">
                 {MEAL_TYPE_LABELS[mt]}
               </p>
               <div className="grid grid-cols-2 gap-3">
@@ -411,7 +414,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
                     step="0.01"
                     value={pricesByType[mt] ?? ''}
                     onChange={(e) => setPricesByType((p) => ({ ...p, [mt]: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:outline-none focus:border-accent transition-colors text-sm tabular-nums"
+                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm tabular-nums"
                   />
                 </div>
                 {orderType === 'FIXED' && (
@@ -422,7 +425,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
                       min="1"
                       value={portionsByType[mt] ?? ''}
                       onChange={(e) => setPortionsByType((p) => ({ ...p, [mt]: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg bg-surface border border-border focus:outline-none focus:border-accent transition-colors text-sm tabular-nums"
+                      className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm tabular-nums"
                     />
                   </div>
                 )}
@@ -431,7 +434,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           ))}
 
           {portionsMismatch && (
-            <div className="rounded-xl bg-warning-bg/50 border border-warning/20 px-3 py-2.5 flex items-start gap-2">
+            <div className="rounded-xl bg-warning-bg border border-warning/30 px-3 py-2.5 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-warning-fg shrink-0 mt-0.5" />
               <p className="text-xs text-warning-fg">
                 По правилу: количество обедов должно равняться количеству ужинов. Сейчас числа отличаются — но сохранить можно.
@@ -440,9 +443,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           )}
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Доставка</label>
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Доставка</label>
             <Select value={deliveryHorizon} onValueChange={(v) => setDeliveryHorizon(v as DeliveryHorizon)}>
-              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger className="w-full !h-auto min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-1 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -453,9 +456,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">График</label>
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">График</label>
             <Select value={scheduleType} onValueChange={(v) => setScheduleType(v as ScheduleType)}>
-              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger className="w-full !h-auto min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-1 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -471,18 +474,21 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
           {scheduleType === 'CUSTOM_DAYS' && (
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Дни недели</label>
+              <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Дни недели</label>
               <div className="flex gap-1.5">
                 {[1, 2, 3, 4, 5, 6, 7].map((d) => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => toggleCustomDay(d)}
+                    aria-pressed={customDays.includes(d)}
+                    style={{ touchAction: 'manipulation' }}
                     className={cn(
-                      'flex-1 px-2 py-2 rounded-lg text-sm font-medium transition-colors',
+                      'flex-1 min-h-[44px] px-2 py-2 rounded-lg text-sm font-medium transition-colors border',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                       customDays.includes(d)
-                        ? 'bg-accent text-accent-fg'
-                        : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
+                        ? 'bg-brand-green-deep text-white border-brand-green-deep'
+                        : 'bg-surface text-fg-muted border-border hover:text-fg hover:border-border-strong'
                     )}
                   >
                     {WEEKDAY_NAMES_SHORT[d]}
@@ -494,29 +500,29 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
           {scheduleType === 'INTERVAL' && (
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Интервал в днях</label>
-              <input type="number" min="1" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} placeholder="Например, 14" className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+              <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Интервал в днях</label>
+              <input type="number" min="1" value={intervalDays} onChange={(e) => setIntervalDays(e.target.value)} placeholder="Например, 14" className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums" />
             </div>
           )}
 
           {(scheduleType === 'ONE_TIME' || scheduleType === 'INTERVAL') && (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">Действует с</label>
-                <input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+                <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Действует с</label>
+                <input type="date" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">До</label>
-                <input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+                <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">До</label>
+                <input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums" />
               </div>
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} disabled={isPending} className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors disabled:opacity-50">
+            <button type="button" onClick={onClose} disabled={isPending} style={{ touchAction: 'manipulation' }} className="min-h-[44px] px-5 py-2.5 rounded-xl border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-surface-2 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
               Отмена
             </button>
-            <button type="submit" disabled={isPending || !locationId} className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+            <button type="submit" disabled={isPending || !locationId} style={{ touchAction: 'manipulation' }} className="min-h-[44px] px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
               {isPending ? 'Сохраняем…' : isEditing ? 'Сохранить' : (selectedTypes.length > 1 ? `Создать (${selectedTypes.length})` : 'Создать питание')}
             </button>
           </div>
@@ -531,8 +537,8 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Обновить порции в будущих заказах?</AlertDialogTitle>
-          <AlertDialogDescription>
+          <AlertDialogTitle className="font-display text-warning-fg">Обновить порции в будущих заказах?</AlertDialogTitle>
+          <AlertDialogDescription className="text-fg-muted">
             {confirmState && (
               <>
                 У этого конфига {confirmState.affectedOrders} будущих DRAFT/PENDING

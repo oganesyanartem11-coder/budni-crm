@@ -103,36 +103,36 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
     >
       <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-surface border border-border" style={{ boxShadow: 'var(--shadow-popover)' }}>
         <div className="flex items-center justify-between p-5 border-b border-border">
-          <h2 className="text-lg font-semibold">{location ? 'Редактировать точку' : 'Новая точка'}</h2>
-          <button type="button" onClick={onClose} aria-label="Закрыть" className="w-8 h-8 rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors">
+          <h2 className="font-display text-lg font-bold text-fg-strong">{location ? 'Редактировать точку' : 'Новая точка'}</h2>
+          <button type="button" onClick={onClose} aria-label="Закрыть" style={{ touchAction: 'manipulation' }} className="min-h-[44px] min-w-[44px] w-11 h-11 -mr-2 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Название точки</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Название точки</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors" />
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Адрес</label>
-            <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Адрес</label>
+            <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors" />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Окно с</label>
-              <input type="time" value={from} onChange={(e) => setFrom(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+              <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Окно с</label>
+              <input type="time" value={from} onChange={(e) => setFrom(e.target.value)} className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Окно до</label>
-              <input type="time" value={to} onChange={(e) => setTo(e.target.value)} className="w-full px-3 py-2.5 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors" />
+              <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Окно до</label>
+              <input type="time" value={to} onChange={(e) => setTo(e.target.value)} className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums" />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Упаковка</label>
+              <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Упаковка</label>
               <Select value={packaging} onValueChange={(v) => setPackaging(v as 'INDIVIDUAL' | 'BULK')}>
-                <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+                <SelectTrigger className="w-full !h-auto min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border-border focus-visible:border-brand-green focus-visible:ring-1 focus-visible:ring-brand-green/30 transition-colors data-placeholder:text-fg-muted">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -144,7 +144,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Пометки</label>
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Пометки</label>
             <p className="text-xs text-fg-subtle">Например: «Прораб — аллергия на цитрус», «Без лука»</p>
             <div className="flex gap-2">
               <input
@@ -153,9 +153,9 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag() } }}
                 placeholder="Добавить пометку и нажать Enter"
-                className="flex-1 px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+                className="flex-1 min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm"
               />
-              <button type="button" onClick={addTag} className="px-3 py-2 rounded-xl bg-bg hover:bg-border text-fg-muted hover:text-fg text-sm transition-colors">
+              <button type="button" onClick={addTag} aria-label="Добавить пометку" style={{ touchAction: 'manipulation' }} className="min-h-[44px] min-w-[44px] px-3 rounded-xl bg-surface-2 hover:bg-border text-fg-muted hover:text-fg text-sm transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
                 <Plus className="w-4 h-4" />
               </button>
             </div>
@@ -164,7 +164,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
                 {tags.map((t) => (
                   <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-pill bg-warning-bg text-warning-fg text-xs font-medium">
                     {t}
-                    <button type="button" onClick={() => removeTag(t)} aria-label={`Убрать ${t}`} className="hover:opacity-70">
+                    <button type="button" onClick={() => removeTag(t)} aria-label={`Убрать ${t}`} className="rounded-full hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       <X className="w-3 h-3" />
                     </button>
                   </span>
@@ -174,10 +174,10 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} disabled={isPending} className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors disabled:opacity-50">
+            <button type="button" onClick={onClose} disabled={isPending} style={{ touchAction: 'manipulation' }} className="min-h-[44px] px-5 py-2.5 rounded-xl border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-surface-2 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
               Отмена
             </button>
-            <button type="submit" disabled={isPending} className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50">
+            <button type="submit" disabled={isPending} style={{ touchAction: 'manipulation' }} className="min-h-[44px] px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
               {isPending ? 'Сохраняем…' : location ? 'Сохранить' : 'Создать'}
             </button>
           </div>
