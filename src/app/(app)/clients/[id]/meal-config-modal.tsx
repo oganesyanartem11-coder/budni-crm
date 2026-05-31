@@ -522,7 +522,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
             <button type="button" onClick={onClose} disabled={isPending} style={{ touchAction: 'manipulation' }} className="min-h-[44px] px-5 py-2.5 rounded-xl border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-surface-2 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
               Отмена
             </button>
-            <button type="submit" disabled={isPending || !locationId} style={{ touchAction: 'manipulation' }} className="min-h-[44px] px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
+            <button type="submit" disabled={isPending || !locationId} style={{ touchAction: 'manipulation', background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }} className="min-h-[44px] px-5 py-2.5 rounded-pill bg-primary text-primary-foreground font-medium text-sm hover:opacity-95 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1">
               {isPending ? 'Сохраняем…' : isEditing ? 'Сохранить' : (selectedTypes.length > 1 ? `Создать (${selectedTypes.length})` : 'Создать питание')}
             </button>
           </div>

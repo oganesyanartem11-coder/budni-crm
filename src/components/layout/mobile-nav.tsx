@@ -53,15 +53,17 @@ export function MobileNav({
               href={item.href}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex flex-col items-center gap-1 py-1.5 min-h-[44px] [touch-action:manipulation] transition-colors motion-reduce:transition-none',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-1',
-                active ? 'text-brand-green-deep' : 'text-fg-subtle'
+                'flex flex-col items-center gap-1 min-h-[44px] [touch-action:manipulation] transition-colors motion-reduce:transition-none',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1',
+                active
+                  ? 'bg-primary text-primary-foreground rounded-pill px-3.5 py-1.5 shadow-[var(--shadow-capsule)]'
+                  : 'text-fg-subtle px-3 py-1.5'
               )}
             >
               <span className="relative">
                 <Icon
                   className="w-5 h-5"
-                  strokeWidth={active ? 2.3 : 1.8}
+                  strokeWidth={active ? 2.2 : 1.8}
                   aria-hidden="true"
                 />
                 {item.badge && badgeValue > 0 && (
@@ -70,7 +72,7 @@ export function MobileNav({
                   </span>
                 )}
               </span>
-              <span className={cn('text-[10px]', active ? 'font-bold' : 'font-medium')}>
+              <span className={cn('text-[10px]', active ? 'font-bold text-primary-foreground' : 'font-medium text-fg-subtle')}>
                 {item.label}
               </span>
             </Link>

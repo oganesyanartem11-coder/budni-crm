@@ -136,7 +136,7 @@ export function OrdersView({
         className="relative rounded-2xl bg-surface border border-border p-3 pr-12 flex items-center gap-3 flex-wrap"
         style={{ boxShadow: 'var(--shadow-card)' }}
       >
-        <div className="flex gap-1 p-1 bg-surface-2 rounded-pill">
+        <div className="inline-flex items-center gap-0.5 p-1 bg-surface-2 rounded-pill">
           <ViewToggleButton active={view === 'list'} onClick={() => setView('list')} icon={List} label="Список" />
           <ViewToggleButton active={view === 'week'} onClick={() => setView('week')} icon={CalendarDays} label="Неделя" />
         </div>
@@ -300,8 +300,8 @@ function ViewToggleButton({
       type="button"
       onClick={onClick}
       className={cn(
-        'px-4 py-2 sm:py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-2 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30',
-        active ? 'bg-brand-green text-white' : 'text-fg-muted hover:text-fg'
+        'px-4 py-2 sm:py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-2 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        active ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]' : 'text-fg-muted hover:text-fg'
       )}
     >
       <Icon className="w-4 h-4" />

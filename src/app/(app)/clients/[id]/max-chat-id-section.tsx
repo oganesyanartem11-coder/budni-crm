@@ -143,8 +143,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
                 type="button"
                 onClick={handleGenerate}
                 disabled={isPending}
-                style={{ touchAction: 'manipulation' }}
-                className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 rounded-xl bg-brand-orange text-white text-xs font-medium hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                style={{ touchAction: 'manipulation', background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }}
+                className="inline-flex items-center gap-1.5 min-h-[44px] px-5 py-2.5 rounded-pill bg-primary text-primary-foreground text-xs font-medium hover:opacity-95 transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
               >
                 <LinkIcon className="w-3.5 h-3.5" />
                 {isPending ? 'Генерируем…' : 'Получить ссылку для онбординга'}
@@ -182,8 +182,8 @@ export function MaxChatIdSection({ clientId, currentValue, onboardingToken, onbo
               type="button"
               onClick={handleManualSave}
               disabled={isPending}
-              style={{ touchAction: 'manipulation' }}
-              className="inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2.5 rounded-xl bg-brand-orange text-white text-xs font-medium hover:bg-brand-orange-dark transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+              style={{ touchAction: 'manipulation', background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }}
+              className="inline-flex items-center gap-1.5 min-h-[44px] px-5 py-2.5 rounded-pill bg-primary text-primary-foreground text-xs font-medium hover:opacity-95 transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
             >
               <Save className="w-3.5 h-3.5" />
               Сохранить

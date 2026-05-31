@@ -12,9 +12,9 @@ import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 
 const MEAL_TYPE_COLORS: Record<string, string> = {
-  BREAKFAST: 'var(--color-brand-yellow)',
-  LUNCH: 'var(--color-brand-green)',
-  DINNER: 'var(--color-info)',
+  BREAKFAST: 'var(--color-data-amount)',
+  LUNCH: 'var(--color-data-orders)',
+  DINNER: 'var(--color-data-revenue)',
 }
 
 interface Props {
@@ -102,9 +102,9 @@ export function ClientAnalyticsTab({ analytics }: Props) {
             <Line
               type="monotone"
               dataKey="revenue"
-              stroke="var(--color-brand-green)"
+              stroke="var(--color-data-revenue)"
               strokeWidth={2.5}
-              dot={{ fill: 'var(--color-brand-green)', r: 3 }}
+              dot={{ fill: 'var(--color-data-revenue)', r: 3 }}
               activeDot={{ r: 5 }}
               isAnimationActive={!prefersReducedMotion}
             />

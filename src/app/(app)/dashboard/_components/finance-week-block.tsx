@@ -2,7 +2,7 @@
 
 import { useId, useTransition } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { TrendingUp, TrendingDown } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts'
 import type { AdminDashboardData, PeriodMargin } from '@/lib/db/queries/dashboard-stats'
 import { formatMoney } from '@/lib/utils/format'
@@ -67,7 +67,7 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
 
   return (
     <section
-      className="rounded-2xl border border-border bg-surface p-6"
+      className="rounded-3xl border border-border bg-surface p-7"
       style={{ boxShadow: 'var(--shadow-card)' }}
       aria-label="Финансы за период"
     >
@@ -81,7 +81,7 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
         <div
           role="group"
           aria-label="Период"
-          className="inline-flex items-center gap-0.5 rounded-pill border border-border bg-bg p-0.5"
+          className="inline-flex items-center gap-0.5 rounded-pill bg-surface-2 p-1"
         >
           {PERIOD_TABS.map((tab) => {
             const active = tab.key === preset
@@ -99,7 +99,7 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                   'disabled:opacity-50',
                   active
-                    ? 'bg-brand-green-deep text-surface'
+                    ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]'
                     : 'text-fg-muted hover:text-fg',
                 )}
               >
@@ -118,12 +118,8 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
         )}
       >
         {/* 1. ВЫРУЧКА — всегда видна */}
-        <div className="relative rounded-xl bg-bg/40 p-4 pl-5">
-          <span
-            className="absolute inset-y-3 left-0 w-[3px] rounded-full bg-brand-green"
-            aria-hidden="true"
-          />
-          <p className="text-[11px] font-medium uppercase tracking-widest text-fg-muted">Выручка</p>
+        <div className="rounded-2xl bg-data-revenue-bg p-5">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-data-revenue-ink">Выручка</p>
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-display text-2xl font-bold tabular-nums text-fg-strong sm:text-3xl">
               {formatMoney(data.thisPeriod.totalRevenue)}
@@ -131,11 +127,17 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
             {hasWow && (
               <span
                 className={cn(
-                  'inline-flex items-center gap-1 text-sm font-semibold tabular-nums',
-                  wowUp ? 'text-brand-green-deep' : 'text-danger-fg',
+                  'inline-flex items-center gap-1 px-3 py-1 rounded-pill text-xs font-bold tabular-nums',
+                  Math.abs(wowPct as number) === 0
+                    ? 'bg-neutral-bg text-neutral-fg'
+                    : wowUp
+                      ? 'bg-success-bg text-success-fg'
+                      : 'bg-danger-bg text-danger-fg',
                 )}
               >
-                {wowUp ? (
+                {Math.abs(wowPct as number) === 0 ? (
+                  <Minus className="h-4 w-4" aria-hidden="true" />
+                ) : wowUp ? (
                   <TrendingUp className="h-4 w-4" aria-hidden="true" />
                 ) : (
                   <TrendingDown className="h-4 w-4" aria-hidden="true" />
@@ -148,12 +150,8 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
 
         {/* 2. МАРЖА — только admin-like. MANAGER НЕ видит. */}
         {isAdminLikeUser && (
-          <div className="relative rounded-xl bg-bg/40 p-4 pl-5">
-            <span
-              className="absolute inset-y-3 left-0 w-[3px] rounded-full bg-brand-yellow"
-              aria-hidden="true"
-            />
-            <p className="text-[11px] font-medium uppercase tracking-widest text-fg-muted">Маржа</p>
+          <div className="rounded-2xl bg-data-margin-bg p-5">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-data-margin-ink">Маржа</p>
             <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3">
               {margin ? (
                 <span className="font-display text-2xl font-extrabold tabular-nums text-fg-strong">
@@ -175,8 +173,8 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
               <AreaChart data={daily} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
                 <defs>
                   <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--color-brand-green)" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="var(--color-brand-green)" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--color-data-revenue)" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="var(--color-data-revenue)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <Tooltip
@@ -194,12 +192,12 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
                 <Area
                   type="monotone"
                   dataKey="revenue"
-                  stroke="var(--color-brand-green)"
+                  stroke="var(--color-data-revenue)"
                   strokeWidth={2}
                   fill={`url(#${gradientId})`}
                   isAnimationActive={!prefersReducedMotion}
                   dot={false}
-                  activeDot={{ r: 4, fill: 'var(--color-brand-green)' }}
+                  activeDot={{ r: 4, fill: 'var(--color-data-revenue)' }}
                 />
               </AreaChart>
             </ResponsiveContainer>

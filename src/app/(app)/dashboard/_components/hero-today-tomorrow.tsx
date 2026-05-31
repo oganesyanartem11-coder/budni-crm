@@ -90,15 +90,15 @@ export function HeroTodayTomorrow({ today, tomorrow, dailyRecord }: Props) {
 
   return (
     <section
-      className="relative overflow-hidden rounded-2xl border border-border bg-surface p-5 sm:p-6"
+      className="relative overflow-hidden rounded-3xl border border-border bg-surface p-5 sm:p-8"
       style={{ boxShadow: 'var(--shadow-card)' }}
       aria-label="Сводка на сегодня и завтра"
     >
       <HeroStyles />
 
-      {/* Оранжевая progress-полоса СЛЕВА (вертикальная) */}
+      {/* Progress-полоса рабочего дня СЛЕВА (вертикальная, холодная — data-revenue) */}
       <div
-        className="pointer-events-none absolute inset-y-0 left-0 w-1.5 overflow-hidden bg-brand-orange-light"
+        className="pointer-events-none absolute inset-y-0 left-0 w-1.5 overflow-hidden bg-data-revenue-bg"
         aria-hidden="true"
       >
         <div
@@ -111,9 +111,9 @@ export function HeroTodayTomorrow({ today, tomorrow, dailyRecord }: Props) {
       </div>
 
       {/* LIVE-индикатор в правом верхнем углу */}
-      <div className="absolute right-4 top-4 inline-flex items-center gap-1.5">
-        <span className="hero-pulse-dot inline-block h-2 w-2 rounded-full bg-brand-green-accent" aria-hidden="true" />
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-brand-green-deep">LIVE</span>
+      <div className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-pill bg-success-bg px-2.5 py-1 text-success-fg">
+        <span className="hero-pulse-dot inline-block h-2 w-2 rounded-full bg-success-fg" aria-hidden="true" />
+        <span className="text-[10px] font-semibold uppercase tracking-widest">LIVE</span>
       </div>
 
       {/* F — Confetti поверх (только при milestone) */}
@@ -133,8 +133,8 @@ export function HeroTodayTomorrow({ today, tomorrow, dailyRecord }: Props) {
           {hasDelta && (
             <span
               className={cn(
-                'inline-flex items-center gap-1 rounded-pill px-2.5 py-1 text-sm font-semibold tabular-nums',
-                deltaUp ? 'bg-brand-green-light text-brand-green-deep' : 'bg-danger-bg text-danger-fg',
+                'inline-flex items-center gap-1 rounded-pill px-3 py-1 text-xs font-bold tabular-nums',
+                deltaUp ? 'bg-success-bg text-success-fg' : 'bg-danger-bg text-danger-fg',
               )}
             >
               {deltaUp ? (
@@ -191,8 +191,8 @@ function HeroStyles() {
         height: var(--hero-progress, 0%);
         background: linear-gradient(
           to top,
-          var(--color-brand-orange-dark),
-          var(--color-brand-orange)
+          var(--color-data-revenue-ink),
+          var(--color-data-revenue)
         );
         transition: height 800ms cubic-bezier(0.22, 1, 0.36, 1);
       }
@@ -226,8 +226,8 @@ function HeroStyles() {
         animation: hero-breathe 2.4s ease-in-out infinite;
       }
       @keyframes hero-breathe {
-        0%, 100% { text-shadow: 0 0 0 rgba(232, 93, 42, 0); }
-        50% { text-shadow: 0 2px 22px rgba(232, 93, 42, 0.22); }
+        0%, 100% { text-shadow: 0 0 0 rgba(16, 20, 26, 0); }
+        50% { text-shadow: 0 2px 22px rgba(16, 20, 26, 0.18); }
       }
 
       .hero-confetti-piece {

@@ -29,8 +29,8 @@ interface SidebarProps {
 /**
  * Десктоп-Sidebar (Волна 2 — вариант A «Bento Editorial»).
  *
- * Collapsed icon-only 72px → hover-expand 232px. Тёмно-зелёный градиент
- * (from-sidebar → to-sidebar-bg-end). Раскрытие управляется CSS `group`-hover
+ * Collapsed icon-only 72px → hover-expand 232px. Светлый фон (bg-sidebar,
+ * наследует холодный --color-bg). Раскрытие управляется CSS `group`-hover
  * на <aside>: ширина анимируется transition-[width], а лейблы/заголовки групп
  * проявляются через opacity 0→100 на group-hover. Все transition отключаются
  * при prefers-reduced-motion (motion-reduce:transition-none).
@@ -58,7 +58,7 @@ export function Sidebar({
       className={cn(
         'no-print group hidden lg:flex shrink-0 h-screen sticky top-0 flex-col overflow-x-hidden',
         'w-[72px] hover:w-[232px] transition-[width] duration-200 ease-out motion-reduce:transition-none',
-        'border-r border-sidebar-border bg-linear-to-b from-sidebar to-sidebar-bg-end text-sidebar-foreground'
+        'border-r border-sidebar-border bg-sidebar text-sidebar-foreground'
       )}
     >
       {/* Лого + wordmark «Будни / КАК ДОМА» (подзаголовок проявляется на hover) */}
@@ -167,12 +167,12 @@ function NavLinkRow({
       href={item.href}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'relative flex items-center gap-3 min-h-10 px-3 py-2.5 rounded-[9px] text-sm',
+        'relative flex items-center gap-3 min-h-10 px-3 py-2.5 text-sm',
         'transition-colors motion-reduce:transition-none',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2',
         active
-          ? 'bg-brand-green text-sidebar-foreground font-medium'
-          : 'text-sidebar-muted hover:bg-sidebar-accent'
+          ? 'bg-primary text-primary-foreground font-medium shadow-[var(--shadow-capsule)] rounded-pill'
+          : 'text-sidebar-muted hover:bg-sidebar-accent rounded-[9px]'
       )}
     >
       <span className="relative shrink-0">
@@ -280,12 +280,12 @@ function NavExpandableRow({
         onClick={toggle}
         aria-expanded={expanded}
         className={cn(
-          'w-full relative flex items-center gap-3 min-h-10 px-3 py-2.5 rounded-[9px] text-sm',
+          'w-full relative flex items-center gap-3 min-h-10 px-3 py-2.5 text-sm',
           'transition-colors motion-reduce:transition-none',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2',
           parentActive
-            ? 'bg-brand-green text-sidebar-foreground font-medium'
-            : 'text-sidebar-muted hover:bg-sidebar-accent'
+            ? 'bg-primary text-primary-foreground font-medium shadow-[var(--shadow-capsule)] rounded-pill'
+            : 'text-sidebar-muted hover:bg-sidebar-accent rounded-[9px]'
         )}
       >
         <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={parentActive ? 2 : 1.7} />
@@ -317,12 +317,12 @@ function NavExpandableRow({
                 href={child.href}
                 aria-current={childActive ? 'page' : undefined}
                 className={cn(
-                  'relative flex items-center gap-3 min-h-10 px-3 py-1.5 rounded-[9px] text-sm',
+                  'relative flex items-center gap-3 min-h-10 px-3 py-1.5 text-sm',
                   'transition-colors motion-reduce:transition-none',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/40 focus-visible:ring-offset-2',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2',
                   childActive
-                    ? 'bg-brand-green text-sidebar-foreground font-medium'
-                    : 'text-sidebar-muted hover:bg-sidebar-accent'
+                    ? 'bg-primary text-primary-foreground font-medium shadow-[var(--shadow-capsule)] rounded-pill'
+                    : 'text-sidebar-muted hover:bg-sidebar-accent rounded-[9px]'
                 )}
               >
                 <span className="relative shrink-0">

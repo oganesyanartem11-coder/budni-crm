@@ -7,32 +7,32 @@
 @theme inline {
   /* === ШРИФТЫ === */
   --font-sans: var(--font-inter);
-  --font-display: var(--font-manrope);
+  --font-display: var(--font-onest);
   --font-mono: ui-monospace, SFMono-Regular, Monaco, Consolas, monospace;
 
   /* === SURFACE — кремовое семейство из стен домика лого === */
-  --color-bg: #F8F4E8;              /* основной фон страницы */
-  --color-surface: #FFFEF8;         /* карточки (тёплый белый) */
-  --color-surface-2: #F2EBD8;       /* приглушённые подложки, hover */
+  --color-bg: #ECEDEE;              /* основной фон страницы */
+  --color-surface: #FFFFFF;         /* карточки (тёплый белый) */
+  --color-surface-2: #F5F6F7;       /* приглушённые подложки, hover */
   --color-surface-pure: #FFFFFF;    /* чистый белый — для редких случаев (модалки) */
 
   /* === INK — тёплый графит, не холодный чёрный === */
-  --color-fg: #1F1F1A;
-  --color-fg-strong: #0A0A09;
-  --color-fg-muted: #4F4E45;
-  --color-fg-subtle: #7A7869;
-  --color-fg-faint: #9E9C8C;
+  --color-fg: #10141A;
+  --color-fg-strong: #0A0A0A;
+  --color-fg-muted: #52525B;
+  --color-fg-subtle: #71717A;
+  --color-fg-faint: #A1A1AA;
 
   /* === BORDERS === */
-  --color-border: #DCD6BE;
-  --color-border-strong: #C2BFAC;
-  --color-border-subtle: #E8E2C7;
+  --color-border: #E4E4E7;
+  --color-border-strong: #D4D4D8;
+  --color-border-subtle: #F1F1F2;
 
   /* === БРЕНД — ЗЕЛЁНЫЙ (главный фирменный, из листвы лого) === */
-  --color-brand-green: #2E7D32;
-  --color-brand-green-deep: #1F5F2A;     /* sidebar background */
-  --color-brand-green-accent: #3D9F44;   /* live pulse, success */
-  --color-brand-green-light: #E5EFE6;    /* fills, tints */
+  --color-brand-green: #1F2530;
+  --color-brand-green-deep: #10141A;     /* sidebar background */
+  --color-brand-green-accent: #3F3F46;   /* live pulse, success */
+  --color-brand-green-light: #F5F6F7;    /* fills, tints */
 
   /* === БРЕНД — ТЕРРАКОТОВЫЙ (КАК ДОМА, primary CTA) === */
   --color-brand-orange: #E85D2A;
@@ -43,48 +43,64 @@
   --color-brand-yellow: #E5A227;
   --color-brand-yellow-light: #FCEDC9;
 
-  /* === DEPRECATED ALIAS — старый brand, не удалять до финальной волны === */
-  --color-brand: #C97B3F;
-  --color-brand-fg: #FFFFFF;
+  /* === PRIMARY — чёрная капсула CTA === */
+  --color-primary: #10141A;
+  --color-primary-fg: #FFFFFF;
+
+  /* === DATA — категориальные пастельные токены === */
+  --color-data-revenue: #83A2DB;
+  --color-data-revenue-bg: #D6E2F2;
+  --color-data-revenue-ink: #3A5897;
+  --color-data-margin: #A89AC9;
+  --color-data-margin-bg: #E5DEF2;
+  --color-data-margin-ink: #5D4F87;
+  --color-data-orders: #94C9A9;
+  --color-data-orders-bg: #DCEEE2;
+  --color-data-orders-ink: #36694B;
+  --color-data-amount: #E5C067;
+  --color-data-amount-bg: #F5E8C2;
+  --color-data-amount-ink: #7A6020;
 
   /* === SEMANTIC — статусы === */
-  --color-success: #2E7D32;
-  --color-success-bg: #E5EFE6;
-  --color-success-fg: #1F5F2A;
+  --color-success: #5A9070;
+  --color-success-bg: #DCEEE2;
+  --color-success-fg: #3F7A56;
 
-  --color-warning: #A67A1F;
-  --color-warning-bg: #FCEDC9;
-  --color-warning-fg: #6B4F17;
+  --color-warning: #C8A050;
+  --color-warning-bg: #F5E8C2;
+  --color-warning-fg: #7A6020;
 
-  --color-danger: #B73420;
-  --color-danger-bg: #F5DDD7;
-  --color-danger-fg: #8B1F0F;
+  --color-danger: #B86060;
+  --color-danger-bg: #F2D8D8;
+  --color-danger-fg: #8B3838;
 
-  --color-info: #3D6172;
-  --color-info-bg: #DDE7EC;
-  --color-info-fg: #2A4350;
+  --color-info: #83A2DB;
+  --color-info-bg: #D6E2F2;
+  --color-info-fg: #3A5897;
 
-  --color-neutral: #7A7869;
-  --color-neutral-bg: #F2EBD8;
-  --color-neutral-fg: #4F4E45;
+  --color-neutral: #71717A;
+  --color-neutral-bg: #F5F6F7;
+  --color-neutral-fg: #52525B;
 
   /* === ACCENT (тёмный контраст для основных кнопок/табов/бейджей) === */
   --color-accent: #1F1F1A;
   --color-accent-fg: #FFFEF8;
 
   /* === RADII === */
-  --radius-sm: 6px;
-  --radius-md: 9px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-3xl: 40px;
   --radius-pill: 999px;
 
   /* === SHADOWS === */
-  --shadow-card: 0 1px 2px rgba(31, 31, 26, 0.04);
-  --shadow-card-hover: 0 1px 3px rgba(31, 31, 26, 0.04), 0 8px 24px rgba(31, 31, 26, 0.05);
-  --shadow-popover: 0 4px 12px rgba(31, 31, 26, 0.08), 0 16px 48px rgba(31, 31, 26, 0.10);
-  --shadow-brand: 0 1px 2px rgba(232, 93, 42, 0.20), 0 4px 12px rgba(232, 93, 42, 0.20);
+  --shadow-card: 0 1px 2px rgba(15,23,42,0.04), 0 4px 16px rgba(15,23,42,0.03);
+  --shadow-card-hover: 0 2px 4px rgba(15,23,42,0.06), 0 8px 24px rgba(15,23,42,0.05);
+  --shadow-float: 0 4px 14px rgba(15,23,42,0.06);
+  --shadow-capsule: 0 8px 24px rgba(16,20,26,0.20), inset 0 1px 0 rgba(255,255,255,0.08);
+  --shadow-popover: 0 8px 30px rgba(15,23,42,0.10);
 
   /* === LAYOUT === */
   --container-page: 1280px;
@@ -113,8 +129,10 @@
   --color-popover: var(--color-surface);
   --color-popover-foreground: var(--color-fg);
 
-  --color-primary: var(--color-brand-green-deep);
-  --color-primary-foreground: var(--color-surface);
+  /* --color-primary уже задан в первом @theme блоке (#10141A) — НЕ переопределяем
+     здесь как var(--color-primary): это циклическая ссылка → bg-primary становится
+     transparent (ломает все активные капсулы). Мост задаёт только foreground. */
+  --color-primary-foreground: var(--color-primary-fg);
 
   --color-secondary: var(--color-surface-2);
   --color-secondary-foreground: var(--color-fg);
@@ -131,26 +149,25 @@
   --color-destructive-foreground: var(--color-surface);
 
   --color-input: var(--color-border);
-  --color-ring: var(--color-ring-green);
+  --color-ring: var(--color-primary);
 
-  /* Sidebar shadcn-токены — указывают на тёмно-зелёный sidebar */
-  --color-sidebar: var(--color-brand-green-deep);
-  --color-sidebar-foreground: #F5F0DC;
-  --color-sidebar-primary: var(--color-brand-green-accent);
-  --color-sidebar-primary-foreground: #F5F0DC;
-  --color-sidebar-accent: rgba(255, 252, 230, 0.06);
-  --color-sidebar-accent-foreground: #F5F0DC;
-  --color-sidebar-border: rgba(255, 252, 230, 0.08);
-  --color-sidebar-ring: var(--color-brand-green-accent);
-  /* Волна 2 (Subagent B): muted-цвет неактивных пунктов + низ градиента sidebar */
-  --color-sidebar-muted: #A6BFA4;
-  --color-sidebar-bg-end: #143818;
+  /* Sidebar shadcn-токены — светлый sidebar */
+  --color-sidebar: var(--color-bg);
+  --color-sidebar-foreground: var(--color-fg);
+  --color-sidebar-primary: var(--color-primary);
+  --color-sidebar-primary-foreground: #FFFFFF;
+  --color-sidebar-accent: var(--color-surface-2);
+  --color-sidebar-accent-foreground: var(--color-fg);
+  --color-sidebar-border: var(--color-border);
+  --color-sidebar-ring: var(--color-primary);
+  /* Волна 2 (Subagent B): muted-цвет неактивных пунктов */
+  --color-sidebar-muted: var(--color-fg-subtle);
 
   /* Charts — recharts палитра */
-  --color-chart-1: var(--color-brand-green);
-  --color-chart-2: var(--color-brand-orange);
-  --color-chart-3: var(--color-brand-yellow);
-  --color-chart-4: var(--color-info);
+  --color-chart-1: var(--color-data-revenue);
+  --color-chart-2: var(--color-data-orders);
+  --color-chart-3: var(--color-data-amount);
+  --color-chart-4: var(--color-data-margin);
   --color-chart-5: var(--color-fg-muted);
 }
 

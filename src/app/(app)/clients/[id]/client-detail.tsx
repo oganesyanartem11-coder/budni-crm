@@ -146,7 +146,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
       <div
         role="tablist"
         aria-label="Разделы клиента"
-        className="inline-flex w-full lg:w-auto bg-surface-2 rounded-xl p-1 gap-1 overflow-x-auto scrollbar-none"
+        className="inline-flex w-full lg:w-auto bg-surface rounded-pill p-1 gap-0.5 overflow-x-auto scrollbar-none shadow-[var(--shadow-card)]"
       >
         <TabButton active={tab === 'locations'} onClick={() => setTab('locations')} icon={MapPin} label="Точки" count={activeLocations.length} />
         <TabButton active={tab === 'configs'} onClick={() => setTab('configs')} icon={Settings} label="Питание" count={configsCount} />
@@ -175,7 +175,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
       )}
 
       {tab === 'orders' && (
-        <div className="rounded-2xl bg-surface border border-border p-8 text-center shadow-card">
+        <div className="rounded-3xl bg-surface border border-border p-8 text-center shadow-card">
           <ClipboardList className="w-10 h-10 mx-auto text-fg-subtle mb-3" />
           <p className="font-medium text-fg mb-1">{formatOrders(client._count.orders)} в истории</p>
           <p className="text-sm text-fg-muted mb-5">
@@ -183,7 +183,8 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
           </p>
           <Link
             href={`/orders?clientId=${client.id}`}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]"
+            style={{ background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-pill bg-primary text-primary-foreground font-medium text-sm hover:opacity-95 transition-opacity min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <ClipboardList className="w-4 h-4" />
             Открыть все заказы
@@ -234,7 +235,7 @@ function ClientHero({ client, analytics }: { client: SerializedClientDetail; ana
   if (client.contactMessenger) contactBits.push({ icon: AtSign, text: client.contactMessenger })
 
   return (
-    <div className="rounded-2xl bg-surface border border-border p-6 shadow-card">
+    <div className="rounded-3xl bg-surface border border-border p-6 shadow-card">
       {/* Заголовок + CTA */}
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div className="min-w-0">
@@ -266,7 +267,7 @@ function ClientHero({ client, analytics }: { client: SerializedClientDetail; ana
               URL из maxChatId не выдумываем. См. todosForArtem. */}
           <Link
             href={`/clients/${client.id}/edit`}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-surface border border-border text-fg font-medium text-sm hover:bg-surface-2 transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-surface border border-border text-fg font-medium text-sm hover:bg-surface-2 transition-colors min-h-[44px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             <Edit2 className="w-4 h-4" />
             Редактировать
@@ -284,9 +285,9 @@ function ClientHero({ client, analytics }: { client: SerializedClientDetail; ana
 
       {/* Мини-метрики */}
       <div className="grid grid-cols-3 gap-3 mt-5">
-        <HeroStat value={analytics.totalOrders.toLocaleString('ru-RU')} label="заказов" />
-        <HeroStat value={analytics.totalPortions.toLocaleString('ru-RU')} label="порций" />
-        <HeroStat value={formatMoney(analytics.averageOrder)} label="средний чек" />
+        <HeroStat value={analytics.totalOrders.toLocaleString('ru-RU')} label="заказов" tone="revenue" />
+        <HeroStat value={analytics.totalPortions.toLocaleString('ru-RU')} label="порций" tone="orders" />
+        <HeroStat value={formatMoney(analytics.averageOrder)} label="средний чек" tone="amount" />
       </div>
 
       {/* Бейджи */}
@@ -301,11 +302,17 @@ function ClientHero({ client, analytics }: { client: SerializedClientDetail; ana
   )
 }
 
-function HeroStat({ value, label }: { value: string; label: string }) {
+function HeroStat({ value, label, tone }: { value: string; label: string; tone: 'revenue' | 'orders' | 'amount' }) {
+  const toneClasses: Record<typeof tone, { bg: string; ink: string }> = {
+    revenue: { bg: 'bg-data-revenue-bg', ink: 'text-data-revenue-ink' },
+    orders: { bg: 'bg-data-orders-bg', ink: 'text-data-orders-ink' },
+    amount: { bg: 'bg-data-amount-bg', ink: 'text-data-amount-ink' },
+  }
+  const t = toneClasses[tone]
   return (
-    <div className="bg-surface-2 rounded-xl p-3">
+    <div className={cn('rounded-2xl p-4', t.bg)}>
       <p className="font-display font-bold text-xl text-fg-strong tabular-nums leading-tight">{value}</p>
-      <p className="text-xs text-fg-muted mt-0.5">{label}</p>
+      <p className={cn('text-xs mt-0.5', t.ink)}>{label}</p>
     </div>
   )
 }
@@ -319,14 +326,17 @@ function TabButton({ active, onClick, icon: Icon, label, count }: { active: bool
       aria-pressed={active}
       aria-selected={active}
       className={cn(
-        'shrink-0 flex-1 lg:flex-none px-4 py-2.5 rounded-lg min-h-[44px] [touch-action:manipulation] text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring-orange)]',
-        active ? 'bg-surface shadow-card text-fg' : 'text-fg-muted hover:text-fg'
+        'shrink-0 flex-1 lg:flex-none px-4 py-2.5 rounded-pill min-h-[44px] [touch-action:manipulation] text-sm font-medium transition-colors flex items-center justify-center gap-2 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        active ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]' : 'text-fg-muted hover:text-fg'
       )}
     >
       <Icon className="w-4 h-4" />
       {label}
       {count !== undefined && (
-        <span className="bg-brand-orange text-white px-1.5 py-0.5 rounded-full text-xs font-bold tabular-nums leading-none">
+        <span className={cn(
+          'px-1.5 py-0.5 rounded-pill text-xs font-bold tabular-nums leading-none',
+          active ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-data-revenue-bg text-data-revenue-ink'
+        )}>
           {count}
         </span>
       )}
@@ -360,7 +370,7 @@ function LocationsTab({
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <button type="button" onClick={onAdd} className="px-4 py-2 min-h-[44px] rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors flex items-center justify-center gap-2 [touch-action:manipulation]">
+        <button type="button" onClick={onAdd} style={{ background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }} className="px-5 py-2.5 min-h-[44px] rounded-pill bg-primary text-primary-foreground font-medium text-sm hover:opacity-95 transition-opacity flex items-center justify-center gap-2 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <Plus className="w-4 h-4" /> Добавить точку
         </button>
       </div>
@@ -480,7 +490,7 @@ function ConfigsTab({
         <p className="text-sm text-fg-muted">
           Питание определяет, что и куда поставлять клиенту: тип, график, цену.
         </p>
-        <button type="button" onClick={onAdd} disabled={locations.length === 0} className="px-4 py-2 min-h-[44px] rounded-xl bg-brand-orange text-white font-medium text-sm hover:bg-brand-orange-dark transition-colors flex items-center justify-center gap-2 [touch-action:manipulation] disabled:opacity-50">
+        <button type="button" onClick={onAdd} disabled={locations.length === 0} style={{ background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }} className="px-5 py-2.5 min-h-[44px] rounded-pill bg-primary text-primary-foreground font-medium text-sm hover:opacity-95 transition-opacity flex items-center justify-center gap-2 [touch-action:manipulation] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <Plus className="w-4 h-4" /> Добавить питание
         </button>
       </div>

@@ -6,9 +6,9 @@ interface LogoProps {
   size?: 'sm' | 'md' | 'lg'
   className?: string
   /**
-   * Вариант под тёмный фон (тёмно-зелёный sidebar Волны 2). При true:
-   *  - текст «Будни» → var(--color-sidebar-foreground) (#F5F0DC), иначе невидим на тёмном;
-   *  - dot → var(--color-brand-orange) (#E85D2A) — контрастный акцент.
+   * Вариант для sidebar (Color Rebrand v16 — светлый sidebar #ECEDEE). При true:
+   *  - dot → var(--color-brand-orange) (#E85D2A) — терракотовый акцент (остаётся);
+   *  - текст «Будни» → var(--color-fg), читается на светлом фоне sidebar.
    * По умолчанию (false) — поведение для светлого фона не меняется.
    */
   onDark?: boolean
@@ -29,7 +29,7 @@ export function Logo({ href = '/dashboard', size = 'md', className, onDark = fal
         className={cn(s.dot, 'rounded-full shrink-0', onDark ? 'bg-brand-orange' : 'bg-brand')}
         aria-hidden
       />
-      <span className={cn(s.text, 'tracking-tight', onDark ? 'text-sidebar-foreground' : 'text-fg')}>
+      <span className={cn(s.text, 'tracking-tight', onDark ? 'text-fg' : 'text-fg')}>
         Будни
       </span>
     </span>

@@ -164,7 +164,7 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
       <div
         role="group"
         aria-label="Вид производства"
-        className="inline-flex w-fit items-center gap-0.5 rounded-pill border border-border bg-bg p-0.5"
+        className="inline-flex w-fit items-center gap-0.5 rounded-pill bg-surface-2 p-1"
       >
         <TabButton
           active={tab === 'dishes'}
@@ -341,8 +341,8 @@ function TabButton({
       style={{ touchAction: 'manipulation' }}
       className={cn(
         'flex min-h-[44px] items-center gap-2 rounded-pill px-4 text-sm font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-        active ? 'bg-brand-green-deep text-surface' : 'text-fg-muted hover:text-fg'
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        active ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]' : 'text-fg-muted hover:text-fg'
       )}
     >
       <Icon className="h-4 w-4" aria-hidden="true" />

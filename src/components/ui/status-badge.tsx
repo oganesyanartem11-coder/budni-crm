@@ -75,3 +75,46 @@ export function DeliveryStatusBadge({ status, className }: { status: DeliverySta
     </StatusBadge>
   )
 }
+
+type DotBadgeVariant =
+  | 'revenue'
+  | 'margin'
+  | 'orders'
+  | 'amount'
+  | 'primary'
+  | 'success'
+  | 'warning'
+  | 'danger'
+  | 'neutral'
+
+interface DotBadgeProps {
+  count: number | string
+  variant: DotBadgeVariant
+  className?: string
+}
+
+const dotBadgeStyles: Record<DotBadgeVariant, string> = {
+  revenue: 'bg-data-revenue-bg text-data-revenue-ink',
+  margin: 'bg-data-margin-bg text-data-margin-ink',
+  orders: 'bg-data-orders-bg text-data-orders-ink',
+  amount: 'bg-data-amount-bg text-data-amount-ink',
+  primary: 'bg-primary text-primary-foreground',
+  success: 'bg-success-bg text-success-fg',
+  warning: 'bg-warning-bg text-warning-fg',
+  danger: 'bg-danger-bg text-danger-fg',
+  neutral: 'bg-neutral-bg text-neutral-fg',
+}
+
+export function DotBadge({ count, variant, className }: DotBadgeProps) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center justify-center rounded-pill min-w-[20px] h-[20px] px-1.5 text-[10px] font-bold tabular-nums',
+        dotBadgeStyles[variant],
+        className
+      )}
+    >
+      {count}
+    </span>
+  )
+}
