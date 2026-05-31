@@ -15,7 +15,7 @@ export default function LoginPage() {
           <Logo size="lg" href={undefined} />
         </div>
 
-        <div className="rounded-2xl bg-surface p-8 border border-border" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-3xl bg-surface p-8 border border-border" style={{ boxShadow: 'var(--shadow-card)' }}>
           <div className="space-y-1 mb-6 text-center">
             <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
             <p className="text-sm text-fg-muted">Введите ваш PIN-код</p>
