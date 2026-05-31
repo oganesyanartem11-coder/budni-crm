@@ -63,7 +63,7 @@ export function Sidebar({
     >
       {/* Лого + wordmark «Будни / КАК ДОМА» (подзаголовок проявляется на hover) */}
       <div className="flex items-center px-3 h-16 shrink-0 overflow-hidden">
-        <Logo size="md" href={HOME_BY_ROLE[userRole]} onDark />
+        <Logo size="md" href={HOME_BY_ROLE[userRole]} collapsible />
         <span
           className={cn(
             'ml-2 text-[10px] uppercase tracking-wider font-semibold text-sidebar-muted whitespace-nowrap',

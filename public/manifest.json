@@ -1,0 +1,30 @@
+{
+  "name": "Будни. Как дома",
+  "short_name": "Будни",
+  "description": "CRM для B2B-обедов",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ECEDEE",
+  "theme_color": "#10141A",
+  "icons": [
+    {
+      "src": "/budni-logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/budni-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/budni-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

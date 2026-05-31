@@ -44,7 +44,8 @@ export const config = {
      * - _next/static (статика Next.js)
      * - _next/image (оптимизация изображений)
      * - favicon, *.svg, *.png и т.п.
+     * - manifest.json (PWA-манифест должен быть публичным — Bug 7.24-7)
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|manifest.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }

@@ -61,6 +61,9 @@
   --color-data-amount-bg: #F5E8C2;
   --color-data-amount-ink: #7A6020;
 
+  /* Мятный бренд-акцент (точка в логотипе). Совпадает с data-orders. */
+  --color-mint: #94C9A9;
+
   /* === SEMANTIC — статусы === */
   --color-success: #5A9070;
   --color-success-bg: #DCEEE2;

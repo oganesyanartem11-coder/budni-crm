@@ -1,9 +1,10 @@
 import Link from 'next/link'
-import { Bell } from 'lucide-react'
-import { format as fnsFormat } from 'date-fns'
-import { ru } from 'date-fns/locale'
 import { getGreeting } from '@/lib/utils/greeting'
-import { formatTime } from '@/lib/utils/format'
+import {
+  formatMskWeekdayShort,
+  formatMskDayMonth,
+  formatMskTime,
+} from '@/lib/utils/format'
 
 interface GreetingRowProps {
   userName: string
@@ -11,20 +12,24 @@ interface GreetingRowProps {
 }
 
 /**
- * Шапка дашборда: слева дата + приветствие, справа колокол «Уведомления»
- * со ссылкой в /inbox и pulse-точкой при непрочитанных.
+ * Шапка дашборда: слева дата + приветствие, справа — аватар профиля
+ * (кружок с инициалом) со ссылкой в /more.
  *
  * Server component — приветствие/дата считаются на сервере (страница должна
- * быть force-dynamic, иначе значение застынет на SSG). Pulse — чистый CSS
- * (animate-pulse), 'use client' не нужен.
+ * быть force-dynamic, иначе значение застынет на SSG).
  *
- * Дату собираем из date-fns ru напрямую (а не formatDateLong) — нужен формат
- * «чт · 7 мая» без года и запятой после дня недели; uppercase даёт «ЧТ · 7 МАЯ».
+ * Дата/время — через MSK-форматтеры (formatMsk*), НЕ через date-fns: на Vercel
+ * сервер в UTC, date-fns форматировал бы время на −3ч (Bug 7.24-3). uppercase
+ * даёт «ВС · 31 МАЯ · 21:39» из CSS-класса.
+ *
+ * Bug 7.24-1: раньше тут был колокол со ссылкой в /inbox — бесполезен (inbox
+ * уже в навигации). Заменён на аватар профиля → /more. Непрочитанные показываем
+ * маленькой точкой на аватаре.
  */
 export function GreetingRow({ userName, hasUnreadInbox }: GreetingRowProps) {
   const now = new Date()
-  const dayAndDate = fnsFormat(now, 'EEEEEE · d MMMM', { locale: ru })
-  const caption = `${dayAndDate} · ${formatTime(now)}`
+  const caption = `${formatMskWeekdayShort(now)} · ${formatMskDayMonth(now)} · ${formatMskTime(now)}`
+  const initial = userName.trim()[0]?.toUpperCase() ?? 'А'
 
   return (
     <div className="flex items-center justify-between gap-3">
@@ -38,16 +43,14 @@ export function GreetingRow({ userName, hasUnreadInbox }: GreetingRowProps) {
       </div>
 
       <Link
-        href="/inbox"
-        aria-label={
-          hasUnreadInbox ? 'Уведомления, есть непрочитанные' : 'Уведомления'
-        }
-        className="relative flex size-9 min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-fg-muted outline-none transition-colors [touch-action:manipulation] hover:text-fg focus-visible:ring-2 focus-visible:ring-ring/60"
+        href="/more"
+        aria-label={hasUnreadInbox ? 'Профиль, есть непрочитанные' : 'Профиль'}
+        className="relative flex size-11 min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full bg-data-revenue-bg text-data-revenue-ink text-base font-bold outline-none transition-opacity [touch-action:manipulation] hover:opacity-90 focus-visible:ring-2 focus-visible:ring-primary/40"
       >
-        <Bell className="size-[15px]" strokeWidth={2} aria-hidden="true" />
+        {initial}
         {hasUnreadInbox && (
           <span
-            className="absolute right-2.5 top-2.5 size-2 animate-pulse rounded-full bg-brand-orange motion-reduce:animate-none"
+            className="absolute right-0 top-0 size-2.5 rounded-full bg-brand-orange ring-2 ring-bg"
             aria-hidden="true"
           />
         )}

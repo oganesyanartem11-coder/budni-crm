@@ -189,3 +189,52 @@ export function formatDateTimeMsk(date: Date | string | null | undefined): strin
   if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })
 }
+
+/* ─────────────────────────────────────────────────────────────
+   MSK wall-clock форматтеры для UI в server components. date-fns
+   (formatTime/formatDateShort/…) форматирует в TZ сервера = UTC на
+   Vercel → отображаемое время «уезжает» на 3ч. Эти хелперы всегда
+   считают в Europe/Moscow через Intl. Для client components браузер
+   Артёма уже в MSK, но эти безопасны и там.
+   ───────────────────────────────────────────────────────────── */
+
+/** Время «ЧЧ:ММ» в МСК. По умолчанию — текущий момент. */
+export function formatMskTime(date: Date | string = new Date()): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d)
+}
+
+/** День недели коротко в МСК: «вс», «пн», … (uppercase делает CSS). */
+export function formatMskWeekdayShort(date: Date | string = new Date()): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    weekday: 'short',
+  })
+    .format(d)
+    .replace(/\.$/, '')
+}
+
+/** Длинный день недели в МСК: «воскресенье» (для «vs прошлая …»). */
+export function formatMskWeekdayLong(date: Date | string = new Date()): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    weekday: 'long',
+  }).format(d)
+}
+
+/** «31 мая» (день + месяц прописью) в МСК. */
+export function formatMskDayMonth(date: Date | string = new Date()): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    day: 'numeric',
+    month: 'long',
+  }).format(d)
+}

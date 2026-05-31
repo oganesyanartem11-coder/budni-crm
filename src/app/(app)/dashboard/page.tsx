@@ -18,11 +18,32 @@ import { GreetingRow } from './_components/greeting-row'
 import { HeroTodayTomorrow } from './_components/hero-today-tomorrow'
 import { ActionRequiredBlock } from './_components/action-required-block'
 import { FinanceWeekBlock } from './_components/finance-week-block'
+import { CutOffBlock } from './_components/cutoff-block'
 
-// Пресеты финансового блока дашборда. Подмножество ReportPreset; квартал
-// считается вручную (см. ниже), остальные — через getPresetRange.
-type FinancePreset = 'this_week' | 'this_month' | 'this_quarter'
-const FINANCE_PRESETS: FinancePreset[] = ['this_week', 'this_month', 'this_quarter']
+// Пресеты финансового блока дашборда. Сегмент Нед/Мес/Кв = первые три; остальные
+// (Bug 7.24-4 date-range picker) + custom приходят из ?period= и считаются через
+// getPresetRange. Квартал считается вручную (frozen-контракт), остальное — getPresetRange.
+type FinancePreset =
+  | 'this_week'
+  | 'this_month'
+  | 'this_quarter'
+  | 'yesterday'
+  | 'last_week'
+  | 'last_month'
+  | 'last_quarter'
+  | 'this_year'
+  | 'custom'
+const FINANCE_PRESETS: FinancePreset[] = [
+  'this_week',
+  'this_month',
+  'this_quarter',
+  'yesterday',
+  'last_week',
+  'last_month',
+  'last_quarter',
+  'this_year',
+  'custom',
+]
 
 // force-dynamic: hero/приветствие зависят от текущего момента (сегодня/завтра).
 export const dynamic = 'force-dynamic'
@@ -38,7 +59,11 @@ interface PageProps {
  * контракт по кварталу, поэтому начало календарного квартала + конец сегодня
  * вычисляем тут Date-математикой.
  */
-function resolveFinanceRange(preset: FinancePreset): { from: Date; to: Date } {
+function resolveFinanceRange(
+  preset: FinancePreset,
+  customFrom?: string,
+  customTo?: string,
+): { from: Date; to: Date } {
   if (preset === 'this_quarter') {
     const now = new Date()
     const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3
@@ -47,6 +72,18 @@ function resolveFinanceRange(preset: FinancePreset): { from: Date; to: Date } {
     to.setHours(23, 59, 59, 999)
     return { from, to }
   }
+  if (preset === 'custom') {
+    // Невалидный/неполный custom → безопасный фолбэк на текущую неделю.
+    const fromOk = customFrom && !Number.isNaN(new Date(customFrom).getTime())
+    const toOk = customTo && !Number.isNaN(new Date(customTo).getTime())
+    if (!fromOk || !toOk) {
+      const range = getPresetRange('this_week')
+      return { from: range.from, to: range.to }
+    }
+    const range = getPresetRange('custom', customFrom, customTo)
+    return { from: range.from, to: range.to }
+  }
+  // this_week / this_month / yesterday / last_week / last_month / last_quarter / this_year
   const range = getPresetRange(preset)
   return { from: range.from, to: range.to }
 }
@@ -67,7 +104,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams
   const periodParam = (params.period ?? 'this_week') as FinancePreset
   const preset: FinancePreset = FINANCE_PRESETS.includes(periodParam) ? periodParam : 'this_week'
-  const { from, to } = resolveFinanceRange(preset)
+  const { from, to } = resolveFinanceRange(preset, params.from, params.to)
   const withWoW = preset === 'this_week'
 
   const [today, tomorrow, dailyRecord, financeData, marginData, hasUnreadInbox] =
@@ -115,9 +152,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             data={financeData}
             margin={marginData}
             preset={preset}
+            customFrom={params.from}
+            customTo={params.to}
             isAdminLikeUser={isAdminLikeUser}
           />
         )}
+
+        {/* Bug 7.24-5: cut-off дня — отдельным блоком ПОД финансами. */}
+        <CutOffBlock />
       </div>
     </>
   )

@@ -1,38 +1,59 @@
 'use client'
 
-import { useId, useTransition } from 'react'
+import { useId, useState, useTransition } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Calendar } from 'lucide-react'
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts'
 import type { AdminDashboardData, PeriodMargin } from '@/lib/db/queries/dashboard-stats'
 import { formatMoney } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
 import { SegmentedControl } from '@/components/ui/segmented-control'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 
-type FinancePreset = 'this_week' | 'this_month' | 'this_quarter'
+type FinancePreset =
+  | 'this_week'
+  | 'this_month'
+  | 'this_quarter'
+  | 'yesterday'
+  | 'last_week'
+  | 'last_month'
+  | 'last_quarter'
+  | 'this_year'
+  | 'custom'
+
+// Сегмент Нед/Мес/Кв — ровно эти три значения.
+type SegmentPreset = 'this_week' | 'this_month' | 'this_quarter'
+const SEGMENT_KEYS: SegmentPreset[] = ['this_week', 'this_month', 'this_quarter']
 
 interface Props {
   data: AdminDashboardData
   /** Маржа за тот же период. null → нет данных/нет доступа → fallback «—». */
   margin?: PeriodMargin | null
   preset: FinancePreset
+  /** Для preset='custom' — границы из URL (YYYY-MM-DD), для отображения/префилла. */
+  customFrom?: string
+  customTo?: string
   isAdminLikeUser: boolean
 }
 
-const PERIOD_TABS: Array<{ key: FinancePreset; label: string; aria: string }> = [
+const PERIOD_TABS: Array<{ key: SegmentPreset; label: string; aria: string }> = [
   { key: 'this_week', label: 'Нед', aria: 'Эта неделя' },
   { key: 'this_month', label: 'Мес', aria: 'Этот месяц' },
   { key: 'this_quarter', label: 'Кв', aria: 'Этот квартал' },
 ]
 
-const PERIOD_TITLE: Record<FinancePreset, string> = {
-  this_week: 'этой недели',
-  this_month: 'этого месяца',
-  this_quarter: 'этого квартала',
-}
+// Пресеты в поповере «Период» (Bug 7.24-4). Значения = ReportPreset, считаются
+// на сервере через getPresetRange — бэкенд уже готов.
+const PICKER_PRESETS: Array<{ value: FinancePreset; label: string }> = [
+  { value: 'yesterday', label: 'Вчера' },
+  { value: 'last_week', label: 'Прошлая неделя' },
+  { value: 'last_month', label: 'Прошлый месяц' },
+  { value: 'last_quarter', label: 'Прошлый квартал' },
+  { value: 'this_year', label: 'Этот год' },
+]
 
-export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Props) {
+export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, isAdminLikeUser }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -41,8 +62,11 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
   const gradientId = useId()
 
   function applyPeriod(next: FinancePreset) {
-    if (next === preset) return
+    if (next === preset && next !== 'custom') return
     const params = new URLSearchParams(searchParams.toString())
+    // Любой пресет (кроме custom) сбрасывает custom-границы.
+    params.delete('from')
+    params.delete('to')
     // 'this_week' — дефолт: убираем параметр; иначе пишем.
     if (next === 'this_week') {
       params.delete('period')
@@ -51,6 +75,14 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
     }
     const qs = params.toString()
     startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname))
+  }
+
+  function applyCustomRange(from: string, to: string) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('period', 'custom')
+    params.set('from', from)
+    params.set('to', to)
+    startTransition(() => router.push(`${pathname}?${params.toString()}`))
   }
 
   const daily = data.thisPeriod.daily
@@ -72,23 +104,34 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
       style={{ boxShadow: 'var(--shadow-card)' }}
       aria-label="Финансы за период"
     >
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Header — заголовок сверху, контролы отдельной строкой снизу (Bug 7.24-2:
+          раньше flex-wrap + длинный заголовок «этого квартала» ронял SegmentedControl вниз). */}
+      <div className="flex flex-col gap-4">
         <h2 className="text-sm font-medium uppercase tracking-wider text-fg-muted">
-          Финансы {PERIOD_TITLE[preset]}
+          Финансы
         </h2>
 
-        {/* Сегментированный переключатель Нед/Мес/Кв */}
-        <SegmentedControl<FinancePreset>
-          ariaLabel="Период"
-          size="sm"
-          value={preset}
-          onChange={(next) => {
-            if (isPending) return
-            applyPeriod(next)
-          }}
-          options={PERIOD_TABS.map((tab) => ({ value: tab.key, label: tab.label }))}
-        />
+        {/* Сегментированный переключатель Нед/Мес/Кв (+ date-range picker — Bug 7.24-4) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <SegmentedControl<FinancePreset>
+            ariaLabel="Период"
+            size="sm"
+            value={preset}
+            onChange={(next) => {
+              if (isPending) return
+              applyPeriod(next)
+            }}
+            options={PERIOD_TABS.map((tab) => ({ value: tab.key, label: tab.label }))}
+          />
+          <FinancePicker
+            preset={preset}
+            customFrom={customFrom}
+            customTo={customTo}
+            disabled={isPending}
+            onPreset={applyPeriod}
+            onCustom={applyCustomRange}
+          />
+        </div>
       </div>
 
       {/* Grid карточек */}
@@ -192,5 +235,139 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
         </div>
       )}
     </section>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Date-range picker (Bug 7.24-4). Кнопка «Период» рядом с сегментом
+   Нед/Мес/Кв; открывает поповер с пресетами (Вчера / Прошлая неделя /
+   …/ Этот год) + произвольный диапазон от/до. Навигация через URL
+   (?period=…&from&to) — бэкенд (getAdminDashboardData/getPresetRange)
+   уже принимает границы. Серверные queries НЕ менялись.
+   ───────────────────────────────────────────────────────────── */
+function shortDate(iso?: string): string {
+  // 'YYYY-MM-DD' → 'DD.MM'
+  if (!iso || iso.length < 10) return ''
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}`
+}
+
+function FinancePicker({
+  preset,
+  customFrom,
+  customTo,
+  disabled,
+  onPreset,
+  onCustom,
+}: {
+  preset: FinancePreset
+  customFrom?: string
+  customTo?: string
+  disabled: boolean
+  onPreset: (value: FinancePreset) => void
+  onCustom: (from: string, to: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [from, setFrom] = useState(customFrom ?? '')
+  const [to, setTo] = useState(customTo ?? '')
+
+  const isActive = !SEGMENT_KEYS.includes(preset as SegmentPreset)
+  const activePreset = PICKER_PRESETS.find((p) => p.value === preset)
+  const label =
+    preset === 'custom' && customFrom && customTo
+      ? `${shortDate(customFrom)}–${shortDate(customTo)}`
+      : activePreset?.label ?? 'Период'
+
+  const customValid = Boolean(from && to && from <= to)
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label="Выбрать период"
+          style={
+            isActive
+              ? { background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }
+              : undefined
+          }
+          className={cn(
+            'inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-pill text-sm font-semibold transition-colors disabled:opacity-50',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1',
+            isActive
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-surface-2 text-fg-muted hover:text-fg',
+          )}
+        >
+          <Calendar className="h-4 w-4" aria-hidden="true" />
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-2">
+        <div className="space-y-0.5">
+          {PICKER_PRESETS.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => {
+                onPreset(p.value)
+                setOpen(false)
+              }}
+              className={cn(
+                'flex w-full items-center rounded-lg px-3 py-2 text-sm transition-colors text-left',
+                preset === p.value ? 'bg-surface-2 font-semibold text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg',
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="my-2 border-t border-border" />
+
+        <div className="space-y-2 px-1">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-fg-muted">Произвольно</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+              aria-label="От"
+              className="min-h-[40px] flex-1 min-w-0 rounded-lg border border-border bg-surface px-2 text-xs focus:outline-none focus:border-primary"
+            />
+            <span className="text-fg-muted">→</span>
+            <input
+              type="date"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+              aria-label="До"
+              className="min-h-[40px] flex-1 min-w-0 rounded-lg border border-border bg-surface px-2 text-xs focus:outline-none focus:border-primary"
+            />
+          </div>
+          <button
+            type="button"
+            disabled={!customValid || disabled}
+            onClick={() => {
+              if (!customValid) return
+              onCustom(from, to)
+              setOpen(false)
+            }}
+            style={
+              customValid
+                ? { background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }
+                : undefined
+            }
+            className={cn(
+              'inline-flex w-full items-center justify-center min-h-[44px] rounded-pill text-sm font-semibold transition-opacity',
+              customValid ? 'bg-primary text-primary-foreground hover:opacity-95' : 'bg-surface-2 text-fg-faint cursor-not-allowed',
+            )}
+          >
+            Применить
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
