@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Carrot, Wheat, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Wheat, Info } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 import { formatDateShort, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
 import { cn } from '@/lib/utils/cn'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import type { ProductionSummary, IngredientsSummary, IngredientProductionRow } from '@/lib/db/queries/production'
 import type { MealType, DishCategory } from '@prisma/client'
 
@@ -161,24 +162,19 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
       )}
 
       {/* Табы Блюда / Сырьё */}
-      <div
-        role="group"
-        aria-label="Вид производства"
-        className="inline-flex w-fit items-center gap-0.5 rounded-pill bg-surface-2 p-1"
-      >
-        <TabButton
-          active={tab === 'dishes'}
-          onClick={() => updateParams({ tab: null })} // dishes — дефолт, убираем из URL
-          icon={ChefHat}
-          label="Блюда"
-        />
-        <TabButton
-          active={tab === 'ingredients'}
-          onClick={() => updateParams({ tab: 'ingredients' })}
-          icon={Carrot}
-          label="Сырьё"
-        />
-      </div>
+      <SegmentedControl<'dishes' | 'ingredients'>
+        ariaLabel="Вид производства"
+        className="w-fit"
+        value={tab}
+        onChange={(next) => {
+          // dishes — дефолт, убираем из URL; ingredients — пишем в URL
+          updateParams({ tab: next === 'dishes' ? null : 'ingredients' })
+        }}
+        options={[
+          { value: 'dishes', label: 'Блюда' },
+          { value: 'ingredients', label: 'Сырьё' },
+        ]}
+      />
 
       {/* Контент */}
       {tab === 'dishes' && <DishesTab summary={summary} canSeePrices={canSeePrices} />}
@@ -322,34 +318,6 @@ function AggregateCard({
   )
 }
 
-function TabButton({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      style={{ touchAction: 'manipulation' }}
-      className={cn(
-        'flex min-h-[44px] items-center gap-2 rounded-pill px-4 text-sm font-medium transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-        active ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]' : 'text-fg-muted hover:text-fg'
-      )}
-    >
-      <Icon className="h-4 w-4" aria-hidden="true" />
-      {label}
-    </button>
-  )
-}
 
 function IngredientsTab({ summary, canSeePrices }: { summary: IngredientsSummary; canSeePrices: boolean }) {
   if (!summary.hasMenu) {

@@ -49,7 +49,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl bg-surface border border-border p-4 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div className="rounded-3xl bg-surface border border-border p-4 space-y-3" style={{ boxShadow: 'var(--shadow-card)' }}>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -60,7 +60,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
             <ChevronLeft className="w-4 h-4" />
           </button>
           <div className="px-3 flex-1 text-center">
-            <p className="font-semibold text-base capitalize">
+            <p className="font-display font-semibold text-base capitalize">
               {isToday ? 'Сегодня' : formatDateShort(targetDate)}
             </p>
             <p className="text-xs text-fg-muted">{formatDateNumeric(targetDate)}</p>
@@ -87,10 +87,10 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
       </div>
 
       {stops.length > 0 && (
-        <div className="rounded-2xl bg-surface border border-border p-4 flex items-center justify-between gap-3" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-3xl bg-surface border border-border p-4 flex items-center justify-between gap-3" style={{ boxShadow: 'var(--shadow-card)' }}>
           <div>
             <p className="text-xs text-fg-muted">Прогресс</p>
-            <p className="text-2xl font-bold tabular-nums">
+            <p className="font-display text-2xl font-bold tabular-nums">
               {deliveredStops.length} <span className="text-fg-muted text-base font-medium">из {stops.length}</span>
             </p>
             <p className="text-xs text-fg-subtle mt-0.5">
@@ -121,11 +121,11 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
           description="Заказы либо отсутствуют, либо все отменены."
         />
       ) : activeStops.length === 0 ? (
-        <div className="rounded-2xl bg-success-bg/40 border border-success/20 p-8 text-center">
+        <div className="rounded-3xl bg-success-bg/40 border border-success/20 p-8 text-center">
           <div className="w-16 h-16 mx-auto rounded-full bg-success-bg flex items-center justify-center mb-4">
             <Check className="w-8 h-8 text-success-fg" strokeWidth={2.5} />
           </div>
-          <p className="font-semibold text-success-fg mb-1">Все доставки выполнены!</p>
+          <p className="font-display font-semibold text-success-fg mb-1">Все доставки выполнены!</p>
           <p className="text-sm text-success-fg/80">{formatLocations(stops.length)}, {formatPortions(totalPortions)}.</p>
         </div>
       ) : (
@@ -142,7 +142,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
       )}
 
       {deliveredStops.length > 0 && (
-        <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <div className="rounded-3xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
           <button
             type="button"
             onClick={() => setShowDelivered((v) => !v)}
@@ -226,14 +226,22 @@ function DeliveryCard({
   return (
     <div
       className={cn(
-        'rounded-2xl bg-surface border p-4 space-y-3',
+        'rounded-3xl bg-surface border p-4 space-y-3',
         stop.hasLateAlert ? 'border-danger/40' : 'border-border'
       )}
       style={{ boxShadow: 'var(--shadow-card)' }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-base truncate">{stop.clientName}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="font-display font-semibold text-base truncate">{stop.clientName}</h3>
+            {isLateState && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-pill bg-warning-bg text-warning-fg text-xs font-medium shrink-0">
+                <Clock className="w-3 h-3" />
+                Опоздание
+              </span>
+            )}
+          </div>
           <p className="text-sm text-fg-muted truncate">{stop.locationName}</p>
           {hasWindow && (
             <p className={cn('text-sm mt-0.5 flex items-center gap-1.5', isLateState ? 'text-danger-fg font-medium' : 'text-fg-muted')}>
@@ -270,7 +278,7 @@ function DeliveryCard({
         </div>
       )}
 
-      <div className="rounded-xl bg-bg/40 px-3 py-2 space-y-1">
+      <div className="rounded-2xl bg-bg/40 px-3 py-2 space-y-1">
         {stop.items.map((item) => (
           <div key={item.orderId} className="flex items-baseline justify-between gap-3 text-sm">
             <span className="flex items-center gap-1.5">
@@ -327,7 +335,7 @@ function DeliveryCard({
           <button
             type="button"
             onClick={() => setIssueOpen(true)}
-            className="text-sm text-fg-muted hover:text-danger-fg transition-colors underline underline-offset-2 self-start lg:self-auto py-2"
+            className="inline-flex items-center min-h-[44px] text-sm text-fg-muted hover:text-danger-fg transition-colors underline underline-offset-2 self-start lg:self-auto"
           >
             Не смог доставить
           </button>
@@ -354,10 +362,11 @@ function DeliveryCard({
 }
 
 /**
- * Состояния кнопки «Доставлено»:
+ * Состояния кнопки «Доставлено» (всегда чёрная капсула, метка «Доставлено»):
  * - before-window: окно ещё не началось → disabled с подсказкой «Окно с HH:mm»
- * - in-window: активная, брендовый цвет
- * - late: прошло > 30 мин после конца окна → активная, красная (визуальный сигнал)
+ * - in-window / after / late: активная чёрная капсула.
+ * Опоздание (late) теперь показывается отдельным warning-бейджем в шапке карточки,
+ * а не цветом/меткой кнопки.
  * COURIER блокируется server-action'ом до начала окна. ADMIN/MANAGER может нажать всегда.
  */
 function DeliveredButton({
@@ -374,7 +383,6 @@ function DeliveredButton({
   onClick: () => void
 }) {
   const isBefore = windowState === 'before' && userRole === 'COURIER'
-  const isLate = windowState === 'late'
 
   // Используем max-lg:* и lg:* как взаимоисключающие медиа-режимы, чтобы
   // не было гонки w-full vs lg:w-fit в одном правиле (предыдущие попытки
@@ -382,7 +390,7 @@ function DeliveredButton({
   // max-lg:w-full применяется только < 1024px, lg:w-fit — только >= 1024px.
   const sizeClasses =
     'max-lg:w-full max-lg:min-h-14 max-lg:px-5 max-lg:py-4 max-lg:text-base ' +
-    'lg:w-fit lg:min-h-10 lg:py-2 lg:px-6 lg:text-sm'
+    'lg:w-fit lg:min-h-11 lg:py-2.5 lg:px-6 lg:text-sm'
 
   if (isBefore) {
     return (
@@ -392,7 +400,7 @@ function DeliveredButton({
           disabled
           className={cn(
             sizeClasses,
-            'rounded-pill bg-bg border border-border text-fg-subtle font-semibold flex items-center justify-center gap-2 cursor-not-allowed'
+            'rounded-pill bg-bg border border-border text-fg-subtle font-medium flex items-center justify-center gap-2 cursor-not-allowed'
           )}
         >
           <Clock className="w-5 h-5 lg:w-4 lg:h-4" />
@@ -410,14 +418,12 @@ function DeliveredButton({
         disabled={isPending}
         className={cn(
           sizeClasses,
-          'rounded-pill font-semibold transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98]',
-          isLate
-            ? 'bg-danger text-accent-fg hover:opacity-90'
-            : 'bg-success text-accent-fg hover:opacity-90'
+          'rounded-pill bg-primary text-primary-foreground font-medium hover:opacity-95 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1'
         )}
+        style={{ background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }}
       >
         <Check className="w-5 h-5 lg:w-4 lg:h-4" strokeWidth={2.5} />
-        {isPending ? 'Отмечаем…' : isLate ? 'Доставлено (опоздание)' : 'Доставлено'}
+        {isPending ? 'Отмечаем…' : 'Доставлено'}
       </button>
     </div>
   )

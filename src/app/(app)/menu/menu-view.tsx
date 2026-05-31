@@ -435,7 +435,9 @@ export function MenuView({ weekStartIso, menu, dishes, userRole, previewImportId
       {!menu ? (
         <EmptyState canCreate={canEdit} onCreate={handleCreateDraft} isPending={isPending} />
       ) : (
-        <div className="rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+        <>
+        {/* Десктоп (lg+): широкая таблица */}
+        <div className="hidden lg:block rounded-2xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
@@ -482,6 +484,53 @@ export function MenuView({ weekStartIso, menu, dishes, userRole, previewImportId
             </table>
           </div>
         </div>
+
+        {/* Мобайл (<lg): дни стопкой карточек, без горизонтального скролла */}
+        <div className="lg:hidden space-y-3">
+          {[1, 2, 3, 4, 5, 6, 7].map((dow) => {
+            const dayDate = getDateForDayOfWeek(monday, dow)
+            const isToday = dayDate.toDateString() === new Date().toDateString()
+            const dd = dayDate.getDate()
+            const mm = (dayDate.getMonth() + 1).toString().padStart(2, '0')
+
+            return (
+              <div
+                key={dow}
+                className={cn(
+                  'rounded-2xl border p-4',
+                  isToday ? 'border-warning bg-warning-bg/20' : 'border-border bg-surface'
+                )}
+              >
+                <div className="flex items-baseline justify-between gap-2 mb-3">
+                  <h3 className="font-display font-semibold text-base">
+                    {WEEKDAY_NAMES_FULL[dow]}
+                  </h3>
+                  <span className="text-xs text-fg-muted tabular-nums">
+                    {dd}.{mm}
+                  </span>
+                </div>
+                <div className="space-y-2.5">
+                  {MEAL_TYPE_ORDER.map((mt) => {
+                    const day = daysByDow.get(dow)?.get(mt)
+                    return (
+                      <div key={mt}>
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-fg-subtle mb-1">
+                          {MEAL_TYPE_LABELS[mt]}
+                        </p>
+                        <DaySlotCell
+                          day={day}
+                          canEdit={isEditable}
+                          onEdit={() => day && setEditingDay(day)}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        </>
       )}
 
       {/* Редактор дня (модалка) — открывается только если isEditable */}

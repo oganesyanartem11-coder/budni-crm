@@ -225,9 +225,9 @@ function ClientCard({ client }: { client: SerializedClient }) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <Stat label="Заказов" value={client._count.orders} />
-        <Stat label="Точек" value={client._count.locations} />
-        <Stat label="Конфигов" value={client._count.mealConfigs} />
+        <Stat label="Заказов" value={client._count.orders} tone="revenue" />
+        <Stat label="Точек" value={client._count.locations} tone="orders" />
+        <Stat label="Конфигов" value={client._count.mealConfigs} tone="amount" />
       </div>
 
       {client.mealConfigs.length > 0 && (
@@ -252,13 +252,19 @@ function ClientCard({ client }: { client: SerializedClient }) {
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, tone }: { label: string; value: number; tone: 'revenue' | 'orders' | 'amount' }) {
+  const toneClasses: Record<typeof tone, { bg: string; ink: string }> = {
+    revenue: { bg: 'bg-data-revenue-bg', ink: 'text-data-revenue-ink' },
+    orders: { bg: 'bg-data-orders-bg', ink: 'text-data-orders-ink' },
+    amount: { bg: 'bg-data-amount-bg', ink: 'text-data-amount-ink' },
+  }
+  const t = toneClasses[tone]
   return (
-    <div className="bg-surface-2 rounded-lg p-2.5 text-center">
+    <div className={cn('rounded-lg p-2.5 text-center', t.bg)}>
       <div className="font-display font-extrabold text-fg-strong tabular-nums leading-none">
         {value}
       </div>
-      <div className="mt-1 text-[9px] uppercase tracking-wide text-fg-subtle leading-none">
+      <div className={cn('mt-1 text-[9px] uppercase tracking-wide leading-none', t.ink)}>
         {label}
       </div>
     </div>

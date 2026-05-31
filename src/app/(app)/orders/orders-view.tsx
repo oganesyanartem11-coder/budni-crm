@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { List, CalendarDays, ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
@@ -10,6 +10,7 @@ import { regenerateFixedOrders } from './actions'
 import { formatDateShort } from '@/lib/utils/format'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import type { Order, Client, ClientLocation } from '@prisma/client'
 
 type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
@@ -136,10 +137,15 @@ export function OrdersView({
         className="relative rounded-2xl bg-surface border border-border p-3 pr-12 flex items-center gap-3 flex-wrap"
         style={{ boxShadow: 'var(--shadow-card)' }}
       >
-        <div className="inline-flex items-center gap-0.5 p-1 bg-surface-2 rounded-pill">
-          <ViewToggleButton active={view === 'list'} onClick={() => setView('list')} icon={List} label="Список" />
-          <ViewToggleButton active={view === 'week'} onClick={() => setView('week')} icon={CalendarDays} label="Неделя" />
-        </div>
+        <SegmentedControl<'list' | 'week'>
+          ariaLabel="Режим отображения"
+          value={view}
+          onChange={(next) => setView(next)}
+          options={[
+            { value: 'list', label: 'Список' },
+            { value: 'week', label: 'Неделя' },
+          ]}
+        />
 
         {view === 'list' ? (
           <DateNav
@@ -284,31 +290,6 @@ function WeekNav({
   )
 }
 
-function ViewToggleButton({
-  active,
-  onClick,
-  icon: Icon,
-  label,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'px-4 py-2 sm:py-1.5 rounded-pill text-sm font-medium transition-colors flex items-center gap-2 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-        active ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]' : 'text-fg-muted hover:text-fg'
-      )}
-    >
-      <Icon className="w-4 h-4" />
-      {label}
-    </button>
-  )
-}
 
 function ServiceMenu() {
   const [open, setOpen] = useState(false)

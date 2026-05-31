@@ -20,7 +20,7 @@ export function AnalyticsTabs({ tabs }: Props) {
   const pathname = usePathname()
 
   return (
-    <nav className="flex gap-1.5 flex-wrap" aria-label="Разделы аналитики">
+    <nav className="flex gap-1 flex-wrap rounded-pill bg-surface-2 p-1" aria-label="Разделы аналитики">
       {tabs.map((t) => {
         // /analytics — активна только если pathname точно совпадает
         // (иначе подсветится и на /analytics/cost).
@@ -36,11 +36,20 @@ export function AnalyticsTabs({ tabs }: Props) {
           <Link
             key={t.href}
             href={t.href}
-            className={cn(
-              'px-4 py-2 rounded-pill text-sm font-medium transition-colors',
+            aria-current={isActive ? 'page' : undefined}
+            style={
               isActive
-                ? 'bg-accent text-accent-fg'
-                : 'bg-surface text-fg-muted hover:text-fg hover:bg-border border border-border'
+                ? {
+                    background: 'linear-gradient(180deg,#1F2530 0%,#10141A 100%)',
+                    boxShadow: 'var(--shadow-capsule)',
+                  }
+                : undefined
+            }
+            className={cn(
+              'inline-flex items-center justify-center min-h-[44px] px-4 rounded-pill text-sm font-medium transition-colors',
+              isActive
+                ? 'text-primary-foreground'
+                : 'text-fg-muted hover:text-fg'
             )}
           >
             {t.label}

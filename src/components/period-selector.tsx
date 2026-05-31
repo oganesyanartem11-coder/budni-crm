@@ -75,11 +75,12 @@ export function PeriodSelector({ preset, rangeFromIso, rangeToIso, basePath }: P
             type="button"
             onClick={() => applyPreset(p.key)}
             disabled={isPending}
+            style={preset === p.key ? { background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' } : undefined}
             className={cn(
-              'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors disabled:opacity-50',
+              'inline-flex items-center min-h-[44px] px-4 rounded-pill text-sm font-medium transition-colors disabled:opacity-50',
               preset === p.key
-                ? 'bg-accent text-accent-fg'
-                : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-surface text-fg-muted hover:text-fg hover:bg-surface-2'
             )}
           >
             {p.label}
@@ -95,20 +96,21 @@ export function PeriodSelector({ preset, rangeFromIso, rangeToIso, basePath }: P
             type="date"
             value={customFrom}
             onChange={(e) => setCustomFrom(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+            className="min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-accent transition-colors text-sm"
           />
           <span className="text-fg-muted text-sm">→</span>
           <input
             type="date"
             value={customTo}
             onChange={(e) => setCustomTo(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-sm"
+            className="min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-accent transition-colors text-sm"
           />
           <button
             type="button"
             onClick={applyCustom}
             disabled={isPending}
-            className="px-4 py-2 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            style={{ background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' }}
+            className="inline-flex items-center min-h-[44px] px-5 rounded-pill bg-primary text-primary-foreground font-medium text-sm hover:opacity-95 transition-opacity disabled:opacity-50"
           >
             Применить
           </button>
@@ -137,11 +139,12 @@ function SecondaryPresetMenu({
         <button
           type="button"
           disabled={disabled}
+          style={isActive ? { background: 'linear-gradient(180deg, #1F2530 0%, #10141A 100%)', boxShadow: 'var(--shadow-capsule)' } : undefined}
           className={cn(
-            'px-3 py-1.5 rounded-pill text-xs font-medium transition-colors disabled:opacity-50 flex items-center gap-1',
+            'inline-flex items-center gap-1 min-h-[44px] px-4 rounded-pill text-sm font-medium transition-colors disabled:opacity-50',
             isActive
-              ? 'bg-accent text-accent-fg'
-              : 'bg-bg text-fg-muted hover:text-fg hover:bg-border'
+              ? 'bg-primary text-primary-foreground'
+              : 'bg-surface text-fg-muted hover:text-fg hover:bg-surface-2'
           )}
         >
           {label}

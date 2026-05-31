@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Wheat, Users, ChevronRight } from 'lucide-react'
 import { PeriodSelector } from '@/components/period-selector'
 import { ChartCard } from '@/components/charts/chart-card'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { RevenueLineChart } from '@/components/charts/revenue-line-chart'
 import { formatMoneyRu } from '@/lib/digest/format'
 import { cn } from '@/lib/utils/cn'
@@ -16,6 +17,15 @@ import type { IngredientsConsumptionResult } from '@/lib/db/queries/ingredients-
 import type { ClientsComparisonResult } from '@/lib/db/queries/clients-comparison'
 
 type Metric = 'revenue' | 'portions'
+
+type MetricTone = 'revenue' | 'orders' | 'amount' | 'margin'
+
+const METRIC_TONE_CLASSES: Record<MetricTone, { bg: string; ink: string }> = {
+  revenue: { bg: 'bg-data-revenue-bg', ink: 'text-data-revenue-ink' },
+  orders: { bg: 'bg-data-orders-bg', ink: 'text-data-orders-ink' },
+  amount: { bg: 'bg-data-amount-bg', ink: 'text-data-amount-ink' },
+  margin: { bg: 'bg-data-margin-bg', ink: 'text-data-margin-ink' },
+}
 
 interface Props {
   preset: ReportPreset
@@ -94,17 +104,18 @@ export function AnalyticsView({
         )}
       >
         {canSeePrices && (
-          <MetricCard label="Выручка" value={formatMoneyRu(report.totalRevenue)} />
+          <MetricCard label="Выручка" value={formatMoneyRu(report.totalRevenue)} tone="revenue" />
         )}
         <MetricCard
           label="Заказов"
           value={String(report.totalOrders)}
           hint={`${report.totalPortions.toLocaleString('ru-RU')} порций`}
+          tone="orders"
         />
         {canSeePrices && (
           <>
-            <MetricCard label="Средний чек" value={formatMoneyRu(report.averageOrder)} />
-            <MetricCard label="В день в среднем" value={formatMoneyRu(report.averagePerDay)} />
+            <MetricCard label="Средний чек" value={formatMoneyRu(report.averageOrder)} tone="amount" />
+            <MetricCard label="В день в среднем" value={formatMoneyRu(report.averagePerDay)} tone="amount" />
           </>
         )}
       </div>
@@ -122,6 +133,7 @@ export function AnalyticsView({
                     ? `без учёта ${materialCost.daysWithoutMenu} из ${materialCost.totalDays} дн. без меню`
                     : undefined
                 }
+                tone="amount"
               />
               <MetricCard
                 label="Маржа"
@@ -132,6 +144,7 @@ export function AnalyticsView({
                       ? formatMoneyRu(margin)
                       : '—'
                 }
+                tone="margin"
               />
             </div>
           ) : (
@@ -152,14 +165,15 @@ export function AnalyticsView({
         height="md"
         action={
           canSeePrices ? (
-            <div className="inline-flex rounded-pill border border-border p-0.5 bg-bg text-xs">
-              <MetricToggle active={metric === 'revenue'} onClick={() => setMetric('revenue')}>
-                Выручка
-              </MetricToggle>
-              <MetricToggle active={metric === 'portions'} onClick={() => setMetric('portions')}>
-                Порции
-              </MetricToggle>
-            </div>
+            <SegmentedControl
+              size="sm"
+              value={metric}
+              onChange={(v) => setMetric(v as Metric)}
+              options={[
+                { value: 'revenue', label: 'Выручка' },
+                { value: 'portions', label: 'Порции' },
+              ]}
+            />
           ) : undefined
         }
       >
@@ -262,39 +276,24 @@ export function AnalyticsView({
   )
 }
 
-function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div
-      className="rounded-2xl border border-border bg-surface p-4"
-      style={{ boxShadow: 'var(--shadow-card)' }}
-    >
-      <p className="text-xs text-fg-muted">{label}</p>
-      <p className="text-lg font-semibold text-fg tabular-nums mt-1">{value}</p>
-      {hint && <p className="text-xs text-fg-subtle mt-0.5">{hint}</p>}
-    </div>
-  )
-}
-
-function MetricToggle({
-  active,
-  onClick,
-  children,
+function MetricCard({
+  label,
+  value,
+  hint,
+  tone,
 }: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
+  label: string
+  value: string
+  hint?: string
+  tone: MetricTone
 }) {
+  const t = METRIC_TONE_CLASSES[tone]
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        'px-3 py-1 rounded-pill transition-colors',
-        active ? 'bg-accent text-accent-fg font-medium' : 'text-fg-muted hover:text-fg'
-      )}
-    >
-      {children}
-    </button>
+    <div className={cn('rounded-2xl p-5', t.bg)}>
+      <p className={cn('text-[11px] font-bold uppercase tracking-widest', t.ink)}>{label}</p>
+      <p className="mt-1.5 font-display text-xl font-bold tabular-nums text-fg-strong">{value}</p>
+      {hint && <p className="text-xs text-fg-muted mt-0.5">{hint}</p>}
+    </div>
   )
 }
 

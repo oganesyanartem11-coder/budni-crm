@@ -7,6 +7,7 @@ import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts'
 import type { AdminDashboardData, PeriodMargin } from '@/lib/db/queries/dashboard-stats'
 import { formatMoney } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 
 type FinancePreset = 'this_week' | 'this_month' | 'this_quarter'
@@ -78,36 +79,16 @@ export function FinanceWeekBlock({ data, margin, preset, isAdminLikeUser }: Prop
         </h2>
 
         {/* Сегментированный переключатель Нед/Мес/Кв */}
-        <div
-          role="group"
-          aria-label="Период"
-          className="inline-flex items-center gap-0.5 rounded-pill bg-surface-2 p-1"
-        >
-          {PERIOD_TABS.map((tab) => {
-            const active = tab.key === preset
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => applyPeriod(tab.key)}
-                disabled={isPending}
-                aria-pressed={active}
-                aria-label={tab.aria}
-                style={{ touchAction: 'manipulation' }}
-                className={cn(
-                  'min-h-[44px] rounded-pill px-3 text-xs font-medium transition-colors',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
-                  'disabled:opacity-50',
-                  active
-                    ? 'bg-primary text-primary-foreground shadow-[var(--shadow-capsule)]'
-                    : 'text-fg-muted hover:text-fg',
-                )}
-              >
-                {tab.label}
-              </button>
-            )
-          })}
-        </div>
+        <SegmentedControl<FinancePreset>
+          ariaLabel="Период"
+          size="sm"
+          value={preset}
+          onChange={(next) => {
+            if (isPending) return
+            applyPeriod(next)
+          }}
+          options={PERIOD_TABS.map((tab) => ({ value: tab.key, label: tab.label }))}
+        />
       </div>
 
       {/* Grid карточек */}
