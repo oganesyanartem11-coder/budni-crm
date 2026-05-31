@@ -80,3 +80,32 @@ export function getMskDayEnd(date: Date): Date {
   const dayStart = getMskDayStart(date)
   return new Date(dayStart.getTime() + 24 * 60 * 60 * 1000 - 1)
 }
+
+/**
+ * UTC-полночь МСК-КАЛЕНДАРНОГО дня — для query inputs по @db.Date колонкам
+ * (deliveryDate и т.п. хранятся как UTC-полночь календарной даты).
+ *
+ * Отличие от getMskDayStart: тот возвращает UTC-инстант МСК-полночи
+ * (МСК 2 июн 00:00 = 1 июн 21:00 UTC), что НЕ совпадает с @db.Date-значением.
+ * Здесь берём Y/M/D в МСК и строим Date.UTC(Y,M,D) = UTC-полночь той же даты
+ * (МСК 2 июн → 2 июн 00:00 UTC) — ровно как хранится @db.Date.
+ *
+ * Bug 7.25: на Vercel (UTC) `new Date()` в окне 00:00–03:00 МСК ещё «вчера»,
+ * поэтому «сегодня/завтра» через серверный new Date()+setHours уезжали на день.
+ *
+ * @param now - опорный момент (по умолчанию текущий)
+ * @param offsetDays - сдвиг от МСК-сегодня: 0=сегодня, 1=завтра, -1=вчера
+ */
+export function getMskCalendarDayUtc(now: Date = new Date(), offsetDays = 0): Date {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now)
+  const year = Number(parts.find((p) => p.type === 'year')!.value)
+  const month = Number(parts.find((p) => p.type === 'month')!.value)
+  const day = Number(parts.find((p) => p.type === 'day')!.value)
+  // Date.UTC корректно переносит через границы месяца/года при day + offset.
+  return new Date(Date.UTC(year, month - 1, day + offsetDays))
+}

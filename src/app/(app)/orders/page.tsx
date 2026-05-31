@@ -5,6 +5,7 @@ import { OrdersView } from './orders-view'
 import { requireRole } from '@/lib/auth/current-user'
 import { listOrders, listOrdersForWeek, listActiveClientsLight } from '@/lib/db/queries/orders'
 import { getMondayOfWeek } from '@/lib/utils/week'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { formatDateShort } from '@/lib/utils/format'
 import { serialize } from '@/lib/utils/serialize'
 import type { OrderStatus, MealType } from '@prisma/client'
@@ -27,19 +28,14 @@ export default async function OrdersPage({ searchParams }: PageProps) {
   const params = await searchParams
   const view: 'list' | 'week' = params.view === 'week' ? 'week' : 'list'
 
-  // Дата по умолчанию: завтра
-  const defaultDate = (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    d.setHours(0, 0, 0, 0)
-    return d
-  })()
-  const selectedDate = params.date ? new Date(params.date) : defaultDate
-  selectedDate.setHours(0, 0, 0, 0)
-
-  // Дата конца дня — для фильтра
-  const dateEnd = new Date(selectedDate)
-  dateEnd.setHours(23, 59, 59, 999)
+  // Дата по умолчанию: завтра по МСК (Bug 7.25 — раньше серверный UTC new Date()
+  // в окне 00:00–03:00 МСК давал «завтра» на день раньше). Всё считаем в UTC
+  // детерминированно (без локального setHours, который на MSK-машине сдвигал бы
+  // UTC-полночь на день назад): ?date=YYYY-MM-DD → UTC-полночь той же даты,
+  // dateEnd = +24ч−1мс. @db.Date deliveryDate хранится как UTC-полночь.
+  const defaultDate = getMskCalendarDayUtc(new Date(), 1)
+  const selectedDate = params.date ? new Date(`${params.date}T00:00:00.000Z`) : defaultDate
+  const dateEnd = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000 - 1)
 
   // Список клиентов для фильтра
   const clients = await listActiveClientsLight()

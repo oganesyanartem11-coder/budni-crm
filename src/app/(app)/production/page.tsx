@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { ProductionView } from './production-view'
 import { requireRole } from '@/lib/auth/current-user'
 import { getProductionSummary, getIngredientsSummary } from '@/lib/db/queries/production'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { formatDateShort } from '@/lib/utils/format'
 
 interface PageProps {
@@ -15,16 +16,10 @@ export default async function ProductionPage({ searchParams }: PageProps) {
 
   const params = await searchParams
 
-  // Default дата — завтра
-  const defaultDate = (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    d.setHours(0, 0, 0, 0)
-    return d
-  })()
-
-  const targetDate = params.date ? new Date(params.date) : defaultDate
-  targetDate.setHours(0, 0, 0, 0)
+  // Default дата — завтра по МСК (Bug 7.25). UTC-детерминированно, без локального
+  // setHours (на MSK-машине он сдвигал бы UTC-полночь на день назад).
+  const defaultDate = getMskCalendarDayUtc(new Date(), 1)
+  const targetDate = params.date ? new Date(`${params.date}T00:00:00.000Z`) : defaultDate
 
   const [summary, ingredientsSummary] = await Promise.all([
     getProductionSummary(targetDate),

@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/layout/page-header'
 import { OrderForm } from './order-form'
 import { requireRole } from '@/lib/auth/current-user'
 import { listActiveClientsLight } from '@/lib/db/queries/orders'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 
 interface PageProps {
   searchParams: Promise<{ date?: string; clientId?: string }>
@@ -15,12 +16,8 @@ export default async function NewOrderPage({ searchParams }: PageProps) {
   const params = await searchParams
   const clients = await listActiveClientsLight()
 
-  const defaultDate = (() => {
-    if (params.date) return params.date
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    return d.toISOString().slice(0, 10)
-  })()
+  // Завтра по МСК как YYYY-MM-DD (Bug 7.25 — UTC-полночь MSK-календарного дня).
+  const defaultDate = params.date ?? getMskCalendarDayUtc(new Date(), 1).toISOString().slice(0, 10)
 
   return (
     <>

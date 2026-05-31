@@ -132,11 +132,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   // userName: первое слово из user.name (firstName в модели нет).
   const userName = user.name.split(' ')[0]
+  // initials для mobile ProfileMenu (Bug 7.25-B) — как в (app)/layout.tsx для sidebar.
+  const initials = user.name
+    .split(' ')
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase()
 
   return (
     <>
       <div className="space-y-6">
-        <GreetingRow userName={userName} hasUnreadInbox={hasUnreadInbox} />
+        <GreetingRow userName={userName} initials={initials} role={user.role} hasUnreadInbox={hasUnreadInbox} />
 
         <HeroTodayTomorrow today={today} tomorrow={tomorrow} dailyRecord={dailyRecord} />
 
