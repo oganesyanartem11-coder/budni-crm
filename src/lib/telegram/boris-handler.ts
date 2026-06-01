@@ -92,10 +92,17 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
       /* не критично */
     })
 
+    const chatType = (ctx.chat?.type ?? 'private') as
+      | 'private'
+      | 'group'
+      | 'supergroup'
+      | 'channel'
     const result = await chatWithBoris({
       userId: user.id,
       conversationId: conv?.id,
       userText: text,
+      chatType,
+      userRole: user.role,
     })
 
     if (result.pendingActionId && result.preview) {
@@ -175,6 +182,23 @@ registerCallbackHandler({
     }
 
     if (action === 'confirm') {
+      // 7.32 двойной guard на момент нажатия (защита от cross-context:
+      // кнопку нажали в группе ИЛИ роль изменилась после создания pending).
+      const callbackChatType = ctx.chat?.type ?? 'private'
+      if (callbackChatType !== 'private') {
+        await ctx.answerCallbackQuery({
+          text: 'Это можно подтвердить только в личной переписке со мной.',
+          show_alert: true,
+        })
+        return
+      }
+      if (user.role !== 'ADMIN_PRO') {
+        await ctx.answerCallbackQuery({
+          text: 'Изменения заказов через бота доступны только ADMIN_PRO.',
+          show_alert: true,
+        })
+        return
+      }
       try {
         const result = await executePendingAction(id, user.id)
         const titleFor = (tool: string) => TOOL_TITLES[tool] ?? tool

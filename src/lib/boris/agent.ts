@@ -20,12 +20,12 @@ import { runAgentLoop } from '@/lib/llm/agent-loop'
 import { clipConversationWindow } from '@/lib/llm/conversation-window'
 import { getBorisModel } from '@/lib/ai/models'
 import { getBorisSystemPrompt } from './personality'
-import { BORIS_TOOLS } from './tools'
+import { BORIS_TOOLS, BORIS_READ_TOOLS } from './tools'
 import { buildMultiActionPreview, type PendingActionForPreview } from './preview'
 import { trackBorisCall } from './metrics/track'
 import { BORIS_HISTORY_WINDOW, BORIS_CONVERSATION_TTL_MINUTES } from './config'
 import { prisma } from '@/lib/db/prisma'
-import { BorisMetricSource, type BorisConversation, type Prisma } from '@prisma/client'
+import { BorisMetricSource, type BorisConversation, type Prisma, type UserRole } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000
@@ -41,6 +41,11 @@ export interface ChatWithBorisInput {
   userId: string
   conversationId?: string
   userText: string
+  /** Тип чата откуда пришло сообщение. Влияет на доступные tools:
+   *  в group/supergroup — только READ-tools (mutate отключаются). */
+  chatType: 'private' | 'group' | 'supergroup' | 'channel'
+  /** Роль пользователя. MUTATE-tools доступны ТОЛЬКО для ADMIN_PRO. */
+  userRole: UserRole
 }
 
 export interface ChatWithBorisResult {
@@ -148,6 +153,14 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
   // 4. Запуск agent-loop. Оборачиваем в try/catch для metrics-трекинга —
   // на исключении пишем fail-метрику и пробрасываем дальше (выше по стеку
   // ловят telegram/boris-handler или web-route).
+  // 7.32: два защитных яруса на mutate-tools.
+  // Ярус 1 (chat-type): mutate только в private. Ярус 2 (role): mutate только ADMIN_PRO.
+  // В группе ИЛИ для не-ADMIN_PRO — отдаём LLM только READ-tools (mutate скрыты физически).
+  const isPrivate = input.chatType === 'private'
+  const isAdminPro = input.userRole === 'ADMIN_PRO'
+  const canMutate = isPrivate && isAdminPro
+  const tools = canMutate ? BORIS_TOOLS : BORIS_READ_TOOLS
+
   const startedAt = Date.now()
   let result
   try {
@@ -155,7 +168,7 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
       model: getBorisModel(),
       systemPrompt: getBorisSystemPrompt(),
       initialMessages: [...historyMessages, userMessage],
-      tools: BORIS_TOOLS,
+      tools,
       maxIterations: 8,
       maxTokens: 2048,
       onToolCall: (name) => {

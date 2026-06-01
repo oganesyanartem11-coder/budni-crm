@@ -735,6 +735,25 @@ const addOrderNoteTool: AgentTool = {
 // Export
 // ============================================================
 
+const READ_TOOL_NAMES = [
+  'find_orders',
+  'get_order_details',
+  'get_client_summary',
+  'get_orders_for_date',
+  'get_menu_for_date',
+  'get_dish_margin',
+  'get_recent_client_messages',
+] as const
+
+const MUTATE_TOOL_NAMES = [
+  'edit_order_portions',
+  'cancel_order',
+  'restore_order',
+  'create_one_time_order',
+  'reschedule_order',
+  'add_order_note',
+] as const
+
 export const BORIS_TOOLS: AgentTool[] = [
   // READ
   findOrdersTool,
@@ -752,3 +771,13 @@ export const BORIS_TOOLS: AgentTool[] = [
   rescheduleOrderTool,
   addOrderNoteTool,
 ]
+
+/** Только READ-tools. Используется в группе ИЛИ для не-ADMIN_PRO ролей. */
+export const BORIS_READ_TOOLS: AgentTool[] = BORIS_TOOLS.filter((t) =>
+  (READ_TOOL_NAMES as readonly string[]).includes(t.name),
+)
+
+/** Только MUTATE-tools. Не используется напрямую — для тестов / type-safety. */
+export const BORIS_MUTATE_TOOLS: AgentTool[] = BORIS_TOOLS.filter((t) =>
+  (MUTATE_TOOL_NAMES as readonly string[]).includes(t.name),
+)
