@@ -8,6 +8,7 @@ import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
 import { regenerateFixedOrders } from './actions'
 import { formatDateShort } from '@/lib/utils/format'
+import { toMskDateString } from '@/lib/utils/msk-window'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
 import { SegmentedControl } from '@/components/ui/segmented-control'
@@ -85,14 +86,14 @@ export function OrdersView({
       })()
       updateParams({ view: 'week', weekStart: monday.toISOString(), date: null })
     } else {
-      updateParams({ view: 'list', date: selectedDate.toISOString(), weekStart: null })
+      updateParams({ view: 'list', date: toMskDateString(selectedDate), weekStart: null })
     }
   }
 
   function shiftDate(days: number) {
     const d = new Date(selectedDate)
     d.setDate(d.getDate() + days)
-    updateParams({ date: d.toISOString() })
+    updateParams({ date: toMskDateString(d) })
   }
 
   function shiftWeekDate(weeks: number) {
@@ -117,14 +118,14 @@ export function OrdersView({
   function jumpToToday() {
     const d = new Date()
     d.setHours(0, 0, 0, 0)
-    updateParams({ date: d.toISOString() })
+    updateParams({ date: toMskDateString(d) })
   }
 
   function jumpToTomorrow() {
     const d = new Date()
     d.setDate(d.getDate() + 1)
     d.setHours(0, 0, 0, 0)
-    updateParams({ date: d.toISOString() })
+    updateParams({ date: toMskDateString(d) })
   }
 
   return (

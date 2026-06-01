@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { markStopDelivered, undoStopDelivered } from './actions'
 import { IssueDialog } from './_components/issue-dialog'
 import { formatDateShort, formatDateNumeric, formatDeliveryWindow, formatLocations, formatPortions, formatTime, pluralize } from '@/lib/utils/format'
-import { parseWindowToDate, getMskHoursMinutes } from '@/lib/utils/msk-window'
+import { parseWindowToDate, getMskHoursMinutes, toMskDateString } from '@/lib/utils/msk-window'
 import { cn } from '@/lib/utils/cn'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
@@ -35,7 +35,7 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
   function shiftDate(days: number) {
     const d = new Date(targetDate)
     d.setDate(d.getDate() + days)
-    router.push(`/delivery?date=${d.toISOString()}`)
+    router.push(`/delivery?date=${toMskDateString(d)}`)
   }
 
   function jumpToToday() {

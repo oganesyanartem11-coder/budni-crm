@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getMskCalendarDayUtc } from './msk-window'
+import { getMskCalendarDayUtc, toMskDateString } from './msk-window'
 
 /**
  * Регрессионные тесты для Bug 7.25 (UTC off-by-one в окне 00:00-03:00 МСК).
@@ -62,5 +62,46 @@ describe('getMskCalendarDayUtc', () => {
     expect(result.getUTCMinutes()).toBe(0)
     expect(result.getUTCSeconds()).toBe(0)
     expect(result.getUTCMilliseconds()).toBe(0)
+  })
+})
+
+describe('toMskDateString', () => {
+  it('обычный день (МСК 12:00): даёт МСК-сегодня', () => {
+    const date = new Date('2026-06-01T09:00:00.000Z') // МСК 12:00
+    expect(toMskDateString(date)).toBe('2026-06-01')
+  })
+
+  it('00:31 МСК (UTC ещё «вчера»): даёт МСК-сегодня — защита от Bug 7.30', () => {
+    const date = new Date('2026-05-31T21:31:00.000Z') // МСК 2026-06-01 00:31
+    expect(toMskDateString(date)).toBe('2026-06-01')
+  })
+
+  it('23:59 МСК (UTC уже «завтра»): даёт МСК-сегодня', () => {
+    const date = new Date('2026-06-01T20:59:00.000Z') // МСК 23:59
+    expect(toMskDateString(date)).toBe('2026-06-01')
+  })
+
+  it('UTC-полночь от getMskCalendarDayUtc: даёт ту же дату', () => {
+    const date = new Date(Date.UTC(2026, 5, 1)) // 2026-06-01T00:00:00.000Z = МСК 03:00
+    expect(toMskDateString(date)).toBe('2026-06-01')
+  })
+
+  it('граница года в окне 00:00-03:00 МСК', () => {
+    const date = new Date('2026-12-31T22:00:00.000Z') // МСК 2027-01-01 01:00
+    expect(toMskDateString(date)).toBe('2027-01-01')
+  })
+
+  it('29 февраля високосного года', () => {
+    const date = new Date('2028-02-28T22:00:00.000Z') // МСК 2028-02-29 01:00
+    expect(toMskDateString(date)).toBe('2028-02-29')
+  })
+
+  it('конкатенация с T00:00:00.000Z даёт валидный UTC-Date', () => {
+    // Это критичный кейс — именно так page.tsx парсит обратно
+    const date = new Date('2026-06-01T09:00:00.000Z')
+    const dateStr = toMskDateString(date)
+    const parsed = new Date(`${dateStr}T00:00:00.000Z`)
+    expect(parsed.toISOString()).toBe('2026-06-01T00:00:00.000Z')
+    expect(Number.isNaN(parsed.getTime())).toBe(false)
   })
 })

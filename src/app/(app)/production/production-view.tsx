@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Wheat, Info } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 import { formatDateShort, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
+import { toMskDateString } from '@/lib/utils/msk-window'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
 import { cn } from '@/lib/utils/cn'
@@ -50,11 +51,11 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
   function shiftDate(days: number) {
     const d = new Date(targetDate)
     d.setDate(d.getDate() + days)
-    updateParams({ date: d.toISOString() })
+    updateParams({ date: toMskDateString(d) })
   }
 
   function jumpTo(date: Date) {
-    updateParams({ date: date.toISOString() })
+    updateParams({ date: toMskDateString(date) })
   }
 
   return (

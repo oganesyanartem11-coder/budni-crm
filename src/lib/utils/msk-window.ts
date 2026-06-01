@@ -109,3 +109,33 @@ export function getMskCalendarDayUtc(now: Date = new Date(), offsetDays = 0): Da
   // Date.UTC корректно переносит через границы месяца/года при day + offset.
   return new Date(Date.UTC(year, month - 1, day + offsetDays))
 }
+
+/**
+ * Преобразует Date в строку формата `YYYY-MM-DD` по МСК-календарному дню.
+ * Используется для URL-параметра `?date=...` — серверные страницы ждут именно
+ * date-only контракт, конкатенируют с `T00:00:00.000Z` и парсят как UTC-Date.
+ *
+ * Почему НЕ `date.toISOString().slice(0, 10)`:
+ * - toISOString() даёт UTC-компоненты, не МСК. В окне 00:00-03:00 МСК
+ *   на UTC-машине Vercel `.slice(0, 10)` вернёт вчерашний день.
+ * - Тот же класс баг 7.25, который привёл к этому helper'у.
+ *
+ * Решение: берём Y/M/D в МСК через Intl.DateTimeFormat (как в
+ * getMskCalendarDayUtc) и собираем строку. Независимо от tz сервера.
+ *
+ * @param date - любой Date (обычно либо new Date(), либо результат
+ *   getMskCalendarDayUtc, либо локальная полночь через setHours(0,0,0,0))
+ * @returns строка формата 'YYYY-MM-DD' (МСК-календарный день)
+ */
+export function toMskDateString(date: Date): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const year = parts.find((p) => p.type === 'year')!.value
+  const month = parts.find((p) => p.type === 'month')!.value
+  const day = parts.find((p) => p.type === 'day')!.value
+  return `${year}-${month}-${day}`
+}
