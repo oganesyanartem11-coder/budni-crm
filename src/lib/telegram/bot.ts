@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db/prisma'
 import { dispatchCallback } from './callback-router'
 import { getTelegramEnv } from './env'
 import { handleBorisMessage } from './boris-handler'
+import { handleMyChatMember } from '@/lib/boris/team-channels/greeting'
 
 interface TelegramBotCache {
   bot: Bot
@@ -96,6 +97,9 @@ async function handleStart(ctx: CommandContext<Context>): Promise<void> {
 }
 
 function registerHandlers(bot: Bot): void {
+  // Service-event: бота добавили в групповой чат → одноразовое приветствие
+  // (см. greeting.ts). Регистрируем ПЕРЕД command/message-роутерами.
+  bot.on('my_chat_member', handleMyChatMember)
   bot.command('start', handleStart)
   bot.on('callback_query:data', dispatchCallback)
   // Sprint 7.16.A.2 (B3): любое нон-командное сообщение от менеджера
