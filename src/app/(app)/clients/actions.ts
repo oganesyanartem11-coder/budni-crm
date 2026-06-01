@@ -160,6 +160,12 @@ const locationSchema = z.object({
   deliveryWindowTo: z.string().regex(/^\d{2}:\d{2}$/, 'Формат HH:MM').nullable().optional(),
   packaging: z.enum(['INDIVIDUAL', 'BULK']),
   tags: z.array(z.string().max(100)).max(20).default([]),
+  // 7.39: same-day delivery — атрибут локации (per-location cut-off в волне 2).
+  // optional (не .default) — иначе z.infer<locationSchema> делает поле обязательным
+  // и ломает существующие UI-вызовы; дефаулт false проставляется в server action и БД.
+  sameDayDelivery: z.boolean().optional(),
+  cutoffHourMsk: z.number().int().min(0).max(23).nullable().optional(),
+  cutoffMinuteMsk: z.number().int().min(0).max(59).nullable().optional(),
 })
 
 const mealConfigSchema = z.object({
@@ -486,6 +492,9 @@ export async function createLocation(
       deliveryWindowTo: parsed.data.deliveryWindowTo ?? null,
       packaging: parsed.data.packaging,
       tags: parsed.data.tags,
+      sameDayDelivery: parsed.data.sameDayDelivery ?? false,
+      cutoffHourMsk: parsed.data.cutoffHourMsk ?? null,
+      cutoffMinuteMsk: parsed.data.cutoffMinuteMsk ?? null,
     },
   })
 
@@ -514,6 +523,9 @@ export async function updateLocation(
       deliveryWindowTo: parsed.data.deliveryWindowTo ?? null,
       packaging: parsed.data.packaging,
       tags: parsed.data.tags,
+      sameDayDelivery: parsed.data.sameDayDelivery ?? false,
+      cutoffHourMsk: parsed.data.cutoffHourMsk ?? null,
+      cutoffMinuteMsk: parsed.data.cutoffMinuteMsk ?? null,
     },
   })
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { generateFixedOrdersForDate } from '@/lib/orders/generate-orders'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,10 +11,10 @@ export const dynamic = 'force-dynamic'
  * Запускается ежедневно в 03:00 UTC (06:00 MSK), генерирует FIXED-заказы на завтра.
  */
 async function handler(_request: Request) {
-  // Целевая дата — завтра
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  tomorrow.setHours(0, 0, 0, 0)
+  // Целевая дата — завтра по календарю МСК (UTC-полночь этого дня).
+  // 7.39: было наивное new Date()+setDate(+1), которое около 00:00 UTC (03:00 МСК)
+  // давало неверный день. getMskCalendarDayUtc(now, 1) корректно учитывает зону.
+  const tomorrow = getMskCalendarDayUtc(new Date(), 1)
 
   try {
     const stats = await generateFixedOrdersForDate(tomorrow, {

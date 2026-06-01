@@ -86,6 +86,7 @@ const EVENT_TYPE_LABELS_RU: Record<BorisEventType, string> = {
   COURIER_ON_TIME_STREAK: 'Курьер вовремя',
   BIG_INVOICE: 'Большая накладная',
   STABLE_PRICE: 'Стабильная цена',
+  SAMEDAY_ORDER_LOCKED: 'Same-day заказ принят',
 }
 
 const CHANNEL_LABELS_RU: Record<'LIVE' | 'EVENING' | 'FRIDAY' | 'ALERT', string> = {

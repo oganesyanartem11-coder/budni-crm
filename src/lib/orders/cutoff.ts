@@ -19,15 +19,20 @@ export const MSK_TIMEZONE = 'Europe/Moscow'
  * перед deliveryDate, как UTC Date. Использует fromZonedTime, чтобы
  * корректно учитывать летнее/зимнее время.
  */
-export function getCutoffMoment(deliveryDate: Date): Date {
+export function getCutoffMoment(
+  deliveryDate: Date,
+  hour: number = CUTOFF_HOUR_MSK,
+  minute: number = 0
+): Date {
   const dayBefore = new Date(deliveryDate)
   dayBefore.setUTCDate(dayBefore.getUTCDate() - 1)
 
   const yyyy = dayBefore.getUTCFullYear()
   const mm = String(dayBefore.getUTCMonth() + 1).padStart(2, '0')
   const dd = String(dayBefore.getUTCDate()).padStart(2, '0')
-  const hh = String(CUTOFF_HOUR_MSK).padStart(2, '0')
-  const localStr = `${yyyy}-${mm}-${dd}T${hh}:00:00`
+  const hh = String(hour).padStart(2, '0')
+  const mi = String(minute).padStart(2, '0')
+  const localStr = `${yyyy}-${mm}-${dd}T${hh}:${mi}:00`
 
   return fromZonedTime(localStr, MSK_TIMEZONE)
 }
@@ -45,7 +50,11 @@ export function isPastCutoff(deliveryDate: Date, now: Date = new Date()): boolea
  * по локальному времени сервера — на Vercel это UTC, и после 21:00 МСК UTC-дата
  * уже «завтра»). Поэтому день берём из now, отформатированного в МСК.
  */
-function getTodayCutoffMomentMsk(now: Date): Date {
+export function getTodayCutoffMomentMsk(
+  now: Date,
+  hour: number = CUTOFF_HOUR_MSK,
+  minute: number = 0
+): Date {
   // ru-RU + явный TZ даёт стабильный 'dd.mm.yyyy' в зоне МСК.
   const parts = new Intl.DateTimeFormat('ru-RU', {
     timeZone: MSK_TIMEZONE,
@@ -57,9 +66,10 @@ function getTodayCutoffMomentMsk(now: Date): Date {
   const yyyy = get('year')
   const mm = get('month')
   const dd = get('day')
-  const hh = String(CUTOFF_HOUR_MSK).padStart(2, '0')
+  const hh = String(hour).padStart(2, '0')
+  const mi = String(minute).padStart(2, '0')
   // fromZonedTime трактует строку как локальное МСК-время → корректный UTC.
-  return fromZonedTime(`${yyyy}-${mm}-${dd}T${hh}:00:00`, MSK_TIMEZONE)
+  return fromZonedTime(`${yyyy}-${mm}-${dd}T${hh}:${mi}:00`, MSK_TIMEZONE)
 }
 
 export interface CutoffCountdown {

@@ -14,6 +14,7 @@ export interface CronJobConfig {
 export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'extend-active-menu',          scheduleUtc: '0 1 * * *',   description: 'Авто-продление APPROVED меню',         maxAgeHours: 26 },
   { jobName: 'generate-fixed-orders',       scheduleUtc: '0 3 * * *',   description: 'Генерация фиксированных заказов',      maxAgeHours: 26 },
+  { jobName: 'daily-questions-sameday',     scheduleUtc: '40 4 * * *',  description: 'SameDay-клиенты: утренний пуш-вопрос о количестве порций', maxAgeHours: 26 },
   { jobName: 'daily-questions',             scheduleUtc: '0 8 * * *',   description: 'Утренние вопросы клиентам в MAX',      maxAgeHours: 26 },
   { jobName: 'reminder-and-summary-1',      scheduleUtc: '0 11 * * *',  description: 'Reminder менеджеру #1',                maxAgeHours: 26 },
   { jobName: 'reminder-and-summary-2',      scheduleUtc: '30 12 * * *', description: 'Reminder менеджеру #2',                maxAgeHours: 26 },

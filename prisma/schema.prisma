@@ -236,6 +236,7 @@ enum BorisEventType {
   COURIER_ON_TIME_STREAK
   BIG_INVOICE
   STABLE_PRICE
+  SAMEDAY_ORDER_LOCKED // 7.39: same-day заказ подтверждён клиентом, нужно сообщить шефу о начале производства
 }
 
 // 7.16.C: в какой канал ушло конкретное событие (или null = ещё не отправили).
@@ -414,6 +415,14 @@ model ClientLocation {
   deliveryWindowTo   String? // Формат "HH:mm", например "12:00"
   packaging          PackagingType @default(INDIVIDUAL)
   tags               String[]      @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
+  // 7.39: same-day delivery для «утреннего клиента». Если true → заказ
+  // создаётся на сегодня (не на завтра), вопрос шлётся в 07:40 МСК,
+  // cut-off индивидуальный (cutoffHourMsk:cutoffMinuteMsk).
+  sameDayDelivery  Boolean @default(false)
+  // 7.39: индивидуальный cut-off для same-day заказов. null → fallback на глобальный CUTOFF_HOUR_MSK (16).
+  cutoffHourMsk    Int?
+  // 7.39: минута cut-off. null → 0.
+  cutoffMinuteMsk  Int?
   // MEGA-BACKEND блок B: опциональная привязка точки к курьеру.
   // SetNull при удалении курьера — точка остаётся, становится «непривязанной».
   assignedCourierId  String?
