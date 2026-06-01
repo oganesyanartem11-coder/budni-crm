@@ -19,6 +19,8 @@
     "db:seed:smoke": "dotenv -e .env.test -- tsx scripts/seed-smoke-client.ts",
     "seed:pilot": "dotenv -e .env.test -- tsx prisma/seed/index.ts && dotenv -e .env.test -- tsx scripts/seed-pilot-topup.ts",
     "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:llm": "dotenv -e .env.local -- tsx scripts/test-llm-parser.ts",
     "test:margin": "dotenv -e .env.test -- tsx scripts/test-historical-margin.ts",
     "test:e2e": "dotenv -e .env.test -- playwright test",
@@ -78,7 +80,8 @@
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.7"
   },
   "overrides": {
     "postcss": "^8.5.10"
