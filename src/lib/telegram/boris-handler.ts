@@ -4,6 +4,7 @@ import { registerCallbackHandler } from './callback-router'
 import { chatWithBoris } from '@/lib/boris/agent'
 import { executePendingAction } from '@/lib/boris/executor'
 import { TOOL_TITLES } from '@/lib/boris/preview'
+import { shouldRespondInChat } from '@/lib/boris/group-filter'
 import { prisma } from '@/lib/db/prisma'
 
 /**
@@ -54,6 +55,9 @@ async function checkRateLimit(userId: string): Promise<boolean> {
 }
 
 export async function handleBorisMessage(ctx: Context): Promise<void> {
+  // 7.28: в группах отвечаем только на адресное «Борис»; в личке — всегда.
+  if (!shouldRespondInChat(ctx)) return
+
   const text = ctx.message?.text ?? ''
   if (!text || text.startsWith('/')) return // /команды не наш case
 
