@@ -12,7 +12,7 @@ import { orderDetailButton } from '@/lib/telegram/buttons'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { formatDateShort } from '@/lib/utils/format'
 import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
-import { startOfTodayMsk } from '@/lib/utils/msk-window'
+import { startOfTodayMsk, toMskDateString } from '@/lib/utils/msk-window'
 import { MealType, type UserRole } from '@prisma/client'
 
 const createOrderSchema = z.object({
@@ -115,7 +115,10 @@ export async function createOrder(
     ok: true,
     data: {
       id: order.id,
-      deliveryDate: deliveryDate.toISOString(),
+      // 7.35 (Bug 7.30 4-я точка): date-only YYYY-MM-DD, не ISO. order-form
+      // редиректит на /orders?date=<это>, а page.tsx парсит `${date}T00:00:00.000Z`.
+      // Полный ISO давал бы конкатенацию-в-Invalid-Date → 500.
+      deliveryDate: toMskDateString(deliveryDate),
     },
   }
 }

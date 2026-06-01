@@ -104,4 +104,18 @@ describe('toMskDateString', () => {
     expect(parsed.toISOString()).toBe('2026-06-01T00:00:00.000Z')
     expect(Number.isNaN(parsed.getTime())).toBe(false)
   })
+
+  it('regression Bug 7.30 4-я точка: createOrder returns date → /orders parse → no Invalid Date', () => {
+    // Симуляция: createOrder делает new Date(input); setHours(0,0,0,0); toMskDateString
+    const input = '2026-06-03'  // приходит из формы как YYYY-MM-DD
+    const dateObj = new Date(input)
+    dateObj.setHours(0, 0, 0, 0)
+    const returned = toMskDateString(dateObj)
+
+    // /orders page.tsx делает: new Date(`${params.date}T00:00:00.000Z`)
+    const parsed = new Date(`${returned}T00:00:00.000Z`)
+
+    expect(Number.isNaN(parsed.getTime())).toBe(false)
+    expect(returned).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
 })
