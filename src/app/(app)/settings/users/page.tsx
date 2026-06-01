@@ -6,7 +6,7 @@ import { prisma } from '@/lib/db/prisma'
 import { UsersTable } from './users-table'
 
 export default async function UsersPage() {
-  const me = await requireRole(['ADMIN'])
+  const me = await requireRole(['ADMIN_PRO'])
 
   const now = new Date()
   const users = await prisma.user.findMany({

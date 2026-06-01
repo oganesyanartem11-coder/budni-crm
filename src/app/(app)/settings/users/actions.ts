@@ -51,7 +51,7 @@ export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
 
-const VALID_ROLES: UserRole[] = ['ADMIN', 'MANAGER', 'CHEF', 'COURIER']
+const VALID_ROLES: UserRole[] = ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF', 'COURIER']
 
 export async function createUser(input: {
   name: string
@@ -68,7 +68,7 @@ export async function createUser(input: {
     messageTemplate: string
   }>
 > {
-  await requireRole(['ADMIN'])
+  await requireRole(['ADMIN_PRO'])
 
   const name = input.name.trim()
   if (!name) return { ok: false, error: 'Имя обязательно' }
@@ -141,7 +141,7 @@ export async function createUser(input: {
 export async function regenerateUserPin(
   userId: string
 ): Promise<ActionResult<{ pin: string }>> {
-  await requireRole(['ADMIN'])
+  await requireRole(['ADMIN_PRO'])
 
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } })
   if (!user) return { ok: false, error: 'Пользователь не найден' }
@@ -176,7 +176,7 @@ export async function setUserActive(
   userId: string,
   isActive: boolean
 ): Promise<ActionResult> {
-  const me = await requireRole(['ADMIN'])
+  const me = await requireRole(['ADMIN_PRO'])
   if (userId === me.id && !isActive) {
     return { ok: false, error: 'Нельзя отключить самого себя' }
   }
@@ -223,7 +223,7 @@ export async function generateOnboardingTokenForUser(
     expiresAt: string
   }>
 > {
-  const me = await requireRole(['ADMIN'])
+  const me = await requireRole(['ADMIN_PRO'])
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -290,7 +290,7 @@ export async function generateOnboardingTokenForUser(
 export async function unlinkTelegramFromUser(
   userId: string
 ): Promise<ActionResult> {
-  const me = await requireRole(['ADMIN'])
+  const me = await requireRole(['ADMIN_PRO'])
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -351,7 +351,7 @@ export interface UserSessionView {
 export async function listUserSessions(
   userId: string
 ): Promise<ActionResult<UserSessionView[]>> {
-  const admin = await requireRole(['ADMIN'])
+  const admin = await requireRole(['ADMIN_PRO'])
   const now = new Date()
   const sessions = await prisma.session.findMany({
     where: { userId, revokedAt: null, expiresAt: { gt: now } },
@@ -400,7 +400,7 @@ export async function listUserSessions(
  * получит 401 (см. getCurrentUser → revokedAt check).
  */
 export async function revokeUserSession(sessionId: string): Promise<ActionResult> {
-  const admin = await requireRole(['ADMIN'])
+  const admin = await requireRole(['ADMIN_PRO'])
   await prisma.session.update({
     where: { id: sessionId },
     data: { revokedAt: new Date() },
@@ -423,7 +423,7 @@ export async function revokeUserSession(sessionId: string): Promise<ActionResult
  * сессий. Часы: 1..720 (30 дней макс).
  */
 export async function lockUser(userId: string, hours: number): Promise<ActionResult> {
-  const admin = await requireRole(['ADMIN'])
+  const admin = await requireRole(['ADMIN_PRO'])
   // Защита от самоблока: ADMIN не должен иметь возможности заблокировать сам
   // себя (зеркало setUserActive). UI ставит disabled, но через DevTools/прямой
   // вызов action это обходится — поэтому проверка дублируется на сервере.
@@ -463,7 +463,7 @@ export async function lockUser(userId: string, hours: number): Promise<ActionRes
  * восстанавливаем — после разблокировки юзер должен залогиниться заново.
  */
 export async function unlockUser(userId: string): Promise<ActionResult> {
-  const admin = await requireRole(['ADMIN'])
+  const admin = await requireRole(['ADMIN_PRO'])
   await prisma.$transaction([
     prisma.user.update({
       where: { id: userId },
