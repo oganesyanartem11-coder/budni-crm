@@ -8,23 +8,24 @@ import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Same-day cron (40 4 * * * = 07:40 МСК). Спрашивает sameDay-клиентов про
+ * доставку СЕГОДНЯ (у них утренний cut-off). Обычных клиентов берёт
+ * daily-questions; здесь — только те, у кого есть sameDay-локация.
+ */
 async function handler(request: Request) {
   const url = new URL(request.url)
   const dryRun = url.searchParams.get('dryRun') === 'true'
 
   const now = new Date()
   const todayMsk = getMskCalendarDayUtc(now, 0)
-  const tomorrow = getMskCalendarDayUtc(now, 1)
 
-  // sameDay-клиентов исключаем (buildCandidatesWhere(false) → locations.none
-  // sameDayDelivery) — их берёт отдельный cron daily-questions-sameday, иначе
-  // они получили бы вопрос дважды.
   const result = await runDailyQuestions({
-    label: 'daily-questions',
+    label: 'daily-questions-sameday',
     todayMsk,
-    targetMode: 'next-active',
-    searchFrom: tomorrow,
-    where: buildCandidatesWhere(false),
+    targetMode: 'today-only',
+    searchFrom: todayMsk,
+    where: buildCandidatesWhere(true),
     dryRun,
   })
 
@@ -36,4 +37,4 @@ async function handler(request: Request) {
   })
 }
 
-export const GET = withCronHeartbeat('daily-questions', handler)
+export const GET = withCronHeartbeat('daily-questions-sameday', handler)

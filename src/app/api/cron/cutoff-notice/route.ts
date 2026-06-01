@@ -26,10 +26,27 @@ async function handler(_request: Request) {
   // больше их не подберёт даже при повторном дёргании cron'а.
   const convs = await findSilentPendingConvsCreatedToday(now)
 
+  // sameDay-клиентов глобальный 16:00 notice НЕ трогает: у них утренний cut-off,
+  // закрытие приёма для них происходит отдельно (SAMEDAY_ORDER_LOCKED). Делаем
+  // отдельный лёгкий запрос по clientId вместо правки shared-функции
+  // findSilentPendingConvsCreatedToday (её же использует reminder-1/2).
+  const clientIds = [...new Set(convs.map((c) => c.clientId))]
+  const sameDayClients = clientIds.length
+    ? await prisma.client.findMany({
+        where: { id: { in: clientIds }, locations: { some: { sameDayDelivery: true } } },
+        select: { id: true },
+      })
+    : []
+  const sameDayClientIds = new Set(sameDayClients.map((c) => c.id))
+
   let sent = 0
   const errors: Array<{ clientName: string; reason: string }> = []
 
   for (const conv of convs) {
+    if (sameDayClientIds.has(conv.clientId)) {
+      // sameDay — пропускаем без смены статуса (их закрывает свой механизм).
+      continue
+    }
     try {
       if (!conv.client.maxChatId) {
         // Без maxChatId не можем отправить, но статус всё равно закрываем.

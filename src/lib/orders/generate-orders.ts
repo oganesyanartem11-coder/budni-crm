@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { buildLegalEntitySnapshot } from '@/lib/orders/legal-entity-snapshot'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import type { ClientMealConfig, ScheduleType } from '@prisma/client'
 
 export interface GenerationStats {
@@ -75,17 +76,45 @@ export function isScheduledForDate(config: ClientMealConfig, date: Date): boolea
 }
 
 /**
+ * 7.39: определяет фактическую дату доставки для конфига.
+ *
+ * - Если локация конфига работает в режиме same-day (`location.sameDayDelivery === true`),
+ *   заказ генерируется на СЕГОДНЯ по МСК (`getMskCalendarDayUtc(now, 0)`).
+ * - Иначе — на переданную `defaultDate` (обычно завтра по МСК, как было раньше).
+ *
+ * Чистая функция (без БД) — тестируется отдельно. `today` передаётся явно,
+ * чтобы вычислить «сегодня МСК» один раз вне цикла и не дёргать Intl на каждый конфиг.
+ */
+export function resolveTargetDate(
+  config: { location: { sameDayDelivery: boolean } },
+  defaultDate: Date,
+  today: Date,
+): Date {
+  return config.location.sameDayDelivery ? today : defaultDate
+}
+
+/** Начало (00:00:00.000) и конец (23:59:59.999) суток, в которые попадает `date`. */
+function dayWindow(date: Date): { start: Date; end: Date } {
+  const start = new Date(date)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(start)
+  end.setHours(23, 59, 59, 999)
+  return { start, end }
+}
+
+/**
  * Генерирует FIXED-заказы на указанную дату для всех активных FIXED-конфигов.
  * Идемпотентно: повторный запуск не создаёт дублей (проверка по sourceConfigId + deliveryDate).
  */
 export async function generateFixedOrdersForDate(targetDate: Date, options: {
   triggeredByUserId?: string | null
 }): Promise<GenerationStats> {
-  // Нормализуем дату на начало дня
+  // Нормализуем «дефолтную» дату (обычно завтра МСК) на начало дня.
   const date = new Date(targetDate)
   date.setHours(0, 0, 0, 0)
-  const dayEnd = new Date(date)
-  dayEnd.setHours(23, 59, 59, 999)
+
+  // 7.39: same-day локации генерируются на СЕГОДНЯ МСК. Вычисляем один раз.
+  const todayMsk = getMskCalendarDayUtc(new Date(), 0)
 
   const stats: GenerationStats = {
     targetDate: date.toISOString(),
@@ -117,32 +146,58 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
           defaultOurLegalEntity: { select: { vatRate: true } },
         },
       },
-      location: { select: { id: true, isActive: true, packaging: true } },
+      location: {
+        select: {
+          id: true,
+          isActive: true,
+          packaging: true,
+          // 7.39: same-day delivery — конфиги такой локации генерируются на СЕГОДНЯ (МСК),
+          // а не на завтра. cutoff* грузим на будущее (фильтрация по cutoff — отдельная зона).
+          sameDayDelivery: true,
+          cutoffHourMsk: true,
+          cutoffMinuteMsk: true,
+        },
+      },
     },
   })
 
   stats.candidatesTotal = configs.length
 
-  // Уже созданные заказы по этой дате — индексируем по бизнес-ключу
-  // (clientId + locationId + mealType), чтобы не дублировать независимо от source.
+  // 7.39: конфиги могут адресоваться на ДВЕ разные даты в одном запуске —
+  // дефолтную (завтра) для обычных локаций и СЕГОДНЯ для same-day. Поэтому
+  // существующие заказы грузим по объединённому диапазону, а дедуп-ключ
+  // включает саму дату доставки (иначе same-day заказ ошибочно «слипся» бы
+  // с обычным заказом того же клиента/локации/mealType на другую дату).
+  const defaultWindow = dayWindow(date)
+  const todayWindow = dayWindow(todayMsk)
+  const rangeStart = defaultWindow.start < todayWindow.start ? defaultWindow.start : todayWindow.start
+  const rangeEnd = defaultWindow.end > todayWindow.end ? defaultWindow.end : todayWindow.end
+
   const existingOrders = await prisma.order.findMany({
     where: {
-      deliveryDate: { gte: date, lte: dayEnd },
+      deliveryDate: { gte: rangeStart, lte: rangeEnd },
       status: { not: 'CANCELLED' },
     },
     select: {
       clientId: true,
       locationId: true,
       mealType: true,
+      deliveryDate: true,
     },
   })
+  // Ключ дедупа: clientId|locationId|mealType|YYYY-MM-DD (дата доставки).
+  const dedupKey = (clientId: string, locationId: string, mealType: string, d: Date) =>
+    `${clientId}|${locationId}|${mealType}|${dayWindow(d).start.toISOString()}`
   const existingKeys = new Set(
-    existingOrders.map((o) => `${o.clientId}|${o.locationId}|${o.mealType}`)
+    existingOrders.map((o) => dedupKey(o.clientId, o.locationId, o.mealType, o.deliveryDate))
   )
 
   // Обрабатываем каждый конфиг
   for (const config of configs) {
-    if (!isScheduledForDate(config, date)) {
+    // 7.39: дата per-config — same-day локация → сегодня МСК, иначе → дефолт (завтра).
+    const configDate = resolveTargetDate(config, date, todayMsk)
+
+    if (!isScheduledForDate(config, configDate)) {
       stats.skippedNoSchedule++
       continue
     }
@@ -154,9 +209,10 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
       { id: config.location.id, packaging: config.location.packaging },
     ]
 
-    // Фильтруем точки: оставляем только те для которых ещё нет заказа на эту дату с этим mealType
+    // Фильтруем точки: оставляем только те для которых ещё нет заказа на ЭТУ (per-config)
+    // дату с этим mealType. Ключ включает configDate — см. dedupKey выше.
     const newLocations = targetLocations.filter((loc) => {
-      const key = `${config.clientId}|${loc.id}|${config.mealType}`
+      const key = dedupKey(config.clientId, loc.id, config.mealType, configDate)
       return !existingKeys.has(key)
     })
 
@@ -175,7 +231,7 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
         clientId: config.clientId,
         locationId: loc.id,
         mealType: config.mealType,
-        deliveryDate: date,
+        deliveryDate: configDate,
         portions: portionsValue,
         pricePerPortion: priceNum,
         totalPrice: priceNum * portionsValue,
@@ -197,7 +253,7 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
       }
       // Регистрируем что мы только что создали — на случай если ещё один конфиг попал бы в ту же ячейку
       for (const loc of newLocations) {
-        existingKeys.add(`${config.clientId}|${loc.id}|${config.mealType}`)
+        existingKeys.add(dedupKey(config.clientId, loc.id, config.mealType, configDate))
       }
     } catch (err) {
       stats.errors.push({

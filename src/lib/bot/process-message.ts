@@ -19,6 +19,7 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
+import { toMskDateString } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
 import { sendTelegramMessage } from '@/lib/telegram/send'
 import { escapeHtml } from '@/lib/telegram/notify'
@@ -407,6 +408,56 @@ async function handleBotResponse(
       where: { id: conv.id },
       data: { status: 'CONFIRMED' },
     })
+
+    // 7.39: same-day delivery — для локаций с sameDayDelivery=true утренний
+    // заказ зафиксирован, шефу пора в производство. Эмитим SAMEDAY_ORDER_LOCKED
+    // в LIVE-канал. savedItems не содержит orderId (см. SaveBotOrdersResult),
+    // поэтому добираем order по бизнес-ключу (clientId+locationId+mealType+date).
+    // Дедуп по (orderId, день) — повторный CONFIRMED того же заказа не плодит пост.
+    const sameDayNow = new Date()
+    const sameDayYyyymmdd = toMskDateString(conv.deliveryDate)
+    for (const item of save.savedItems) {
+      const location = client.locations.find((l) => l.id === item.locationId)
+      if (!location?.sameDayDelivery) continue
+      try {
+        const order = await prisma.order.findFirst({
+          where: {
+            clientId: client.id,
+            locationId: item.locationId,
+            mealType: item.mealType,
+            deliveryDate: conv.deliveryDate,
+            status: { notIn: ['CANCELLED'] },
+          },
+          select: { id: true },
+        })
+        if (!order) continue
+        const event = await logBorisEvent({
+          eventType: 'SAMEDAY_ORDER_LOCKED',
+          eventDate: sameDayNow,
+          clientId: client.id,
+          orderId: order.id,
+          payload: {
+            clientName: client.name,
+            locationName: item.locationName,
+            mealType: item.mealType,
+            portions: item.portions,
+            deliveryDate: sameDayYyyymmdd,
+            cutoffHourMsk: location.cutoffHourMsk ?? 16,
+            cutoffMinuteMsk: location.cutoffMinuteMsk ?? 0,
+          },
+          deduplKey: `sameday-locked:${order.id}:${sameDayYyyymmdd}`,
+        })
+        if (event) {
+          waitUntil(
+            emitLivePost(event).catch((err) =>
+              console.error('[boris-team] sameday-locked emit failed', err),
+            ),
+          )
+        }
+      } catch (err) {
+        console.error('[boris-team] sameday-locked trigger failed', err)
+      }
+    }
 
     const reply = formatAcceptedReply(itemsForReply)
     await sendBotMessage(client.maxChatId!, reply)
