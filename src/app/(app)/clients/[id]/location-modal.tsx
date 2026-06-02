@@ -24,8 +24,11 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
   const [tags, setTags] = useState<string[]>(location?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
   const [sameDayDelivery, setSameDayDelivery] = useState<boolean>(location?.sameDayDelivery ?? false)
-  const [cutoffHourMsk, setCutoffHourMsk] = useState<number | ''>(location?.cutoffHourMsk ?? '')
-  const [cutoffMinuteMsk, setCutoffMinuteMsk] = useState<number | ''>(location?.cutoffMinuteMsk ?? '')
+  const [cutoffTimeStr, setCutoffTimeStr] = useState<string>(
+    location != null && location.cutoffHourMsk != null
+      ? `${String(location.cutoffHourMsk).padStart(2, '0')}:${String(location.cutoffMinuteMsk ?? 0).padStart(2, '0')}`
+      : ''
+  )
 
   useEffect(() => {
     if (open && !location) {
@@ -37,8 +40,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
       setTags([])
       setTagInput('')
       setSameDayDelivery(false)
-      setCutoffHourMsk('')
-      setCutoffMinuteMsk('')
+      setCutoffTimeStr('')
     } else if (open && location) {
       setName(location.name)
       setAddress(location.address)
@@ -47,8 +49,11 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
       setPackaging(location.packaging)
       setTags(location.tags)
       setSameDayDelivery(location.sameDayDelivery ?? false)
-      setCutoffHourMsk(location.cutoffHourMsk ?? '')
-      setCutoffMinuteMsk(location.cutoffMinuteMsk ?? '')
+      setCutoffTimeStr(
+        location.cutoffHourMsk != null
+          ? `${String(location.cutoffHourMsk).padStart(2, '0')}:${String(location.cutoffMinuteMsk ?? 0).padStart(2, '0')}`
+          : ''
+      )
     }
   }, [open, location])
 
@@ -83,6 +88,14 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
     }
 
     startTransition(async () => {
+      let cutoffHourMsk: number | null = null
+      let cutoffMinuteMsk: number | null = null
+      if (cutoffTimeStr !== '') {
+        const [hh, mm] = cutoffTimeStr.split(':')
+        cutoffHourMsk = Number(hh)
+        cutoffMinuteMsk = Number(mm)
+      }
+
       const data = {
         name: name.trim(),
         address: address.trim(),
@@ -91,8 +104,8 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
         packaging,
         tags,
         sameDayDelivery,
-        cutoffHourMsk: cutoffHourMsk === '' ? null : cutoffHourMsk,
-        cutoffMinuteMsk: cutoffMinuteMsk === '' ? null : cutoffMinuteMsk,
+        cutoffHourMsk,
+        cutoffMinuteMsk,
       }
 
       const result = location
@@ -173,31 +186,15 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
               </span>
             </label>
             {sameDayDelivery && (
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="space-y-1.5">
-                  <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Cut-off час (МСК)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    placeholder="8"
-                    value={cutoffHourMsk}
-                    onChange={(e) => setCutoffHourMsk(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Cut-off минута</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={59}
-                    placeholder="40"
-                    value={cutoffMinuteMsk}
-                    onChange={(e) => setCutoffMinuteMsk(e.target.value === '' ? '' : Number(e.target.value))}
-                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums"
-                  />
-                </div>
+              <div className="space-y-1.5 pt-1">
+                <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Cut-off (МСК)</label>
+                <input
+                  type="time"
+                  placeholder="08:40"
+                  value={cutoffTimeStr}
+                  onChange={(e) => setCutoffTimeStr(e.target.value)}
+                  className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums"
+                />
               </div>
             )}
           </div>

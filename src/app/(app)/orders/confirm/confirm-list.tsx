@@ -17,7 +17,11 @@ type SerializedPendingOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'va
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
-  location: Pick<ClientLocation, 'id' | 'name' | 'address'>
+  // 7.40: cutoff-поля локации — для per-location отсчёта cut-off.
+  location: Pick<
+    ClientLocation,
+    'id' | 'name' | 'address' | 'cutoffHourMsk' | 'cutoffMinuteMsk' | 'sameDayDelivery'
+  >
   sourceConfig: { id: string; fixedPortions: number | null } | null
 }
 
@@ -25,13 +29,25 @@ interface Props {
   orders: SerializedPendingOrder[]
 }
 
-function getCutoffStatus(deliveryDate: Date): {
+function getCutoffStatus(
+  deliveryDate: Date,
+  location: Pick<
+    SerializedPendingOrder['location'],
+    'cutoffHourMsk' | 'cutoffMinuteMsk' | 'sameDayDelivery'
+  >
+): {
   isPastCutoff: boolean
   hoursLeft: number | null
   minutesLeft: number | null
 } {
-  // Cut-off привязан к зоне Europe/Moscow (см. lib/orders/cutoff.ts)
-  const cutoff = getCutoffMoment(deliveryDate)
+  // Cut-off привязан к зоне Europe/Moscow (см. lib/orders/cutoff.ts).
+  // 7.40: момент считается per-location — час/минута/sameDay из локации.
+  const cutoff = getCutoffMoment(
+    deliveryDate,
+    location.cutoffHourMsk ?? 16,
+    location.cutoffMinuteMsk ?? 0,
+    location.sameDayDelivery
+  )
   const now = new Date()
   const diff = cutoff.getTime() - now.getTime()
 
@@ -72,7 +88,6 @@ export function ConfirmList({ orders }: Props) {
       {sortedDates.map((dateKey) => {
         const dateOrders = groupedByDate.get(dateKey)!
         const dateObj = new Date(dateOrders[0].deliveryDate)
-        const cutoff = getCutoffStatus(dateObj)
 
         return (
           <div key={dateKey} className="space-y-3">
@@ -80,14 +95,18 @@ export function ConfirmList({ orders }: Props) {
               <h2 className="text-lg font-semibold capitalize">
                 {formatDateLong(dateObj)}
               </h2>
-              <CutoffBadge cutoff={cutoff} />
             </div>
             <div className="rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
-              {dateOrders.map((o, idx) => (
-                <div key={o.id} className={cn(idx > 0 && 'border-t border-border')}>
-                  <ConfirmRow order={o} pastCutoff={cutoff.isPastCutoff} onChanged={() => router.refresh()} />
-                </div>
-              ))}
+              {dateOrders.map((o, idx) => {
+                // 7.40: cut-off считается per-order по cutoff-полям его локации,
+                // т.к. внутри одной даты доставки локации могут различаться.
+                const cutoff = getCutoffStatus(new Date(o.deliveryDate), o.location)
+                return (
+                  <div key={o.id} className={cn(idx > 0 && 'border-t border-border')}>
+                    <ConfirmRow order={o} cutoff={cutoff} onChanged={() => router.refresh()} />
+                  </div>
+                )
+              })}
             </div>
           </div>
         )
@@ -122,13 +141,14 @@ function CutoffBadge({ cutoff }: { cutoff: ReturnType<typeof getCutoffStatus> })
 
 function ConfirmRow({
   order,
-  pastCutoff,
+  cutoff,
   onChanged,
 }: {
   order: SerializedPendingOrder
-  pastCutoff: boolean
+  cutoff: ReturnType<typeof getCutoffStatus>
   onChanged: () => void
 }) {
+  const pastCutoff = cutoff.isPastCutoff
   const [portions, setPortions] = useState<string>(
     order.sourceConfig?.fixedPortions?.toString() ?? ''
   )
@@ -184,10 +204,11 @@ function ConfirmRow({
       pastCutoff && 'bg-danger-bg/10'
     )}>
       <div className="min-w-0">
-        <div className="flex items-baseline gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold truncate">{order.client.name}</span>
           <span className="text-sm text-fg-muted">·</span>
           <span className="text-sm text-fg-muted truncate">{order.location.name}</span>
+          <CutoffBadge cutoff={cutoff} />
         </div>
         <div className="flex items-baseline gap-3 text-xs text-fg-muted mt-0.5">
           <span>{MEAL_TYPE_LABELS[order.mealType]}</span>

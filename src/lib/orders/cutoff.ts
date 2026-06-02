@@ -15,21 +15,29 @@ export const CUTOFF_HOUR_MSK = 16
 export const MSK_TIMEZONE = 'Europe/Moscow'
 
 /**
- * Возвращает момент cut-off (CUTOFF_HOUR_MSK по Europe/Moscow) для дня
- * перед deliveryDate, как UTC Date. Использует fromZonedTime, чтобы
- * корректно учитывать летнее/зимнее время.
+ * Возвращает момент cut-off (hour:minute по Europe/Moscow) как UTC Date.
+ * Использует fromZonedTime, чтобы корректно учитывать зону МСК.
+ *
+ * - sameDay=false (по умолчанию, легаси): cut-off на дне ПЕРЕД deliveryDate.
+ *   Для обычных NEXT_DAY-заказов (приём накануне до 16:00).
+ * - sameDay=true (7.40): cut-off на САМОЙ deliveryDate. Для same-day-клиентов
+ *   доставка сегодня и cut-off сегодня утром — вычитать день нельзя, иначе
+ *   момент уезжает на «вчера» и отсчёт всегда показывает «прошёл».
  */
 export function getCutoffMoment(
   deliveryDate: Date,
   hour: number = CUTOFF_HOUR_MSK,
-  minute: number = 0
+  minute: number = 0,
+  sameDay: boolean = false
 ): Date {
-  const dayBefore = new Date(deliveryDate)
-  dayBefore.setUTCDate(dayBefore.getUTCDate() - 1)
+  const base = new Date(deliveryDate)
+  if (!sameDay) {
+    base.setUTCDate(base.getUTCDate() - 1)
+  }
 
-  const yyyy = dayBefore.getUTCFullYear()
-  const mm = String(dayBefore.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(dayBefore.getUTCDate()).padStart(2, '0')
+  const yyyy = base.getUTCFullYear()
+  const mm = String(base.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(base.getUTCDate()).padStart(2, '0')
   const hh = String(hour).padStart(2, '0')
   const mi = String(minute).padStart(2, '0')
   const localStr = `${yyyy}-${mm}-${dd}T${hh}:${mi}:00`
@@ -72,6 +80,21 @@ export function getTodayCutoffMomentMsk(
   return fromZonedTime(`${yyyy}-${mm}-${dd}T${hh}:${mi}:00`, MSK_TIMEZONE)
 }
 
+/**
+ * Форматирует UTC-момент как "HH:MM" по Europe/Moscow (7.40). Для подписей
+ * «cut-off в HH:MM МСК» в UI — единый источник форматирования, без дублей.
+ */
+export function formatMskTime(moment: Date): string {
+  const parts = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: MSK_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(moment)
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  return `${get('hour')}:${get('minute')}`
+}
+
 export interface CutoffCountdown {
   hoursLeft: number
   minutesLeft: number
@@ -99,14 +122,28 @@ export function getCutoffCountdown(
     ? getCutoffMoment(deliveryDate)
     : getTodayCutoffMomentMsk(now)
 
-  const diffMs = cutoffMoment.getTime() - now.getTime()
+  return getCountdownToMoment(cutoffMoment, now)
+}
+
+/**
+ * Отсчёт до явно заданного момента cut-off (7.40). Та же форма результата,
+ * что и getCutoffCountdown, но момент вычисляется снаружи — например per-location
+ * через getCutoffMoment(deliveryDate, hour, minute, sameDay). Позволяет UI
+ * не дёргать helper дважды и работать с произвольным (в т.ч. ближайшим из
+ * нескольких) cut-off.
+ */
+export function getCountdownToMoment(
+  targetMoment: Date,
+  now: Date = new Date()
+): CutoffCountdown {
+  const diffMs = targetMoment.getTime() - now.getTime()
   const totalMinutesLeft = Math.round(diffMs / 60_000)
   const clamped = Math.max(0, totalMinutesLeft)
   const hoursLeft = Math.floor(clamped / 60)
   const minutesLeft = clamped % 60
   const isPast = totalMinutesLeft <= 0
 
-  // isToday: совпадает ли календарная дата cut-off-момента с «сегодня» по МСК.
+  // isToday: совпадает ли календарная дата момента с «сегодня» по МСК.
   // Сравниваем dd.mm.yyyy в зоне МСК, чтобы не зависеть от TZ сервера.
   const fmt = (d: Date) =>
     new Intl.DateTimeFormat('ru-RU', {
@@ -115,7 +152,7 @@ export function getCutoffCountdown(
       month: '2-digit',
       day: '2-digit',
     }).format(d)
-  const isToday = fmt(cutoffMoment) === fmt(now)
+  const isToday = fmt(targetMoment) === fmt(now)
 
   return { hoursLeft, minutesLeft, totalMinutesLeft, isPast, isToday }
 }

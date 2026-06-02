@@ -1,23 +1,56 @@
 import Link from 'next/link'
 import { Clock, ChevronRight } from 'lucide-react'
-import { countPendingConfirmationToday } from '@/lib/db/queries/orders'
-import { getCutoffCountdown } from '@/lib/orders/cutoff'
+import { listPendingCutoffData } from '@/lib/db/queries/orders'
+import {
+  getCutoffMoment,
+  getCountdownToMoment,
+  formatMskTime,
+} from '@/lib/orders/cutoff'
 
 /**
  * «Требует действия» — баннер на дашборде про DYNAMIC-заказы, ждущие
- * подтверждения, с обратным отсчётом до cut-off (16:00 МСК).
+ * подтверждения, с обратным отсчётом до cut-off.
  *
- * Async server component: сам тянет счётчик. Если ждущих нет (n === 0) —
+ * Async server component: сам тянет данные. Если ждущих нет (n === 0) —
  * не рендерится вовсе (return null), чтобы не загромождать дашборд.
+ *
+ * 7.40: cut-off теперь per-location. Один запрос listPendingCutoffData()
+ * даёт и количество (data.length → n), и моменты cut-off по каждому заказу,
+ * чтобы count и моменты не рассинхронились. Для каждого заказа момент
+ * считается через getCutoffMoment(deliveryDate, hour, minute, sameDay),
+ * а отсчёт показывается до БЛИЖАЙШЕГО ещё не наступившего cut-off. Если все
+ * cut-off уже прошли — показываем ветку «cut-off прошёл».
  *
  * «DYNAMIC» — тип заказа, по-русски не склоняется, оставлено как есть.
  */
 export async function ActionRequiredBlock() {
-  const n = await countPendingConfirmationToday()
+  const data = await listPendingCutoffData()
+  const n = data.length
   if (n === 0) return null
 
-  // Без аргументов → cut-off сегодняшнего дня 16:00 МСК.
-  const countdown = getCutoffCountdown()
+  const now = new Date()
+  const nowMs = now.getTime()
+
+  // Момент cut-off по каждому заказу (per-location, с дефолтами 16:00).
+  const moments = data.map((o) =>
+    getCutoffMoment(
+      o.deliveryDate,
+      o.location?.cutoffHourMsk ?? 16,
+      o.location?.cutoffMinuteMsk ?? 0,
+      o.location?.sameDayDelivery ?? false
+    )
+  )
+
+  // Ближайший ещё НЕ наступивший cut-off (минимальный timestamp среди будущих).
+  const future = moments.filter((m) => m.getTime() > nowMs)
+  const target =
+    future.length > 0
+      ? future.reduce((a, b) => (a.getTime() <= b.getTime() ? a : b))
+      : null
+
+  // target === null → все cut-off прошли. Берём любой прошедший момент, чтобы
+  // getCountdownToMoment вернул isPast (ветка «cut-off прошёл»).
+  const countdown = getCountdownToMoment(target ?? now, now)
 
   return (
     <Link
@@ -37,14 +70,15 @@ export async function ActionRequiredBlock() {
         </p>
         <p className="mt-0.5 text-sm text-fg-muted">
           <b className="font-bold text-brand-orange-dark">{n} DYNAMIC</b> ждут ·{' '}
-          {countdown.isPast ? (
+          {countdown.isPast || !target ? (
             <>cut-off прошёл</>
           ) : (
             <>
               cut-off через{' '}
               <b className="font-bold tabular-nums text-fg">
                 {countdown.hoursLeft}ч {countdown.minutesLeft}мин
-              </b>
+              </b>{' '}
+              (к {formatMskTime(target)})
             </>
           )}
         </p>

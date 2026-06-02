@@ -136,8 +136,47 @@ export async function listPendingConfirmation() {
     ],
     include: {
       client: { select: { id: true, name: true } },
-      location: { select: { id: true, name: true, address: true } },
+      // 7.40: cutoff-поля локации — для per-location отсчёта в confirm-list.
+      location: {
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          cutoffHourMsk: true,
+          cutoffMinuteMsk: true,
+          sameDayDelivery: true,
+        },
+      },
       sourceConfig: { select: { id: true, fixedPortions: true } },
+    },
+  })
+}
+
+/**
+ * 7.40: данные для виджетов cut-off на дашборде (CutOffBlock, ActionRequiredBlock).
+ * Pending DYNAMIC-заказы на сегодня и завтра + cutoff-поля их локаций. Лёгкая
+ * выборка (без клиента/цен): UI считает per-location момент через
+ * getCutoffMoment(deliveryDate, cutoffHourMsk ?? 16, cutoffMinuteMsk ?? 0, sameDayDelivery)
+ * и выбирает ближайший ещё не наступивший. Один источник для обоих виджетов —
+ * чтобы не плодить параллельные запросы в одинаковой семантикой.
+ */
+export async function listPendingCutoffData() {
+  const today = startOfDay(new Date())
+  const tomorrowEnd = endOfDay(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  return prisma.order.findMany({
+    where: {
+      status: 'PENDING_CONFIRMATION',
+      deliveryDate: { gte: today, lte: tomorrowEnd },
+    },
+    select: {
+      deliveryDate: true,
+      location: {
+        select: {
+          cutoffHourMsk: true,
+          cutoffMinuteMsk: true,
+          sameDayDelivery: true,
+        },
+      },
     },
   })
 }

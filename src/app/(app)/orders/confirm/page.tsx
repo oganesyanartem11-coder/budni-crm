@@ -10,6 +10,13 @@ export default async function ConfirmPage() {
   await requireRole(['ADMIN', 'MANAGER'])
   const pending = await listPendingConfirmation()
 
+  // 7.40: если хоть у одной локации в pending включён same-day cut-off,
+  // единого «16:00» больше нет — показываем нейтральный subtitle.
+  const hasSameDay = pending.some((o) => o.location.sameDayDelivery)
+  const subtitle = hasSameDay
+    ? 'Cut-off индивидуальный по локациям. Введите количество порций по каждому клиенту.'
+    : 'Cut-off в 16:00. Введите количество порций по каждому клиенту.'
+
   return (
     <>
       <div className="mb-6">
@@ -23,7 +30,7 @@ export default async function ConfirmPage() {
       </div>
       <PageHeader
         title="Подтверждение заказов"
-        subtitle="Cut-off в 16:00. Введите количество порций по каждому клиенту."
+        subtitle={subtitle}
       />
       <ConfirmList orders={serialize(pending)} />
     </>
