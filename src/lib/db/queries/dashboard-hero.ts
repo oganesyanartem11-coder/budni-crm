@@ -1,7 +1,6 @@
 import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
-import { getMskDayStart } from '@/lib/utils/msk-window'
 
 // «Реальные» заказы дня: в работе + доставленные. Исключает DRAFT и CANCELLED.
 // Тот же набор, что в src/app/(app)/dashboard/page.tsx — чтобы hero-цифры
@@ -21,13 +20,25 @@ export type TomorrowHeroData = {
   status: 'pending' | 'confirmed'
 }
 
-// Границы суток в МСК (а не в локали сервера). deliveryDate в схеме — @db.Date
-// (date-only), но на UTC-сервере локальный setHours(0,0,0,0) мог дать UTC-момент
-// предыдущей МСК-даты; getMskDayStart считает МСК-полночь как UTC-момент (MSK=UTC+3).
-// Возвращаем [start, end) — start включительно, end (= след. МСК-полночь) нет.
-function dayBounds(base: Date): { start: Date; end: Date } {
-  const start = getMskDayStart(base)
-  const end = getMskDayStart(addDays(base, 1))
+// Границы суток для запроса по deliveryDate (@db.Date, date-only).
+//
+// Bug 7.42: раньше брали getMskDayStart — он возвращает UTC-ИНСТАНТ МСК-полуночи
+// (МСК 2 июн 00:00 = 1 июн 21:00 UTC). Для @db.Date-колонки Prisma усекает границу
+// до её UTC-КАЛЕНДАРНОЙ даты → 1 июн 21:00 UTC превращался в '2026-06-01' и всё
+// окно «сегодня» съезжало на вчера (виджет показывал данные −1 дня).
+//
+// Правильно для @db.Date — UTC-ПОЛНОЧЬ МСК-календарного дня (МСК 2 июн → 2 июн
+// 00:00 UTC), чья UTC-дата = нужный день. Вычисляем самодостаточно: +3ч к base
+// (МСК=UTC+3, DST не действует с 2011), читаем Y/M/D в UTC, строим Date.UTC.
+// Не зависит от TZ рантайма и от семантики getMskCalendarDayUtc(now).
+// Возвращаем [start, end) — start включительно, end (= след. UTC-полночь) нет.
+export function dayBounds(base: Date): { start: Date; end: Date } {
+  const baseMsk = new Date(base.getTime() + 3 * 60 * 60 * 1000)
+  const y = baseMsk.getUTCFullYear()
+  const m = baseMsk.getUTCMonth()
+  const d = baseMsk.getUTCDate()
+  const start = new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
+  const end = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0))
   return { start, end }
 }
 
