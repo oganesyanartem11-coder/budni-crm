@@ -102,10 +102,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   // MANAGER тоже видит выручку (маржу/себестоимость — нет, это решает FinanceWeekBlock).
   const canSeeFinance = isAdminLikeUser || user.role === 'MANAGER'
 
-  // Финансовый пресет из URL, дефолт this_week. Невалидный → this_week.
+  // 7.45: Финансовый пресет из URL, дефолт today. Невалидный → today.
+  // withWoW остаётся на this_week — по умолчанию (today) WoW-блок не показывается.
   const params = await searchParams
-  const periodParam = (params.period ?? 'this_week') as FinancePreset
-  const preset: FinancePreset = FINANCE_PRESETS.includes(periodParam) ? periodParam : 'this_week'
+  const periodParam = (params.period ?? 'today') as FinancePreset
+  const preset: FinancePreset = FINANCE_PRESETS.includes(periodParam) ? periodParam : 'today'
   const { from, to } = resolveFinanceRange(preset, params.from, params.to)
   const withWoW = preset === 'this_week'
 
