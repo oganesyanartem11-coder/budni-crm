@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { buildLegalEntitySnapshot } from '@/lib/orders/legal-entity-snapshot'
-import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
+import { getMskCalendarDayUtc, toMskDateString } from '@/lib/utils/msk-window'
 import type { ClientMealConfig, ScheduleType } from '@prisma/client'
 
 export interface GenerationStats {
@@ -13,6 +13,13 @@ export interface GenerationStats {
   skippedExisting: number
   skippedNoSchedule: number
   errors: Array<{ configId: string; error: string }>
+  // 7.41: заполняются только generateFixedOrdersForRange. Для single-day
+  // generateFixedOrdersForDate остаются undefined (обратная совместимость).
+  rangeStart?: string
+  rangeEnd?: string
+  days?: number
+  sameDayProcessed?: number
+  rangeProcessed?: number
 }
 
 /**
@@ -91,6 +98,37 @@ export function resolveTargetDate(
   today: Date,
 ): Date {
   return config.location.sameDayDelivery ? today : defaultDate
+}
+
+/**
+ * 7.41: чистое планирование дат доставки для одного конфига на горизонт `days`.
+ *
+ * - same-day локация → ровно [сегодня МСК] (offset 0), если расписание попадает.
+ *   Решение продукта: same-day горизонт остаётся 1 день, в диапазон НЕ входит.
+ * - обычная локация → дни диапазона offset 1..days (завтра..сегодня+days),
+ *   отфильтрованные по isScheduledForDate (WEEKDAYS пропустит сб/вс и т.п.).
+ *
+ * Без БД и без дедупа — только «какие даты по расписанию». Дедуп по уже
+ * существующим заказам делает вызывающий generateFixedOrdersForRange.
+ * `sameDayDelivery` передаётся отдельно, чтобы функцию можно было тестировать
+ * с минимальным объектом конфига (как resolveTargetDate).
+ */
+export function planConfigDeliveryDates(
+  config: ClientMealConfig,
+  sameDayDelivery: boolean,
+  now: Date,
+  days: number,
+): Date[] {
+  if (sameDayDelivery) {
+    const today = getMskCalendarDayUtc(now, 0)
+    return isScheduledForDate(config, today) ? [today] : []
+  }
+  const dates: Date[] = []
+  for (let offset = 1; offset <= days; offset++) {
+    const date = getMskCalendarDayUtc(now, offset)
+    if (isScheduledForDate(config, date)) dates.push(date)
+  }
+  return dates
 }
 
 /** Начало (00:00:00.000) и конец (23:59:59.999) суток, в которые попадает `date`. */
@@ -280,6 +318,218 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
         createdDynamic: stats.createdDynamic,
         skippedExisting: stats.skippedExisting,
         skippedNoSchedule: stats.skippedNoSchedule,
+        errors: stats.errors.length,
+      },
+    },
+  }).catch(() => { /* лог не должен ронять генерацию */ })
+
+  return stats
+}
+
+/**
+ * 7.41: пролонгация FIXED/DYNAMIC-заказов на горизонт `days` дней вперёд.
+ *
+ * Зачем: видеть планирование заранее + защита от пропусков Vercel cron —
+ * ежедневный запуск перекрывает [сегодня..сегодня+days] и идемпотентно
+ * «дозаполняет» дни, которые мог пропустить упавший cron (date-aware
+ * партиальный unique `order_business_key` + skipDuplicates + in-memory Set).
+ *
+ * Раздельный обход (см. planConfigDeliveryDates):
+ *  - same-day локации обрабатываются ровно на СЕГОДНЯ (offset 0), в диапазон
+ *    1..days не входят (горизонт same-day остаётся 1 день — решение продукта);
+ *  - обычные локации — на каждый день диапазона offset 1..days, прошедший
+ *    проверку расписания.
+ *
+ * `startDate` используется для лейблинга (обычно = завтра МСК); сами даты
+ * вычисляются от текущего МСК-дня через getMskCalendarDayUtc(now, offset),
+ * поэтому функция не подходит для «генерации на произвольную дату» — для
+ * этого остаётся generateFixedOrdersForDate (manual-trigger).
+ */
+export async function generateFixedOrdersForRange(
+  startDate: Date,
+  days: number,
+  options: { triggeredByUserId?: string | null }
+): Promise<GenerationStats> {
+  const now = new Date()
+  const todayMsk = getMskCalendarDayUtc(now, 0)
+  // Объединённый диапазон существующих заказов: от сегодня (same-day, offset 0)
+  // до последнего дня горизонта (offset days). deliveryDate — @db.Date (UTC-
+  // полночь календарной даты), поэтому inclusive lte по UTC-полночи корректен.
+  const rangeStartDate = todayMsk
+  const rangeEndDate = getMskCalendarDayUtc(now, days)
+
+  const stats: GenerationStats = {
+    targetDate: startDate.toISOString(),
+    candidatesTotal: 0,
+    matchedSchedule: 0,
+    created: 0,
+    createdFixed: 0,
+    createdDynamic: 0,
+    skippedExisting: 0,
+    skippedNoSchedule: 0,
+    errors: [],
+    rangeStart: toMskDateString(rangeStartDate),
+    rangeEnd: toMskDateString(rangeEndDate),
+    days,
+    sameDayProcessed: 0,
+    rangeProcessed: 0,
+  }
+
+  // Грузим все активные FIXED+DYNAMIC конфиги ОДИН раз (тот же include, что и
+  // generateFixedOrdersForDate — нужны client-снапшот юрлица и поля локации).
+  const configs = await prisma.clientMealConfig.findMany({
+    where: {
+      isActive: true,
+      orderType: { in: ['FIXED', 'DYNAMIC'] },
+      client: { isActive: true },
+      location: { isActive: true },
+    },
+    include: {
+      client: {
+        select: {
+          id: true,
+          isActive: true,
+          defaultOurLegalEntityId: true,
+          defaultOurLegalEntity: { select: { vatRate: true } },
+        },
+      },
+      location: {
+        select: {
+          id: true,
+          isActive: true,
+          packaging: true,
+          sameDayDelivery: true,
+          cutoffHourMsk: true,
+          cutoffMinuteMsk: true,
+        },
+      },
+    },
+  })
+
+  stats.candidatesTotal = configs.length
+
+  // Существующие (не отменённые) заказы по всему диапазону — для антидубля.
+  // Ключ включает дату доставки: clientId|locationId|mealType|YYYY-MM-DD (МСК).
+  const existingOrders = await prisma.order.findMany({
+    where: {
+      deliveryDate: { gte: rangeStartDate, lte: rangeEndDate },
+      status: { not: 'CANCELLED' },
+    },
+    select: {
+      clientId: true,
+      locationId: true,
+      mealType: true,
+      deliveryDate: true,
+    },
+  })
+  const dedupKey = (clientId: string, locationId: string, mealType: string, d: Date) =>
+    `${clientId}|${locationId}|${mealType}|${toMskDateString(d)}`
+  const existingKeys = new Set(
+    existingOrders.map((o) => dedupKey(o.clientId, o.locationId, o.mealType, o.deliveryDate))
+  )
+
+  // Накапливаем все заказы и пишем одним createMany в конце.
+  type OrderInsert = {
+    clientId: string
+    locationId: string
+    mealType: ClientMealConfig['mealType']
+    deliveryDate: Date
+    portions: number
+    pricePerPortion: number
+    totalPrice: number
+    packaging: 'INDIVIDUAL' | 'BULK'
+    source: 'FIXED_AUTO' | 'RECURRING_AUTO'
+    status: 'CONFIRMED' | 'PENDING_CONFIRMATION'
+    sourceConfigId: string
+    confirmedAt: Date | null
+    ourLegalEntityId: string | null
+    vatRate: ReturnType<typeof buildLegalEntitySnapshot>['vatRate']
+  }
+  const ordersData: OrderInsert[] = []
+
+  for (const config of configs) {
+    // Даты по расписанию для этого конфига (same-day → [сегодня], иначе 1..days).
+    const targetDates = planConfigDeliveryDates(config, config.location.sameDayDelivery, now, days)
+    if (targetDates.length === 0) {
+      stats.skippedNoSchedule++
+      continue
+    }
+    stats.matchedSchedule++
+
+    try {
+      const isFixed = config.orderType === 'FIXED'
+      const portionsValue = isFixed ? (config.fixedPortions ?? 0) : 0
+      const priceNum = Number(config.pricePerPortion)
+      const snapshot = buildLegalEntitySnapshot(config.client)
+
+      for (const configDate of targetDates) {
+        const key = dedupKey(config.clientId, config.location.id, config.mealType, configDate)
+        if (existingKeys.has(key)) {
+          stats.skippedExisting++
+          continue
+        }
+        existingKeys.add(key)
+
+        ordersData.push({
+          clientId: config.clientId,
+          locationId: config.location.id,
+          mealType: config.mealType,
+          deliveryDate: configDate,
+          portions: portionsValue,
+          pricePerPortion: priceNum,
+          totalPrice: priceNum * portionsValue,
+          packaging: config.location.packaging,
+          source: isFixed ? 'FIXED_AUTO' : 'RECURRING_AUTO',
+          status: isFixed ? 'CONFIRMED' : 'PENDING_CONFIRMATION',
+          sourceConfigId: config.id,
+          confirmedAt: isFixed ? new Date() : null,
+          ourLegalEntityId: snapshot.ourLegalEntityId,
+          vatRate: snapshot.vatRate,
+        })
+
+        if (config.location.sameDayDelivery) {
+          stats.sameDayProcessed!++
+        } else {
+          stats.rangeProcessed!++
+        }
+      }
+    } catch (err) {
+      stats.errors.push({
+        configId: config.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  if (ordersData.length > 0) {
+    await prisma.order.createMany({ data: ordersData, skipDuplicates: true })
+    stats.created = ordersData.length
+    stats.createdFixed = ordersData.filter((o) => o.source === 'FIXED_AUTO').length
+    stats.createdDynamic = ordersData.filter((o) => o.source === 'RECURRING_AUTO').length
+  }
+
+  // Один агрегированный лог на весь диапазон (entityId = диапазон дат).
+  await prisma.activityLog.create({
+    data: {
+      userId: options.triggeredByUserId ?? null,
+      userRole: options.triggeredByUserId ? 'MANAGER' : 'ADMIN',
+      action: 'FIXED_ORDERS_GENERATED',
+      entityType: 'OrderBatch',
+      entityId: `${stats.rangeStart}_to_${stats.rangeEnd}`,
+      payload: {
+        startDate: stats.targetDate,
+        days,
+        rangeStart: stats.rangeStart,
+        rangeEnd: stats.rangeEnd,
+        candidatesTotal: stats.candidatesTotal,
+        matchedSchedule: stats.matchedSchedule,
+        created: stats.created,
+        createdFixed: stats.createdFixed,
+        createdDynamic: stats.createdDynamic,
+        skippedExisting: stats.skippedExisting,
+        skippedNoSchedule: stats.skippedNoSchedule,
+        sameDayProcessed: stats.sameDayProcessed,
+        rangeProcessed: stats.rangeProcessed,
         errors: stats.errors.length,
       },
     },
