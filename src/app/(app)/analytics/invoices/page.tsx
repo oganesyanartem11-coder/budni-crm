@@ -52,11 +52,11 @@ export default async function InvoicesAnalyticsPage({ searchParams }: PageProps)
           </div>
           <h3 className="text-base font-semibold text-fg">Данных пока недостаточно</h3>
           <p className="text-sm text-fg-muted mt-1 max-w-md mx-auto">
-            Принимайте накладные через{' '}
+            Принимайте поставки через{' '}
             <Link href="/invoices/new" className="text-accent-fg hover:underline font-medium">
               /invoices/new
             </Link>
-            . Когда за период будет принято хотя бы 2 накладных, появятся графики.
+            . Когда за период будет принято хотя бы 2 поставки, появятся графики.
           </p>
           <p className="text-xs text-fg-subtle mt-3">
             За «{label.toLowerCase()}» принято: {acceptedCount}
@@ -88,7 +88,7 @@ export default async function InvoicesAnalyticsPage({ searchParams }: PageProps)
         {/* W1: Top-10 поставщиков */}
         <ChartCard
           title="Top-10 поставщиков по объёму"
-          subtitle="Сумма принятых накладных за период"
+          subtitle="Сумма принятых поставок за период"
           height="lg"
         >
           <SupplierTopChart data={suppliers} />

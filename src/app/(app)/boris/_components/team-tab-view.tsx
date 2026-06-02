@@ -20,6 +20,7 @@ import {
   triggerTeamEveningDigest,
   triggerTeamFriday,
   triggerTestAlert,
+  triggerGenerateFixedOrders,
 } from '../actions'
 import type { BriefingType, BorisEventType, MealType } from '@prisma/client'
 import type { TeamWeeklyMetrics } from '@/lib/db/queries/boris-briefings'
@@ -84,7 +85,7 @@ const EVENT_TYPE_LABELS_RU: Record<BorisEventType, string> = {
   COMPLAINT_FREE_WEEK: 'Неделя без жалоб',
   ANNIVERSARY: 'Юбилей',
   COURIER_ON_TIME_STREAK: 'Курьер вовремя',
-  BIG_INVOICE: 'Большая накладная',
+  BIG_INVOICE: 'Большая поставка',
   STABLE_PRICE: 'Стабильная цена',
   SAMEDAY_ORDER_LOCKED: 'Same-day заказ принят',
 }
@@ -204,6 +205,12 @@ export function TeamTabView({ teamBriefings, teamEvents, teamMetricsWeek }: Prop
                 'РЕАЛЬНО отправить тестовый алёрт в групповой чат? Это увидят все.',
               )
             }
+          />
+          <TriggerButton
+            label="Сгенерировать заказы (7 дней)"
+            disabled={busyAction !== null}
+            busy={busyAction === 'generate-fixed-orders'}
+            onClick={() => runAction('generate-fixed-orders', triggerGenerateFixedOrders)}
           />
         </div>
         <p className="text-xs text-fg-muted">

@@ -285,7 +285,7 @@ export function UploadForm() {
           )}
         >
           <Camera className="w-12 h-12 text-fg-subtle mx-auto mb-3" strokeWidth={1.5} />
-          <p className="font-medium text-fg mb-1">Загрузить накладную</p>
+          <p className="font-medium text-fg mb-1">Загрузить поставку</p>
           <p className="text-sm text-fg-muted mb-5">
             JPEG / PNG / HEIC · до 25 МБ
           </p>
@@ -324,7 +324,7 @@ export function UploadForm() {
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={previewUrl}
-              alt="превью накладной"
+              alt="превью поставки"
               className="w-full max-h-96 object-contain rounded-lg bg-bg"
             />
           )}

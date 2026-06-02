@@ -111,7 +111,7 @@ export function DraftIngredientCard({ draft, approvedOptions }: Props) {
         >
           <FileText className="w-3.5 h-3.5 shrink-0" />
           <span className="truncate">
-            Из накладной {lastLine.invoice.supplierName} от{' '}
+            Из поставки {lastLine.invoice.supplierName} от{' '}
             {formatDateLong(lastLine.invoice.invoiceDate)}
           </span>
         </Link>
@@ -159,7 +159,7 @@ export function DraftIngredientCard({ draft, approvedOptions }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>Удалить ингредиент «{draft.name}»?</AlertDialogTitle>
             <AlertDialogDescription>
-              История накладных останется (позиции отметятся как пропущенные), но
+              История поставок останется (позиции отметятся как пропущенные), но
               ингредиент будет удалён. Действие необратимо.
               {draft._count.dishIngredients > 0 && (
                 <>

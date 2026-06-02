@@ -10,7 +10,7 @@ export default async function NewInvoicePage() {
   return (
     <>
       <PageHeader
-        title="Загрузить накладную"
+        title="Загрузить поставку"
         actions={
           <Link
             href="/invoices"

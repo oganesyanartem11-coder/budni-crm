@@ -68,14 +68,14 @@ export default async function InvoicesPage({ searchParams }: PageProps) {
   return (
     <>
       <PageHeader
-        title="Накладные"
+        title="Поставки"
         actions={
           <Link
             href="/invoices/new"
             className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Загрузить накладную</span>
+            <span className="hidden sm:inline">Загрузить поставку</span>
           </Link>
         }
       />

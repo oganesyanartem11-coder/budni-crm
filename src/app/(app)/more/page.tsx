@@ -62,7 +62,7 @@ const SECTIONS: MoreSection[] = [
   {
     title: 'Производство',
     items: [
-      { href: '/invoices',    label: 'Накладные', icon: ReceiptText, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
+      { href: '/invoices',    label: 'Поставки', icon: ReceiptText, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
       { href: '/ingredients', label: 'Сырьё',     icon: Wheat,       roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
     ],
   },

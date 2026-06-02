@@ -107,6 +107,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
   // E-блок MEGA-AUDIT-FIX-2: подтверждение изменения fixedPortions при наличии
   // будущих DRAFT/PENDING заказов с устаревшим значением.
   const [confirmState, setConfirmState] = useState<{
+    // T-2: 'portions' — старый сценарий (обновляем порции в заказах);
+    // 'schedule' — только предупреждение, заказы остаются как есть.
+    changeType: 'portions' | 'schedule'
     affectedOrders: number
     oldPortions: number
     newPortions: number
@@ -156,6 +159,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     }
     if ('needsConfirmation' in result && result.needsConfirmation) {
       setConfirmState({
+        changeType: result.changeType,
         affectedOrders: result.affectedOrders,
         oldPortions: result.oldPortions,
         newPortions: result.newPortions,
@@ -530,38 +534,62 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
       </div>
     </div>
 
-    {/* E-блок MEGA-AUDIT-FIX-2: подтверждение изменения fixedPortions */}
+    {/* E-блок MEGA-AUDIT-FIX-2: подтверждение изменения fixedPortions.
+        T-2: смена расписания у FIXED — отдельный текст-предупреждение. */}
     <AlertDialog
       open={confirmState !== null}
       onOpenChange={(o) => { if (!o) setConfirmState(null) }}
     >
       <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="font-display text-warning-fg">Обновить порции в будущих заказах?</AlertDialogTitle>
-          <AlertDialogDescription className="text-fg-muted">
-            {confirmState && (
-              <>
-                У этого конфига {confirmState.affectedOrders} будущих DRAFT/PENDING
-                заказов с {confirmState.oldPortions} порций. Поменять порции в
-                заказах на {confirmState.newPortions} или оставить старые значения?
-              </>
-            )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel
-            disabled={isPending}
-            onClick={() => handleConfirmChoice('keep')}
-          >
-            Только конфиг
-          </AlertDialogCancel>
-          <AlertDialogAction
-            disabled={isPending}
-            onClick={() => handleConfirmChoice('update')}
-          >
-            {confirmState ? `Обновить ${confirmState.affectedOrders} заказов` : 'Обновить заказы'}
-          </AlertDialogAction>
-        </AlertDialogFooter>
+        {confirmState?.changeType === 'schedule' ? (
+          <>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="font-display text-warning-fg">Расписание изменено</AlertDialogTitle>
+              <AlertDialogDescription className="text-fg-muted">
+                {confirmState.affectedOrders} будущих заказов могут не
+                соответствовать новому графику. Проверьте список заказов вручную
+                и отмените лишние при необходимости.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction
+                disabled={isPending}
+                onClick={() => handleConfirmChoice('update')}
+              >
+                Понятно
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </>
+        ) : (
+          <>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="font-display text-warning-fg">Обновить порции в будущих заказах?</AlertDialogTitle>
+              <AlertDialogDescription className="text-fg-muted">
+                {confirmState && (
+                  <>
+                    У этого конфига {confirmState.affectedOrders} будущих DRAFT/PENDING
+                    заказов с {confirmState.oldPortions} порций. Поменять порции в
+                    заказах на {confirmState.newPortions} или оставить старые значения?
+                  </>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                disabled={isPending}
+                onClick={() => handleConfirmChoice('keep')}
+              >
+                Только конфиг
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={isPending}
+                onClick={() => handleConfirmChoice('update')}
+              >
+                {confirmState ? `Обновить ${confirmState.affectedOrders} заказов` : 'Обновить заказы'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </>
+        )}
       </AlertDialogContent>
     </AlertDialog>
     </>

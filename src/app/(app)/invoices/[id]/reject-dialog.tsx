@@ -41,7 +41,7 @@ export function RejectDialog({ invoiceId, open, onOpenChange }: Props) {
     startTransition(async () => {
       const r = await rejectInvoice(invoiceId, trimmed)
       if (r.ok) {
-        toast.success('Накладная отклонена')
+        toast.success('Поставка отклонена')
         onOpenChange(false)
         setReason('')
         router.push('/invoices')
@@ -55,7 +55,7 @@ export function RejectDialog({ invoiceId, open, onOpenChange }: Props) {
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Отклонить накладную?</AlertDialogTitle>
+          <AlertDialogTitle>Отклонить поставку?</AlertDialogTitle>
           <AlertDialogDescription>
             Цены не будут применены. Укажите причину — она сохранится в журнале.
           </AlertDialogDescription>

@@ -61,7 +61,7 @@ export function ProgressView({
     const prev = prevProgressRef.current
     prevProgressRef.current = progress
     if (prev !== null && prev !== 'READY' && progress === 'READY') {
-      toast.success('Накладная распознана')
+      toast.success('Поставка распознана')
     }
   }, [progress])
 
@@ -114,7 +114,7 @@ export function ProgressView({
           <div className="flex items-start gap-3">
             <AlertCircle className="w-6 h-6 text-danger shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="font-medium text-fg mb-1">Не удалось распознать накладную</p>
+              <p className="font-medium text-fg mb-1">Не удалось распознать поставку</p>
               <p className="text-sm text-fg-muted mb-4 whitespace-pre-wrap">
                 {errorMessage ?? 'Причина неизвестна. Проверьте логи сервера.'}
               </p>

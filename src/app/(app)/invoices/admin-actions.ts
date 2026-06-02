@@ -27,11 +27,11 @@ export async function acceptInvoice(invoiceId: string): Promise<ActionResult> {
     where: { id: invoiceId },
     include: { lines: true },
   })
-  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+  if (!invoice) return { ok: false, error: 'Поставка не найдена' }
   if (invoice.status !== 'AWAITING_ACCEPT') {
     return {
       ok: false,
-      error: `Накладная в статусе ${invoice.status}, ожидался AWAITING_ACCEPT`,
+      error: `Поставка в статусе ${invoice.status}, ожидался AWAITING_ACCEPT`,
     }
   }
 
@@ -193,11 +193,11 @@ export async function rejectInvoice(
     where: { id: invoiceId },
     select: { status: true, supplierName: true, invoiceNumber: true },
   })
-  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+  if (!invoice) return { ok: false, error: 'Поставка не найдена' }
   if (invoice.status !== 'AWAITING_ACCEPT') {
     return {
       ok: false,
-      error: `Накладная в статусе ${invoice.status}, ожидался AWAITING_ACCEPT`,
+      error: `Поставка в статусе ${invoice.status}, ожидался AWAITING_ACCEPT`,
     }
   }
 
@@ -241,7 +241,7 @@ export async function revertInvoice(invoiceId: string): Promise<ActionResult> {
     where: { id: invoiceId },
     include: { lines: true },
   })
-  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+  if (!invoice) return { ok: false, error: 'Поставка не найдена' }
   if (invoice.status !== 'ACCEPTED') {
     return {
       ok: false,
@@ -249,7 +249,7 @@ export async function revertInvoice(invoiceId: string): Promise<ActionResult> {
     }
   }
   if (!invoice.acceptedAt) {
-    return { ok: false, error: 'У накладной нет acceptedAt — неконсистентное состояние' }
+    return { ok: false, error: 'У поставки нет acceptedAt — неконсистентное состояние' }
   }
 
   const now = new Date()

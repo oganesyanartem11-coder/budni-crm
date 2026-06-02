@@ -45,7 +45,7 @@ export function RevertDialog({ invoiceId, open, onOpenChange }: Props) {
           <AlertDialogTitle>Откатить приёмку?</AlertDialogTitle>
           <AlertDialogDescription>
             Все цены ингредиентов вернутся к значениям до приёмки. Новые ингредиенты,
-            созданные этой накладной, будут деактивированы. Действие необратимо без
+            созданные этой поставкой, будут деактивированы. Действие необратимо без
             новой приёмки.
           </AlertDialogDescription>
         </AlertDialogHeader>

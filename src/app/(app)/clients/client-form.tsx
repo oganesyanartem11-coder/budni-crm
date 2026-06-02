@@ -306,7 +306,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
             </Field>
           )}
 
-          <Field label={`ОГРН / ОГРНИП${innFilled ? ' *' : ''}`} hint={ogrnHint}>
+          <Field label="ОГРН / ОГРНИП" hint={ogrnHint}>
             <input
               type="text"
               inputMode="numeric"

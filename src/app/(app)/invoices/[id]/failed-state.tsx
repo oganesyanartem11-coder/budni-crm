@@ -38,7 +38,7 @@ export function FailedState({ invoiceId, errorMessage, imageUrl, userRole }: Pro
       <div className="flex items-start gap-3 mb-4">
         <AlertCircle className="w-6 h-6 text-danger-fg shrink-0 mt-0.5" />
         <div>
-          <p className="font-medium text-fg mb-1">AI не смог распознать накладную</p>
+          <p className="font-medium text-fg mb-1">AI не смог распознать поставку</p>
           <p className="text-sm text-fg-muted whitespace-pre-wrap">
             {errorMessage ?? 'Причина неизвестна. Проверьте качество фото.'}
           </p>

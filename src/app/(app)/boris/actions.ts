@@ -167,3 +167,28 @@ export async function triggerTestAlert(): Promise<ActionResult<{ eventId?: strin
     }
   }
 }
+
+export async function triggerGenerateFixedOrders(): Promise<ActionResult<{ created: number }>> {
+  const user = await requireRole(['ADMIN_PRO'])
+
+  try {
+    const { generateFixedOrdersForRange } = await import('@/lib/orders/generate-orders')
+    const { getMskCalendarDayUtc } = await import('@/lib/utils/msk-window')
+
+    const tomorrow = getMskCalendarDayUtc(new Date(), 1)
+    const stats = await generateFixedOrdersForRange(tomorrow, 7, {
+      triggeredByUserId: user.id,
+    })
+
+    return {
+      ok: true,
+      data: { created: stats.created },
+      message: `Создано ${stats.created} заказов на 7 дней вперёд`,
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    }
+  }
+}

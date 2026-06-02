@@ -96,7 +96,7 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
         toast.error(r.error)
         return
       }
-      toast.success('Накладная принята, цены обновлены')
+      toast.success('Поставка принята, цены обновлены')
       router.push('/invoices')
     })
   }
@@ -202,7 +202,7 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
               {invoice.imageUrl ? (
                 <Image
                   src={invoice.imageUrl}
-                  alt={`Накладная ${invoice.supplierName} № ${invoice.invoiceNumber}`}
+                  alt={`Поставка ${invoice.supplierName} № ${invoice.invoiceNumber}`}
                   width={invoice.imageWidth ?? 1600}
                   height={invoice.imageHeight ?? 2000}
                   className="w-full h-auto"
@@ -226,7 +226,7 @@ export function InvoiceView({ invoice, currentUserRole }: Props) {
         <div className="space-y-3">
           {invoice.lines.length === 0 ? (
             <div className="rounded-2xl border border-border bg-surface p-6 text-sm text-fg-muted text-center">
-              В накладной нет распознанных позиций.
+              В поставке нет распознанных позиций.
             </div>
           ) : (
             invoice.lines.map((line, idx) => (

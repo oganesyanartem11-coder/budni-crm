@@ -122,7 +122,7 @@ export async function getInvoiceProgress(invoiceId: string): Promise<ActionResul
     },
   })
 
-  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+  if (!invoice) return { ok: false, error: 'Поставка не найдена' }
 
   return {
     ok: true,
@@ -147,12 +147,12 @@ export async function retryRecognition(invoiceId: string): Promise<ActionResult>
     where: { id: invoiceId },
     select: { status: true, imageUrl: true },
   })
-  if (!invoice) return { ok: false, error: 'Накладная не найдена' }
+  if (!invoice) return { ok: false, error: 'Поставка не найдена' }
   if (invoice.status !== 'FAILED') {
     return { ok: false, error: `Можно перераспознать только FAILED, сейчас ${invoice.status}` }
   }
   if (!invoice.imageUrl) {
-    return { ok: false, error: 'У накладной нет фото — повторное распознавание невозможно' }
+    return { ok: false, error: 'У поставки нет фото — повторное распознавание невозможно' }
   }
 
   await prisma.invoice.update({

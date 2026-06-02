@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Users as UsersIcon, Send, Building2, Bug, ChevronRight } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
-import { isAdminLike } from '@/lib/auth/role-helpers'
+import { isAdminLike, isAdminPro } from '@/lib/auth/role-helpers'
 
 export default async function SettingsPage() {
   const user = await requireRole(['ADMIN'])
@@ -35,7 +35,7 @@ export default async function SettingsPage() {
           </Link>
         )}
 
-        {isAdminLike(user.role) && (
+        {isAdminPro(user.role) && (
           <Link
             href="/settings/users"
             className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"

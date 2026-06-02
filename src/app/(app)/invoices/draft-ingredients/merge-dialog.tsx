@@ -93,7 +93,7 @@ export function MergeDialog({ open, onOpenChange, draft, approvedOptions }: Prop
           <DialogTitle>Объединить «{draft.name}»</DialogTitle>
           <DialogDescription>
             Выберите существующий ингредиент. DRAFT будет удалён, а его связи в
-            накладных перейдут на выбранный.
+            поставках перейдут на выбранный.
           </DialogDescription>
         </DialogHeader>
 
@@ -155,7 +155,7 @@ export function MergeDialog({ open, onOpenChange, draft, approvedOptions }: Prop
             <div className="rounded-xl bg-warning/5 border border-warning/30 p-3 text-xs text-fg-muted space-y-1">
               <p>
                 «{draft.name}» будет удалён, его brand-варианты добавятся в
-                «{target.name}». Связи в накладных перенесутся.
+                «{target.name}». Связи в поставках перенесутся.
               </p>
               {target.unit !== draft.unit && (
                 <p className="font-medium text-warning-fg">

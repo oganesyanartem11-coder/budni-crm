@@ -110,7 +110,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: 'Производство',
     items: [
       { href: '/production',  label: 'Производство', icon: ChefHat,     roles: ['ADMIN_PRO', 'ADMIN', 'CHEF', 'MANAGER'] },
-      { href: '/invoices',    label: 'Накладные',    icon: ReceiptText, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'], badge: 'invoicesAwaitingCount' },
+      { href: '/invoices',    label: 'Поставки',    icon: ReceiptText, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'], badge: 'invoicesAwaitingCount' },
       { href: '/ingredients', label: 'Сырьё',        icon: Wheat,       roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
     ],
   },

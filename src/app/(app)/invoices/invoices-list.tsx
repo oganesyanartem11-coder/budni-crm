@@ -116,7 +116,7 @@ export function InvoicesList({
         hasActiveFilters ? (
           <EmptyState
             icon={SearchIcon}
-            title="Не найдено накладных по фильтрам"
+            title="Не найдено поставок по фильтрам"
             description="Попробуйте изменить фильтры или поисковый запрос."
             cta={
               <Link
@@ -130,15 +130,15 @@ export function InvoicesList({
         ) : (
           <EmptyState
             icon={ReceiptText}
-            title="📦 Пока ни одной накладной"
-            description="Сфотографируйте накладную — AI распознает позиции и сопоставит с базой ингредиентов."
+            title="📦 Пока ни одной поставки"
+            description="Сфотографируйте поставку — AI распознает позиции и сопоставит с базой ингредиентов."
             cta={
               <Link
                 href="/invoices/new"
                 className="px-5 py-2.5 rounded-pill bg-accent text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity inline-flex items-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                Загрузить накладную
+                Загрузить поставку
               </Link>
             }
           />

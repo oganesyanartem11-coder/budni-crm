@@ -59,9 +59,6 @@ const clientSchema = z
       if (!data.legalName || data.legalName === '') {
         ctx.addIssue({ code: 'custom', path: ['legalName'], message: 'Укажите полное юридическое название' })
       }
-      if (!data.ogrn || data.ogrn === '') {
-        ctx.addIssue({ code: 'custom', path: ['ogrn'], message: 'Укажите ОГРН/ОГРНИП' })
-      }
       if (!data.legalAddress || data.legalAddress === '') {
         ctx.addIssue({ code: 'custom', path: ['legalAddress'], message: 'Укажите юридический адрес' })
       }
@@ -203,6 +200,9 @@ export type UpdateMealConfigResult =
   | {
       ok: false
       needsConfirmation: true
+      // T-2: 'portions' — старый сценарий (меняем порции в заказах);
+      // 'schedule' — только предупреждение, заказы не трогаем.
+      changeType: 'portions' | 'schedule'
       affectedOrders: number
       oldPortions: number
       newPortions: number
@@ -598,7 +598,14 @@ export async function updateMealConfig(
   // «оставить только конфиг». НЕ авто-обновляем.
   const existing = await prisma.clientMealConfig.findUnique({
     where: { id },
-    select: { fixedPortions: true, clientId: true },
+    select: {
+      fixedPortions: true,
+      clientId: true,
+      scheduleType: true,
+      scheduleData: true,
+      validFrom: true,
+      validTo: true,
+    },
   })
   if (!existing) {
     return { ok: false, error: 'Питание не найдено' }
@@ -611,6 +618,17 @@ export async function updateMealConfig(
     newFixedPortions !== null &&
     oldFixedPortions !== null &&
     newFixedPortions !== oldFixedPortions
+
+  // T-2: смена расписания у FIXED-конфига. Будущие заказы уже сгенерированы под
+  // старый график — предупреждаем менеджера (заказы НЕ трогаем автоматически).
+  const scheduleChanged =
+    parsed.data.orderType === 'FIXED' &&
+    (parsed.data.scheduleType !== existing.scheduleType ||
+      JSON.stringify(parsed.data.scheduleData ?? null) !== JSON.stringify(existing.scheduleData ?? null) ||
+      (parsed.data.validFrom ? new Date(parsed.data.validFrom).getTime() : null) !==
+        (existing.validFrom?.getTime() ?? null) ||
+      (parsed.data.validTo ? new Date(parsed.data.validTo).getTime() : null) !==
+        (existing.validTo?.getTime() ?? null))
 
   const updateData = {
     locationId: parsed.data.locationId ?? null,
@@ -638,7 +656,7 @@ export async function updateMealConfig(
     deliveryDate: { gte: getMskCalendarDayUtc(new Date(), 1) },
   }
 
-  if (portionsChanged && !parsed.data.confirmDraftPortions) {
+  if ((portionsChanged || scheduleChanged) && !parsed.data.confirmDraftPortions) {
     const affected = await prisma.order.count({
       where: affectedOrdersWhere,
     })
@@ -646,10 +664,14 @@ export async function updateMealConfig(
       return {
         ok: false,
         needsConfirmation: true,
+        // Если изменились и порции, и расписание — приоритет у 'portions':
+        // только этот путь реально мутирует заказы.
+        changeType: portionsChanged ? 'portions' : 'schedule',
         affectedOrders: affected,
-        oldPortions: oldFixedPortions!,
-        newPortions: newFixedPortions!,
-        error: `${affected} будущих заказов с устаревшим значением. Подтвердите действие.`,
+        // Для schedule-варианта порции могли не меняться — отдаём текущее значение.
+        oldPortions: oldFixedPortions ?? 0,
+        newPortions: newFixedPortions ?? 0,
+        error: `${affected} будущих заказов затронуты. Подтвердите действие.`,
       }
     }
     // affected === 0 → молча апдейтим только конфиг

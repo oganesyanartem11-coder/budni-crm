@@ -48,7 +48,7 @@ export default async function DraftIngredientsPage() {
             className="px-4 py-2 rounded-pill border border-border text-fg text-sm hover:bg-fg/5 transition-colors flex items-center gap-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            К накладным
+            К поставкам
           </Link>
         }
       />

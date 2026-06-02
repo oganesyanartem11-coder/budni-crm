@@ -16,7 +16,7 @@ export function SupplierTopChart({ data }: Props) {
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-fg-muted">
-        За период нет принятых накладных
+        За период нет принятых поставок
       </div>
     )
   }
@@ -71,9 +71,9 @@ export function SupplierTopChart({ data }: Props) {
 
 function pluralizeInvoices(n: number): string {
   const lastTwo = n % 100
-  if (lastTwo >= 11 && lastTwo <= 14) return 'накладных'
+  if (lastTwo >= 11 && lastTwo <= 14) return 'поставок'
   const last = n % 10
-  if (last === 1) return 'накладная'
-  if (last >= 2 && last <= 4) return 'накладные'
-  return 'накладных'
+  if (last === 1) return 'поставка'
+  if (last >= 2 && last <= 4) return 'поставки'
+  return 'поставок'
 }

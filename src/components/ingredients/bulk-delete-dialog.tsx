@@ -98,7 +98,7 @@ export function BulkDeleteDialog({ open, onOpenChange, selected, onDeleted }: Pr
                         <div className="text-xs text-fg-muted mt-0.5">
                           {hasLinks ? (
                             <>
-                              используется в {ing.dishIngredientCount} техкартах, {ing.invoiceLineCount} строках накладных
+                              используется в {ing.dishIngredientCount} техкартах, {ing.invoiceLineCount} строках поставок
                             </>
                           ) : (
                             <span className="text-fg-subtle">нет связей — можно удалить</span>
