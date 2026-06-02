@@ -51,8 +51,7 @@ export async function createOrder(
   }
 
   const data = parsed.data
-  const deliveryDate = new Date(data.deliveryDate)
-  deliveryDate.setHours(0, 0, 0, 0)
+  const deliveryDate = new Date(`${data.deliveryDate}T00:00:00.000Z`)
 
   if (deliveryDate < startOfTodayMsk()) {
     return { ok: false, error: 'Нельзя создать или перенести заказ на прошедшую дату' }
@@ -612,11 +611,10 @@ export async function rescheduleOrderCore(
     return { ok: false, error: `Нельзя перенести заказ в статусе ${order.status}` }
   }
 
-  const target = new Date(newDate)
+  const target = new Date(`${newDate}T00:00:00.000Z`)
   if (isNaN(target.getTime())) {
     return { ok: false, error: 'Неверная дата' }
   }
-  target.setHours(0, 0, 0, 0)
 
   if (target < startOfTodayMsk()) {
     return { ok: false, error: 'Нельзя создать или перенести заказ на прошедшую дату' }
@@ -975,8 +973,7 @@ export async function createOneTimeOrderCore(
   }
 
   const data = parsed.data
-  const deliveryDate = new Date(data.deliveryDate)
-  deliveryDate.setHours(0, 0, 0, 0)
+  const deliveryDate = new Date(`${toMskDateString(data.deliveryDate)}T00:00:00.000Z`)
 
   if (deliveryDate < startOfTodayMsk()) {
     return { ok: false, error: 'Нельзя создать или перенести заказ на прошедшую дату' }

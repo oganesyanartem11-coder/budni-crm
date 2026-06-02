@@ -12,6 +12,7 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 
 type FinancePreset =
+  | 'today'
   | 'this_week'
   | 'this_month'
   | 'this_quarter'
@@ -22,9 +23,9 @@ type FinancePreset =
   | 'this_year'
   | 'custom'
 
-// Сегмент Нед/Мес/Кв — ровно эти три значения.
-type SegmentPreset = 'this_week' | 'this_month' | 'this_quarter'
-const SEGMENT_KEYS: SegmentPreset[] = ['this_week', 'this_month', 'this_quarter']
+// Сегмент Сегодня/Вчера/Нед/Мес/Кв — ровно эти пять значений.
+type SegmentPreset = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_quarter'
+const SEGMENT_KEYS: SegmentPreset[] = ['today', 'yesterday', 'this_week', 'this_month', 'this_quarter']
 
 interface Props {
   data: AdminDashboardData
@@ -38,6 +39,8 @@ interface Props {
 }
 
 const PERIOD_TABS: Array<{ key: SegmentPreset; label: string; aria: string }> = [
+  { key: 'today', label: 'Сегодня', aria: 'Сегодня' },
+  { key: 'yesterday', label: 'Вчера', aria: 'Вчера' },
   { key: 'this_week', label: 'Нед', aria: 'Эта неделя' },
   { key: 'this_month', label: 'Мес', aria: 'Этот месяц' },
   { key: 'this_quarter', label: 'Кв', aria: 'Этот квартал' },

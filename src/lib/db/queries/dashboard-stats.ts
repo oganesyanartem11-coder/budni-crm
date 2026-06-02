@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma'
 import { getFinancialWeek } from '@/lib/utils/week'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
+import { toMskDateString } from '@/lib/utils/msk-window'
 
 export interface DailyRevenuePoint {
   date: string
@@ -108,7 +109,7 @@ export async function getAdminDashboardData(
     for (let i = 0; i < periodDays; i++) {
       const d = new Date(from)
       d.setDate(from.getDate() + i)
-      const key = d.toISOString().slice(0, 10)
+      const key = toMskDateString(d)
       dailyMap.set(key, { revenue: 0, orders: 0 })
     }
   }
@@ -118,7 +119,7 @@ export async function getAdminDashboardData(
   const clientMap = new Map<string, TopClient>()
 
   for (const o of orders) {
-    const key = o.deliveryDate.toISOString().slice(0, 10)
+    const key = toMskDateString(o.deliveryDate)
     const day = dailyMap.get(key)
     const price = Number(o.totalPrice)
     if (day) {

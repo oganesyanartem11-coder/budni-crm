@@ -28,12 +28,12 @@ export default async function OrdersPage({ searchParams }: PageProps) {
   const params = await searchParams
   const view: 'list' | 'week' = params.view === 'week' ? 'week' : 'list'
 
-  // Дата по умолчанию: завтра по МСК (Bug 7.25 — раньше серверный UTC new Date()
-  // в окне 00:00–03:00 МСК давал «завтра» на день раньше). Всё считаем в UTC
+  // Дата по умолчанию: сегодня по МСК (Bug 7.25 — раньше серверный UTC new Date()
+  // в окне 00:00–03:00 МСК давал «сегодня» на день раньше). Всё считаем в UTC
   // детерминированно (без локального setHours, который на MSK-машине сдвигал бы
   // UTC-полночь на день назад): ?date=YYYY-MM-DD → UTC-полночь той же даты,
   // dateEnd = +24ч−1мс. @db.Date deliveryDate хранится как UTC-полночь.
-  const defaultDate = getMskCalendarDayUtc(new Date(), 1)
+  const defaultDate = getMskCalendarDayUtc(new Date(), 0)
   const selectedDate = params.date ? new Date(`${params.date}T00:00:00.000Z`) : defaultDate
   const dateEnd = new Date(selectedDate.getTime() + 24 * 60 * 60 * 1000 - 1)
 
@@ -59,13 +59,13 @@ export default async function OrdersPage({ searchParams }: PageProps) {
     weekOrdersData = await listOrdersForWeek(weekStartDate)
   }
 
-  // Подзаголовок с датой для list-view: «Завтра, Чт, 15 мая» по умолчанию,
+  // Подзаголовок с датой для list-view: «Сегодня, Чт, 15 мая» по умолчанию,
   // иначе просто формат даты выбранной даты. Для week-view дата меняется
   // в самом WeekView, на уровне страницы не нужна.
-  const isDefaultTomorrow = view === 'list'
+  const isDefaultToday = view === 'list'
     && selectedDate.getTime() === defaultDate.getTime()
   const dateLabel = view === 'list'
-    ? (isDefaultTomorrow ? `Завтра, ${formatDateShort(selectedDate)}` : formatDateShort(selectedDate))
+    ? (isDefaultToday ? `Сегодня, ${formatDateShort(selectedDate)}` : formatDateShort(selectedDate))
     : 'Все заказы по датам, статусам и клиентам'
 
   return (

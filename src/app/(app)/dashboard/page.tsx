@@ -24,6 +24,7 @@ import { CutOffBlock } from './_components/cutoff-block'
 // (Bug 7.24-4 date-range picker) + custom приходят из ?period= и считаются через
 // getPresetRange. Квартал считается вручную (frozen-контракт), остальное — getPresetRange.
 type FinancePreset =
+  | 'today'
   | 'this_week'
   | 'this_month'
   | 'this_quarter'
@@ -34,6 +35,7 @@ type FinancePreset =
   | 'this_year'
   | 'custom'
 const FINANCE_PRESETS: FinancePreset[] = [
+  'today',
   'this_week',
   'this_month',
   'this_quarter',
@@ -83,7 +85,7 @@ function resolveFinanceRange(
     const range = getPresetRange('custom', customFrom, customTo)
     return { from: range.from, to: range.to }
   }
-  // this_week / this_month / yesterday / last_week / last_month / last_quarter / this_year
+  // today / this_week / this_month / yesterday / last_week / last_month / last_quarter / this_year
   const range = getPresetRange(preset)
   return { from: range.from, to: range.to }
 }
