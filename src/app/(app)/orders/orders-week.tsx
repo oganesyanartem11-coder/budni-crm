@@ -3,6 +3,7 @@
 import { useMemo } from 'react'
 import Link from 'next/link'
 import { WEEKDAY_NAMES_SHORT, getDateForDayOfWeek } from '@/lib/utils/week'
+import { toMskDateString } from '@/lib/utils/msk-window'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Order, Client, MealType } from '@prisma/client'
@@ -64,8 +65,8 @@ export function OrdersWeek({ orders, weekStart }: Props) {
     )
   }
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  // 7.43: МСК-сегодня строкой для подсветки колонки текущего дня.
+  const todayMskStr = toMskDateString(new Date())
 
   return (
     <div className="rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
@@ -78,7 +79,7 @@ export function OrdersWeek({ orders, weekStart }: Props) {
               </th>
               {[1, 2, 3, 4, 5, 6, 7].map((dow) => {
                 const dayDate = getDateForDayOfWeek(weekStart, dow)
-                const isToday = dayDate.getTime() === today.getTime()
+                const isToday = toMskDateString(dayDate) === todayMskStr
                 return (
                   <th key={dow} className={cn(
                     'text-left px-3 py-3 text-xs uppercase tracking-wider font-medium min-w-[110px] snap-start',
@@ -104,7 +105,7 @@ export function OrdersWeek({ orders, weekStart }: Props) {
                 {[1, 2, 3, 4, 5, 6, 7].map((dow) => {
                   const cell = data.cells.get(`${client.id}|${dow}`)
                   const dayDate = getDateForDayOfWeek(weekStart, dow)
-                  const isToday = dayDate.getTime() === today.getTime()
+                  const isToday = toMskDateString(dayDate) === todayMskStr
 
                   return (
                     <td key={dow} className={cn(

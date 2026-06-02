@@ -8,7 +8,7 @@ import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
 import { regenerateFixedOrders } from './actions'
 import { formatDateShort } from '@/lib/utils/format'
-import { toMskDateString } from '@/lib/utils/msk-window'
+import { toMskDateString, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
 import { SegmentedControl } from '@/components/ui/segmented-control'
@@ -102,17 +102,17 @@ export function OrdersView({
     updateParams({ weekStart: newWeek.toISOString() })
   }
 
+  // 7.43: сравниваем МСК-календарные дни строкой (toMskDateString), а не getTime()
+  // двух дат. Раньше selectedDate (UTC-полночь @db.Date) сравнивался с
+  // new Date()+setHours(0,0,0,0), который в МСК-браузере даёт МСК-полночь (UTC−3ч)
+  // → getTime() никогда не совпадал → подсветка Сегодня/Завтра не загоралась.
   const isToday = useMemo(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    return selectedDate.getTime() === today.getTime()
+    return toMskDateString(selectedDate) === toMskDateString(new Date())
   }, [selectedDate])
 
   const isTomorrow = useMemo(() => {
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    tomorrow.setHours(0, 0, 0, 0)
-    return selectedDate.getTime() === tomorrow.getTime()
+    const tomorrowMsk = getMskCalendarDayUtc(new Date(), 1)
+    return toMskDateString(selectedDate) === toMskDateString(tomorrowMsk)
   }, [selectedDate])
 
   function jumpToToday() {

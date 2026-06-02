@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { LockedEditConfirmDialog, requiresLockedEditConfirm } from './_components/locked-edit-confirm'
 import { editOrderPortions } from './actions'
 import { formatMoney } from '@/lib/utils/format'
+import { toMskDateString } from '@/lib/utils/msk-window'
 import { ORDER_STATUS_LABELS, ORDER_STATUS_VARIANT, portionsEditedToast } from '@/lib/constants/order'
 import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
@@ -66,11 +67,8 @@ function statusDotClass(status: OrderStatus): string {
 // Для таких показываем пульсирующую точку (живой статус).
 function isOrderLive(order: SerializedOrder): boolean {
   if (order.status !== 'CONFIRMED') return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const d = new Date(order.deliveryDate)
-  d.setHours(0, 0, 0, 0)
-  return d.getTime() === today.getTime()
+  // 7.43: МСК-календарный день строкой, без getTime() двух дат с setHours.
+  return toMskDateString(new Date(order.deliveryDate)) === toMskDateString(new Date())
 }
 
 export function OrdersList({ orders, clients, filters, onFilterChange, isPending }: Props) {

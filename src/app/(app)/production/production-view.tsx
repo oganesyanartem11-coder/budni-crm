@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { ChevronLeft, ChevronRight, ChevronDown, AlertTriangle, ChefHat, Wheat, Info } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 import { formatDateShort, formatMoney, formatOrders, formatLocations, formatPortions } from '@/lib/utils/format'
-import { toMskDateString } from '@/lib/utils/msk-window'
+import { toMskDateString, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { DISH_CATEGORY_LABELS, DISH_CATEGORY_ICONS, DISH_CATEGORY_ORDER } from '@/lib/constants/dish-categories'
 import { cn } from '@/lib/utils/cn'
@@ -28,14 +28,14 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
   const pathname = usePathname()
   const [, startTransition] = useTransition()
 
+  // 7.43: сравниваем МСК-календарные дни строкой (toMskDateString), а не getTime().
+  // targetDate — UTC-полночь, new Date()+setHours давал МСК-полночь (UTC−3ч) →
+  // в МСК-браузере isToday/isTomorrow всегда false → подсветка не загоралась.
   const targetDate = new Date(targetDateIso)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-
-  const isToday = targetDate.getTime() === today.getTime()
-  const isTomorrow = targetDate.getTime() === tomorrow.getTime()
+  const todayStr = toMskDateString(new Date())
+  const tomorrowStr = toMskDateString(getMskCalendarDayUtc(new Date(), 1))
+  const isToday = toMskDateString(targetDate) === todayStr
+  const isTomorrow = toMskDateString(targetDate) === tomorrowStr
 
   function updateParams(patch: Record<string, string | null>) {
     const url = new URL(window.location.href)
@@ -78,7 +78,7 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => jumpTo(today)}
+            onClick={() => jumpTo(new Date())}
             aria-pressed={isToday}
             style={{ touchAction: 'manipulation' }}
             className={cn(
@@ -91,7 +91,7 @@ export function ProductionView({ summary, ingredientsSummary, targetDateIso, tab
           </button>
           <button
             type="button"
-            onClick={() => jumpTo(tomorrow)}
+            onClick={() => jumpTo(getMskCalendarDayUtc(new Date(), 1))}
             aria-pressed={isTomorrow}
             style={{ touchAction: 'manipulation' }}
             className={cn(

@@ -27,10 +27,11 @@ export function DeliveryView({ stops, targetDateIso, userRole }: Props) {
   const router = useRouter()
   const [showDelivered, setShowDelivered] = useState(false)
 
+  // 7.43: сравнение МСК-календарных дней строкой (toMskDateString). targetDate —
+  // UTC-полночь, а new Date()+setHours давал МСК-полночь (UTC−3ч) → в МСК-браузере
+  // isToday всегда был false (лейбл «Сегодня» не показывался).
   const targetDate = new Date(targetDateIso)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const isToday = targetDate.getTime() === today.getTime()
+  const isToday = toMskDateString(targetDate) === toMskDateString(new Date())
 
   function shiftDate(days: number) {
     const d = new Date(targetDate)
