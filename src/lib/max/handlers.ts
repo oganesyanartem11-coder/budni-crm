@@ -2,7 +2,7 @@ import type { Context, FilteredContext } from '@maxhub/max-bot-api'
 import { prisma } from '@/lib/db/prisma'
 import { processClientMessage } from '@/lib/bot/process-message'
 import { logBotMessage } from '@/lib/bot/log-message'
-import { getBotReplyTemplate } from '@/lib/bot/templates'
+import { pickWelcomeKind, getWelcomeText } from '@/lib/bot/welcome'
 import { sendBotMessage } from '@/lib/max/send-message'
 
 /**
@@ -67,7 +67,15 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
 
   // 1. Клиент
   const username = ctx.user?.username ?? null
-  const client = await prisma.client.findUnique({ where: { maxOnboardingToken: payload } })
+  const client = await prisma.client.findUnique({
+    where: { maxOnboardingToken: payload },
+    // Welcome ветвится по типу клиента (см. welcome.ts) — подгружаем минимум:
+    // orderType конфигов и sameDayDelivery локаций.
+    include: {
+      mealConfigs: { select: { orderType: true } },
+      locations: { select: { sameDayDelivery: true } },
+    },
+  })
   if (client) {
     await prisma.client.update({
       where: { id: client.id },
@@ -77,7 +85,9 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
         // onboardedAt отсутствует в модели Client — фиксируем только chat_id и username
       },
     })
-    const greeting = getBotReplyTemplate('ONBOARDING')
+    const kind = pickWelcomeKind(client)
+    console.log(`[max-welcome] client=${client.id} kind=${kind}`)
+    const greeting = getWelcomeText(kind)
     // sendBotMessage даёт естественную задержку 15-30 сек (см. send-message.ts).
     // Без этого приветствие приходит мгновенно после клика по deep-link.
     await sendBotMessage(chatIdStr, greeting)
