@@ -170,7 +170,7 @@ const mealConfigSchema = z.object({
   // 5.9b: locationId обязателен. Старые null-конфиги в БД остаются (миграция позже).
   locationId: z.string().min(1, 'Выберите локацию'),
   mealType: z.enum(['BREAKFAST', 'LUNCH', 'DINNER']),
-  orderType: z.enum(['DYNAMIC', 'FIXED']),
+  orderType: z.enum(['DYNAMIC', 'FIXED', 'WEEKLY']),
   deliveryHorizon: z.enum(['NEXT_DAY', 'SAME_DAY']).default('NEXT_DAY'),
   scheduleType: z.enum(['DAILY', 'WEEKDAYS', 'WEEKENDS', 'CUSTOM_DAYS', 'ONE_TIME', 'INTERVAL']),
   scheduleData: z.record(z.string(), z.any()).nullable().optional(),
@@ -753,7 +753,7 @@ const mealConfigBulkSchema = z.object({
   mealTypes: z.array(z.enum(['BREAKFAST', 'LUNCH', 'DINNER'])).min(1, 'Выберите хотя бы один тип питания'),
   // Цены отдельно по каждому типу: { BREAKFAST: 200, LUNCH: 380, DINNER: 320 }
   pricesByType: z.record(z.string(), z.number().nonnegative()),
-  orderType: z.enum(['DYNAMIC', 'FIXED']),
+  orderType: z.enum(['DYNAMIC', 'FIXED', 'WEEKLY']),
   deliveryHorizon: z.enum(['NEXT_DAY', 'SAME_DAY']).default('NEXT_DAY'),
   scheduleType: z.enum(['DAILY', 'WEEKDAYS', 'WEEKENDS', 'CUSTOM_DAYS', 'ONE_TIME', 'INTERVAL']),
   scheduleData: z.record(z.string(), z.any()).nullable().optional(),

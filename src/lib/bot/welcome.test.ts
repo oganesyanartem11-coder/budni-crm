@@ -8,7 +8,7 @@ import {
 
 /**
  * Перепозиционирование MAX-канала (welcome от лица «менеджеров Будни»).
- * pickWelcomeKind ветвит по приоритету SAMEDAY > DYNAMIC > FIXED;
+ * pickWelcomeKind ветвит по приоритету SAMEDAY > WEEKLY > DYNAMIC > FIXED;
  * getWelcomeText отдаёт согласованные тексты как есть.
  */
 
@@ -56,10 +56,35 @@ describe('pickWelcomeKind', () => {
       )
     ).toBe('DYNAMIC')
   })
+
+  it('один WEEKLY-конфиг, без sameDay-локаций → WEEKLY', () => {
+    expect(
+      pickWelcomeKind(client([{ orderType: 'WEEKLY' }], [{ sameDayDelivery: false }]))
+    ).toBe('WEEKLY')
+  })
+
+  it('WEEKLY-конфиг + локация sameDayDelivery=true → SAMEDAY (приоритет)', () => {
+    expect(
+      pickWelcomeKind(
+        client(
+          [{ orderType: 'WEEKLY' }],
+          [{ sameDayDelivery: false }, { sameDayDelivery: true }]
+        )
+      )
+    ).toBe('SAMEDAY')
+  })
+
+  it('смешанные WEEKLY+DYNAMIC, без sameDay-локаций → WEEKLY (WEEKLY выигрывает у DYNAMIC)', () => {
+    expect(
+      pickWelcomeKind(
+        client([{ orderType: 'DYNAMIC' }, { orderType: 'WEEKLY' }], [{ sameDayDelivery: false }])
+      )
+    ).toBe('WEEKLY')
+  })
 })
 
 describe('getWelcomeText', () => {
-  const kinds: WelcomeKind[] = ['FIXED', 'DYNAMIC', 'SAMEDAY']
+  const kinds: WelcomeKind[] = ['FIXED', 'DYNAMIC', 'SAMEDAY', 'WEEKLY']
 
   it.each(kinds)('начинается с «Здравствуйте! Это Будни.» (%s)', (kind) => {
     expect(getWelcomeText(kind).startsWith('Здравствуйте! Это Будни.')).toBe(true)
@@ -83,5 +108,12 @@ describe('getWelcomeText', () => {
 
   it('FIXED содержит «до 16:00 накануне»', () => {
     expect(getWelcomeText('FIXED')).toContain('до 16:00 накануне')
+  })
+
+  it('WEEKLY начинается с «Здравствуйте! Это Будни.», содержит «следующую неделю» и заканчивается «— Будни»', () => {
+    const text = getWelcomeText('WEEKLY')
+    expect(text.startsWith('Здравствуйте! Это Будни.')).toBe(true)
+    expect(text).toContain('следующую неделю')
+    expect(text.trimEnd().endsWith('— Будни')).toBe(true)
   })
 })

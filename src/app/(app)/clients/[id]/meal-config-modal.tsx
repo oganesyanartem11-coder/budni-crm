@@ -97,6 +97,22 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
       : ''
   const [intervalDays, setIntervalDays] = useState<string>(initialInterval)
 
+  // WEEKLY: ожидаемое число дней в неделю (1-7, по умолчанию 5) и среднее число
+  // порций в день. Хранятся в scheduleData вместе с захардкоженными
+  // weekDeadlineDow/weekDeadlineTime. Дни недели у WEEKLY не фиксируются —
+  // их определяет недельная заявка клиента, поэтому scheduleType всегда CUSTOM_DAYS.
+  const initialExpectedDaysPerWeek: string =
+    isObjectData && 'expectedDaysPerWeek' in cfgScheduleData && typeof cfgScheduleData.expectedDaysPerWeek === 'number'
+      ? String(cfgScheduleData.expectedDaysPerWeek)
+      : '5'
+  const [expectedDaysPerWeek, setExpectedDaysPerWeek] = useState<string>(initialExpectedDaysPerWeek)
+
+  const initialTypicalPortionsPerDay: string =
+    isObjectData && 'typicalPortionsPerDay' in cfgScheduleData && typeof cfgScheduleData.typicalPortionsPerDay === 'number'
+      ? String(cfgScheduleData.typicalPortionsPerDay)
+      : ''
+  const [typicalPortionsPerDay, setTypicalPortionsPerDay] = useState<string>(initialTypicalPortionsPerDay)
+
   const [validFrom, setValidFrom] = useState<string>(
     config?.validFrom ? new Date(config.validFrom).toISOString().slice(0, 10) : ''
   )
@@ -123,6 +139,12 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  // WEEKLY: дни доставки определяются недельной заявкой, поэтому фиксированного
+  // графика нет — принудительно ставим CUSTOM_DAYS (архитектурное решение).
+  useEffect(() => {
+    if (orderType === 'WEEKLY') setScheduleType('CUSTOM_DAYS')
+  }, [orderType])
 
   if (!open) return null
 
@@ -169,6 +191,17 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     toast.error(result.error)
   }
 
+  // WEEKLY scheduleData: ожидаемые дни/порции из UI + захардкоженные дедлайны
+  // недельной заявки (в UI не показываются). Дни недели не фиксируются.
+  function buildWeeklyScheduleData(): Record<string, unknown> {
+    return {
+      expectedDaysPerWeek: parseInt(expectedDaysPerWeek || '0', 10),
+      typicalPortionsPerDay: parseInt(typicalPortionsPerDay || '0', 10),
+      weekDeadlineDow: 0,
+      weekDeadlineTime: '23:59',
+    }
+  }
+
   // Текущий data-payload для редактирования — используется и из формы, и из
   // AlertDialog (повторный submit с confirm). Считается «лениво», только если
   // мы в режиме редактирования.
@@ -176,7 +209,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     if (!isEditing || !config) return null
     const mt = config.mealType
     let scheduleData: Record<string, unknown> | null = null
-    if (scheduleType === 'CUSTOM_DAYS') {
+    if (orderType === 'WEEKLY') {
+      scheduleData = buildWeeklyScheduleData()
+    } else if (scheduleType === 'CUSTOM_DAYS') {
       scheduleData = { daysOfWeek: customDays }
     } else if (scheduleType === 'INTERVAL') {
       const interval = parseInt(intervalDays, 10)
@@ -187,7 +222,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
       mealType: mt,
       orderType,
       deliveryHorizon,
-      scheduleType,
+      // WEEKLY всегда CUSTOM_DAYS (дни решает заявка); эффект уже выставил state,
+      // но дублируем явно, чтобы payload не зависел от тайминга рендера.
+      scheduleType: orderType === 'WEEKLY' ? 'CUSTOM_DAYS' : scheduleType,
       scheduleData,
       fixedPortions: orderType === 'FIXED' ? parseInt(portionsByType[mt] || '0', 10) : null,
       pricePerPortion: parseFloat(pricesByType[mt] || '0'),
@@ -248,8 +285,20 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
       }
     }
 
+    // WEEKLY: график определяется недельной заявкой → scheduleType всегда
+    // CUSTOM_DAYS, daysOfWeek-селектор не показывается. Используем
+    // эффективный scheduleType, чтобы payload не зависел от тайминга эффекта.
+    const effectiveScheduleType: ScheduleType = orderType === 'WEEKLY' ? 'CUSTOM_DAYS' : scheduleType
+
     let scheduleData: Record<string, unknown> | null = null
-    if (scheduleType === 'CUSTOM_DAYS') {
+    if (orderType === 'WEEKLY') {
+      const days = parseInt(expectedDaysPerWeek || '0', 10)
+      if (!days || days < 1 || days > 7) {
+        toast.error('Укажите ожидаемое количество дней в неделю (1–7)')
+        return
+      }
+      scheduleData = buildWeeklyScheduleData()
+    } else if (scheduleType === 'CUSTOM_DAYS') {
       if (customDays.length === 0) {
         toast.error('Выберите хотя бы один день недели')
         return
@@ -274,7 +323,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           mealType: mt,
           orderType,
           deliveryHorizon,
-          scheduleType,
+          scheduleType: effectiveScheduleType,
           scheduleData,
           fixedPortions: orderType === 'FIXED' ? parseInt(portionsByType[mt] || '0', 10) : null,
           pricePerPortion: parseFloat(pricesByType[mt] || '0'),
@@ -299,7 +348,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           pricesByType: pricesNumbers,
           orderType,
           deliveryHorizon,
-          scheduleType,
+          scheduleType: effectiveScheduleType,
           scheduleData,
           fixedPortionsByType: orderType === 'FIXED' ? portionsNumbers : null,
           validFrom: validFrom || null,
@@ -399,6 +448,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
               <SelectContent>
                 <SelectItem value="FIXED">{ORDER_TYPE_LABELS.FIXED}</SelectItem>
                 <SelectItem value="DYNAMIC">{ORDER_TYPE_LABELS.DYNAMIC}</SelectItem>
+                <SelectItem value="WEEKLY">{ORDER_TYPE_LABELS.WEEKLY}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -437,6 +487,37 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
             </div>
           ))}
 
+          {orderType === 'WEEKLY' && (
+            <div className="bg-surface-2 rounded-xl p-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-fg-muted">Ожидаемое количество дней в неделю</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="7"
+                    value={expectedDaysPerWeek}
+                    onChange={(e) => setExpectedDaysPerWeek(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm tabular-nums"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-fg-muted">Среднее количество порций в день</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={typicalPortionsPerDay}
+                    onChange={(e) => setTypicalPortionsPerDay(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm tabular-nums"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-fg-subtle">
+                Конкретные дни и количества определяются недельной заявкой клиента — заранее график не фиксируется.
+              </p>
+            </div>
+          )}
+
           {portionsMismatch && (
             <div className="rounded-xl bg-warning-bg border border-warning/30 px-3 py-2.5 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-warning-fg shrink-0 mt-0.5" />
@@ -459,6 +540,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
             </Select>
           </div>
 
+          {orderType !== 'WEEKLY' && (
           <div className="space-y-1.5">
             <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">График</label>
             <Select value={scheduleType} onValueChange={(v) => setScheduleType(v as ScheduleType)}>
@@ -475,8 +557,9 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
               </SelectContent>
             </Select>
           </div>
+          )}
 
-          {scheduleType === 'CUSTOM_DAYS' && (
+          {orderType !== 'WEEKLY' && scheduleType === 'CUSTOM_DAYS' && (
             <div className="space-y-1.5">
               <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Дни недели</label>
               <div className="flex gap-1.5">

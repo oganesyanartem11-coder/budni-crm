@@ -72,3 +72,12 @@ export function importButton(
   const { appBaseUrl } = getTelegramEnv()
   return new InlineKeyboard().url(label, `${appBaseUrl}/menu/imports/${menuImportId}`)
 }
+
+/**
+ * Inline-кнопка «Отменить заявку» под пушем о принятой недельной заявке.
+ * callback_data `wsub:cancel:<cuid>` (cuid ~25 символов, well under 64 байт).
+ * Обрабатывается scope 'wsub' (см. handlers/weekly-submission.ts).
+ */
+export function weeklySubmissionCancelButton(submissionId: string): InlineKeyboard {
+  return new InlineKeyboard().text('Отменить заявку', `wsub:cancel:${submissionId}`)
+}

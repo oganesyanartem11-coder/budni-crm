@@ -795,6 +795,7 @@ function SourceLabel({ source }: { source: OrderSource }) {
     MESSENGER: 'Из мессенджера',
     BOT: 'Из MAX-бота',
     BORIS: 'Создан Борисом',
+    WEEKLY_AUTO: 'Авто (недельная заявка)',
   }
   return <span className="font-medium">{labels[source]}</span>
 }

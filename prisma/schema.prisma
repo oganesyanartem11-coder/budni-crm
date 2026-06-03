@@ -32,9 +32,7 @@ enum MealType {
 enum OrderType {
   DYNAMIC // Каждый день меняется, требует подтверждения до cut-off
   FIXED // Постоянное число, автогенерация
-  // WEEKLY — добавляется в MEGA-2 вместе с потребителями (label-мапы, zod,
-  // meal-config). В MEGA-1 не вводим: добавление enum-значения ломает
-  // exhaustive Record<OrderType> и next build (решение «Split»).
+  WEEKLY // Клиент раз в неделю присылает заявку на 5-7 дней вперёд (Недельный заказ, MEGA-2)
 }
 
 enum DeliveryHorizon {
@@ -74,8 +72,7 @@ enum OrderSource {
   FIXED_AUTO // Автоматически сгенерирован для FIXED-конфига
   RECURRING_AUTO // Из расписания
   BORIS // AI-агент Action-Борис (Спринт 7.16.A.2)
-  // WEEKLY_AUTO — добавляется в MEGA-2 вместе с потребителями (Record<OrderSource>
-  // label-мапа в order-detail.tsx). В MEGA-1 не вводим (решение «Split»).
+  WEEKLY_AUTO // Из недельной заявки клиента (WeeklyOrderSubmission, MEGA-2)
 }
 
 // Недельный заказ: способ, которым клиент прислал заявку на неделю.
@@ -790,6 +787,8 @@ model WeeklyOrderSubmission {
   updatedAt         DateTime                    @updatedAt
   orders            Order[]
 
+  // Одна заявка на клиента в неделю — защита от дубль-обработки (MEGA-2).
+  @@unique([clientId, weekStartDate])
   @@index([clientId, weekStartDate])
   @@index([status])
   @@index([createdAt])

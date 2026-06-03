@@ -3,11 +3,13 @@ import type { OrderType, ScheduleType, PackagingType, MealType, DeliveryHorizon 
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   DYNAMIC: 'Динамика (подтверждение)',
   FIXED: 'Фикс (постоянное число)',
+  WEEKLY: 'Недельный',
 }
 
 export const ORDER_TYPE_SHORT: Record<OrderType, string> = {
   DYNAMIC: 'Динамика',
   FIXED: 'Фикс',
+  WEEKLY: 'Неделя',
 }
 
 export const SCHEDULE_TYPE_LABELS: Record<ScheduleType, string> = {

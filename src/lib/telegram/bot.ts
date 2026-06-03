@@ -6,6 +6,9 @@ import { dispatchCallback } from './callback-router'
 import { getTelegramEnv } from './env'
 import { handleBorisMessage } from './boris-handler'
 import { handleMyChatMember } from '@/lib/boris/team-channels/greeting'
+// Side-effect import: регистрирует callback-handler scope 'wsub'
+// (отмена недельной заявки). См. handlers/weekly-submission.ts.
+import '@/lib/telegram/handlers/weekly-submission'
 
 interface TelegramBotCache {
   bot: Bot
