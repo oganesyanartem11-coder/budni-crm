@@ -43,7 +43,7 @@ const RU_MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'ию
 
 // Daily-график строится для периодов до ~31 дня. Больше — точек слишком
 // много, график перестаёт читаться, отдаём пустой массив (UI покажет fallback).
-const MAX_DAILY_POINTS = 31
+const MAX_DAILY_POINTS = 35
 
 function startOfDay(d: Date): Date {
   const x = new Date(d)
@@ -156,7 +156,10 @@ export async function getAdminDashboardData(
 
   // WoW-сравнение. Прорейт: если today попадает в [from, to] — считаем
   // N = дней от from до today (вкл.). Иначе период закончен → N = periodDays.
-  // Сравниваем sum(this[0..N-1]) с sum(prev[0..N-1]), prev = shift -periodDays.
+  // Сравниваем sum(this[0..N-1]) с sum(prev[0..N-1]).
+  // 7.46: prev = сдвиг РОВНО на −7 дней (одна неделя), а НЕ на −periodDays.
+  // При week_to_date (Сб→сегодня) periodDays переменный; сдвиг −7 держит
+  // сравнение выровненным по дням недели (тек. WTD vs те же дни прошлой недели).
   let wow: AdminDashboardData['wow'] = null
   if (opts.withWoW) {
     const today = startOfDay(new Date())
@@ -165,7 +168,7 @@ export async function getAdminDashboardData(
       ? Math.min(daysBetweenInclusive(from, today), periodDays)
       : periodDays
     const compareFrom = new Date(from)
-    compareFrom.setDate(from.getDate() - periodDays)
+    compareFrom.setDate(from.getDate() - 7)
     const compareTo = new Date(compareFrom)
     compareTo.setDate(compareFrom.getDate() + daysCompared - 1)
     compareTo.setHours(23, 59, 59, 999)

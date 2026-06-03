@@ -13,19 +13,23 @@ import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 
 type FinancePreset =
   | 'today'
+  | 'yesterday'
+  | 'week_to_date'
+  | 'month_rolling'
+  | 'last_3_months'
   | 'this_week'
   | 'this_month'
   | 'this_quarter'
-  | 'yesterday'
   | 'last_week'
   | 'last_month'
   | 'last_quarter'
   | 'this_year'
   | 'custom'
 
-// Сегмент Сегодня/Вчера/Нед/Мес/Кв — ровно эти пять значений.
-type SegmentPreset = 'today' | 'yesterday' | 'this_week' | 'this_month' | 'this_quarter'
-const SEGMENT_KEYS: SegmentPreset[] = ['today', 'yesterday', 'this_week', 'this_month', 'this_quarter']
+// Сегмент Вчера/Сегодня/Нед/Мес/3 мес — ровно эти пять значений (7.46:
+// rolling-окна week_to_date/month_rolling/last_3_months вместо календарных).
+type SegmentPreset = 'yesterday' | 'today' | 'week_to_date' | 'month_rolling' | 'last_3_months'
+const SEGMENT_KEYS: SegmentPreset[] = ['yesterday', 'today', 'week_to_date', 'month_rolling', 'last_3_months']
 
 interface Props {
   data: AdminDashboardData
@@ -41,9 +45,9 @@ interface Props {
 const PERIOD_TABS: Array<{ key: SegmentPreset; label: string; aria: string }> = [
   { key: 'yesterday', label: 'Вчера', aria: 'Вчера' },
   { key: 'today', label: 'Сегодня', aria: 'Сегодня' },
-  { key: 'this_week', label: 'Нед', aria: 'Эта неделя' },
-  { key: 'this_month', label: 'Мес', aria: 'Этот месяц' },
-  { key: 'this_quarter', label: 'Кв', aria: 'Этот квартал' },
+  { key: 'week_to_date', label: 'Нед', aria: 'Неделя по сегодня' },
+  { key: 'month_rolling', label: 'Мес', aria: 'Месяц по сегодня' },
+  { key: 'last_3_months', label: '3 мес', aria: 'Три месяца по сегодня' },
 ]
 
 // Пресеты в поповере «Период» (Bug 7.24-4). Значения = ReportPreset, считаются

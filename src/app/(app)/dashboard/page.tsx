@@ -20,15 +20,19 @@ import { ActionRequiredBlock } from './_components/action-required-block'
 import { FinanceWeekBlock } from './_components/finance-week-block'
 import { CutOffBlock } from './_components/cutoff-block'
 
-// Пресеты финансового блока дашборда. Сегмент Нед/Мес/Кв = первые три; остальные
-// (Bug 7.24-4 date-range picker) + custom приходят из ?period= и считаются через
-// getPresetRange. Квартал считается вручную (frozen-контракт), остальное — getPresetRange.
+// Пресеты финансового блока дашборда. 7.46: сегменты — rolling-окна
+// week_to_date/month_rolling/last_3_months (+ today/yesterday). Календарные
+// ключи и custom (Bug 7.24-4 date-range picker) приходят из ?period= и тоже
+// считаются через getPresetRange.
 type FinancePreset =
   | 'today'
+  | 'yesterday'
+  | 'week_to_date'
+  | 'month_rolling'
+  | 'last_3_months'
   | 'this_week'
   | 'this_month'
   | 'this_quarter'
-  | 'yesterday'
   | 'last_week'
   | 'last_month'
   | 'last_quarter'
@@ -36,10 +40,16 @@ type FinancePreset =
   | 'custom'
 const FINANCE_PRESETS: FinancePreset[] = [
   'today',
+  'yesterday',
+  // 7.46: дашбордные rolling-окна (сегменты Нед/Мес/3 мес).
+  'week_to_date',
+  'month_rolling',
+  'last_3_months',
+  // Календарные ключи остаются валидными (бэкенд getPresetRange, старые
+  // ссылки/picker), но в сегментах дашборда больше не показываются.
   'this_week',
   'this_month',
   'this_quarter',
-  'yesterday',
   'last_week',
   'last_month',
   'last_quarter',
@@ -56,36 +66,28 @@ interface PageProps {
 
 /**
  * Диапазон финансового блока по пресету.
- * this_week / this_month → getPresetRange (Date-границы).
- * this_quarter → считаем вручную: getPresetRange НЕ входит в замороженный
- * контракт по кварталу, поэтому начало календарного квартала + конец сегодня
- * вычисляем тут Date-математикой.
+ * 7.46: дашбордные сегменты — rolling-окна week_to_date / month_rolling /
+ * last_3_months. Все пресеты (включая старые календарные и rolling) считает
+ * getPresetRange. Квартал из дашборда убран — отдельная ручная ветка больше
+ * не нужна (если ?period=this_quarter придёт из старой ссылки, getPresetRange
+ * вернёт календарный квартал).
  */
 function resolveFinanceRange(
   preset: FinancePreset,
   customFrom?: string,
   customTo?: string,
 ): { from: Date; to: Date } {
-  if (preset === 'this_quarter') {
-    const now = new Date()
-    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3
-    const from = new Date(now.getFullYear(), quarterStartMonth, 1, 0, 0, 0, 0)
-    const to = new Date(now)
-    to.setHours(23, 59, 59, 999)
-    return { from, to }
-  }
   if (preset === 'custom') {
-    // Невалидный/неполный custom → безопасный фолбэк на текущую неделю.
+    // Невалидный/неполный custom → безопасный фолбэк на сегодня (дефолт 7.45+).
     const fromOk = customFrom && !Number.isNaN(new Date(customFrom).getTime())
     const toOk = customTo && !Number.isNaN(new Date(customTo).getTime())
     if (!fromOk || !toOk) {
-      const range = getPresetRange('this_week')
+      const range = getPresetRange('today')
       return { from: range.from, to: range.to }
     }
     const range = getPresetRange('custom', customFrom, customTo)
     return { from: range.from, to: range.to }
   }
-  // today / this_week / this_month / yesterday / last_week / last_month / last_quarter / this_year
   const range = getPresetRange(preset)
   return { from: range.from, to: range.to }
 }
@@ -103,12 +105,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const canSeeFinance = isAdminLikeUser || user.role === 'MANAGER'
 
   // 7.45: Финансовый пресет из URL, дефолт today. Невалидный → today.
-  // withWoW остаётся на this_week — по умолчанию (today) WoW-блок не показывается.
+  // 7.46: withWoW только на week_to_date — по умолчанию (today) WoW-блок скрыт.
   const params = await searchParams
   const periodParam = (params.period ?? 'today') as FinancePreset
   const preset: FinancePreset = FINANCE_PRESETS.includes(periodParam) ? periodParam : 'today'
   const { from, to } = resolveFinanceRange(preset, params.from, params.to)
-  const withWoW = preset === 'this_week'
+  const withWoW = preset === 'week_to_date'
 
   const [today, tomorrow, dailyRecord, financeData, marginData, hasUnreadInbox] =
     await Promise.all([

@@ -175,6 +175,61 @@ export type ReportPreset =
   | 'last_quarter'
   | 'this_year'
   | 'custom'
+  // Дашбордные rolling-окна (Sprint 7.46). Существуют рядом со старыми
+  // календарными ключами — /analytics и /reports их не используют.
+  | 'week_to_date'
+  | 'month_rolling'
+  | 'last_3_months'
+
+// ── Хелперы для дашбордных rolling-окон (Sprint 7.46). ───────────────────
+// Все вычисления в МСК через ту же арифметику UTC-миллисекунд, что и
+// getFinancialWeek: МСК-стенные компоненты получаем сдвигом +3ч, целевые
+// инстанты строим как Date.UTC(...) − MSK_OFFSET_MS. Намеренно НЕ используем
+// date-fns subMonths (он считает в TZ процесса через local getMonth/setMonth)
+// и НЕ setHours — иначе на Vercel (UTC) границы съедут на 3 часа / на день.
+
+interface MskYmd {
+  y: number
+  m: number // 0-based month index
+  d: number
+}
+
+/** МСК-компоненты календарного дня для заданного момента. */
+function mskTodayYmd(now: Date): MskYmd {
+  const shifted = new Date(now.getTime() + MSK_OFFSET_MS)
+  return { y: shifted.getUTCFullYear(), m: shifted.getUTCMonth(), d: shifted.getUTCDate() }
+}
+
+/** «МСК 00:00:00.000 этой даты» как UTC-точка. */
+function mskStartOfDayUtc({ y, m, d }: MskYmd): Date {
+  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) - MSK_OFFSET_MS)
+}
+
+/** «МСК 23:59:59.999 этой даты» как UTC-точка. */
+function mskEndOfDayUtc({ y, m, d }: MskYmd): Date {
+  return new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - MSK_OFFSET_MS)
+}
+
+/** Кол-во дней в месяце (TZ-safe, чистая UTC-арифметика; day 0 = последний день пред. месяца). */
+function daysInMonthUtc(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()
+}
+
+/**
+ * Вычитает n месяцев из МСК-даты с clamp на последний день целевого месяца:
+ * 31 марта − 1 мес → 28 февраля (а не 3 марта из-за JS Date overflow).
+ * Возвращает «МСК 00:00 целевой даты» как UTC-точку.
+ */
+function mskSubMonthsStartOfDay(today: MskYmd, n: number): Date {
+  let monthIdx = today.m - n
+  let year = today.y
+  while (monthIdx < 0) {
+    monthIdx += 12
+    year -= 1
+  }
+  const day = Math.min(today.d, daysInMonthUtc(year, monthIdx))
+  return mskStartOfDayUtc({ y: year, m: monthIdx, d: day })
+}
 
 export interface PeriodRange {
   from: Date
@@ -239,6 +294,26 @@ export function getPresetRange(preset: ReportPreset, customFrom?: string, custom
       const to = new Date(now)
       to.setHours(23, 59, 59, 999)
       return { from, to, label: 'Этот год' }
+    }
+    // ── Дашбордные rolling-окна (Sprint 7.46). Считаются в МСК, не от `now`
+    //    (тот мутирован setHours в TZ процесса) — каждый кейс берёт свежий
+    //    инстант и MSK-компоненты через mskTodayYmd. `to` = конец сегодняшнего
+    //    МСК-дня (никогда не в будущем). dashboard-stats использует lte:to.
+    case 'week_to_date': {
+      const realNow = new Date()
+      const { from } = getFinancialWeek(realNow) // Сб 00:00 МСК текущей фин-недели
+      const to = mskEndOfDayUtc(mskTodayYmd(realNow))
+      return { from, to, label: 'Неделя по сегодня' }
+    }
+    case 'month_rolling': {
+      const realNow = new Date()
+      const today = mskTodayYmd(realNow)
+      return { from: mskSubMonthsStartOfDay(today, 1), to: mskEndOfDayUtc(today), label: 'Месяц по сегодня' }
+    }
+    case 'last_3_months': {
+      const realNow = new Date()
+      const today = mskTodayYmd(realNow)
+      return { from: mskSubMonthsStartOfDay(today, 3), to: mskEndOfDayUtc(today), label: '3 месяца по сегодня' }
     }
     case 'custom':
     default: {
