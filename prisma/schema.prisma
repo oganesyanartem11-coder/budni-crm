@@ -32,6 +32,9 @@ enum MealType {
 enum OrderType {
   DYNAMIC // Каждый день меняется, требует подтверждения до cut-off
   FIXED // Постоянное число, автогенерация
+  // WEEKLY — добавляется в MEGA-2 вместе с потребителями (label-мапы, zod,
+  // meal-config). В MEGA-1 не вводим: добавление enum-значения ломает
+  // exhaustive Record<OrderType> и next build (решение «Split»).
 }
 
 enum DeliveryHorizon {
@@ -71,6 +74,23 @@ enum OrderSource {
   FIXED_AUTO // Автоматически сгенерирован для FIXED-конфига
   RECURRING_AUTO // Из расписания
   BORIS // AI-агент Action-Борис (Спринт 7.16.A.2)
+  // WEEKLY_AUTO — добавляется в MEGA-2 вместе с потребителями (Record<OrderSource>
+  // label-мапа в order-detail.tsx). В MEGA-1 не вводим (решение «Split»).
+}
+
+// Недельный заказ: способ, которым клиент прислал заявку на неделю.
+enum WeeklyOrderSubmissionSource {
+  PHOTO // Фото бумажной таблицы
+  TEXT // SMS/текст со списком «ДД.ММ — N»
+}
+
+// Жизненный цикл недельной заявки.
+enum WeeklyOrderSubmissionStatus {
+  PARSED // парсинг готов, sanity checks прошли, заказы создаются
+  AUTO_CONFIRMED // заказы созданы (все в CONFIRMED), менеджер уведомлён
+  NEEDS_REVIEW // confidence ниже порога ИЛИ sanity check провалился — менеджеру в Inbox, заказов нет
+  CANCELLED // менеджер нажал «Отменить»: Order'ы CONFIRMED→DRAFT (LOCKED/IN_PRODUCTION не трогаются)
+  FAILED // тех. ошибка парсера / API
 }
 
 enum DeliveryType {
@@ -389,16 +409,17 @@ model Client {
   defaultOurLegalEntityId String?
   defaultOurLegalEntity   OurLegalEntity? @relation("ClientDefaultLegalEntity", fields: [defaultOurLegalEntityId], references: [id], onDelete: SetNull)
 
-  locations        ClientLocation[]
-  mealConfigs      ClientMealConfig[]
-  orders           Order[]
-  botConversations BotConversation[]
-  botMessages      BotMessage[]
-  inboxItems       InboxItem[]
-  updDocuments     UpdDocument[]
-  toneAlerts       ToneAlertLog[]
-  clientAlerts     ClientAlertLog[]
-  borisEvents      BorisEventLog[]
+  locations         ClientLocation[]
+  mealConfigs       ClientMealConfig[]
+  orders            Order[]
+  botConversations  BotConversation[]
+  botMessages       BotMessage[]
+  inboxItems        InboxItem[]
+  updDocuments      UpdDocument[]
+  toneAlerts        ToneAlertLog[]
+  clientAlerts      ClientAlertLog[]
+  borisEvents       BorisEventLog[]
+  weeklySubmissions WeeklyOrderSubmission[]
 
   @@index([isActive])
   @@index([name])
@@ -714,6 +735,12 @@ model Order {
   sourceConversationId String?
   sourceConversation   BotConversation? @relation(fields: [sourceConversationId], references: [id], onDelete: SetNull)
 
+  // Недельная заявка-источник (Спринт «Недельный заказ»). Nullable — старые
+  // заказы и заказы из других источников её не имеют. SetNull: заказ переживает
+  // удаление submission.
+  weeklySubmissionId String?
+  weeklySubmission   WeeklyOrderSubmission? @relation(fields: [weeklySubmissionId], references: [id], onDelete: SetNull)
+
   delivery Delivery?
 
   // 6.4: антидубль для cron'а check-late-deliveries.
@@ -737,6 +764,35 @@ model Order {
   @@index([status])
   @@index([ourLegalEntityId])
   @@index([clientId, locationId, mealType, deliveryDate])
+  @@index([weeklySubmissionId])
+}
+
+// Недельный заказ (Спринт «Недельный заказ»): одна заявка клиента на 5-7 дней
+// вперёд (фото таблицы или SMS-текст). AI парсит → sanity checks → создаются
+// CONFIRMED-заказы. Группирует порождённые Order для отката по кнопке «Отменить».
+model WeeklyOrderSubmission {
+  id                String                      @id @default(cuid())
+  clientId          String
+  client            Client                      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  weekStartDate     DateTime // UTC-полночь МСК ближайшего Пн в будущем
+  source            WeeklyOrderSubmissionSource
+  blobUrl           String? // если source=PHOTO
+  rawText           String? // SMS-текст для TEXT и опционально caption для PHOTO
+  parsedJson        Json // структурированный результат AI: { items: [{date, portions, locationHint?}], dietaryNotes? }
+  confidence        Float // 0..1
+  status            WeeklyOrderSubmissionStatus @default(PARSED)
+  managerNotifiedAt DateTime?
+  cancelledById     String?
+  cancelledAt       DateTime?
+  failureReason     String?
+  notes             String? // диетические пометки клиента («всегда 2 без свинины»)
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  orders            Order[]
+
+  @@index([clientId, weekStartDate])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // ============================================================

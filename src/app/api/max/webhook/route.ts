@@ -31,7 +31,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid json' }, { status: 400 })
   }
 
-  console.log('[MAX] webhook update:', JSON.stringify(update).slice(0, 500))
+  // Базовый лог апдейта. slice(1500) — чтобы не обрезать длинные SMS-пометки
+  // («всегда 2 без свинины» и т.п.). Секреты/headers здесь не логируем.
+  console.log('[MAX] webhook update:', JSON.stringify(update).slice(0, 1500))
+
+  // P0 (Недельный заказ): если в message_created есть attachments — логируем их
+  // целиком и без slice, чтобы зафиксировать точную форму вложения (фото-заявка
+  // придёт сюда первой). Парсера/обработки медиа пока нет — только разведка формы.
+  if (update.update_type === 'message_created') {
+    const attachments = update.message.body.attachments
+    if (attachments && attachments.length > 0) {
+      console.info(
+        '[max-webhook] message has attachments',
+        JSON.stringify(
+          {
+            updateType: update.update_type,
+            fromId: update.message.sender?.user_id ?? null,
+            attachments,
+          },
+          null,
+          2
+        )
+      )
+    }
+  }
 
   try {
     const bot = getMaxBot() as unknown as BotInternal
