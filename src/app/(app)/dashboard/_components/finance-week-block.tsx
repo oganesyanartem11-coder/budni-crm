@@ -39,8 +39,8 @@ interface Props {
 }
 
 const PERIOD_TABS: Array<{ key: SegmentPreset; label: string; aria: string }> = [
-  { key: 'today', label: 'Сегодня', aria: 'Сегодня' },
   { key: 'yesterday', label: 'Вчера', aria: 'Вчера' },
+  { key: 'today', label: 'Сегодня', aria: 'Сегодня' },
   { key: 'this_week', label: 'Нед', aria: 'Эта неделя' },
   { key: 'this_month', label: 'Мес', aria: 'Этот месяц' },
   { key: 'this_quarter', label: 'Кв', aria: 'Этот квартал' },
@@ -70,12 +70,10 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
     // Любой пресет (кроме custom) сбрасывает custom-границы.
     params.delete('from')
     params.delete('to')
-    // 'this_week' — дефолт: убираем параметр; иначе пишем.
-    if (next === 'this_week') {
-      params.delete('period')
-    } else {
-      params.set('period', next)
-    }
+    // 7.45: дефолт без ?period= = today (см. page.tsx). Поэтому каждый пресет
+    // пишем явно — включая this_week. Раньше this_week удалял param и
+    // проваливался в today-дефолт, из-за чего «Нед» не нажималась.
+    params.set('period', next)
     const qs = params.toString()
     startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname))
   }
