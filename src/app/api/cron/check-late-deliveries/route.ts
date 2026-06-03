@@ -26,6 +26,33 @@ async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
 
+  // Feature-flag: временное отключение алёртов опоздания доставки (Sprint 7.46).
+  // Контролируется через ENV DELIVERY_LATE_ALERTS_ENABLED в Vercel.
+  // Дефолт — алёрты включены. Чтобы выключить — поставить переменную в 'false'.
+  // НЕ влияет на UI-индикаторы опоздания в /delivery (queries.deliveries.hasLateAlert):
+  // те просто показывают факт, не шлют уведомлений.
+  //
+  // Гейт стоит ВНУТРИ handler (withCronHeartbeat снаружи уже записал heartbeat —
+  // job-registry не считает cron упавшим) и ДО запроса опоздавших заказов /
+  // notifyGroup. lateAlertSentAt никому не ставим — при возврате флага в 'true'
+  // прошлые опоздания снова попадут в выборку и получат алёрт.
+  if (process.env.DELIVERY_LATE_ALERTS_ENABLED === 'false') {
+    console.info(
+      `[check-late-deliveries] disabled via DELIVERY_LATE_ALERTS_ENABLED=false, skipping alerts`
+    )
+    await prisma.activityLog.create({
+      data: {
+        userId: null,
+        userRole: 'ADMIN',
+        action: 'LATE_DELIVERY_ALERTS_SKIPPED_FLAG',
+        entityType: 'System',
+        entityId: todayMsk.toISOString().slice(0, 10),
+        payload: { skipped: true, reason: 'flag' },
+      },
+    })
+    return NextResponse.json({ ok: true, skipped: true, reason: 'flag' })
+  }
+
   const candidates = await prisma.order.findMany({
     where: {
       deliveryDate: todayMsk,
