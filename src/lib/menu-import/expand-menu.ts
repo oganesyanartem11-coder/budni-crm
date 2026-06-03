@@ -24,6 +24,35 @@ export interface WeekStructure {
 export interface MenuImportStructure {
   weekA: WeekStructure
   weekB: WeekStructure | null
+  weekC: WeekStructure | null
+}
+
+export interface PickedWeek {
+  week: WeekStructure
+  label: 'А' | 'Б' | 'В'
+  idx: number // 0|1|2
+}
+
+/**
+ * Чистая функция ротации недель меню для индекса экспансии.
+ * cycleLen = число определённых недель в структуре (1, 2 или 3).
+ * При 1 неделе — всегда weekA. При 2 — A/Б. При 3 — A/Б/В.
+ * Backward compat: 2-недельные импорты продолжают чередовать A/Б как раньше.
+ */
+export function pickWeekForIndex(
+  structure: MenuImportStructure,
+  i: number,
+  startOffset = 0,
+): PickedWeek {
+  const weeks: { week: WeekStructure; label: 'А' | 'Б' | 'В' }[] = []
+  if (structure.weekA) weeks.push({ week: structure.weekA, label: 'А' })
+  if (structure.weekB) weeks.push({ week: structure.weekB, label: 'Б' })
+  if (structure.weekC) weeks.push({ week: structure.weekC, label: 'В' })
+  if (weeks.length === 0) {
+    throw new Error('pickWeekForIndex: empty structure (no weekA)')
+  }
+  const idx = (i + startOffset) % weeks.length
+  return { week: weeks[idx].week, label: weeks[idx].label, idx }
 }
 
 // Унаследованный хелпер для callers, которые ещё работают в UTC-семантике
@@ -39,11 +68,12 @@ function formatDayMonthMsk(d: Date): string {
   return `${dd}.${mm}`
 }
 
-// Собирает структуру исходного импорта в виде {weekA, weekB?} — что развернётся
-// при approve. Источник правды для связи «цикл принадлежит этому импорту» —
-// Dish.menuImportId (тот же критерий, что использует rollbackMenuImport в assemble.ts).
-// Сортировка циклов по validFrom asc: первый = A, второй = B; третий и далее
-// игнорируются (контракт 8.6: импорт максимум на 2 недели).
+// Собирает структуру исходного импорта в виде {weekA, weekB?, weekC?} — что
+// развернётся при approve. Источник правды для связи «цикл принадлежит этому
+// импорту» — Dish.menuImportId (тот же критерий, что использует
+// rollbackMenuImport в assemble.ts).
+// Сортировка циклов по validFrom asc: первый = A, второй = B, третий = C;
+// четвёртый и далее игнорируются (контракт 8.6: импорт максимум на 3 недели).
 //
 // slotCategory сразу включаем в выходную структуру, чтобы expandMenuFromStructure
 // не делал отдельный lookup Dish per dishId внутри транзакции.
@@ -84,12 +114,14 @@ export async function getMenuStructureFromImport(
 
   const weekA = cycles[0] ? toWeekStructure(cycles[0].days) : { days: [] }
   const weekB = cycles[1] ? toWeekStructure(cycles[1].days) : null
+  const weekC = cycles[2] ? toWeekStructure(cycles[2].days) : null
 
-  return { weekA, weekB }
+  return { weekA, weekB, weekC }
 }
 
-// Создаёт weeksAhead новых MenuCycle от startDate (понедельник). Чередование:
-// index 0 → A, index 1 → B (если B != null), 2 → A, ... Если B == null — все недели A.
+// Создаёт weeksAhead новых MenuCycle от startDate (понедельник). Чередование
+// делегировано pickWeekForIndex: cycleLen = число определённых недель (1/2/3),
+// idx = i % cycleLen → A / А-Б / А-Б-В. 2-недельные импорты ведут себя как раньше.
 // Новые MenuCycle имеют status='APPROVED', menuImportId, approvedById/At.
 // Dish переиспользуются — только ссылки через dishId, никаких tx.dish.create.
 export async function expandMenuFromStructure(
@@ -113,12 +145,10 @@ export async function expandMenuFromStructure(
   let cyclesCreated = 0
 
   for (let i = 0; i < weeksAhead; i++) {
-    const isWeekA = i % 2 === 0 || structure.weekB === null
-    const week = isWeekA ? structure.weekA : structure.weekB!
+    const { week, label } = pickWeekForIndex(structure, i)
     const validFrom = new Date(startDate.getTime() + i * 7 * DAY_MS)
     const validTo = getSundayOfWeek(validFrom)
-    const weekLabel = isWeekA ? 'А' : 'Б'
-    const name = `Неделя ${weekLabel}, ${formatDayMonthMsk(validFrom)} - ${formatDayMonthMsk(validTo)}`
+    const name = `Неделя ${label}, ${formatDayMonthMsk(validFrom)} - ${formatDayMonthMsk(validTo)}`
 
     const cycle = await tx.menuCycle.create({
       data: {

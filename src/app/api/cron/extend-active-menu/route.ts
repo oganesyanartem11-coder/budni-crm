@@ -109,11 +109,15 @@ async function handler(_request: Request) {
           }
         }
 
-        // Чередование A/B продолжается: если уже было N циклов и N чётное,
-        // последний был Б (индекс N-1 нечётный) → новый блок начинается с А
-        // (startOffset=0). Если N нечётное — последний был А → новый блок с Б
-        // (startOffset=1).
-        const startOffset: 0 | 1 = (active.cyclesCount % 2) as 0 | 1
+        // Чередование продолжается от существующих циклов. cycleLen = число
+        // недель в структуре конкретного импорта (1/2/3) — НЕ глобальная
+        // константа, чтобы 2-недельные импорты сохраняли прежнюю фазу A/Б.
+        // startOffset = cyclesCount % cycleLen: последняя неделя текущего меню
+        // не дублируется первой неделей продления. Сдвиг применяет pickWeekForIndex.
+        const cycleLen = [structure.weekA, structure.weekB, structure.weekC].filter(
+          Boolean
+        ).length
+        const startOffset: number = active.cyclesCount % cycleLen
 
         const cyclesCreated = await extendMenuPlan(
           structure,

@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client'
-import { type MenuImportStructure } from './expand-menu'
+import { type MenuImportStructure, pickWeekForIndex } from './expand-menu'
 import { getMondayOfWeek, getSundayOfWeek } from '@/lib/utils/week'
 
 type Tx = Prisma.TransactionClient
@@ -68,10 +68,10 @@ function formatDayMonthMsk(d: Date): string {
  *
  * 1. approvedById: string | null — у cron'а нет пользователя; передаём null,
  *    в БД approvedById nullable.
- * 2. startOffset: 0 | 1 — продолжает чередование A/B от существующих циклов.
- *    Если до продления было N циклов и N чётное, startOffset = 0 (новый блок
- *    начинается с A). Если N нечётное — startOffset = 1 (начинаем с Б), чтобы
- *    последний A в существующем меню не дублировался первым A в продлении.
+ * 2. startOffset: number — продолжает чередование от существующих циклов.
+ *    Вызывающий передаёт cyclesCount % cycleLen (cycleLen = число недель в
+ *    структуре: 1/2/3). Так последняя неделя существующего меню не дублируется
+ *    первой неделей продления. Конкретный сдвиг считает pickWeekForIndex.
  *
  * Оригинальная expandMenuFromStructure не изменяется (8.7 контракт).
  */
@@ -81,7 +81,7 @@ export async function extendMenuPlan(
   weeksAhead: number,
   menuImportId: string,
   approvedById: string | null,
-  startOffset: 0 | 1,
+  startOffset: number,
   tx: Tx
 ): Promise<number> {
   // Новая семантика (7.6 A.1): startDate должен быть MSK-полночью понедельника
@@ -98,12 +98,10 @@ export async function extendMenuPlan(
   let cyclesCreated = 0
 
   for (let i = 0; i < weeksAhead; i++) {
-    const isWeekA = (i + startOffset) % 2 === 0 || structure.weekB === null
-    const week = isWeekA ? structure.weekA : structure.weekB!
+    const { week, label } = pickWeekForIndex(structure, i, startOffset)
     const validFrom = new Date(startDate.getTime() + i * 7 * DAY_MS)
     const validTo = getSundayOfWeek(validFrom)
-    const weekLabel = isWeekA ? 'А' : 'Б'
-    const name = `Неделя ${weekLabel}, ${formatDayMonthMsk(validFrom)} - ${formatDayMonthMsk(validTo)}`
+    const name = `Неделя ${label}, ${formatDayMonthMsk(validFrom)} - ${formatDayMonthMsk(validTo)}`
 
     const cycle = await tx.menuCycle.create({
       data: {
