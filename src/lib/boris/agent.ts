@@ -234,7 +234,38 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
 
   // 8. Если есть pending — создать BorisPendingAction и собрать preview.
   if (pendingActions.length > 0) {
-    const preview = buildMultiActionPreview(pendingActions)
+    let preview = buildMultiActionPreview(pendingActions)
+
+    // MEGA-4a guard (П6): если в одном плане смешаны заказы РАЗНЫХ клиентов —
+    // помечаем preview предупреждением. Берём clientId только оттуда, где он
+    // реально есть в input (create_one_time_order). Для order-based actions
+    // (edit/cancel/reschedule/...) clientId в input нет — через orderId не
+    // докапываемся, чтобы не делать тяжёлых доп-запросов.
+    const clientIds = Array.from(
+      new Set(
+        pendingActions
+          .map((a) => a.input.clientId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
+    )
+    if (clientIds.length >= 2) {
+      // Имена дёшево достаём одним findMany; при сбое — fallback на id.
+      let labels = clientIds
+      try {
+        const clients = await prisma.client.findMany({
+          where: { id: { in: clientIds } },
+          select: { id: true, name: true },
+        })
+        const byId = new Map(clients.map((c) => [c.id, c.name]))
+        labels = clientIds.map((id) => byId.get(id) ?? id)
+      } catch {
+        labels = clientIds
+      }
+      preview =
+        `⚠️ В плане заказы РАЗНЫХ клиентов: ${labels.join(', ')}. Подтверди осознанно.\n\n` +
+        preview
+    }
+
     const pending = await prisma.borisPendingAction.create({
       data: {
         conversationId: conversation.id,

@@ -18,6 +18,7 @@ const {
   mockParse,
   mockSave,
   mockDetectAnomalies,
+  mockDetectPortionAnomaly,
   mockGetStats,
   mockSendBotMessage,
   mockLogBotMessage,
@@ -38,6 +39,7 @@ const {
   mockParse: vi.fn(),
   mockSave: vi.fn(),
   mockDetectAnomalies: vi.fn(),
+  mockDetectPortionAnomaly: vi.fn(),
   mockGetStats: vi.fn(),
   mockSendBotMessage: vi.fn(),
   mockLogBotMessage: vi.fn(),
@@ -53,7 +55,10 @@ vi.mock('@/lib/db/queries/bot', () => ({
 }))
 vi.mock('@/lib/llm/parser', () => ({ parseClientResponse: mockParse }))
 vi.mock('./save-orders', () => ({ saveBotOrders: mockSave }))
-vi.mock('@/lib/orders/anomaly-detector', () => ({ detectAnomalies: mockDetectAnomalies }))
+vi.mock('@/lib/orders/anomaly-detector', () => ({
+  detectAnomalies: mockDetectAnomalies,
+  detectPortionAnomaly: mockDetectPortionAnomaly,
+}))
 vi.mock('@/lib/orders/client-stats', () => ({ getClientStats: mockGetStats }))
 vi.mock('@/lib/max/send-message', () => ({ sendBotMessage: mockSendBotMessage }))
 vi.mock('./log-message', () => ({ logBotMessage: mockLogBotMessage }))
@@ -115,7 +120,8 @@ beforeEach(() => {
     toneLabel: 'neutral',
     items: [{ locationId: 'loc_1', portions: 10 }],
   })
-  mockDetectAnomalies.mockReturnValue({ isAnomaly: false })
+  mockDetectAnomalies.mockReturnValue({ isAnomaly: false, priority: 'NORMAL' })
+  mockDetectPortionAnomaly.mockResolvedValue({ isAnomaly: false, reason: 'no_history' })
   mockSave.mockResolvedValue({
     savedItems: [{ locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 10 }],
   })

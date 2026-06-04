@@ -28,6 +28,17 @@ import {
   formatDateHuman,
   formatPortions,
 } from './labels'
+import { resolveClient } from './client-resolver'
+
+/**
+ * Спец-результат tool'а когда резолвер клиента не дал единственного кандидата.
+ * Боря по промту обязан переспросить менеджера, а не угадывать.
+ */
+type ClientResolveFailure = {
+  ok: false
+  reason: 'no_match' | 'ambiguous'
+  candidates: Array<{ id: string; name: string }>
+}
 
 const MAX_LIST_ITEMS = 20
 
@@ -74,8 +85,21 @@ const findOrdersTool: AgentTool = {
       date?: string
       mealType?: MealType
     }
+
+    // П6: строгий резолвер клиента вместо substring-матчинга. Если кандидат
+    // не единственный — возвращаем спец-результат, Боря переспросит менеджера.
+    const resolved = await resolveClient(input.clientNameQuery, prisma)
+    if (!resolved.suggested) {
+      const failure: ClientResolveFailure = {
+        ok: false,
+        reason: resolved.rejected === 'no_match' ? 'no_match' : 'ambiguous',
+        candidates: resolved.matched.map((c) => ({ id: c.id, name: c.name })),
+      }
+      return failure
+    }
+
     const where: Prisma.OrderWhereInput = {
-      client: { name: { contains: input.clientNameQuery, mode: 'insensitive' } },
+      clientId: resolved.suggested.id,
     }
     if (input.date) where.deliveryDate = new Date(input.date)
     if (input.mealType) where.mealType = input.mealType
@@ -183,9 +207,21 @@ const getClientSummaryTool: AgentTool = {
   },
   execute: async (rawInput) => {
     const { clientNameQuery } = rawInput as { clientNameQuery: string }
+
+    // П6: строгий резолвер. Неоднозначность → переспрос, не угадывание.
+    const resolved = await resolveClient(clientNameQuery, prisma)
+    if (!resolved.suggested) {
+      const failure: ClientResolveFailure = {
+        ok: false,
+        reason: resolved.rejected === 'no_match' ? 'no_match' : 'ambiguous',
+        candidates: resolved.matched.map((c) => ({ id: c.id, name: c.name })),
+      }
+      return failure
+    }
+
+    // Подтягиваем связи только для единственного подтверждённого клиента.
     const clients = await prisma.client.findMany({
-      where: { name: { contains: clientNameQuery, mode: 'insensitive' }, isActive: true },
-      take: 5,
+      where: { id: resolved.suggested.id },
       include: {
         locations: {
           where: { isActive: true },

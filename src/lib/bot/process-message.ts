@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { findClientByMaxChatId, findLatestBotConv } from '@/lib/db/queries/bot'
 import { parseClientResponse } from '@/lib/llm/parser'
-import { detectAnomalies } from '@/lib/orders/anomaly-detector'
+import { detectAnomalies, detectPortionAnomaly } from '@/lib/orders/anomaly-detector'
 import { getClientStats } from '@/lib/orders/client-stats'
 import { getCutoffMoment } from '@/lib/orders/cutoff'
 import { getClientCutoffForDate, formatCutoff } from '@/lib/utils/cutoff'
@@ -24,7 +24,7 @@ import { toMskDateString } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
 import { sendTelegramMessage } from '@/lib/telegram/send'
 import { escapeHtml } from '@/lib/telegram/notify'
-import type { BotConversation, MealType, Prisma } from '@prisma/client'
+import type { BotConversation, MealType, Prisma, InboxItemReason } from '@prisma/client'
 
 const MEAL_TYPE_RU: Record<MealType, string> = {
   BREAKFAST: 'завтрака',
@@ -372,11 +372,46 @@ async function handleBotResponse(
     isPastCutoff: false,
   })
 
+  // MEGA-4a (П10): «цифра вне нормы» — динамический порог 50–200% от истории
+  // клиента по дню недели за 90 дней (вместо глобального MIN=10). Проверяем
+  // каждую позицию числового ответа; первая выпавшая → inbox. cold-start
+  // (samples<3) и числа в норме НЕ алёртят. detectAnomalies (тон/cutoff/отмена/
+  // новый клиент) имеет приоритет — если он уже пометил, портин-чек пропускаем.
+  let portionAnomaly: {
+    reason: InboxItemReason
+    humanReason: string
+  } | null = null
+  if (!anomaly.isAnomaly && parsed.type === 'numeric') {
+    for (const item of parsed.items) {
+      const res = await detectPortionAnomaly(
+        {
+          clientId: client.id,
+          locationId: item.locationId,
+          deliveryDate: conv.deliveryDate,
+          proposedPortions: item.portions,
+        },
+        prisma,
+      )
+      if (res.isAnomaly && res.expected) {
+        const { average, min, max } = res.expected
+        portionAnomaly = {
+          reason: 'ANOMALY_HISTORICAL',
+          humanReason: `Цифра вне обычного: предложено ${item.portions}, обычно для этой локации в эти дни около ${average} (${min}–${max} по истории за 90 дней).`,
+        }
+        break
+      }
+    }
+  }
+
   const isNotNumeric = parsed.type !== 'numeric'
-  if (anomaly.isAnomaly || isNotNumeric) {
+  if (anomaly.isAnomaly || portionAnomaly || isNotNumeric) {
     // КЕЙС D — парсер не понял или аномалия по содержанию. Заказ НЕ сохраняем.
-    const reason = anomaly.reason ?? 'NON_NUMERIC'
-    const humanReason = anomaly.humanReason || (parsed.reason || 'Не цифровой ответ')
+    const reason = anomaly.isAnomaly
+      ? (anomaly.reason ?? 'NON_NUMERIC')
+      : (portionAnomaly?.reason ?? 'NON_NUMERIC')
+    const humanReason = anomaly.isAnomaly
+      ? anomaly.humanReason || (parsed.reason || 'Не цифровой ответ')
+      : portionAnomaly?.humanReason || (parsed.reason || 'Не цифровой ответ')
 
     if (conv.status !== 'AWAITING_MANAGER') {
       await prisma.botConversation.update({
