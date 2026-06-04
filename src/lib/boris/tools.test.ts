@@ -1,5 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+// Мокаем prisma, чтобы исполнять execute() tool'ов без реальной БД.
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: {
+    client: { findMany: vi.fn(), findUnique: vi.fn() },
+    clientLocation: { findFirst: vi.fn() },
+    order: { findMany: vi.fn() },
+  },
+}))
+
 import { BORIS_TOOLS, BORIS_READ_TOOLS, BORIS_MUTATE_TOOLS } from './tools'
+import { prisma } from '@/lib/db/prisma'
 
 describe('BORIS_TOOLS подмножества', () => {
   it('BORIS_TOOLS содержит ровно 13 tools', () => {
@@ -79,4 +90,61 @@ describe('Логика выбора tools по chatType + userRole', () => {
       expect(canMutate).toBe(c.canMutate)
     })
   }
+})
+
+describe('find_orders SAME-DAY будущая дата (MEGA-4a-fix)', () => {
+  const findOrders = BORIS_READ_TOOLS.find((t) => t.name === 'find_orders')!
+
+  it('same-day клиент на будущую дату без заказов → {ok:false, reason:same_day_future}', async () => {
+    // Резолвер вернёт этого клиента как exact с активной same-day локацией.
+    vi.mocked(prisma.client.findMany).mockResolvedValue([
+      {
+        id: 'sk',
+        name: 'Ск Техник',
+        isActive: true,
+        locations: [{ id: 'l1', sameDayDelivery: true, isActive: true }],
+      },
+    ] as never)
+    // Заказов на запрошенную (будущую) дату ещё нет.
+    vi.mocked(prisma.order.findMany).mockResolvedValue([] as never)
+
+    // '2999-01-01' гарантированно > сегодня МСК → будущая дата.
+    const res = await findOrders.execute({ clientNameQuery: 'ск техник', date: '2999-01-01' })
+
+    expect(res).toMatchObject({
+      ok: false,
+      reason: 'same_day_future',
+      clientName: 'Ск Техник',
+      deliveryDate: '2999-01-01',
+    })
+  })
+
+  it('same-day клиент, но есть заказы → обычный список (не блокируем)', async () => {
+    vi.mocked(prisma.client.findMany).mockResolvedValue([
+      {
+        id: 'sk',
+        name: 'Ск Техник',
+        isActive: true,
+        locations: [{ id: 'l1', sameDayDelivery: true, isActive: true }],
+      },
+    ] as never)
+    vi.mocked(prisma.order.findMany).mockResolvedValue([
+      {
+        id: 'o1',
+        mealType: 'LUNCH',
+        deliveryDate: new Date('2999-01-01'),
+        portions: 8,
+        status: 'CONFIRMED',
+        updatedAt: new Date('2026-06-01'),
+        client: { id: 'sk', name: 'Ск Техник' },
+        location: { id: 'l1', name: 'Точка' },
+      },
+    ] as never)
+
+    const res = (await findOrders.execute({ clientNameQuery: 'ск техник', date: '2999-01-01' })) as {
+      items: unknown[]
+    }
+    expect(Array.isArray(res.items)).toBe(true)
+    expect(res.items).toHaveLength(1)
+  })
 })

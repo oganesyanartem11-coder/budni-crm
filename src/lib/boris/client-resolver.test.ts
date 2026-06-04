@@ -2,20 +2,27 @@
  * Тесты строгого резолвера клиента (MEGA-4a, фикс П6).
  */
 import { describe, it, expect, vi } from 'vitest'
-import type { Client, PrismaClient } from '@prisma/client'
-import { normalizeClientName, resolveClient } from './client-resolver'
+import type { PrismaClient } from '@prisma/client'
+import { normalizeClientName, resolveClient, type ResolvedClient } from './client-resolver'
 
-/** Минимальный фабричный helper для Client-стаба. */
-function client(name: string, isActive = true, id = name): Client {
-  return { id, name, isActive } as unknown as Client
+type StubLocation = { id: string; sameDayDelivery: boolean; isActive: boolean }
+
+/** Минимальный фабричный helper для Client-стаба (с локациями для same-day). */
+function client(
+  name: string,
+  isActive = true,
+  id = name,
+  locations: StubLocation[] = []
+): ResolvedClient {
+  return { id, name, isActive, locations } as unknown as ResolvedClient
 }
 
 /**
  * Стаб prisma: findMany имитирует ILIKE contains (case-insensitive) + isActive.
  * Резолвер сам делает строгую категоризацию в памяти — стабу достаточно
- * корректно отдать «широкую» выборку.
+ * корректно отдать «широкую» выборку (с уже подгруженными locations).
  */
-function makePrisma(all: Client[]): PrismaClient {
+function makePrisma(all: ResolvedClient[]): PrismaClient {
   const findMany = vi.fn(async (args: {
     where: { isActive?: boolean; name?: { contains?: string } }
   }) => {
@@ -149,5 +156,48 @@ describe('resolveClient', () => {
     expect(r.matched.map((c) => c.id)).toEqual(['exact', 'startsWith', 'contains'])
     // exact один → suggested
     expect(r.suggested?.id).toBe('exact')
+  })
+})
+
+describe('resolveClient isSameDayClient (MEGA-4a-fix)', () => {
+  const sameDayLoc = { id: 'l1', sameDayDelivery: true, isActive: true }
+  const normalLoc = { id: 'l2', sameDayDelivery: false, isActive: true }
+
+  it('suggested с активной same-day локацией → isSameDayClient=true', async () => {
+    const prisma = makePrisma([client('Ск Техник', true, 'sk', [sameDayLoc])])
+    const r = await resolveClient('ск техник', prisma)
+    expect(r.suggested?.id).toBe('sk')
+    expect(r.isSameDayClient).toBe(true)
+  })
+
+  it('suggested без same-day локаций → isSameDayClient=false', async () => {
+    const prisma = makePrisma([client('Обычный', true, 'reg', [normalLoc])])
+    const r = await resolveClient('обычный', prisma)
+    expect(r.suggested?.id).toBe('reg')
+    expect(r.isSameDayClient).toBe(false)
+  })
+
+  it('mixed: одна same-day + одна обычная локация → isSameDayClient=true', async () => {
+    const prisma = makePrisma([client('Микс', true, 'mix', [normalLoc, sameDayLoc])])
+    const r = await resolveClient('микс', prisma)
+    expect(r.isSameDayClient).toBe(true)
+  })
+
+  it('same-day локация НЕактивна → isSameDayClient=false (только активные считаются)', async () => {
+    const inactiveSameDay = { id: 'l3', sameDayDelivery: true, isActive: false }
+    const prisma = makePrisma([client('Спящий', true, 'slp', [inactiveSameDay])])
+    const r = await resolveClient('спящий', prisma)
+    expect(r.suggested?.id).toBe('slp')
+    expect(r.isSameDayClient).toBe(false)
+  })
+
+  it('suggested=null (ambiguous) → isSameDayClient=false', async () => {
+    const prisma = makePrisma([
+      client('Розница Инпарт соседи', true, 'a', [sameDayLoc]),
+      client('Сеть Инпарт регион', true, 'b', [sameDayLoc]),
+    ])
+    const r = await resolveClient('инпарт', prisma)
+    expect(r.suggested).toBeNull()
+    expect(r.isSameDayClient).toBe(false)
   })
 })

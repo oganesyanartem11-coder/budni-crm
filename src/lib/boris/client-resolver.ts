@@ -19,17 +19,35 @@
  * автокандидатом — только показывается как вариант выбора.
  */
 
-import type { Client, PrismaClient } from '@prisma/client'
+import type { Client, ClientLocation, PrismaClient } from '@prisma/client'
+
+/** Локационная часть, нужная резолверу для same-day определения. */
+type ResolverLocation = Pick<ClientLocation, 'id' | 'sameDayDelivery' | 'isActive'>
+
+/** Client с подгруженными локациями (для вычисления isSameDayClient). */
+export type ResolvedClient = Client & { locations: ResolverLocation[] }
 
 export interface ResolveResult {
   /** Все попавшие кандидаты, упорядочены: exact → startsWith → contains. */
-  matched: Client[]
-  exact: Client[]
-  startsWith: Client[]
-  contains: Client[]
+  matched: ResolvedClient[]
+  exact: ResolvedClient[]
+  startsWith: ResolvedClient[]
+  contains: ResolvedClient[]
   /** Единственный безопасный кандидат для автодействия, либо null. */
-  suggested: Client | null
+  suggested: ResolvedClient | null
   rejected: 'no_match' | 'ambiguous' | null
+  /**
+   * MEGA-4a-fix: true, если у suggested есть хотя бы одна АКТИВНАЯ локация с
+   * sameDayDelivery=true. SAME-DAY клиент сам подтверждает заказ утром в день
+   * доставки — Боря не должен создавать ему предзаявку на будущую дату руками.
+   * Относится к suggested; при suggested=null всегда false.
+   */
+  isSameDayClient: boolean
+}
+
+/** true если у клиента есть активная same-day локация. */
+function hasActiveSameDayLocation(c: ResolvedClient | null): boolean {
+  return c ? c.locations.some((l) => l.sameDayDelivery && l.isActive) : false
 }
 
 /** Юр.формы, которые срезаем как отдельный токен (не подстроку внутри слов). */
@@ -71,6 +89,7 @@ export async function resolveClient(
     contains: [],
     suggested: null,
     rejected: 'no_match',
+    isSameDayClient: false,
   }
 
   if (normQuery.length === 0) {
@@ -86,11 +105,14 @@ export async function resolveClient(
       isActive: true,
       name: { contains: normQuery, mode: 'insensitive' },
     },
+    include: {
+      locations: { select: { id: true, sameDayDelivery: true, isActive: true } },
+    },
   })
 
-  const exact: Client[] = []
-  const startsWith: Client[] = []
-  const contains: Client[] = []
+  const exact: ResolvedClient[] = []
+  const startsWith: ResolvedClient[] = []
+  const contains: ResolvedClient[] = []
 
   for (const c of candidates) {
     const normName = normalizeClientName(c.name)
@@ -108,10 +130,18 @@ export async function resolveClient(
   const matched = [...exact, ...startsWith, ...contains]
 
   if (matched.length === 0) {
-    return { matched, exact, startsWith, contains, suggested: null, rejected: 'no_match' }
+    return {
+      matched,
+      exact,
+      startsWith,
+      contains,
+      suggested: null,
+      rejected: 'no_match',
+      isSameDayClient: false,
+    }
   }
 
-  let suggested: Client | null = null
+  let suggested: ResolvedClient | null = null
   if (exact.length === 1) {
     suggested = exact[0]
   } else if (exact.length === 0 && startsWith.length === 1) {
@@ -120,5 +150,13 @@ export async function resolveClient(
 
   const rejected: ResolveResult['rejected'] = suggested === null ? 'ambiguous' : null
 
-  return { matched, exact, startsWith, contains, suggested, rejected }
+  return {
+    matched,
+    exact,
+    startsWith,
+    contains,
+    suggested,
+    rejected,
+    isSameDayClient: hasActiveSameDayLocation(suggested),
+  }
 }

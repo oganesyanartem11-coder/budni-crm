@@ -29,6 +29,7 @@ import {
   formatPortions,
 } from './labels'
 import { resolveClient } from './client-resolver'
+import { toMskDateString } from '@/lib/utils/msk-window'
 
 /**
  * Спец-результат tool'а когда резолвер клиента не дал единственного кандидата.
@@ -40,7 +41,28 @@ type ClientResolveFailure = {
   candidates: Array<{ id: string; name: string }>
 }
 
+/**
+ * MEGA-4a-fix: спец-результат для SAME-DAY клиента на будущую дату. Он сам
+ * подтвердит заказ утром в день доставки через daily-questions-sameday (~07:40),
+ * поэтому Боря НЕ создаёт ему предзаявку руками — объясняет менеджеру.
+ */
+type SameDayFutureFailure = {
+  ok: false
+  reason: 'same_day_future' | 'same_day_future_create_blocked'
+  clientName: string
+  deliveryDate: string
+}
+
 const MAX_LIST_ITEMS = 20
+
+/**
+ * true если 'YYYY-MM-DD' дата доставки — БУДУЩИЙ МСК-день относительно сейчас
+ * (т.е. завтра или позже). Сравнение строк YYYY-MM-DD лексикографически
+ * корректно. Используется для блокировки ручных предзаявок same-day клиентам.
+ */
+function isFutureMskDate(dateStr: string): boolean {
+  return dateStr > toMskDateString(new Date())
+}
 
 /** Форматирует DateTime → 'YYYY-MM-DD' (UTC, как хранится в @db.Date). */
 function formatDate(d: Date | string): string {
@@ -97,9 +119,10 @@ const findOrdersTool: AgentTool = {
       }
       return failure
     }
+    const suggested = resolved.suggested
 
     const where: Prisma.OrderWhereInput = {
-      clientId: resolved.suggested.id,
+      clientId: suggested.id,
     }
     if (input.date) where.deliveryDate = new Date(input.date)
     if (input.mealType) where.mealType = input.mealType
@@ -133,6 +156,19 @@ const findOrdersTool: AgentTool = {
       statusCode: o.status,
       updatedAt: o.updatedAt.toISOString(),
     }))
+
+    // MEGA-4a-fix: SAME-DAY клиент на будущую дату — заказов ещё нет и руками их
+    // создавать не нужно (клиент подтвердит сам утром). Возвращаем спец-reason,
+    // а не пустой список, чтобы Боря объяснил менеджеру вместо предложения создать.
+    if (mapped.length === 0 && input.date && resolved.isSameDayClient && isFutureMskDate(input.date)) {
+      const failure: SameDayFutureFailure = {
+        ok: false,
+        reason: 'same_day_future',
+        clientName: suggested.name,
+        deliveryDate: input.date,
+      }
+      return failure
+    }
 
     return truncate(mapped)
   },
@@ -669,7 +705,7 @@ const createOneTimeOrderTool: AgentTool = {
     },
     required: ['clientId', 'locationId', 'mealType', 'deliveryDate', 'portions'],
   },
-  execute: async (rawInput): Promise<PendingResult> => {
+  execute: async (rawInput): Promise<PendingResult | SameDayFutureFailure> => {
     const input = rawInput as {
       clientId: string
       locationId: string
@@ -678,6 +714,28 @@ const createOneTimeOrderTool: AgentTool = {
       portions: number
       pricePerPortion?: number
     }
+
+    // MEGA-4a-fix: блокируем ручную предзаявку SAME-DAY клиенту на будущую дату.
+    // Он подтвердит заказ сам утром в день доставки (daily-questions-sameday).
+    if (isFutureMskDate(input.deliveryDate)) {
+      const sameDayLoc = await prisma.clientLocation.findFirst({
+        where: { clientId: input.clientId, isActive: true, sameDayDelivery: true },
+        select: { id: true },
+      })
+      if (sameDayLoc) {
+        const c = await prisma.client.findUnique({
+          where: { id: input.clientId },
+          select: { name: true },
+        })
+        return {
+          ok: false,
+          reason: 'same_day_future_create_blocked',
+          clientName: c?.name ?? input.clientId,
+          deliveryDate: input.deliveryDate,
+        }
+      }
+    }
+
     const [client, location] = await Promise.all([
       prisma.client.findUnique({ where: { id: input.clientId }, select: { name: true } }),
       prisma.clientLocation.findUnique({
