@@ -4,6 +4,7 @@ import {
   formatProductionSummary,
   formatProductionSummaryRow,
   sortProductionSummaryRows,
+  computeUnconfirmedConfigs,
 } from './production-summary-format'
 
 describe('formatProductionSummaryRow', () => {
@@ -104,5 +105,92 @@ describe('formatProductionSummary', () => {
     })
     expect(text).toContain('⚠️ Не ответили (1):')
     expect(text).toContain('Гамма, Никитская')
+  })
+})
+
+describe('computeUnconfirmedConfigs (П3-механизм1: матчинг по бизнес-ключу)', () => {
+  const config = {
+    id: 'cfg-1',
+    clientId: 'client-1',
+    locationId: 'loc-1',
+    mealType: 'LUNCH',
+  }
+
+  it('ручной MANUAL-заказ (sourceConfigId=null), совпадающий по (client,location,mealType) и CONFIRMED → конфиг НЕ в «Не ответили»', () => {
+    const orders = [
+      {
+        sourceConfigId: null,
+        clientId: 'client-1',
+        locationId: 'loc-1',
+        mealType: 'LUNCH',
+        status: 'CONFIRMED',
+      },
+    ]
+    expect(computeUnconfirmedConfigs([config], orders)).toEqual([])
+  })
+
+  it('DYNAMIC-конфиг без единого Order на завтра → в «Не ответили»', () => {
+    expect(computeUnconfirmedConfigs([config], [])).toEqual([config])
+  })
+
+  it('Order в PENDING_CONFIRMATION НЕ считается отвеченным → конфиг в «Не ответили»', () => {
+    const orders = [
+      {
+        sourceConfigId: 'cfg-1',
+        clientId: 'client-1',
+        locationId: 'loc-1',
+        mealType: 'LUNCH',
+        status: 'PENDING_CONFIRMATION',
+      },
+    ]
+    expect(computeUnconfirmedConfigs([config], orders)).toEqual([config])
+  })
+
+  it('DRAFT и CANCELLED тоже НЕ считаются отвеченными', () => {
+    const orders = [
+      {
+        clientId: 'client-1',
+        locationId: 'loc-1',
+        mealType: 'LUNCH',
+        status: 'DRAFT',
+      },
+      {
+        clientId: 'client-1',
+        locationId: 'loc-1',
+        mealType: 'LUNCH',
+        status: 'CANCELLED',
+      },
+    ]
+    expect(computeUnconfirmedConfigs([config], orders)).toEqual([config])
+  })
+
+  it('заказ с тем же клиентом/локацией, но другим mealType НЕ закрывает конфиг', () => {
+    const orders = [
+      {
+        clientId: 'client-1',
+        locationId: 'loc-1',
+        mealType: 'BREAKFAST',
+        status: 'CONFIRMED',
+      },
+    ]
+    expect(computeUnconfirmedConfigs([config], orders)).toEqual([config])
+  })
+
+  it('LOCKED / IN_PRODUCTION / OUT_FOR_DELIVERY / DELIVERED считаются отвеченными', () => {
+    for (const status of ['LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY', 'DELIVERED']) {
+      const orders = [
+        { clientId: 'client-1', locationId: 'loc-1', mealType: 'LUNCH', status },
+      ]
+      expect(computeUnconfirmedConfigs([config], orders)).toEqual([])
+    }
+  })
+
+  it('частичный матч в наборе конфигов: закрывается только совпавший', () => {
+    const cfgA = { id: 'a', clientId: 'c1', locationId: 'l1', mealType: 'LUNCH' }
+    const cfgB = { id: 'b', clientId: 'c2', locationId: 'l2', mealType: 'DINNER' }
+    const orders = [
+      { clientId: 'c1', locationId: 'l1', mealType: 'LUNCH', status: 'CONFIRMED' },
+    ]
+    expect(computeUnconfirmedConfigs([cfgA, cfgB], orders)).toEqual([cfgB])
   })
 })

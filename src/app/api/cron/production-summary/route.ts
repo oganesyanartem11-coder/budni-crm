@@ -4,9 +4,12 @@ import { ru } from 'date-fns/locale'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { isScheduledForDate } from '@/lib/orders/generate-orders'
-import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
+import { notifyProductionChannel, escapeHtml } from '@/lib/telegram/notify'
 import { productionSummaryButton } from '@/lib/telegram/buttons'
-import { formatProductionSummary } from '@/lib/boris/production-summary-format'
+import {
+  formatProductionSummary,
+  computeUnconfirmedConfigs,
+} from '@/lib/boris/production-summary-format'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
@@ -37,6 +40,10 @@ async function handler(_request: Request) {
       portions: true,
       totalPrice: true,
       sourceConfigId: true,
+      clientId: true,
+      locationId: true,
+      mealType: true,
+      status: true,
       client: { select: { id: true, name: true } },
       location: { select: { id: true, name: true } },
     },
@@ -50,7 +57,10 @@ async function handler(_request: Request) {
     const text =
       `📦 На завтра, <i>${escapeHtml(dateLabel)}</i>\n\n` +
       `Заказов пока нет. Менеджеры — проверьте, всё ли в порядке.`
-    const result = await notifyGroup(text, { parseMode: 'HTML', replyMarkup: button })
+    // notifyProductionChannel сам делает фолбэк в ADMIN_PRO при недоступности
+    // канала производства и не возвращает результат — доставка гарантирована
+    // (либо канал, либо личка), поэтому sentToGroup=true.
+    await notifyProductionChannel(text, { parseMode: 'HTML', replyMarkup: button })
 
     await prisma.activityLog.create({
       data: {
@@ -59,11 +69,11 @@ async function handler(_request: Request) {
         action: ACTION,
         entityType: 'System',
         entityId: tomorrowIso,
-        payload: { date: tomorrowIso, total: 0, sentToGroup: result.ok, empty: true },
+        payload: { date: tomorrowIso, total: 0, sentToGroup: true, empty: true },
       },
     })
 
-    return NextResponse.json({ ok: true, date: tomorrowIso, total: 0, sentToGroup: result.ok })
+    return NextResponse.json({ ok: true, date: tomorrowIso, total: 0, sentToGroup: true })
   }
 
   // Метрики.
@@ -86,12 +96,10 @@ async function handler(_request: Request) {
     },
   })
   const activeConfigsForTomorrow = dynamicConfigs.filter((c) => isScheduledForDate(c, tomorrowMsk))
-  const confirmedConfigIds = new Set(
-    orders.map((o) => o.sourceConfigId).filter((id): id is string => id !== null)
-  )
-  const unconfirmedConfigs = activeConfigsForTomorrow.filter(
-    (c) => !confirmedConfigIds.has(c.id)
-  )
+  // П3-механизм1: матчинг «отвечен» по бизнес-ключу (clientId, locationId, mealType)
+  // вместо sourceConfigId — ручной MANUAL-заказ (sourceConfigId=null) теперь
+  // корректно «закрывает» свой DYNAMIC-конфиг. См. computeUnconfirmedConfigs.
+  const unconfirmedConfigs = computeUnconfirmedConfigs(activeConfigsForTomorrow, orders)
 
   // Единый список заказов на завтра (подтверждённые DYNAMIC + фиксированные FIXED),
   // сгруппированный по клиент+локация: несколько mealConfig'ов на одной точке =
@@ -129,7 +137,10 @@ async function handler(_request: Request) {
     totalRevenue,
     unconfirmed: unconfirmedRows,
   })
-  const result = await notifyGroup(text, { parseMode: 'HTML', replyMarkup: button })
+  // notifyProductionChannel: канал производства с фолбэком в личку ADMIN_PRO.
+  // Доставка гарантирована (канал или личка), результат не возвращается →
+  // sentToGroup=true, error=null.
+  await notifyProductionChannel(text, { parseMode: 'HTML', replyMarkup: button })
 
   await prisma.activityLog.create({
     data: {
@@ -146,8 +157,8 @@ async function handler(_request: Request) {
         locations: uniqueLocationIds.size,
         orders: orderRows.length,
         unconfirmed: unconfirmedRows.length,
-        sentToGroup: result.ok,
-        error: result.error ?? null,
+        sentToGroup: true,
+        error: null,
       },
     },
   })
@@ -161,8 +172,8 @@ async function handler(_request: Request) {
     locations: uniqueLocationIds.size,
     orders: orderRows.length,
     unconfirmed: unconfirmedRows.length,
-    sentToGroup: result.ok,
-    error: result.error ?? null,
+    sentToGroup: true,
+    error: null,
   })
 }
 

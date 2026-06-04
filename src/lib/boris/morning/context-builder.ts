@@ -93,6 +93,28 @@ export function formatUrgentAttention(params: {
   return `От ${clientName} (${loc}): срочное сообщение, сегодня доставка [tone=${tone}]`
 }
 
+/** Ключ заказа для перекрытия pending↔covering: clientId:locationId:mealType. */
+type OrderKeyParts = { clientId: string; locationId: string; mealType: string }
+
+/**
+ * П3-механизм2: считает PENDING_CONFIRMATION-заказы, у которых НЕТ перекрывающего
+ * активного (CONFIRMED/LOCKED/…) заказа на тот же ключ (clientId,locationId,mealType).
+ *
+ * Сценарий дубля: cron generate-orders создал PENDING, менеджер руками завёл
+ * CONFIRMED на ту же точку/приём → висит лишний PENDING, и Боря зря пишет
+ * «ждём заказ». Такой перекрытый PENDING из счётчика выкидываем.
+ *
+ * Чистая функция (вынесена для тестируемости — buildMorningContext требует БД).
+ */
+export function countUncoveredPending(
+  pendingOrders: OrderKeyParts[],
+  coveringOrders: OrderKeyParts[],
+): number {
+  const key = (o: OrderKeyParts) => `${o.clientId}:${o.locationId}:${o.mealType}`
+  const coveringKeys = new Set(coveringOrders.map(key))
+  return pendingOrders.filter((o) => !coveringKeys.has(key(o))).length
+}
+
 /** Обрезает текст до limit символов, добавляя «…» если был длиннее. Пустой/null → ''. */
 export function buildExcerpt(message: string | null | undefined, limit: number): string {
   if (!message) return ''
@@ -141,9 +163,28 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
     return null
   }
 
-  const pendingConfirmationTomorrow = await prisma.order.count({
-    where: { deliveryDate: tomorrowMsk, status: 'PENDING_CONFIRMATION' },
-  })
+  // П3-механизм2: считаем pending только тех PENDING_CONFIRMATION-заказов на завтра,
+  // для которых НЕТ перекрывающего активного заказа (CONFIRMED/LOCKED/IN_PRODUCTION/
+  // OUT_FOR_DELIVERY) на тот же ключ (clientId,locationId,mealType,deliveryDate=завтра).
+  // Сценарий: cron generate-orders создал PENDING, менеджер руками завёл CONFIRMED на
+  // ту же точку → висит дубль-PENDING, и Боря в сводке зря пишет «ждём заказ».
+  const [pendingTomorrowOrders, coveringTomorrowOrders] = await Promise.all([
+    prisma.order.findMany({
+      where: { deliveryDate: tomorrowMsk, status: 'PENDING_CONFIRMATION' },
+      select: { clientId: true, locationId: true, mealType: true },
+    }),
+    prisma.order.findMany({
+      where: {
+        deliveryDate: tomorrowMsk,
+        status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
+      },
+      select: { clientId: true, locationId: true, mealType: true },
+    }),
+  ])
+  const pendingConfirmationTomorrow = countUncoveredPending(
+    pendingTomorrowOrders,
+    coveringTomorrowOrders,
+  )
 
   // П12: SAME-DAY клиенты ставят заказ на СЕГОДНЯ (deliveryDate=today), не на завтра.
   // Поэтому pendingConfirmationTomorrow их не видит. Берём отдельно: pending-заказы

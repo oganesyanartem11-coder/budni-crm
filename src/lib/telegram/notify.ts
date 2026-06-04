@@ -1,7 +1,7 @@
 import type { InlineKeyboard } from 'grammy'
 import { prisma } from '@/lib/db/prisma'
 import { sendTelegramMessage } from './send'
-import { getTelegramEnv } from './env'
+import { getTelegramEnv, readProductionChatId } from './env'
 
 export interface NotifyOptions {
   /** Если не указан — текст шлётся без parseMode (как plain text). */
@@ -304,6 +304,40 @@ export async function notifyGroup(text: string, opts?: NotifyOptions): Promise<N
     return { ok: false, error: result.error }
   }
   return { ok: true }
+}
+
+/**
+ * П5: отправка в канал производства (TELEGRAM_PRODUCTION_CHAT_ID).
+ *
+ * Приоритет: если ENV задан и валиден — шлём туда. При любом провале
+ * (ENV не задан / отправка вернула ok:false / sendTelegramMessage кинул) —
+ * фолбэк в личку всем активным ADMIN_PRO, чтобы сводка не потерялась.
+ *
+ * sendTelegramMessage по контракту не кидает (возвращает {ok:false, error}),
+ * поэтому основная проверка — result.ok. try/catch оставлен как страховка от
+ * неожиданного throw (напр. отсутствие бот-токена в getTelegramBot).
+ */
+export async function notifyProductionChannel(text: string, opts?: NotifyOptions): Promise<void> {
+  const productionChatId = readProductionChatId()
+  if (productionChatId) {
+    try {
+      const result = await sendTelegramMessage(productionChatId, text, {
+        parseMode: opts?.parseMode ?? DEFAULT_PARSE_MODE,
+        replyMarkup: opts?.replyMarkup,
+      })
+      if (result.ok) return
+      console.warn(
+        `[notify-production] send to production chat failed (${result.error}), falling back to ADMIN_PRO direct`
+      )
+    } catch (error) {
+      console.warn(
+        '[notify-production] send to production chat threw, falling back to ADMIN_PRO direct',
+        error
+      )
+    }
+  }
+  // ENV не задан / отправка упала → фолбэк в личку всем ADMIN_PRO.
+  await notifyAllAdminProDirect(text, opts)
 }
 
 /**

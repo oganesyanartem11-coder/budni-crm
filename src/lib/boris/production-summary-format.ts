@@ -39,6 +39,70 @@ export interface ProductionSummaryInput {
 }
 
 /**
+ * П3-механизм1: статусы Order, при которых DYNAMIC-конфиг считается «отвеченным».
+ *
+ * Бизнес-ключ матчинга — (clientId, locationId, mealType), НЕ sourceConfigId:
+ * ручной заказ (source MANUAL) может иметь sourceConfigId=null, и тогда матчинг
+ * по конфигу ложно относил бы динамику в «Не ответили».
+ *
+ * «Отвечено» = существует Order на завтра с тем же бизнес-ключом и статусом
+ * НЕ в [DRAFT, CANCELLED, PENDING_CONFIRMATION], т.е. фактически
+ * CONFIRMED / LOCKED / IN_PRODUCTION / OUT_FOR_DELIVERY / DELIVERED.
+ */
+const ANSWERED_ORDER_STATUSES = new Set([
+  'CONFIRMED',
+  'LOCKED',
+  'IN_PRODUCTION',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+])
+
+/** Минимальная форма конфига для матчинга «Не ответили». */
+export interface UnconfirmedConfigInput {
+  clientId: string
+  locationId: string
+  mealType: string
+}
+
+/** Минимальная форма заказа для матчинга «Не ответили». */
+export interface UnconfirmedOrderInput {
+  clientId: string
+  locationId: string
+  mealType: string
+  status: string
+}
+
+/**
+ * Бизнес-ключ для матчинга конфиг↔заказ: клиент + локация + тип приёма пищи.
+ */
+function businessKey(x: { clientId: string; locationId: string; mealType: string }): string {
+  return `${x.clientId}:${x.locationId}:${x.mealType}`
+}
+
+/**
+ * Чистая логика «Не ответили» (П3-механизм1).
+ *
+ * Конфиг считается ОТВЕЧЕННЫМ, если среди заказов есть хотя бы один с тем же
+ * бизнес-ключом (clientId, locationId, mealType) и статусом из
+ * ANSWERED_ORDER_STATUSES. Все активные на завтра DYNAMIC-конфиги без такого
+ * заказа возвращаются как «не ответившие».
+ *
+ * Вынесено из route.ts ради тестируемости без БД.
+ */
+export function computeUnconfirmedConfigs<T extends UnconfirmedConfigInput>(
+  configs: T[],
+  orders: UnconfirmedOrderInput[]
+): T[] {
+  const answeredKeys = new Set<string>()
+  for (const o of orders) {
+    if (ANSWERED_ORDER_STATUSES.has(o.status)) {
+      answeredKeys.add(businessKey(o))
+    }
+  }
+  return configs.filter((c) => !answeredKeys.has(businessKey(c)))
+}
+
+/**
  * Сортировка строк заказа: по локации алфавитно, затем по клиенту.
  */
 export function sortProductionSummaryRows<

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mentionsBoris } from './group-filter'
+import { mentionsBoris, resolveBorisAccess } from './group-filter'
 
 describe('mentionsBoris', () => {
   it('срабатывает на адресное обращение в начале', () => {
@@ -36,5 +36,61 @@ describe('mentionsBoris', () => {
     expect(mentionsBoris('Борис!!!')).toBe(true)
     expect(mentionsBoris('🎉 Борис, поздравляю')).toBe(true)
     expect(mentionsBoris('— Борис')).toBe(true)
+  })
+})
+
+describe('resolveBorisAccess (П4: доступ Бориса по chatType + наличию user)', () => {
+  it('private + user есть → respond, требует identify, mutate разрешён (ярус role — дальше), персистим', () => {
+    const a = resolveBorisAccess('private', true)
+    expect(a).toEqual({
+      respond: true,
+      requireIdentify: true,
+      canMutate: true,
+      persistConversation: true,
+    })
+  })
+
+  it('private + user=null → respond, requireIdentify=true (=> reply «не нашёл»), без mutate/персиста', () => {
+    const a = resolveBorisAccess('private', false)
+    expect(a.respond).toBe(true)
+    expect(a.requireIdentify).toBe(true)
+    expect(a.canMutate).toBe(false)
+    expect(a.persistConversation).toBe(false)
+  })
+
+  it('group + user есть → respond, identify НЕ обязателен, mutate ЗАПРЕЩЁН в группе, персистим', () => {
+    const a = resolveBorisAccess('group', true)
+    expect(a).toEqual({
+      respond: true,
+      requireIdentify: false,
+      canMutate: false,
+      persistConversation: true,
+    })
+  })
+
+  it('group + user=null → respond (НЕ «не нашёл»), read-only stateless, mutate запрещён', () => {
+    const a = resolveBorisAccess('group', false)
+    expect(a.respond).toBe(true)
+    expect(a.requireIdentify).toBe(false) // не отвечаем «не нашёл»
+    expect(a.canMutate).toBe(false)
+    expect(a.persistConversation).toBe(false) // stateless: FK userId required → не персистим
+  })
+
+  it('supergroup ведёт себя как group', () => {
+    expect(resolveBorisAccess('supergroup', false)).toEqual(resolveBorisAccess('group', false))
+    expect(resolveBorisAccess('supergroup', true)).toEqual(resolveBorisAccess('group', true))
+  })
+
+  it('mutate в группе ЗАПРЕЩЁН всегда (и с user, и без)', () => {
+    expect(resolveBorisAccess('group', true).canMutate).toBe(false)
+    expect(resolveBorisAccess('group', false).canMutate).toBe(false)
+    expect(resolveBorisAccess('supergroup', true).canMutate).toBe(false)
+    expect(resolveBorisAccess('supergroup', false).canMutate).toBe(false)
+  })
+
+  it('channel / undefined → respond=false (не наша зона)', () => {
+    expect(resolveBorisAccess('channel', false).respond).toBe(false)
+    expect(resolveBorisAccess('channel', true).respond).toBe(false)
+    expect(resolveBorisAccess(undefined, false).respond).toBe(false)
   })
 })

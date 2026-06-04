@@ -4,7 +4,15 @@ import { registerCallbackHandler } from './callback-router'
 import { chatWithBoris } from '@/lib/boris/agent'
 import { executePendingAction } from '@/lib/boris/executor'
 import { TOOL_TITLES } from '@/lib/boris/preview'
-import { shouldRespondInChat } from '@/lib/boris/group-filter'
+import {
+  shouldRespondInChat,
+  resolveBorisAccess,
+  type BorisChatType,
+} from '@/lib/boris/group-filter'
+import { runAgentLoop } from '@/lib/llm/agent-loop'
+import { getBorisModel } from '@/lib/ai/models'
+import { getBorisSystemPrompt } from '@/lib/boris/personality'
+import { BORIS_READ_TOOLS } from '@/lib/boris/tools'
 import { prisma } from '@/lib/db/prisma'
 
 /**
@@ -54,6 +62,34 @@ async function checkRateLimit(userId: string): Promise<boolean> {
   return count < RATE_LIMIT_PER_MIN
 }
 
+/**
+ * П4: stateless read-only ответ для АНОНИМНОЙ группы (user не идентифицирован).
+ *
+ * BorisConversation.userId — required FK к User, поэтому без реального юзера
+ * персистить диалог нельзя (фейк-юзеров не заводим). Здесь запускаем agent-loop
+ * напрямую с BORIS_READ_TOOLS: без истории, без записи в БД, без metrics.
+ *
+ * mutate здесь физически невозможен — только READ-tools, pending не строится.
+ * Этого достаточно как guard'а: модель просто не имеет инструментов для изменений.
+ */
+async function answerStatelessReadOnly(ctx: Context, userText: string): Promise<void> {
+  await ctx.replyWithChatAction('typing').catch(() => {
+    /* не критично */
+  })
+  const result = await runAgentLoop({
+    model: getBorisModel(),
+    systemPrompt: getBorisSystemPrompt(),
+    initialMessages: [{ role: 'user', content: userText }],
+    tools: BORIS_READ_TOOLS,
+    maxIterations: 8,
+    maxTokens: 2048,
+    onToolCall: (name) => {
+      console.log('[boris] (group/anon) tool_use', name)
+    },
+  })
+  await ctx.reply(result.finalText, { parse_mode: 'HTML' })
+}
+
 export async function handleBorisMessage(ctx: Context): Promise<void> {
   // 7.28: в группах отвечаем только на адресное «Борис»; в личке — всегда.
   if (!shouldRespondInChat(ctx)) return
@@ -61,11 +97,27 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
   const text = ctx.message?.text ?? ''
   if (!text || text.startsWith('/')) return // /команды не наш case
 
+  const chatType = (ctx.chat?.type ?? 'private') as BorisChatType
   const user = await identifyTelegramUser(ctx)
+  const access = resolveBorisAccess(chatType, !!user)
+
+  // private без user → строго «не нашёл». group без user → read-only (см. ниже).
   if (!user) {
-    await ctx.reply(TEMPLATE_REPLIES.notIdentified)
+    if (access.requireIdentify) {
+      await ctx.reply(TEMPLATE_REPLIES.notIdentified)
+      return
+    }
+    // group/supergroup + аноним: stateless read-only диалог, БЕЗ персистинга.
+    try {
+      await answerStatelessReadOnly(ctx, text)
+    } catch (e) {
+      console.error('[boris-handler] (group/anon)', e)
+      await ctx.reply(TEMPLATE_REPLIES.error)
+    }
     return
   }
+
+  // Дальше — идентифицированный user (личка ИЛИ группа с атрибуцией).
   if (
     !BORIS_ALLOWED_ROLES.includes(
       user.role as typeof BORIS_ALLOWED_ROLES[number]
@@ -92,11 +144,6 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
       /* не критично */
     })
 
-    const chatType = (ctx.chat?.type ?? 'private') as
-      | 'private'
-      | 'group'
-      | 'supergroup'
-      | 'channel'
     const result = await chatWithBoris({
       userId: user.id,
       conversationId: conv?.id,

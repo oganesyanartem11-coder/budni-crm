@@ -797,6 +797,11 @@ model Order {
   // Ставится при отправке алёрта в групповой Telegram (опоздание > 30 мин).
   lateAlertSentAt DateTime?
 
+  // П5: антидубль для cron'ов courier-evening-preview / courier-hour-before-window.
+  // Ставится при отправке уведомления «заказ без курьера» в чат-производство.
+  // Один флаг на оба cron'а (вечерний обзор + за час до окна).
+  courierMissingNotifiedAt DateTime?
+
   // 7b-2: snapshot нашего юрлица отгрузки и ставки НДС на момент создания заказа.
   // Копируется из client.defaultOurLegalEntityId. Меняется отдельным action'ом
   // changeOrderLegalEntity (только до lock). Используется в УПД (7c).
