@@ -45,6 +45,37 @@ export async function getCurrentUser(): Promise<User> {
 }
 
 /**
+ * P7: как getCurrentUser, но НЕ редиректит — возвращает User при живой валидной
+ * БД-сессии, иначе null. Те же проверки (revoked/expired/inactive), что и в
+ * getCurrentUser, но без побочного redirect('/login').
+ *
+ * Нужен местам, которым важно «проверить, не редиректя»: /login сам решает,
+ * увести залогиненного на home роли или стереть stale-cookie. Существующий
+ * getCurrentUser (с redirect) НЕ трогаем — на него завязаны серверные
+ * компоненты, которым нужен гарантированный User.
+ */
+export async function tryGetCurrentUser(): Promise<User | null> {
+  try {
+    const cookie = await getSession()
+    if (!cookie) return null
+
+    const session = await prisma.session.findUnique({
+      where: { id: cookie.sessionId },
+      include: { user: true },
+    })
+
+    if (!session) return null
+    if (session.revokedAt) return null
+    if (session.expiresAt.getTime() < Date.now()) return null
+    if (!session.user.isActive) return null
+
+    return session.user
+  } catch {
+    return null
+  }
+}
+
+/**
  * Защищает маршрут от пользователей не из allowedRoles.
  *
  * 7.14A: ADMIN_PRO автоматически наследует все права ADMIN — это даёт

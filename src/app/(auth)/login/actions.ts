@@ -12,9 +12,13 @@ import {
   getSession,
   revokeSession,
 } from '@/lib/auth/session'
+import type { UserRole } from '@prisma/client'
 
 export type LoginResult =
-  | { ok: true }
+  // P7: возвращаем role, чтобы клиент редиректил на home роли через
+  // getHomeForRole (COURIER→/delivery, CHEF→/production), а не хардкодом на
+  // /dashboard с лишним bounce через requireRole.
+  | { ok: true; role: UserRole }
   | { ok: false; error: string }
 
 // 7.9: global rate-limit. > N неудач за окно → блокируем все логины.
@@ -315,7 +319,7 @@ export async function loginAction(pin: string): Promise<LoginResult> {
   const token = await createSession(matchedUser.id, { ipAddress, userAgent })
   await setSessionCookie(token)
 
-  return { ok: true }
+  return { ok: true, role: matchedUser.role }
 }
 
 export async function logoutAction(): Promise<void> {

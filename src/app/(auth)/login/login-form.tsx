@@ -3,6 +3,7 @@
 import { useState, useTransition, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { loginAction } from './actions'
+import { getHomeForRole } from '@/lib/auth/roles'
 import { cn } from '@/lib/utils/cn'
 import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion'
 
@@ -60,8 +61,11 @@ export function LoginForm() {
       const result = await loginAction(pinValue)
       if (result.ok) {
         setSuccess(true)
+        // P7: redirect на home роли (getHomeForRole), а не хардкод /dashboard —
+        // COURIER→/delivery, CHEF→/production без лишнего bounce через requireRole.
+        const home = getHomeForRole(result.role)
         setTimeout(() => {
-          router.push('/dashboard')
+          router.push(home)
           router.refresh()
         }, 350)
       } else {

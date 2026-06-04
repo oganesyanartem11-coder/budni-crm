@@ -22,10 +22,13 @@ export async function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value
   const isAuthenticated = token ? await verifyToken(token) : false
 
-  // Если на /login и уже авторизован — на дашборд
-  if (isPublicRoute && isAuthenticated) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
-  }
+  // P7: ВСТРЕЧНЫЙ редирект /login→/dashboard УДАЛЁН. Он замыкал петлю:
+  // proxy.verifyToken проверяет только подпись JWT (stateless), а getCurrentUser
+  // проверяет БД-сессию (revoked/expired/inactive). При живой JWT-cookie с
+  // revoked БД-сессией (напр. после changePin, который ревокает все сессии)
+  // getCurrentUser слал /dashboard→/login, а proxy слал /login→/dashboard → ∞
+  // (ERR_TOO_MANY_REDIRECTS в Safari/Telegram). Теперь /login рендерится
+  // свободно и сам разбирается с сессией (см. login/page.tsx).
 
   // Если не на публичном маршруте и не авторизован — на /login
   if (!isPublicRoute && !isAuthenticated) {
