@@ -24,7 +24,34 @@ import { toMskDateString } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
 import { sendTelegramMessage } from '@/lib/telegram/send'
 import { escapeHtml } from '@/lib/telegram/notify'
+import { parseChangeIntent } from '@/lib/bot/parse-change-intent'
+import { resolveOrderChangeTarget } from '@/lib/order-changes/resolve-target'
+import { createPendingChange } from '@/lib/order-changes/actions'
+import { findActiveOrder } from '@/lib/db/queries/orders'
+import { notifyManagerAboutOrderChange } from '@/lib/telegram/handlers/order-change'
 import type { BotConversation, MealType, Prisma, InboxItemReason } from '@prisma/client'
+
+// П3 (MEGA-4b): маппинг enum MealType → русское название для parseChangeIntent
+// (он принимает availableMealTypes как 'ЗАВТРАК'|'ОБЕД'|'УЖИН') и обратно.
+const MEAL_TYPE_TO_RU: Record<MealType, 'ЗАВТРАК' | 'ОБЕД' | 'УЖИН'> = {
+  BREAKFAST: 'ЗАВТРАК',
+  LUNCH: 'ОБЕД',
+  DINNER: 'УЖИН',
+}
+const RU_TO_MEAL_TYPE: Record<'ЗАВТРАК' | 'ОБЕД' | 'УЖИН', MealType> = {
+  ЗАВТРАК: 'BREAKFAST',
+  ОБЕД: 'LUNCH',
+  УЖИН: 'DINNER',
+}
+
+// Статусы заказа, при которых заказ «уже в производстве» — П3-приём текстового
+// изменения не применяем (только менеджер вручную).
+const LOCKED_ORDER_STATUSES = new Set([
+  'LOCKED',
+  'IN_PRODUCTION',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+])
 
 const MEAL_TYPE_RU: Record<MealType, string> = {
   BREAKFAST: 'завтрака',
@@ -44,11 +71,13 @@ export type ProcessAction =
   | 'inbox'
   | 'unknown_client'
   | 'empty_message'
+  | 'pending_order_change'
 
 export interface ProcessMessageResult {
   reply: string | null
   action: ProcessAction
   inboxItemId?: string
+  pendingId?: string
 }
 
 // MEGA-3 (П11): окно, в течение которого ручной ответ менеджера «глушит»
@@ -839,6 +868,168 @@ async function handleSpontaneous(
   // 7.15.B: tone-сигнал шлём вместе с inbox-сигналом ниже через notifyClientSignal.
   const spontaneousAlertTone =
     spontaneousTone === 'rude' || spontaneousTone === 'urgent' ? spontaneousTone : null
+
+  // ─────────────────────────────────────────────────────────────────────
+  // П3 (MEGA-4b): текстовый приём изменения заказа. Клиент пишет свободным
+  // текстом «надо 13 обедов на завтра» → AI-классификация (parseChangeIntent),
+  // резолв адреса/типа (resolveOrderChangeTarget), создание PendingOrderChange
+  // и уведомление менеджера для ручного подтверждения. Авто-исполнения НЕТ.
+  //
+  // Гейты, при которых П3 пропускаем и падаем в обычный NON_NUMERIC inbox:
+  //  - тон rude/urgent (клиент расстроен/срочно — не лезем с парсингом порций);
+  //  - клиент на WEEKLY (текст-приём WEEKLY не реализован);
+  //  - parseChangeIntent → NONE (не запрос на изменение).
+  // Входящее сообщение уже залогировано выше (logBotMessage IN) — не дублируем.
+  // ─────────────────────────────────────────────────────────────────────
+  const isWeekly = client.locations.some((l) =>
+    l.mealConfigs.some((c) => c.orderType === 'WEEKLY' && c.isActive),
+  )
+  const isRudeOrUrgent = spontaneousTone === 'rude' || spontaneousTone === 'urgent'
+
+  if (!isRudeOrUrgent && !isWeekly) {
+    // Уникальные русские названия активных mealType клиента.
+    const availableMealTypesRu = Array.from(
+      new Set(
+        client.locations.flatMap((l) =>
+          l.mealConfigs.filter((c) => c.isActive).map((c) => MEAL_TYPE_TO_RU[c.mealType]),
+        ),
+      ),
+    )
+
+    const intent = await parseChangeIntent(text, {
+      clientName: client.name,
+      today: new Date(),
+      availableMealTypes: availableMealTypesRu,
+    })
+
+    if (intent.action === 'CHANGE') {
+      // result.date = 'YYYY-MM-DD' МСК → UTC-полночь МСК-дня (как deliveryDate в проекте).
+      const deliveryDate = new Date(`${intent.date}T00:00:00.000Z`)
+
+      const parsedMealTypeEnum: MealType | null =
+        intent.mealType != null ? RU_TO_MEAL_TYPE[intent.mealType] : null
+
+      const activeConfigs = client.locations.flatMap((l) =>
+        l.mealConfigs
+          .filter((c) => c.isActive)
+          .map((c) => ({
+            id: c.id,
+            mealType: c.mealType,
+            locationId: c.locationId,
+            isActive: c.isActive,
+          })),
+      )
+      const activeLocations = client.locations
+        .filter((l) => l.isActive)
+        .map((l) => ({ id: l.id, isActive: l.isActive }))
+
+      const resolveResult = resolveOrderChangeTarget({
+        client: { mealConfigs: activeConfigs, locations: activeLocations },
+        parsedMealType: parsedMealTypeEnum,
+      })
+
+      if (!resolveResult.ok) {
+        // Не смогли однозначно определить адрес/тип → обычный inbox с пометкой,
+        // менеджер разрулит руками. П3 НЕ создаём pending.
+        const inbox = await createInboxItem({
+          clientId: client.id,
+          conversationId: conversation.id,
+          reason: 'NON_NUMERIC',
+          humanReason: `Не смог определить адрес/тип: ${resolveResult.reason}`,
+          priority: 'NORMAL',
+          clientMessage: text,
+        })
+        await notifyClientSignal({
+          clientId: client.id,
+          messageText: text,
+          inboxItemId: inbox.id,
+          tone: spontaneousAlertTone,
+          reason: inbox.reason,
+          priority: inbox.priority,
+        }).catch((e) => {
+          console.error('[bot] notifyClientSignal failed (П3 resolve):', e)
+        })
+        return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+      }
+
+      const existingOrder = await findActiveOrder({
+        clientId: client.id,
+        locationId: resolveResult.locationId,
+        mealType: resolveResult.mealType,
+        deliveryDate,
+      })
+
+      if (existingOrder && LOCKED_ORDER_STATUSES.has(existingOrder.status)) {
+        // Заказ уже в производстве → текст-приём не применяем, эскалируем менеджеру.
+        const inbox = await createInboxItem({
+          clientId: client.id,
+          conversationId: conversation.id,
+          reason: 'NON_NUMERIC',
+          humanReason: 'Запрос на изменение, но заказ уже в производстве',
+          priority: 'NORMAL',
+          clientMessage: text,
+        })
+        await notifyClientSignal({
+          clientId: client.id,
+          messageText: text,
+          inboxItemId: inbox.id,
+          tone: spontaneousAlertTone,
+          reason: inbox.reason,
+          priority: inbox.priority,
+        }).catch((e) => {
+          console.error('[bot] notifyClientSignal failed (П3 locked):', e)
+        })
+        return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+      }
+
+      const action = existingOrder ? 'EDIT' : 'CREATE'
+      const locationName =
+        client.locations.find((l) => l.id === resolveResult.locationId)?.name ?? 'не указано'
+
+      const pending = await createPendingChange({
+        clientId: client.id,
+        locationId: resolveResult.locationId,
+        deliveryDate,
+        mealType: resolveResult.mealType,
+        action,
+        proposedPortions: intent.portions,
+        currentOrderId: existingOrder?.id,
+        currentPortions: existingOrder?.portions ?? null,
+        sourceMaxChatId: client.maxChatId!,
+        rawClientMessage: text,
+        parsedConfidence: intent.confidence,
+      })
+
+      await notifyManagerAboutOrderChange({
+        changeId: pending.id,
+        clientName: client.name,
+        locationName,
+        deliveryDate,
+        mealType: resolveResult.mealType,
+        action,
+        proposedPortions: intent.portions,
+        currentPortions: existingOrder?.portions ?? null,
+        rawClientMessage: text,
+        parsedConfidence: intent.confidence,
+      })
+
+      // InboxItemReason не содержит ORDER_CHANGE_PENDING (см. schema) → fallback
+      // NON_NUMERIC c пометкой в humanReason. Менеджер уже уведомлён персонально
+      // через notifyManagerAboutOrderChange — повторный notifyClientSignal НЕ шлём.
+      // POST_CUTOFF_REPLY клиенту НЕ отправляем.
+      await createInboxItem({
+        clientId: client.id,
+        conversationId: conversation.id,
+        reason: 'NON_NUMERIC',
+        humanReason: `Pending order change: ${pending.id}`,
+        priority: 'NORMAL',
+        clientMessage: text,
+      })
+
+      return { reply: null, action: 'pending_order_change', pendingId: pending.id }
+    }
+    // intent.action === 'NONE' → проваливаемся в обычный NON_NUMERIC flow ниже.
+  }
 
   // Дедупим InboxItem по conv. Reopened → новый item.
   let inboxItem = isReopenedConversation

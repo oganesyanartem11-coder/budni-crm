@@ -9,6 +9,9 @@ import { handleMyChatMember } from '@/lib/boris/team-channels/greeting'
 // Side-effect import: регистрирует callback-handler scope 'wsub'
 // (отмена недельной заявки). См. handlers/weekly-submission.ts.
 import '@/lib/telegram/handlers/weekly-submission'
+// Side-effect import: регистрирует callback-handler scope 'poc'
+// (подтверждение/отклонение запроса клиента на изменение заказа). См. handlers/order-change.ts.
+import '@/lib/telegram/handlers/order-change'
 
 interface TelegramBotCache {
   bot: Bot

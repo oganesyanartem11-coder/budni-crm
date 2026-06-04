@@ -13,7 +13,7 @@ import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { formatDateShort } from '@/lib/utils/format'
 import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
 import { startOfTodayMsk, toMskDateString } from '@/lib/utils/msk-window'
-import { MealType, type UserRole } from '@prisma/client'
+import { MealType, OrderSource, type UserRole } from '@prisma/client'
 
 const createOrderSchema = z.object({
   clientId: z.string().min(1, 'Выберите клиента'),
@@ -948,6 +948,7 @@ const createOneTimeOrderSchema = z.object({
   deliveryDate: z.coerce.date(),
   portions: z.number().int().positive(),
   pricePerPortion: z.number().positive().optional(),
+  source: z.nativeEnum(OrderSource).optional(),
 })
 
 /**
@@ -1080,7 +1081,7 @@ export async function createOneTimeOrderCore(
       pricePerPortion,
       totalPrice,
       packaging: location.packaging,
-      source: 'BORIS',
+      source: data.source ?? 'BORIS',
       status: 'CONFIRMED',
       confirmedAt: now,
       ourLegalEntityId: snapshot.ourLegalEntityId,

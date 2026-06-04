@@ -13,6 +13,7 @@
     { "path": "/api/cron/cutoff-notice", "schedule": "0 13 * * *" },
     { "path": "/api/cron/production-summary", "schedule": "5 13 * * *" },
     { "path": "/api/cron/check-late-deliveries", "schedule": "*/10 6-19 * * *" },
+    { "path": "/api/cron/expire-pending-changes", "schedule": "*/10 * * * *" },
     { "path": "/api/cron/unpriced-ingredients-digest", "schedule": "0 9 * * 1" },
     { "path": "/api/cron/monitor-heartbeats", "schedule": "0 19 * * *" },
     { "path": "/api/cron/cleanup-login-attempts", "schedule": "0 0 * * 1" },

@@ -73,6 +73,22 @@ enum OrderSource {
   RECURRING_AUTO // Из расписания
   BORIS // AI-агент Action-Борис (Спринт 7.16.A.2)
   WEEKLY_AUTO // Из недельной заявки клиента (WeeklyOrderSubmission, MEGA-2)
+  CLIENT_REQUEST // Запрос клиента в MAX → подтверждён менеджером (П3, MEGA-4b)
+}
+
+// П3 (MEGA-4b): статус pending-изменения заказа, инициированного клиентом в MAX.
+enum PendingOrderChangeStatus {
+  PENDING // ждёт подтверждения менеджера
+  CONFIRMED // менеджер подтвердил (claim), идёт исполнение
+  REJECTED // менеджер отклонил
+  EXPIRED // истёк TTL 30 мин (cron)
+  EXECUTED // изменение применено к заказу
+  FAILED // исполнение упало (заказ заблокирован / нет меню и т.п.)
+}
+
+enum PendingOrderChangeAction {
+  EDIT // правка порций существующего заказа
+  CREATE // создание разового заказа
 }
 
 // Недельный заказ: способ, которым клиент прислал заявку на неделю.
@@ -406,17 +422,18 @@ model Client {
   defaultOurLegalEntityId String?
   defaultOurLegalEntity   OurLegalEntity? @relation("ClientDefaultLegalEntity", fields: [defaultOurLegalEntityId], references: [id], onDelete: SetNull)
 
-  locations         ClientLocation[]
-  mealConfigs       ClientMealConfig[]
-  orders            Order[]
-  botConversations  BotConversation[]
-  botMessages       BotMessage[]
-  inboxItems        InboxItem[]
-  updDocuments      UpdDocument[]
-  toneAlerts        ToneAlertLog[]
-  clientAlerts      ClientAlertLog[]
-  borisEvents       BorisEventLog[]
-  weeklySubmissions WeeklyOrderSubmission[]
+  locations           ClientLocation[]
+  mealConfigs         ClientMealConfig[]
+  orders              Order[]
+  botConversations    BotConversation[]
+  botMessages         BotMessage[]
+  inboxItems          InboxItem[]
+  updDocuments        UpdDocument[]
+  toneAlerts          ToneAlertLog[]
+  clientAlerts        ClientAlertLog[]
+  borisEvents         BorisEventLog[]
+  weeklySubmissions   WeeklyOrderSubmission[]
+  pendingOrderChanges PendingOrderChange[]
 
   @@index([isActive])
   @@index([name])
@@ -436,11 +453,11 @@ model ClientLocation {
   // 7.39: same-day delivery для «утреннего клиента». Если true → заказ
   // создаётся на сегодня (не на завтра), вопрос шлётся в 07:40 МСК,
   // cut-off индивидуальный (cutoffHourMsk:cutoffMinuteMsk).
-  sameDayDelivery  Boolean @default(false)
+  sameDayDelivery    Boolean       @default(false)
   // 7.39: индивидуальный cut-off для same-day заказов. null → fallback на глобальный CUTOFF_HOUR_MSK (16).
-  cutoffHourMsk    Int?
+  cutoffHourMsk      Int?
   // 7.39: минута cut-off. null → 0.
-  cutoffMinuteMsk  Int?
+  cutoffMinuteMsk    Int?
   // MEGA-BACKEND блок B: опциональная привязка точки к курьеру.
   // SetNull при удалении курьера — точка остаётся, становится «непривязанной».
   assignedCourierId  String?
@@ -449,12 +466,48 @@ model ClientLocation {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  mealConfigs  ClientMealConfig[]
-  orders       Order[]
-  updDocuments UpdDocument[]
+  mealConfigs         ClientMealConfig[]
+  orders              Order[]
+  updDocuments        UpdDocument[]
+  pendingOrderChanges PendingOrderChange[]
 
   @@index([clientId, isActive])
   @@index([assignedCourierId])
+}
+
+// П3 (MEGA-4b): pending-изменение заказа, инициированное клиентом в MAX.
+// Клиент пишет «надо 13 на завтра» → parseChangeIntent → запись PENDING →
+// пинг ADMIN_PRO с кнопками. Подтверждение → editOrderPortionsCore /
+// createOneTimeOrderCore. TTL 30 мин, cron expire-pending-changes.
+model PendingOrderChange {
+  id               String                   @id @default(cuid())
+  clientId         String
+  client           Client                   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationId       String
+  location         ClientLocation           @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  deliveryDate     DateTime
+  mealType         MealType
+  action           PendingOrderChangeAction
+  proposedPortions Int
+  currentOrderId   String? // для EDIT: id существующего заказа
+  currentPortions  Int? // для EDIT: текущее число порций
+  sourceMaxChatId  String // куда слать автоответ клиенту
+  rawClientMessage String
+  parsedConfidence Float
+  status           PendingOrderChangeStatus @default(PENDING)
+  confirmedById    String?
+  confirmedAt      DateTime?
+  executedAt       DateTime?
+  rejectedAt       DateTime?
+  expiredAt        DateTime?
+  failureReason    String?
+  expiresAt        DateTime
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@index([clientId, deliveryDate])
+  @@index([status, expiresAt])
+  @@index([createdAt])
 }
 
 // Конфигурация питания клиента/точки: что заказывает, по какому графику, по какой цене

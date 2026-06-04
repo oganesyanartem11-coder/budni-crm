@@ -214,3 +214,32 @@ export async function getOrderDetail(orderId: string) {
 
   return { order, history }
 }
+
+/**
+ * MEGA-4b (П3): найти активный (не отменённый) заказ по бизнес-ключу
+ * {clientId, locationId, mealType, deliveryDate}.
+ *
+ * Используется при подтверждении запроса клиента на изменение порций:
+ * перепроверяем, что заказ всё ещё существует и его статус не блокирует
+ * правку. Если по ключу несколько заказов — берём самый свежий по updatedAt
+ * (нормально для исторических дублей; антидубль на создании уже гарантирует
+ * один живой заказ на день).
+ */
+export async function findActiveOrder(params: {
+  clientId: string
+  locationId: string
+  mealType: MealType
+  deliveryDate: Date
+}): Promise<{ id: string; status: OrderStatus; portions: number; updatedAt: Date } | null> {
+  return prisma.order.findFirst({
+    where: {
+      clientId: params.clientId,
+      locationId: params.locationId,
+      mealType: params.mealType,
+      deliveryDate: params.deliveryDate,
+      status: { not: 'CANCELLED' },
+    },
+    orderBy: { updatedAt: 'desc' },
+    select: { id: true, status: true, portions: true, updatedAt: true },
+  })
+}

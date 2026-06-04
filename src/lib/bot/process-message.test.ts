@@ -25,11 +25,16 @@ const {
   mockClassifyTone,
   mockCreateInbox,
   mockNotifySignal,
+  mockParseChangeIntent,
+  mockResolveTarget,
+  mockCreatePendingChange,
+  mockFindActiveOrder,
+  mockNotifyManagerOrderChange,
 } = vi.hoisted(() => ({
   mockPrisma: {
     user: { findMany: vi.fn() },
     client: { update: vi.fn(), findUnique: vi.fn() },
-    botConversation: { update: vi.fn(), findFirst: vi.fn() },
+    botConversation: { update: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
     inboxItem: { findFirst: vi.fn(), update: vi.fn() },
     order: { findFirst: vi.fn() },
     botMessage: { findFirst: vi.fn() },
@@ -46,6 +51,11 @@ const {
   mockClassifyTone: vi.fn(),
   mockCreateInbox: vi.fn(),
   mockNotifySignal: vi.fn(),
+  mockParseChangeIntent: vi.fn(),
+  mockResolveTarget: vi.fn(),
+  mockCreatePendingChange: vi.fn(),
+  mockFindActiveOrder: vi.fn(),
+  mockNotifyManagerOrderChange: vi.fn(),
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
@@ -71,6 +81,16 @@ vi.mock('@/lib/boris/team-channels', () => ({
   emitAlertPost: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('@vercel/functions', () => ({ waitUntil: (p: Promise<unknown>) => p }))
+// П3 (MEGA-4b): order-change collaborators (Subagent B/C).
+vi.mock('@/lib/bot/parse-change-intent', () => ({ parseChangeIntent: mockParseChangeIntent }))
+vi.mock('@/lib/order-changes/resolve-target', () => ({
+  resolveOrderChangeTarget: mockResolveTarget,
+}))
+vi.mock('@/lib/order-changes/actions', () => ({ createPendingChange: mockCreatePendingChange }))
+vi.mock('@/lib/db/queries/orders', () => ({ findActiveOrder: mockFindActiveOrder }))
+vi.mock('@/lib/telegram/handlers/order-change', () => ({
+  notifyManagerAboutOrderChange: mockNotifyManagerOrderChange,
+}))
 
 import { processClientMessage } from './process-message'
 
@@ -134,6 +154,22 @@ beforeEach(() => {
   mockPrisma.order.findFirst.mockResolvedValue(null)
   // П11: по умолчанию менеджер НЕ в ручной переписке.
   mockPrisma.botMessage.findFirst.mockResolvedValue(null)
+
+  // П3 (MEGA-4b): по умолчанию НЕ запрос на изменение → старые spontaneous-тесты
+  // и весь legacy flow не задеты. Конкретные кейсы переопределяют моки локально.
+  mockParseChangeIntent.mockResolvedValue({ action: 'NONE', reason: 'default' })
+  mockResolveTarget.mockReturnValue({ ok: true, locationId: 'loc_1', mealType: 'LUNCH' })
+  mockFindActiveOrder.mockResolvedValue(null)
+  mockCreatePendingChange.mockResolvedValue({ id: 'pending_1' })
+  mockNotifyManagerOrderChange.mockResolvedValue(undefined)
+  // Для spontaneous-ветки: conv не найдена → create новую AWAITING_MANAGER.
+  mockPrisma.botConversation.findFirst.mockResolvedValue(null)
+  mockPrisma.botConversation.create.mockResolvedValue({
+    id: 'conv_spont',
+    status: 'AWAITING_MANAGER',
+    deliveryDate: mskMidnightUtc(2026, 6, 4),
+  })
+  mockPrisma.inboxItem.findFirst.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -212,5 +248,202 @@ describe('process-message cut-off (П5/П9)', () => {
 
     expect(res.action).toBe('saved')
     expect(res.reply).toContain('Принято')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// П3 (MEGA-4b): текстовый приём изменения заказа в spontaneous-ветке.
+// Spontaneous достигается когда findLatestBotConv → null (нет PENDING/CONFIRMED).
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Клиент для spontaneous-ветки: с активным DYNAMIC mealConfig (НЕ WEEKLY),
+ * нужны id/locationId/orderType для П3-резолва.
+ */
+function makeSpontaneousClient(
+  opts: { orderType?: string; mealType?: string } = {}
+) {
+  return {
+    id: 'client_1',
+    name: 'Тест Клиент',
+    isActive: true,
+    maxChatId: 'max_1',
+    safeAnswerStreak: 99,
+    locationAliases: {},
+    locations: [
+      {
+        id: 'loc_1',
+        name: 'Офис',
+        isActive: true,
+        sameDayDelivery: false,
+        cutoffHourMsk: null,
+        cutoffMinuteMsk: null,
+        mealConfigs: [
+          {
+            id: 'cfg_1',
+            locationId: 'loc_1',
+            mealType: opts.mealType ?? 'LUNCH',
+            orderType: opts.orderType ?? 'DYNAMIC',
+            isActive: true,
+            pricePerPortion: '300',
+          },
+        ],
+      },
+    ],
+  }
+}
+
+describe('process-message П3 — текстовый приём изменения (spontaneous)', () => {
+  beforeEach(() => {
+    // По умолчанию spontaneous: нет cron-conv.
+    mockFindConv.mockResolvedValue(null)
+    mockFindClient.mockResolvedValue(makeSpontaneousClient())
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+  })
+
+  it('tone=rude + текст-интент → parseChangeIntent НЕ вызван, обычный NON_NUMERIC flow', async () => {
+    mockClassifyTone.mockResolvedValue('rude')
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      portions: 13,
+      date: '2026-06-05',
+      mealType: 'ОБЕД',
+      confidence: 0.97,
+      reason: 'ok',
+    })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'надо 13 на завтра, твари' })
+
+    expect(mockParseChangeIntent).not.toHaveBeenCalled()
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+  })
+
+  it('isWeekly клиент + текст-интент → parseChangeIntent НЕ вызван → NON_NUMERIC', async () => {
+    mockFindClient.mockResolvedValue(makeSpontaneousClient({ orderType: 'WEEKLY' }))
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      portions: 13,
+      date: '2026-06-05',
+      mealType: 'ОБЕД',
+      confidence: 0.97,
+      reason: 'ok',
+    })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'надо 13 обедов на завтра' })
+
+    expect(mockParseChangeIntent).not.toHaveBeenCalled()
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+  })
+
+  it('parseChangeIntent → NONE → старый NON_NUMERIC flow', async () => {
+    mockParseChangeIntent.mockResolvedValue({ action: 'NONE', reason: 'no date' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'надо 13' })
+
+    expect(mockParseChangeIntent).toHaveBeenCalledOnce()
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+  })
+
+  it('CHANGE + resolveTarget ambiguous_location → старый flow, inbox с пометкой «Не смог определить адрес»', async () => {
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      portions: 13,
+      date: '2026-06-05',
+      mealType: null,
+      confidence: 0.95,
+      reason: 'ok',
+    })
+    mockResolveTarget.mockReturnValue({ ok: false, reason: 'ambiguous_location' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'надо 13 на завтра' })
+
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+    const inboxArg = mockCreateInbox.mock.calls.at(-1)?.[0]
+    expect(inboxArg.reason).toBe('NON_NUMERIC')
+    expect(inboxArg.humanReason).toContain('Не смог определить адрес')
+    expect(inboxArg.humanReason).toContain('ambiguous_location')
+  })
+
+  it('CHANGE + existingOrder LOCKED → старый flow, пометка «уже в производстве»', async () => {
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      portions: 13,
+      date: '2026-06-05',
+      mealType: 'ОБЕД',
+      confidence: 0.97,
+      reason: 'ok',
+    })
+    mockResolveTarget.mockReturnValue({ ok: true, locationId: 'loc_1', mealType: 'LUNCH' })
+    mockFindActiveOrder.mockResolvedValue({ id: 'ord_1', portions: 10, status: 'LOCKED' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'надо 13 обедов на завтра' })
+
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect(mockNotifyManagerOrderChange).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+    const inboxArg = mockCreateInbox.mock.calls.at(-1)?.[0]
+    expect(inboxArg.humanReason).toContain('уже в производстве')
+  })
+
+  it('CHANGE + existingOrder CONFIRMED → createPendingChange action=EDIT, notifyManager вызван', async () => {
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      portions: 13,
+      date: '2026-06-05',
+      mealType: 'ОБЕД',
+      confidence: 0.97,
+      reason: 'ok',
+    })
+    mockResolveTarget.mockReturnValue({ ok: true, locationId: 'loc_1', mealType: 'LUNCH' })
+    mockFindActiveOrder.mockResolvedValue({ id: 'ord_1', portions: 10, status: 'CONFIRMED' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'надо 13 обедов на завтра' })
+
+    expect(res.action).toBe('pending_order_change')
+    expect(res.pendingId).toBe('pending_1')
+    expect(mockCreatePendingChange).toHaveBeenCalledOnce()
+    const pendingArg = mockCreatePendingChange.mock.calls[0][0]
+    expect(pendingArg.action).toBe('EDIT')
+    expect(pendingArg.currentOrderId).toBe('ord_1')
+    expect(pendingArg.currentPortions).toBe(10)
+    expect(pendingArg.proposedPortions).toBe(13)
+    expect(pendingArg.sourceMaxChatId).toBe('max_1')
+    expect(pendingArg.deliveryDate).toEqual(new Date('2026-06-05T00:00:00.000Z'))
+    expect(mockNotifyManagerOrderChange).toHaveBeenCalledOnce()
+    const notifyArg = mockNotifyManagerOrderChange.mock.calls[0][0]
+    expect(notifyArg.action).toBe('EDIT')
+    expect(notifyArg.changeId).toBe('pending_1')
+    expect(notifyArg.currentPortions).toBe(10)
+    expect(notifyArg.locationName).toBe('Офис')
+    // notifyClientSignal НЕ вызывается на pending-ветке (менеджер уведомлён персонально).
+    expect(mockNotifySignal).not.toHaveBeenCalled()
+  })
+
+  it('CHANGE + existingOrder=null → createPendingChange action=CREATE', async () => {
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      portions: 8,
+      date: '2026-06-06',
+      mealType: null,
+      confidence: 0.96,
+      reason: 'ok',
+    })
+    mockResolveTarget.mockReturnValue({ ok: true, locationId: 'loc_1', mealType: 'LUNCH' })
+    mockFindActiveOrder.mockResolvedValue(null)
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'давайте 8 на 06.06' })
+
+    expect(res.action).toBe('pending_order_change')
+    expect(mockCreatePendingChange).toHaveBeenCalledOnce()
+    const pendingArg = mockCreatePendingChange.mock.calls[0][0]
+    expect(pendingArg.action).toBe('CREATE')
+    expect(pendingArg.currentOrderId).toBeUndefined()
+    expect(pendingArg.currentPortions).toBeNull()
+    expect(pendingArg.proposedPortions).toBe(8)
+    expect(mockNotifyManagerOrderChange).toHaveBeenCalledOnce()
   })
 })

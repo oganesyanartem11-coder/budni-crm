@@ -81,3 +81,15 @@ export function importButton(
 export function weeklySubmissionCancelButton(submissionId: string): InlineKeyboard {
   return new InlineKeyboard().text('Отменить заявку', `wsub:cancel:${submissionId}`)
 }
+
+/**
+ * MEGA-4b (П3): кнопки «Подтвердить»/«Отклонить» под пушем менеджеру о запросе
+ * клиента на изменение/создание заказа. callback_data `poc:confirm:<cuid>` /
+ * `poc:reject:<cuid>` (cuid ~25 символов, well under 64 байт).
+ * Обрабатывается scope 'poc' (см. handlers/order-change.ts).
+ */
+export function orderChangeButtons(changeId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✅ Подтвердить', `poc:confirm:${changeId}`)
+    .text('❌ Отклонить', `poc:reject:${changeId}`)
+}
