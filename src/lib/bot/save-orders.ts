@@ -58,17 +58,25 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
           deliveryDate: input.deliveryDate,
           status: { notIn: ['CANCELLED'] },
         },
-        select: { id: true, portions: true },
+        select: { id: true, portions: true, status: true },
       })
 
       if (existing) {
-        if (existing.portions !== item.portions) {
+        const needsPortionsUpdate = existing.portions !== item.portions
+        // GUARD: разрешён ТОЛЬКО переход PENDING_CONFIRMATION → CONFIRMED.
+        // Любой другой статус (CONFIRMED/LOCKED/IN_PRODUCTION/OUT_FOR_DELIVERY/
+        // DELIVERED) НИКОГДА не понижается и не трогается здесь.
+        const needsStatusBump = existing.status === 'PENDING_CONFIRMATION'
+
+        if (needsPortionsUpdate || needsStatusBump) {
           await prisma.order.update({
             where: { id: existing.id },
             data: {
               portions: item.portions,
               totalPrice: cfg.pricePerPortion * item.portions,
               sourceConversationId: input.conversationId,
+              // status выставляем ТОЛЬКО при подтверждении из PENDING_CONFIRMATION.
+              ...(needsStatusBump ? { status: 'CONFIRMED' as const, confirmedAt: new Date() } : {}),
             },
           })
           wasUpdate = true

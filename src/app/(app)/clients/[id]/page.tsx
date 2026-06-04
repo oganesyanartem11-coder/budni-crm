@@ -19,6 +19,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
     prisma.client.findUnique({
       where: { id },
       include: {
+        contacts: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
         locations: { orderBy: [{ isActive: 'desc' }, { name: 'asc' }] },
         mealConfigs: {
           orderBy: [{ isActive: 'desc' }, { mealType: 'asc' }],

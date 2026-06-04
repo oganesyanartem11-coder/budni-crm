@@ -98,6 +98,9 @@ export function formatAcceptedReply(items: SavedItemForReply[]): string {
 
 /** Кейс B: повторный ответ числом (conv уже CONFIRMED), до 16:00. */
 export function formatUpdatedReply(items: SavedItemForReply[]): string {
+  if (items.length === 0) {
+    return 'Принято, без изменений.'
+  }
   if (items.length === 1) {
     return `Принято, обновили на ${formatPortions(items[0].portions)}.`
   }

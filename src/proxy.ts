@@ -32,7 +32,23 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  return NextResponse.next()
+  // П7: пробрасываем текущий путь как REQUEST-заголовок x-pathname, чтобы
+  // Server Component (requireRole) мог реализовать self-loop guard через
+  // `await headers()`.
+  //
+  // Next 16 (проверено по node_modules/next/dist/docs/.../proxy.md): чтобы
+  // заголовок был читаем из Server Component, его нужно установить именно как
+  // request-заголовок через NextResponse.next({ request: { headers } }).
+  // Установка на response.headers отдаёт его клиенту, но НЕ серверным
+  // компонентам.
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-pathname', pathname)
+
+  return NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  })
 }
 
 // Применяется ко всем маршрутам кроме статики и API health-check

@@ -138,6 +138,63 @@ export async function createUser(input: {
   }
 }
 
+/**
+ * П4: ADMIN_PRO меняет роль другого юзера. Строго PRO-only —
+ * requireRole(['ADMIN_PRO']) НЕ включает обычного ADMIN (extension в
+ * current-user.ts добавляет ADMIN_PRO только когда в списке есть 'ADMIN').
+ *
+ * Защита от self-lockout: PRO не может понизить собственную роль — иначе
+ * единственный администратор может случайно отрезать себе доступ к этой же
+ * странице (она требует ADMIN_PRO). Зеркало setUserActive/lockUser.
+ */
+export async function updateUserRole(
+  userId: string,
+  newRole: UserRole
+): Promise<ActionResult> {
+  const me = await requireRole(['ADMIN_PRO'])
+
+  if (!VALID_ROLES.includes(newRole)) {
+    return { ok: false, error: 'Неверная роль' }
+  }
+
+  if (userId === me.id && newRole !== 'ADMIN_PRO') {
+    return { ok: false, error: 'Нельзя понизить собственную роль' }
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true },
+  })
+  if (!user) return { ok: false, error: 'Пользователь не найден' }
+
+  if (user.role === newRole) {
+    // Ничего не меняем — но и не считаем ошибкой (idempotent).
+    return { ok: true, data: undefined }
+  }
+
+  const fromRole = user.role
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: { role: newRole },
+    }),
+    prisma.activityLog.create({
+      data: {
+        userId: me.id,
+        userRole: me.role,
+        action: 'USER_ROLE_CHANGED',
+        entityType: 'User',
+        entityId: userId,
+        payload: { userId, fromRole, toRole: newRole },
+      },
+    }),
+  ])
+
+  revalidatePath('/settings/users')
+  return { ok: true, data: undefined }
+}
+
 export async function regenerateUserPin(
   userId: string
 ): Promise<ActionResult<{ pin: string }>> {

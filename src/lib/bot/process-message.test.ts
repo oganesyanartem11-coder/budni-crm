@@ -252,6 +252,55 @@ describe('process-message cut-off (П5/П9)', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────
+// П8: КЕЙС B — повтор того же заказа на уже CONFIRMED conv, без изменений.
+// saveBotOrders возвращает пустой savedItems → бот подтверждает «без изменений»
+// и НЕ создаёт InboxItem.
+// ─────────────────────────────────────────────────────────────────────────
+describe('process-message П8 — КЕЙС B повтор без изменений', () => {
+  it('CONFIRMED conv + savedItems=[] → reply «Принято, без изменений.» и createInbox НЕ вызван', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    // conv уже CONFIRMED → ветка КЕЙС B (не PENDING-приём).
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'CONFIRMED',
+      deliveryDate: mskMidnightUtc(2026, 6, 5),
+    })
+    // saveBotOrders ничего не сохранил/не обновил — повтор без изменений.
+    mockSave.mockResolvedValue({ savedItems: [] })
+    // до cut-off: 15:48 МСК = 12:48 UTC
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 12, 48, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '10' })
+
+    expect(res.action).toBe('noop')
+    expect(res.reply).toBe('Принято, без изменений.')
+    expect(res.inboxItemId).toBeUndefined()
+    expect(mockCreateInbox).not.toHaveBeenCalled()
+    expect(mockSendBotMessage).toHaveBeenCalledWith('max_1', 'Принято, без изменений.')
+  })
+
+  it('CONFIRMED conv + savedItems непустой → обычная ветка updated с InboxItem', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'CONFIRMED',
+      deliveryDate: mskMidnightUtc(2026, 6, 5),
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [{ locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 12 }],
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_1', reason: 'ANOMALY_HISTORICAL', priority: 'NORMAL' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 12, 48, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '12' })
+
+    expect(res.action).toBe('updated')
+    expect(res.reply).toContain('обновили')
+    expect(mockCreateInbox).toHaveBeenCalledOnce()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
 // П3 (MEGA-4b): текстовый приём изменения заказа в spontaneous-ветке.
 // Spontaneous достигается когда findLatestBotConv → null (нет PENDING/CONFIRMED).
 // ─────────────────────────────────────────────────────────────────────────

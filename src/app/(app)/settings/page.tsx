@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Users as UsersIcon, Send, Building2, Bug, ChevronRight } from 'lucide-react'
+import { Users as UsersIcon, Send, Building2, Bug, ChevronRight, KeyRound } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { isAdminLike, isAdminPro } from '@/lib/auth/role-helpers'
@@ -14,6 +14,26 @@ export default async function SettingsPage() {
       <PageHeader title="Настройки" subtitle={user.name} />
 
       <div className="space-y-5">
+        {/* П5: доступно любому залогиненному юзеру — смена собственного PIN. */}
+        <Link
+          href="/settings/profile"
+          className="block rounded-2xl bg-surface border border-border p-5 hover:border-border-strong transition-all"
+          style={{ boxShadow: 'var(--shadow-card)' }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-bg flex items-center justify-center">
+                <KeyRound className="w-5 h-5 text-fg-muted" strokeWidth={1.75} />
+              </div>
+              <div>
+                <h3 className="font-semibold text-base">Профиль</h3>
+                <p className="text-sm text-fg-muted">Смена своего PIN-кода</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-fg-subtle" />
+          </div>
+        </Link>
+
         {isAdminOrManager && (
           <Link
             href="/settings/telegram"

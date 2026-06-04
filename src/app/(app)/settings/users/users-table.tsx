@@ -23,6 +23,7 @@ import {
   generateOnboardingTokenForUser,
   unlinkTelegramFromUser,
   unlockUser,
+  updateUserRole,
 } from './actions'
 import { SessionsModal } from './sessions-modal'
 import { LockModal } from './lock-modal'
@@ -168,6 +169,23 @@ export function UsersTable({ users, currentUserId }: Props) {
     })
   }
 
+  function handleRoleChangeFor(u: UserRow, newRole: UserRole) {
+    if (newRole === u.role) return
+    if (u.id === currentUserId && newRole !== 'ADMIN_PRO') {
+      toast.error('Нельзя понизить собственную роль')
+      return
+    }
+    startTransition(async () => {
+      const r = await updateUserRole(u.id, newRole)
+      if (r.ok) {
+        toast.success(`Роль «${u.name}» → ${ROLE_LABELS[newRole]}`)
+        router.refresh()
+      } else {
+        toast.error(r.error)
+      }
+    })
+  }
+
   function handleToggleActive(u: UserRow) {
     const verb = u.isActive ? 'Отключить' : 'Включить'
     if (!confirm(`${verb} пользователя «${u.name}»?`)) return
@@ -284,14 +302,28 @@ export function UsersTable({ users, currentUserId }: Props) {
                     )}
                   </td>
                   <td className="px-3 py-3">
-                    <span
-                      className={cn(
-                        'inline-flex items-center px-2 py-0.5 rounded-pill text-xs font-medium',
-                        ROLE_COLORS[u.role]
-                      )}
+                    <Select
+                      value={u.role}
+                      onValueChange={(v) => handleRoleChangeFor(u, v as UserRole)}
+                      disabled={isPending || !u.isActive}
                     >
-                      {ROLE_LABELS[u.role]}
-                    </span>
+                      <SelectTrigger
+                        className={cn(
+                          'h-auto px-2 py-0.5 rounded-pill text-xs font-medium border-0 gap-1 focus-visible:ring-0 focus-visible:ring-offset-0',
+                          ROLE_COLORS[u.role]
+                        )}
+                        title="Изменить роль"
+                      >
+                        <SelectValue>{ROLE_LABELS[u.role]}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ADMIN_PRO">{ROLE_LABELS.ADMIN_PRO}</SelectItem>
+                        <SelectItem value="ADMIN">{ROLE_LABELS.ADMIN}</SelectItem>
+                        <SelectItem value="MANAGER">{ROLE_LABELS.MANAGER}</SelectItem>
+                        <SelectItem value="CHEF">{ROLE_LABELS.CHEF}</SelectItem>
+                        <SelectItem value="COURIER">{ROLE_LABELS.COURIER}</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="px-3 py-3 text-xs">
                     {isLocked(u) ? (

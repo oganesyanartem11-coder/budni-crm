@@ -72,6 +72,7 @@ export type ProcessAction =
   | 'unknown_client'
   | 'empty_message'
   | 'pending_order_change'
+  | 'noop'
 
 export interface ProcessMessageResult {
   reply: string | null
@@ -692,8 +693,28 @@ async function handleBotResponse(
   }
 
   // КЕЙС B — conv уже CONFIRMED, клиент пишет повторно, до 16:00.
-  // InboxItem создаём (чтобы менеджер видел изменение в /inbox), но БЕЗ push'а
-  // в MAX — повтор не срочный, увидим в следующей сводке.
+
+  // П8: повтор без изменений — saveBotOrders ничего не сохранил/не обновил
+  // (savedItems пуст). НЕ создаём InboxItem (менеджеру нечего смотреть), но
+  // всё равно подтверждаем клиенту, чтобы он знал, что его услышали.
+  if (save.savedItems.length === 0) {
+    console.log('[process-message] repeat-no-change', {
+      clientId: client.id,
+      conversationId: conv.id,
+    })
+    const noChangeReply = 'Принято, без изменений.'
+    await sendBotMessage(client.maxChatId!, noChangeReply)
+    await logBotMessage({
+      clientId: client.id,
+      conversationId: conv.id,
+      direction: 'OUT',
+      text: noChangeReply,
+    })
+    return { reply: noChangeReply, action: 'noop' }
+  }
+
+  // Что-то изменилось: InboxItem создаём (чтобы менеджер видел изменение в
+  // /inbox), но БЕЗ push'а в MAX — повтор не срочный, увидим в следующей сводке.
   // NB: схема InboxItemReason не содержит ORDER_UPDATED — используем
   // ANOMALY_HISTORICAL (решение пользователя). UI-метка «Отклонение от нормы».
   const reply = formatUpdatedReply(itemsForReply)

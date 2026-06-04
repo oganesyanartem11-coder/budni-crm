@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { prisma } from '@/lib/db/prisma'
 import { getSession } from './session'
+import { getHomeForRole } from './roles'
 import type { User, UserRole } from '@prisma/client'
 
 /**
@@ -57,7 +59,45 @@ export async function requireRole(allowedRoles: UserRole[]): Promise<User> {
     ? [...allowedRoles, 'ADMIN_PRO']
     : allowedRoles
   if (!effective.includes(user.role)) {
-    redirect('/dashboard')
+    // П7: smart per-role redirect with a SELF-LOOP GUARD.
+    //
+    // The old fallback `redirect('/dashboard')` looped forever for roles that
+    // cannot access /dashboard (COURIER, CHEF): they'd be sent to /dashboard,
+    // fail its requireRole, and be sent back to /dashboard again.
+    //
+    // We now redirect to the role's own home. To avoid a NEW self-loop (the
+    // role's home itself rejecting the role — e.g. a misconfiguration), we read
+    // the current path from the `x-pathname` request header (set by proxy.ts)
+    // and refuse to redirect to a home we're already on.
+    const home = getHomeForRole(user.role)
+
+    // headers() is async in Next 16. The header is forwarded as a *request*
+    // header by proxy.ts via NextResponse.next({ request: { headers } }), so a
+    // Server Component can read it here.
+    const h = await headers()
+    const currentPath = h.get('x-pathname') ?? ''
+
+    const alreadyAtHome =
+      currentPath === home ||
+      currentPath.startsWith(`${home}?`) ||
+      currentPath.startsWith(`${home}/`)
+
+    if (alreadyAtHome) {
+      // home itself rejected this role → redirecting to home would loop.
+      console.warn('[require-role] self-loop avoided', {
+        role: user.role,
+        home,
+        currentPath,
+      })
+      redirect('/login?reason=role-mismatch')
+    }
+
+    // If x-pathname is missing (proxy didn't run for this route, e.g. an
+    // excluded path), currentPath is '' which can never equal a real home, so
+    // `alreadyAtHome` is false and we safely redirect to home. This is the
+    // preferred behavior per the spec: redirect(home) rather than bouncing to
+    // /login, since home differs from the current (excluded) route family.
+    redirect(home)
   }
   return user
 }

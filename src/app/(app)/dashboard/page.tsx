@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { requireRole } from '@/lib/auth/current-user'
+import { getCurrentUser, requireRole } from '@/lib/auth/current-user'
 import { isAdminLike } from '@/lib/auth/role-helpers'
 import { prisma } from '@/lib/db/prisma'
 import { getPresetRange } from '@/lib/utils/week'
@@ -93,12 +93,18 @@ function resolveFinanceRange(
 }
 
 export default async function DashboardPage({ searchParams }: PageProps) {
-  const user = await requireRole(['ADMIN', 'MANAGER', 'CHEF'])
-
-  // CHEF не имеет дашборд-содержимого — отправляем на свой home.
+  // П7: explicit per-role guards BEFORE requireRole so COURIER/CHEF never reach
+  // the failing requireRole (which would, for COURIER, have produced the old
+  // /dashboard self-loop).
+  const user = await getCurrentUser()
+  if (user.role === 'COURIER') {
+    redirect('/delivery')
+  }
   if (user.role === 'CHEF') {
     redirect('/production')
   }
+  // ADMIN_PRO is virtually included by requireRole when 'ADMIN' is present.
+  await requireRole(['ADMIN', 'MANAGER'])
 
   const isAdminLikeUser = isAdminLike(user.role)
   // MANAGER тоже видит выручку (маржу/себестоимость — нет, это решает FinanceWeekBlock).

@@ -3,11 +3,14 @@
 import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User, UtensilsCrossed } from 'lucide-react'
+import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User, UtensilsCrossed, Mail, Trash2, Contact } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 import { toast } from 'sonner'
 import { LocationModal } from './location-modal'
 import { MealConfigModal } from './meal-config-modal'
+import { ContactModal } from './contact-modal'
+import type { ClientContactDTO } from './contact-actions'
+import { deleteClientContact } from './contact-actions'
 import { ClientAnalyticsTab } from './client-analytics-tab'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
 import { archiveClient, archiveLocation, assignCourierToLocation, deleteMealConfig } from '../actions'
@@ -40,6 +43,7 @@ interface SerializedConfig {
 }
 
 interface SerializedClientDetail extends Omit<Client, never> {
+  contacts: ClientContactDTO[]
   locations: ClientLocation[]
   mealConfigs: SerializedConfig[]
   defaultOurLegalEntity: {
@@ -76,6 +80,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
 
   const [locModal, setLocModal] = useState<{ open: boolean; location?: ClientLocation }>({ open: false })
   const [cfgModal, setCfgModal] = useState<{ open: boolean; config?: SerializedConfig }>({ open: false })
+  const [contactModal, setContactModal] = useState<{ open: boolean; contact?: ClientContactDTO }>({ open: false })
 
   const activeLocations = client.locations.filter((l) => l.isActive)
 
@@ -96,6 +101,19 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
       const result = await archiveLocation(id)
       if (result.ok) {
         toast.success(isActive ? `«${name}» в архиве` : `«${name}» восстановлена`)
+        router.refresh()
+      } else {
+        toast.error(result.error)
+      }
+    })
+  }
+
+  function handleDeleteContact(id: string, label: string) {
+    if (!window.confirm(`Удалить контакт «${label}»?`)) return
+    startTransition(async () => {
+      const result = await deleteClientContact(id)
+      if (result.ok) {
+        toast.success('Контакт удалён')
         router.refresh()
       } else {
         toast.error(result.error)
@@ -127,6 +145,13 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
   return (
     <div id="client-tabs" className="space-y-5 scroll-mt-24">
       <ClientHero client={client} analytics={analytics} />
+
+      <ContactsSection
+        contacts={client.contacts}
+        onAdd={() => setContactModal({ open: true })}
+        onEdit={(c) => setContactModal({ open: true, contact: c })}
+        onDelete={handleDeleteContact}
+      />
 
       {(client.notes || hasRequisites) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
@@ -223,6 +248,13 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
         config={cfgModal.config}
         open={cfgModal.open}
         onClose={() => setCfgModal({ open: false })}
+      />
+
+      <ContactModal
+        clientId={client.id}
+        contact={contactModal.contact}
+        open={contactModal.open}
+        onClose={() => setContactModal({ open: false })}
       />
     </div>
   )
@@ -557,16 +589,109 @@ function ConfigsTab({
   )
 }
 
+function ContactsSection({
+  contacts,
+  onAdd,
+  onEdit,
+  onDelete,
+}: {
+  contacts: ClientContactDTO[]
+  onAdd: () => void
+  onEdit: (c: ClientContactDTO) => void
+  onDelete: (id: string, label: string) => void
+}) {
+  return (
+    <div className="rounded-xl bg-surface border border-border p-4 shadow-card">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2">
+          <Contact className="w-4 h-4 text-fg-subtle" />
+          <p className="text-xs uppercase tracking-wide text-fg-subtle font-bold">Контактные лица</p>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-surface-2 hover:bg-border text-fg-muted hover:text-fg text-sm font-medium transition-colors min-h-[36px] [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <Plus className="w-4 h-4" /> Добавить контакт
+        </button>
+      </div>
+
+      {contacts.length === 0 ? (
+        <p className="text-sm text-fg-muted">Контактных лиц пока нет.</p>
+      ) : (
+        <div className="space-y-2">
+          {contacts.map((c) => {
+            const label = c.name || c.role || c.phone
+            return (
+              <div
+                key={c.id}
+                className="flex items-start justify-between gap-3 rounded-xl bg-bg/40 border border-border px-3.5 py-3"
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {c.name && <span className="font-semibold text-fg-strong">{c.name}</span>}
+                    {c.role && (
+                      <span className="text-xs px-2 py-0.5 rounded-pill bg-warning-bg text-warning-fg font-medium">
+                        {c.role}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-fg-muted">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-fg-subtle" />
+                      {c.phone}
+                    </span>
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1.5 min-w-0">
+                        <Mail className="w-3.5 h-3.5 text-fg-subtle shrink-0" />
+                        <span className="truncate">{c.email}</span>
+                      </span>
+                    )}
+                  </div>
+                  {c.notes && <p className="text-sm text-fg-muted whitespace-pre-line">{c.notes}</p>}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onEdit(c)}
+                    aria-label="Редактировать"
+                    className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(c.id, label)}
+                    aria-label="Удалить"
+                    className="min-w-[44px] min-h-[44px] rounded-full hover:bg-danger-bg flex items-center justify-center text-fg-muted hover:text-danger-fg transition-colors [touch-action:manipulation]"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RequisitesBlock({ client }: { client: SerializedClientDetail }) {
   const contractDateStr = client.contractDate ? formatDateMsk(client.contractDate) : null
 
   return (
-    <div className="rounded-xl bg-surface border border-border p-4 space-y-4 shadow-card">
-      <h3 className="text-xs font-bold uppercase tracking-wide text-fg-subtle">
-        Реквизиты
-      </h3>
+    <details className="group rounded-xl bg-surface border border-border p-4 shadow-card">
+      <summary className="flex items-center justify-between gap-2 cursor-pointer list-none select-none [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded">
+        <span className="text-xs font-bold uppercase tracking-wide text-fg-subtle">
+          Реквизиты юр.лица
+        </span>
+        <span className="text-fg-subtle text-xs transition-transform group-open:rotate-180" aria-hidden>
+          ▾
+        </span>
+      </summary>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm mt-4">
         {/* Юр.реквизиты */}
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-wider text-fg-subtle">Юридические</p>
@@ -608,7 +733,7 @@ function RequisitesBlock({ client }: { client: SerializedClientDetail }) {
           />
         </div>
       </div>
-    </div>
+    </details>
   )
 }
 

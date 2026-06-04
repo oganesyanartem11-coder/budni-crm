@@ -20,6 +20,7 @@ import {
   ShoppingBag,
   Factory,
   Settings,
+  UserCircle,
   type LucideIcon,
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
@@ -151,6 +152,11 @@ export const NAV_GROUPS: NavGroup[] = [
  */
 export const BOTTOM_NAV: NavItem[] = [
   { href: '/boris', label: 'Борис', icon: Bot, roles: ['ADMIN_PRO'] },
+  // П5/MEGA-1: смена своего PIN доступна КАЖДОМУ залогиненному. Сама страница
+  // /settings/profile роле-агностична (getCurrentUser), но /settings и сайдбар
+  // гейтятся под ADMIN — поэтому даём прямую ссылку «Профиль» всем 5 ролям,
+  // в самом низу сайдбара (после групп и Бориса).
+  { href: '/settings/profile', label: 'Профиль', icon: UserCircle, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF', 'COURIER'] },
 ]
 
 export interface TabbarItem {

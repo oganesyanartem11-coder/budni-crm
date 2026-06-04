@@ -434,10 +434,27 @@ model Client {
   borisEvents         BorisEventLog[]
   weeklySubmissions   WeeklyOrderSubmission[]
   pendingOrderChanges PendingOrderChange[]
+  contacts            ClientContact[]
 
   @@index([isActive])
   @@index([name])
   @@index([defaultOurLegalEntityId])
+}
+
+model ClientContact {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name      String?
+  role      String? // "прораб", "бухгалтер"
+  phone     String
+  email     String?
+  notes     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
 }
 
 model ClientLocation {
