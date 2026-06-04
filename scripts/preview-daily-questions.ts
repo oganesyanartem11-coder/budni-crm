@@ -7,7 +7,7 @@ import {
   CUTOFF_NOTICE_TEXT,
   formatAcceptedReply,
   formatUpdatedReply,
-  POST_CUTOFF_REPLY,
+  getPostCutoffReply,
 } from '@/lib/bot/templates'
 
 const start = new Date(Date.UTC(2026, 4, 18, 0, 0, 0, 0)) // пн 18 мая 2026
@@ -80,5 +80,6 @@ console.log(
   ])
 )
 console.log()
-console.log('--- POST_CUTOFF_REPLY ---')
-console.log(POST_CUTOFF_REPLY)
+console.log('--- POST_CUTOFF (16:00 / same-day 08:40) ---')
+console.log(getPostCutoffReply('16:00'))
+console.log(getPostCutoffReply('08:40'))

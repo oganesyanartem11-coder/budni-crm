@@ -3,7 +3,8 @@ import { findClientByMaxChatId, findLatestBotConv } from '@/lib/db/queries/bot'
 import { parseClientResponse } from '@/lib/llm/parser'
 import { detectAnomalies } from '@/lib/orders/anomaly-detector'
 import { getClientStats } from '@/lib/orders/client-stats'
-import { isPastCutoff } from '@/lib/orders/cutoff'
+import { getCutoffMoment } from '@/lib/orders/cutoff'
+import { getClientCutoffForDate, formatCutoff } from '@/lib/utils/cutoff'
 import { saveBotOrders } from './save-orders'
 import { createInboxItem } from './create-inbox-item'
 import { notifyClientSignal } from './notify-client-signal'
@@ -12,7 +13,7 @@ import { logBotMessage } from './log-message'
 import {
   formatAcceptedReply,
   formatUpdatedReply,
-  POST_CUTOFF_REPLY,
+  getPostCutoffReply,
   type SavedItemForReply,
 } from './templates'
 import { sendBotMessage } from '@/lib/max/send-message'
@@ -48,6 +49,33 @@ export interface ProcessMessageResult {
   reply: string | null
   action: ProcessAction
   inboxItemId?: string
+}
+
+// MEGA-3 (П11): окно, в течение которого ручной ответ менеджера «глушит»
+// автоответ. Если менеджер писал клиенту вручную (MANAGER_OUT) за последние
+// MANAGER_TAKEOVER_MIN минут — мы НЕ отвечаем автоматически, чтобы не
+// перебивать живую переписку. Только фиксируем входящее и сигналим в inbox.
+const MANAGER_TAKEOVER_MIN = 30
+
+/**
+ * Проверяет, ведёт ли сейчас менеджер ручную переписку с клиентом.
+ * true → автоответ подавляем. Смотрим самый свежий MANAGER_OUT за 24ч и
+ * сравниваем его возраст с порогом MANAGER_TAKEOVER_MIN.
+ */
+async function isManagerHandling(clientId: string, now: Date = new Date()): Promise<boolean> {
+  const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const lastManagerOut = await prisma.botMessage.findFirst({
+    where: {
+      clientId,
+      direction: 'MANAGER_OUT',
+      createdAt: { gte: since24h },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  })
+  if (!lastManagerOut) return false
+  const ageMs = now.getTime() - lastManagerOut.createdAt.getTime()
+  return ageMs <= MANAGER_TAKEOVER_MIN * 60_000
 }
 
 /**
@@ -95,11 +123,76 @@ export async function processClientMessage(
     return { reply: null, action: 'unknown_client' }
   }
 
+  // MEGA-3 (П11): guard ручной переписки менеджера. Если менеджер отвечал
+  // клиенту вручную (MANAGER_OUT) за последние 30 минут — НЕ автоотвечаем,
+  // только фиксируем входящее и сигналим в inbox (менеджер ведёт диалог сам).
+  if (await isManagerHandling(client.id)) {
+    return handleManagerTakeover(client, text)
+  }
+
   const botConv = await findLatestBotConv(client.id)
   if (botConv) {
     return handleBotResponse(client, botConv, text)
   }
   return handleSpontaneous(client, text)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// MEGA-3 (П11): MANAGER-TAKEOVER branch — менеджер сейчас в ручном диалоге.
+// Никакого автоответа. Пишем входящее в БД (привязываем к самой свежей conv,
+// если есть) и создаём/обновляем InboxItem, чтобы менеджер видел сообщение.
+// ─────────────────────────────────────────────────────────────────────
+async function handleManagerTakeover(
+  client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,
+  text: string
+): Promise<ProcessMessageResult> {
+  console.log(`[bot] manager-takeover: client=${client.id} — автоответ подавлен`)
+
+  // Привязываем входящее к самой свежей conv клиента (любого статуса), если есть.
+  const conv = await prisma.botConversation.findFirst({
+    where: { clientId: client.id },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true },
+  })
+
+  await logBotMessage({
+    clientId: client.id,
+    conversationId: conv?.id,
+    direction: 'IN',
+    text,
+  })
+
+  // Дедупим InboxItem по conv (если есть) — менеджер увидит свежий текст.
+  const existing = conv
+    ? await prisma.inboxItem.findFirst({
+        where: { conversationId: conv.id },
+        orderBy: { createdAt: 'desc' },
+      })
+    : null
+
+  let inboxItem
+  if (existing) {
+    inboxItem = await prisma.inboxItem.update({
+      where: { id: existing.id },
+      data: {
+        clientMessage: text,
+        status: 'UNREAD',
+        resolvedAt: null,
+        resolvedById: null,
+      },
+    })
+  } else {
+    inboxItem = await createInboxItem({
+      clientId: client.id,
+      conversationId: conv?.id,
+      reason: 'NON_NUMERIC',
+      humanReason: 'Сообщение во время ручной переписки менеджера',
+      priority: 'NORMAL',
+      clientMessage: text,
+    })
+  }
+
+  return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -351,7 +444,56 @@ async function handleBotResponse(
     data: { safeAnswerStreak: { increment: 1 } },
   })
 
-  const afterCutoff = isPastCutoff(conv.deliveryDate)
+  // MEGA-3 (П5+П9): cut-off строго в МСК и с учётом same-day клиентов.
+  //
+  // П9: для same-day-локации (доставка сегодня) cut-off = индивидуальный
+  // (напр. 08:40) на САМ день доставки; для обычных клиентов = 16:00 накануне.
+  // getClientCutoffForDate возвращает {hour,minute}, sameDay-флаг определяем
+  // тем же признаком (доставка сегодня + есть same-day-локация).
+  //
+  // П5: момент cut-off считаем через getCutoffMoment (fromZonedTime, МСК) —
+  // никаких `now > cutoff` в UTC. До cut-off МСК → нормальный приём
+  // (formatAccepted/Updated). После → getPostCutoffReply.
+  const now = new Date()
+  // Резолвим cut-off по локации(ям) ИМЕННО этого заказа, а не по всем
+  // локациям клиента: иначе обычная точка унаследовала бы same-day 08:40
+  // от другой точки клиента. Среди локаций заказа выбираем same-day с самым
+  // ранним cut-off (ближайший дедлайн для клиента); если same-day среди
+  // заказа нет — первую локацию заказа (даст обычный 16:00).
+  const deliveryIsToday = toMskDateString(conv.deliveryDate) === toMskDateString(now)
+  const orderLocations = save.savedItems
+    .map((s) => client.locations.find((l) => l.id === s.locationId))
+    .filter((l): l is NonNullable<typeof l> => Boolean(l))
+  const sameDayOrderLocations = deliveryIsToday
+    ? orderLocations.filter((l) => l.sameDayDelivery && l.isActive !== false)
+    : []
+  const cutoffLocation =
+    sameDayOrderLocations.length > 0
+      ? sameDayOrderLocations.reduce((a, b) =>
+          (a.cutoffHourMsk ?? 16) * 60 + (a.cutoffMinuteMsk ?? 0) <=
+          (b.cutoffHourMsk ?? 16) * 60 + (b.cutoffMinuteMsk ?? 0)
+            ? a
+            : b
+        )
+      : (orderLocations[0] ?? null)
+  const cutoff = getClientCutoffForDate({
+    client,
+    deliveryDate: conv.deliveryDate,
+    locationId: cutoffLocation?.id ?? null,
+    now,
+  })
+  const isSameDayCutoff =
+    deliveryIsToday &&
+    !!cutoffLocation?.sameDayDelivery &&
+    cutoffLocation.isActive !== false
+  const cutoffMoment = getCutoffMoment(
+    conv.deliveryDate,
+    cutoff.hour,
+    cutoff.minute,
+    isSameDayCutoff
+  )
+  const afterCutoff = now.getTime() >= cutoffMoment.getTime()
+  const cutoffStr = formatCutoff(cutoff)
   const wasFirstAnswer = conv.status === 'PENDING'
 
   const itemsForReply: SavedItemForReply[] = save.savedItems.map((s) => ({
@@ -369,19 +511,20 @@ async function handleBotResponse(
       })
     }
 
-    await sendBotMessage(client.maxChatId!, POST_CUTOFF_REPLY)
+    const postCutoffReply = getPostCutoffReply(cutoffStr)
+    await sendBotMessage(client.maxChatId!, postCutoffReply)
     await logBotMessage({
       clientId: client.id,
       conversationId: conv.id,
       direction: 'OUT',
-      text: POST_CUTOFF_REPLY,
+      text: postCutoffReply,
     })
 
     const inbox = await createInboxItem({
       clientId: client.id,
       conversationId: conv.id,
       reason: 'POST_CUTOFF',
-      humanReason: 'Клиент ответил после 16:00 — заказ принят, но менеджер может скорректировать',
+      humanReason: `Клиент ответил после ${cutoffStr} — заказ принят, но менеджер может скорректировать`,
       priority: 'NORMAL',
       clientMessage: text,
       parsedJson: parsed as unknown as Prisma.InputJsonValue,
@@ -397,7 +540,7 @@ async function handleBotResponse(
       console.error('[bot] notifyClientSignal failed:', e)
     })
 
-    return { reply: POST_CUTOFF_REPLY, action: 'post_cutoff', inboxItemId: inbox.id }
+    return { reply: postCutoffReply, action: 'post_cutoff', inboxItemId: inbox.id }
   }
 
   if (wasFirstAnswer) {

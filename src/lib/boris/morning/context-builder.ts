@@ -18,11 +18,19 @@ export type AttentionItem = {
     | 'urgent_client_with_delivery'
     | 'first_delivery'
     | 'unconfirmed_dynamic'
+    | 'unconfirmed_sameday_today'
     | 'ingredient_price_spike'
     | 'menu_repetition'
   severity: 'high' | 'medium' | 'low'
   description: string
   relatedData: Record<string, unknown>
+}
+
+/** Формат cut-off локации как «HH:mm» (fallback 16:00 если поля null). */
+function formatCutoff(hour: number | null | undefined, minute: number | null | undefined): string {
+  const h = (hour ?? 16).toString().padStart(2, '0')
+  const m = (minute ?? 0).toString().padStart(2, '0')
+  return `${h}:${m}`
 }
 
 export type TrendItem = {
@@ -43,9 +51,11 @@ export type MorningContext = {
   attention: AttentionItem[]
   day: {
     totalPortionsToday: number
-    clientsCountToday: number
-    locationsCountToday: number
     pendingConfirmationTomorrow: number
+    // П12: SAME-DAY локации, которые сегодня ещё не подтвердили заказ (deliveryDate=сегодня,
+    // status=PENDING_CONFIRMATION). У них индивидуальный утренний cut-off (cutoffLabel «HH:mm»),
+    // обычный pendingConfirmationTomorrow их не ловит (там фильтр по завтрашней дате).
+    pendingSameDayToday: { locationName: string; cutoffLabel: string }[]
     avgWeekdayPortions: number
     deltaPercent: number
   }
@@ -59,6 +69,38 @@ const TOP_INGREDIENTS_LIMIT = 20
 const WEEKDAY_AVG_WINDOW_DAYS = 5
 const MAX_ATTENTION_ITEMS = 5
 const STREAK_NO_COMPLAINTS_THRESHOLD_DAYS = 5
+const ATTENTION_EXCERPT_LIMIT = 60
+
+/**
+ * Формирует description для attention-item по rude/urgent клиенту с доставкой сегодня.
+ * Чистая функция (вынесена для тестируемости — context-builder требует БД).
+ *
+ * Формат с текстом сообщения: `От {clientName} ({locationName}): "{excerpt}…" [tone={tone}]`.
+ * Если excerpt пустой (нет исходного текста) — деградирует до читаемого фолбэка
+ * без кривых пустых кавычек.
+ */
+export function formatUrgentAttention(params: {
+  clientName: string
+  locationName: string
+  excerpt: string
+  tone: 'rude' | 'urgent'
+}): string {
+  const { clientName, locationName, excerpt, tone } = params
+  const loc = locationName || '—'
+  if (excerpt) {
+    return `От ${clientName} (${loc}): "${excerpt}" [tone=${tone}]`
+  }
+  return `От ${clientName} (${loc}): срочное сообщение, сегодня доставка [tone=${tone}]`
+}
+
+/** Обрезает текст до limit символов, добавляя «…» если был длиннее. Пустой/null → ''. */
+export function buildExcerpt(message: string | null | undefined, limit: number): string {
+  if (!message) return ''
+  const trimmed = message.trim()
+  if (!trimmed) return ''
+  if (trimmed.length <= limit) return trimmed
+  return `${trimmed.slice(0, limit)}…`
+}
 
 /**
  * Возвращает день недели МСК как 1..7 (Пн=1, Вс=7) для даты в UTC-полуночи МСК.
@@ -99,12 +141,38 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
     return null
   }
 
-  const clientsCountToday = new Set(todayOrders.map((o) => o.clientId)).size
-  const locationsCountToday = new Set(todayOrders.map((o) => o.locationId)).size
-
   const pendingConfirmationTomorrow = await prisma.order.count({
     where: { deliveryDate: tomorrowMsk, status: 'PENDING_CONFIRMATION' },
   })
+
+  // П12: SAME-DAY клиенты ставят заказ на СЕГОДНЯ (deliveryDate=today), не на завтра.
+  // Поэтому pendingConfirmationTomorrow их не видит. Берём отдельно: pending-заказы
+  // на сегодня, чьи локации same-day, и показываем с их утренним cut-off.
+  const pendingSameDayOrders = await prisma.order.findMany({
+    where: {
+      deliveryDate: todayMsk,
+      status: 'PENDING_CONFIRMATION',
+      location: { sameDayDelivery: true },
+    },
+    select: {
+      locationId: true,
+      location: {
+        select: { name: true, cutoffHourMsk: true, cutoffMinuteMsk: true },
+      },
+    },
+  })
+  // Дедуп по локации (несколько mealType на одной точке = одна строка).
+  const pendingSameDayMap = new Map<string, { locationName: string; cutoffLabel: string }>()
+  for (const o of pendingSameDayOrders) {
+    if (pendingSameDayMap.has(o.locationId)) continue
+    pendingSameDayMap.set(o.locationId, {
+      locationName: o.location.name,
+      cutoffLabel: formatCutoff(o.location.cutoffHourMsk, o.location.cutoffMinuteMsk),
+    })
+  }
+  const pendingSameDayToday = Array.from(pendingSameDayMap.values()).sort((a, b) =>
+    a.locationName.localeCompare(b.locationName, 'ru')
+  )
 
   // Средний дневной totalPortions за последние 5 БУДНИХ дней (исключая сегодня).
   const weekdayMidnights: Date[] = []
@@ -141,30 +209,45 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
       clientId: true,
       tone: true,
       createdAt: true,
-      client: { select: { id: true, name: true } },
+      inboxItem: { select: { clientMessage: true } },
+      client: {
+        select: {
+          id: true,
+          name: true,
+          locations: { select: { name: true, isActive: true } },
+        },
+      },
     },
     orderBy: { createdAt: 'desc' },
   })
 
-  // Берём свежайший tone на клиента.
-  const latestToneByClient = new Map<string, { tone: string; name: string }>()
+  // Берём свежайший tone на клиента (+ название локации и excerpt сообщения).
+  const latestToneByClient = new Map<
+    string,
+    { tone: 'rude' | 'urgent'; name: string; locationName: string; excerpt: string }
+  >()
   for (const a of recentAlerts) {
-    if (!latestToneByClient.has(a.clientId) && a.tone) {
-      latestToneByClient.set(a.clientId, { tone: a.tone, name: a.client.name })
+    if (!latestToneByClient.has(a.clientId) && (a.tone === 'rude' || a.tone === 'urgent')) {
+      // Для пилота у клиента 1 активная локация — берём первую активную.
+      const activeLocation =
+        a.client.locations.find((l) => l.isActive !== false) ?? a.client.locations[0]
+      latestToneByClient.set(a.clientId, {
+        tone: a.tone,
+        name: a.client.name,
+        locationName: activeLocation?.name ?? '',
+        excerpt: buildExcerpt(a.inboxItem?.clientMessage, ATTENTION_EXCERPT_LIMIT),
+      })
     }
   }
 
   const todayClientIds = new Set(todayOrders.map((o) => o.clientId))
-  for (const [clientId, { tone, name }] of latestToneByClient) {
+  for (const [clientId, { tone, name, locationName, excerpt }] of latestToneByClient) {
     if (!todayClientIds.has(clientId)) continue
     attention.push({
       type: tone === 'rude' ? 'rude_client_with_delivery' : 'urgent_client_with_delivery',
       severity: 'high',
-      description:
-        tone === 'rude'
-          ? `${name}: раздражённый тон в последние 48 ч, сегодня доставка`
-          : `${name}: срочное сообщение в последние 48 ч, сегодня доставка`,
-      relatedData: { clientId, clientName: name, tone },
+      description: formatUrgentAttention({ clientName: name, locationName, excerpt, tone }),
+      relatedData: { clientId, clientName: name, tone, locationName, excerpt },
     })
   }
 
@@ -202,6 +285,17 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
       severity: 'medium',
       description: `${pendingConfirmationTomorrow} клиентов не подтвердили заказ на завтра`,
       relatedData: { count: pendingConfirmationTomorrow },
+    })
+  }
+
+  // 3b. П12: SAME-DAY локации не подтвердили заказ на СЕГОДНЯ. Высокий приоритет —
+  // у них утренний cut-off, времени мало. Каждую называем с её cut-off.
+  for (const s of pendingSameDayToday) {
+    attention.push({
+      type: 'unconfirmed_sameday_today',
+      severity: 'high',
+      description: `${s.locationName}: не подтвердили на сегодня (утренние, cut-off ${s.cutoffLabel})`,
+      relatedData: { locationName: s.locationName, cutoffLabel: s.cutoffLabel },
     })
   }
 
@@ -310,9 +404,8 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
     attention: attentionSliced,
     day: {
       totalPortionsToday,
-      clientsCountToday,
-      locationsCountToday,
       pendingConfirmationTomorrow,
+      pendingSameDayToday,
       avgWeekdayPortions,
       deltaPercent,
     },

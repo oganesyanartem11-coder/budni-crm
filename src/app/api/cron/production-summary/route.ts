@@ -1,24 +1,17 @@
 import { NextResponse } from 'next/server'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import type { MealType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { productionSummaryButton } from '@/lib/telegram/buttons'
-import { formatPortions, formatLocations, formatClients } from '@/lib/utils/format'
+import { formatProductionSummary } from '@/lib/boris/production-summary-format'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
 
 const ACTION = 'PRODUCTION_SUMMARY_SENT'
-
-const MEAL_TYPE_LABEL: Record<MealType, string> = {
-  BREAKFAST: 'Завтрак',
-  LUNCH: 'Обед',
-  DINNER: 'Ужин',
-}
 
 async function handler(_request: Request) {
   const now = new Date()
@@ -40,10 +33,12 @@ async function handler(_request: Request) {
       deliveryDate: tomorrowMsk,
       status: { notIn: ['CANCELLED'] },
     },
-    include: {
+    select: {
+      portions: true,
+      totalPrice: true,
+      sourceConfigId: true,
       client: { select: { id: true, name: true } },
       location: { select: { id: true, name: true } },
-      sourceConfig: { select: { orderType: true } },
     },
   })
 
@@ -73,16 +68,9 @@ async function handler(_request: Request) {
 
   // Метрики.
   const totalPortions = orders.reduce((s, o) => s + o.portions, 0)
+  const totalRevenue = orders.reduce((s, o) => s + Number(o.totalPrice), 0)
   const uniqueClientIds = new Set(orders.map((o) => o.client.id))
   const uniqueLocationIds = new Set(orders.map((o) => o.location.id))
-
-  const byMealType: Record<MealType, number> = { BREAKFAST: 0, LUNCH: 0, DINNER: 0 }
-  for (const o of orders) {
-    byMealType[o.mealType] += o.portions
-  }
-
-  const dynamicOrders = orders.filter((o) => o.sourceConfig?.orderType !== 'FIXED')
-  const fixedOrders = orders.filter((o) => o.sourceConfig?.orderType === 'FIXED')
 
   // "Не ответили" — активные DYNAMIC-конфиги на завтра без созданного Order.
   const dynamicConfigs = await prisma.clientMealConfig.findMany({
@@ -101,86 +89,46 @@ async function handler(_request: Request) {
   const confirmedConfigIds = new Set(
     orders.map((o) => o.sourceConfigId).filter((id): id is string => id !== null)
   )
-  const unconfirmed = activeConfigsForTomorrow.filter((c) => !confirmedConfigIds.has(c.id))
-
-  // Группируем dynamic/fixed по клиенту+локации (несколько mealConfig'ов на
-  // одной локации = одна строка с суммарными порциями).
-  const groupOrders = (
-    list: typeof orders
-  ): Array<{ clientName: string; locationName: string; portions: number }> => {
-    const map = new Map<string, { clientName: string; locationName: string; portions: number }>()
-    for (const o of list) {
-      const key = `${o.client.id}:${o.location.id}`
-      const existing = map.get(key)
-      if (existing) existing.portions += o.portions
-      else
-        map.set(key, {
-          clientName: o.client.name,
-          locationName: o.location.name,
-          portions: o.portions,
-        })
-    }
-    return Array.from(map.values()).sort((a, b) => a.clientName.localeCompare(b.clientName, 'ru'))
-  }
-
-  const dynamicGroups = groupOrders(dynamicOrders)
-  const fixedGroups = groupOrders(fixedOrders)
-
-  // Сборка текста.
-  const lines: string[] = []
-  lines.push(`📦 На завтра, <i>${escapeHtml(dateLabel)}</i>`)
-  lines.push('')
-  lines.push(
-    `<b>${formatPortions(totalPortions)}</b> · ${formatLocations(uniqueLocationIds.size)} · ${formatClients(uniqueClientIds.size)}`
+  const unconfirmedConfigs = activeConfigsForTomorrow.filter(
+    (c) => !confirmedConfigIds.has(c.id)
   )
 
-  const mealTypeOrder: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
-  const nonEmptyMealTypes = mealTypeOrder.filter((t) => byMealType[t] > 0)
-  if (nonEmptyMealTypes.length > 0) {
-    lines.push(
-      nonEmptyMealTypes.map((t) => `${MEAL_TYPE_LABEL[t]}: ${byMealType[t]}`).join(' · ')
-    )
+  // Единый список заказов на завтра (подтверждённые DYNAMIC + фиксированные FIXED),
+  // сгруппированный по клиент+локация: несколько mealConfig'ов на одной точке =
+  // одна строка с суммарными порциями. Разные локации одного клиента = разные строки.
+  const orderMap = new Map<
+    string,
+    { clientName: string; locationName: string; portions: number }
+  >()
+  for (const o of orders) {
+    const key = `${o.client.id}:${o.location.id}`
+    const existing = orderMap.get(key)
+    if (existing) existing.portions += o.portions
+    else
+      orderMap.set(key, {
+        clientName: o.client.name,
+        locationName: o.location.name,
+        portions: o.portions,
+      })
   }
+  const orderRows = Array.from(orderMap.values())
 
-  if (dynamicGroups.length > 0) {
-    lines.push('')
-    lines.push(`✅ Подтверждено (${dynamicGroups.length}):`)
-    for (const g of dynamicGroups) {
-      lines.push(
-        `• ${escapeHtml(g.clientName)} (${escapeHtml(g.locationName)}) — ${formatPortions(g.portions)}`
-      )
-    }
+  // "Не ответили" — дедуп по клиент+локация.
+  const unconfirmedMap = new Map<string, { clientName: string; locationName: string }>()
+  for (const c of unconfirmedConfigs) {
+    const key = `${c.client.name}::${c.location.name}`
+    if (!unconfirmedMap.has(key))
+      unconfirmedMap.set(key, { clientName: c.client.name, locationName: c.location.name })
   }
+  const unconfirmedRows = Array.from(unconfirmedMap.values())
 
-  if (fixedGroups.length > 0) {
-    lines.push('')
-    lines.push(`🔁 Фиксированные (${fixedGroups.length}):`)
-    for (const g of fixedGroups) {
-      lines.push(
-        `• ${escapeHtml(g.clientName)} (${escapeHtml(g.locationName)}) — ${formatPortions(g.portions)}`
-      )
-    }
-  }
-
-  if (unconfirmed.length > 0) {
-    lines.push('')
-    lines.push(`⚠️ Не ответили (${unconfirmed.length}):`)
-    // Группируем «не ответил» тоже по клиенту+локации, чтобы 2 mealType на одной
-    // точке не дублировали строку.
-    const seen = new Set<string>()
-    for (const c of unconfirmed) {
-      const locName = c.location.name
-      const key = `${c.client.name}::${locName}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      lines.push(`• ${escapeHtml(c.client.name)} (${escapeHtml(locName)})`)
-    }
-  }
-
-  lines.push('')
-  lines.push('ℹ️ Аллергии, контакты, окно доставки — в CRM.')
-
-  const text = lines.join('\n')
+  const text = formatProductionSummary({
+    dateLabel,
+    orders: orderRows,
+    totalPortions,
+    totalRevenue,
+    unconfirmed: unconfirmedRows,
+  })
   const result = await notifyGroup(text, { parseMode: 'HTML', replyMarkup: button })
 
   await prisma.activityLog.create({
@@ -193,11 +141,11 @@ async function handler(_request: Request) {
       payload: {
         date: tomorrowIso,
         total: totalPortions,
+        revenue: totalRevenue,
         clients: uniqueClientIds.size,
         locations: uniqueLocationIds.size,
-        dynamic: dynamicGroups.length,
-        fixed: fixedGroups.length,
-        unconfirmed: unconfirmed.length,
+        orders: orderRows.length,
+        unconfirmed: unconfirmedRows.length,
         sentToGroup: result.ok,
         error: result.error ?? null,
       },
@@ -208,11 +156,11 @@ async function handler(_request: Request) {
     ok: true,
     date: tomorrowIso,
     total: totalPortions,
+    revenue: totalRevenue,
     clients: uniqueClientIds.size,
     locations: uniqueLocationIds.size,
-    dynamic_groups: dynamicGroups.length,
-    fixed_groups: fixedGroups.length,
-    unconfirmed: unconfirmed.length,
+    orders: orderRows.length,
+    unconfirmed: unconfirmedRows.length,
     sentToGroup: result.ok,
     error: result.error ?? null,
   })
