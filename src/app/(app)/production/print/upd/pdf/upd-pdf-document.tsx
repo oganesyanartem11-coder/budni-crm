@@ -563,8 +563,9 @@ function Copy({ doc, copyLabel }: { doc: UpdPdfDocData; copyLabel: string }) {
             <Text style={[styles.td, styles.center, { width: COL.codeTRU }]}>--</Text>
             <Text style={[styles.td, styles.center, { width: COL.no }]}>{idx + 1}</Text>
             <Text style={[styles.td, { width: COL.name }]}>
-              Реализация готовых обедов ({l.mealLabel}),{' '}
-              {formatDateNumeric(new Date(l.deliveryDateIso))}
+              {l.kind === 'DELIVERY' || !l.deliveryDateIso
+                ? 'Услуги по доставке'
+                : `Реализация готовых обедов (${l.mealLabel}), ${formatDateNumeric(new Date(l.deliveryDateIso))}`}
             </Text>
             <Text style={[styles.td, styles.center, { width: COL.codeKind }]}>--</Text>
             <View style={[styles.tdGroup, { width: COL.unitGroup }]}>

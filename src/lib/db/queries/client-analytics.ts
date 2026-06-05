@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { getFinancialWeek } from '@/lib/utils/week'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
+import { deliveryRevenueByLocation } from '@/lib/db/queries/delivery-revenue'
 import type { MealType } from '@prisma/client'
 
 export interface PeriodPoint {
@@ -21,14 +22,23 @@ export interface MealTypeBreakdown {
 export interface LocationBreakdown {
   locationId: string
   locationName: string
+  /** Выручка по еде (sum totalPrice) — НЕ менялась. */
   revenue: number
+  /**
+   * Сервисная выручка (доставка) по локации за период. Волна 4: отдельное поле,
+   * НЕ смешивается с food-выручкой `revenue`.
+   */
+  deliveryRevenue: number
   portions: number
   ordersCount: number
 }
 
 export interface ClientAnalytics {
   clientId: string
+  /** Выручка по еде за период — историческое поле, формула не менялась. */
   totalRevenue: number
+  /** Сервисная выручка (доставка) клиента за период. Волна 4: отдельное поле. */
+  deliveryRevenue: number
   totalOrders: number
   totalPortions: number
   totalCancelled: number
@@ -73,22 +83,37 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
   startMonths.setDate(1)
   startMonths.setHours(0, 0, 0, 0)
 
-  const allOrders = await prisma.order.findMany({
-    where: {
-      clientId,
-      deliveryDate: { gte: startMonths, lte: now },
-    },
-    select: {
-      id: true,
-      deliveryDate: true,
-      mealType: true,
-      portions: true,
-      totalPrice: true,
-      status: true,
-      locationId: true,
-      location: { select: { id: true, name: true } },
-    },
-  })
+  // Волна 4: сервисная выручка (доставка) по локациям за тот же 12-мес. период.
+  // Хелпер отдаёт по всем клиентам — фильтруем по clientId и индексируем по
+  // locationId. Доставка хранится ОТДЕЛЬНО от food-выручки (в маржу не входит).
+  const [allOrders, deliveryByLocation] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        clientId,
+        deliveryDate: { gte: startMonths, lte: now },
+      },
+      select: {
+        id: true,
+        deliveryDate: true,
+        mealType: true,
+        portions: true,
+        totalPrice: true,
+        status: true,
+        locationId: true,
+        location: { select: { id: true, name: true } },
+      },
+    }),
+    deliveryRevenueByLocation({ from: startMonths, to: now }),
+  ])
+
+  const deliveryByLocationId = new Map<string, number>()
+  let deliveryRevenue = 0
+  for (const row of deliveryByLocation) {
+    if (row.clientId !== clientId) continue
+    const v = Number(row.deliveryRevenue)
+    deliveryByLocationId.set(row.locationId, v)
+    deliveryRevenue += v
+  }
 
   const activeOrders = allOrders.filter((o) => REVENUE_STATUSES.includes(o.status))
   const cancelledCount = allOrders.filter((o) => o.status === 'CANCELLED').length
@@ -127,6 +152,7 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
         locationId: o.locationId,
         locationName: o.location.name,
         revenue: 0,
+        deliveryRevenue: 0,
         portions: 0,
         ordersCount: 0,
       }
@@ -135,6 +161,10 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
     loc.revenue += Number(o.totalPrice)
     loc.portions += o.portions
     loc.ordersCount += 1
+  }
+  // Привязываем сервисную выручку к локациям (отдельно от food-revenue).
+  for (const loc of locationMap.values()) {
+    loc.deliveryRevenue = deliveryByLocationId.get(loc.locationId) ?? 0
   }
   const locations = Array.from(locationMap.values()).sort((a, b) => b.revenue - a.revenue)
 
@@ -202,6 +232,7 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
   return {
     clientId,
     totalRevenue,
+    deliveryRevenue,
     totalOrders: activeOrders.length,
     totalPortions,
     totalCancelled: cancelledCount,

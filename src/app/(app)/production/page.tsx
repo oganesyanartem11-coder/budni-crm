@@ -40,6 +40,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     : {
         ...summary,
         totalRevenue: 0,
+        deliveryRevenue: 0,
         mealTypes: {
           BREAKFAST: { ...summary.mealTypes.BREAKFAST, totalRevenue: 0 },
           LUNCH: { ...summary.mealTypes.LUNCH, totalRevenue: 0 },

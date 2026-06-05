@@ -21,6 +21,7 @@ import {
 } from '@/lib/boris/morning/nine-am-summary'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { prisma } from '@/lib/db/prisma'
+import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
 import type { OrderStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -44,18 +45,23 @@ async function handler(request: Request) {
   }
 
   const todayMsk = mskMidnightUtc(now, 0)
+  const tomorrowMsk = mskMidnightUtc(now, 1)
 
-  const orders = await prisma.order.findMany({
-    where: {
-      deliveryDate: todayMsk,
-      status: { in: DELIVERY_STATUSES },
-    },
-    select: {
-      portions: true,
-      totalPrice: true,
-      location: { select: { id: true, name: true } },
-    },
-  })
+  const [orders, deliveryToday] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        deliveryDate: todayMsk,
+        status: { in: DELIVERY_STATUSES },
+      },
+      select: {
+        portions: true,
+        totalPrice: true,
+        location: { select: { id: true, name: true } },
+      },
+    }),
+    // Волна 4: сервисная выручка (доставка) за сегодня — отдельной строкой.
+    sumDeliveryRevenue({ from: todayMsk, to: tomorrowMsk }),
+  ])
 
   const rows: NineAmOrderRow[] = orders.map((o) => ({
     locationId: o.location.id,
@@ -64,7 +70,7 @@ async function handler(request: Request) {
     totalPrice: Number(o.totalPrice),
   }))
 
-  const text = buildNineAmSummary(rows, now, escapeHtml)
+  const text = buildNineAmSummary(rows, now, escapeHtml, Number(deliveryToday))
 
   if (isDryRun) {
     await markRanToday(JOB_LABEL, { dryRun: true, orders: rows.length })

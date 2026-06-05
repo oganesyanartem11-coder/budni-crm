@@ -62,7 +62,17 @@ export interface DayContext {
   /** Заказы СЕГОДНЯ (deliveryDate=date, ACTIVE+DELIVERED). */
   today: {
     portionsTotal: number
+    /**
+     * Выручка по ЕДЕ (sum totalPrice). Историческое поле — формула не менялась.
+     * Совпадает с foodRevenueRub (alias для совместимости с потребителями).
+     */
     revenueRub: number
+    /** Явный алиас food-выручки (Волна 4). */
+    foodRevenueRub: number
+    /** Сервисная выручка (доставка) за день. Волна 4: отдельное поле. */
+    deliveryRevenueRub: number
+    /** food + delivery — общий объём для озвучки (НЕ для маржи). */
+    totalRevenueRub: number
     materialCostRub: number
     daysWithoutMenu: number
     byClient: ClientOrderAggregate[]
@@ -92,7 +102,14 @@ export interface WeekContext {
   weekFrom: Date
   weekTo: Date
   portionsTotal: number
+  /** Выручка по ЕДЕ за неделю — историческое поле, формула не менялась. */
   revenueRub: number
+  /** Явный алиас food-выручки (Волна 4). */
+  foodRevenueRub: number
+  /** Сервисная выручка (доставка) за неделю. Волна 4: отдельное поле. */
+  deliveryRevenueRub: number
+  /** food + delivery — общий объём недели для озвучки (НЕ для маржи). */
+  totalRevenueRub: number
   materialCostRub: number
   daysWithoutMenu: number
   /** Кол-во заказов недели — AI сам выведет средний чек если нужно. */

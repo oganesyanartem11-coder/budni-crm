@@ -480,6 +480,10 @@ model ClientLocation {
   assignedCourierId  String?
   assignedCourier    User?         @relation("CourierLocations", fields: [assignedCourierId], references: [id], onDelete: SetNull)
   isActive           Boolean       @default(true)
+  // Волна 4: «сервисная выручка» — стоимость доставки в эту точку за день.
+  // Опционально. null/0 → доставка бесплатная, фин-показатели не меняются.
+  // Считается ОДИН раз на (локация, день-с-доставкой), не на каждый заказ.
+  deliveryFee        Decimal?      @db.Decimal(10, 2)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 

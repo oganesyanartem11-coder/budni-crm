@@ -3,11 +3,18 @@ import { getFinancialWeek } from '@/lib/utils/week'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
 import { toMskDateString } from '@/lib/utils/msk-window'
+import {
+  sumDeliveryRevenue,
+  deliveryRevenueByDay,
+} from '@/lib/db/queries/delivery-revenue'
 
 export interface DailyRevenuePoint {
   date: string
   dayLabel: string
+  /** Выручка по еде (sum totalPrice) — историческое поле, формула не менялась. */
   revenue: number
+  /** Сервисная выручка (доставка) за день. Волна 4: добавлено отдельным полем. */
+  deliveryRevenue: number
   orders: number
 }
 
@@ -22,7 +29,17 @@ export interface AdminDashboardData {
   rangeFrom: string
   rangeTo: string
   thisPeriod: {
+    /**
+     * Выручка по ЕДЕ (sum Order.totalPrice). Историческое поле — формула и
+     * значение НЕ менялись. Совпадает с foodRevenue (alias для совместимости).
+     */
     totalRevenue: number
+    /** Явный алиас food-выручки (Волна 4) — чтобы потребители не путались. */
+    foodRevenue: number
+    /** Сервисная выручка (доставка) за период. Волна 4: новое поле. */
+    deliveryRevenue: number
+    /** food + delivery — общий объём (для отображения, НЕ для маржи). */
+    grandTotalRevenue: number
     totalOrders: number
     totalPortions: number
     daily: DailyRevenuePoint[]
@@ -34,6 +51,9 @@ export interface AdminDashboardData {
     comparePrevRevenue: number
     prorated: boolean
     daysCompared: number
+    /** Сервисная выручка (доставка) для обоих окон сравнения. Волна 4. */
+    deliveryRevenue: number
+    comparePrevDeliveryRevenue: number
   } | null
   topClients: TopClient[]
 }
@@ -85,32 +105,47 @@ export async function getAdminDashboardData(
   const from = rangeFrom ?? defaultFrom
   const to = rangeTo ?? defaultTo
 
-  const orders = await prisma.order.findMany({
-    where: {
-      deliveryDate: { gte: from, lte: to },
-      status: { in: REVENUE_STATUSES },
-    },
-    select: {
-      id: true,
-      deliveryDate: true,
-      portions: true,
-      totalPrice: true,
-      clientId: true,
-      client: { select: { id: true, name: true } },
-    },
-  })
+  // Волна 4: сервисная выручка (доставка). Запрашиваем параллельно. Хелпер
+  // дедупит fee один раз на (локация, день) и игнорит null-fee. Маржа на эти
+  // цифры НЕ опирается — это отдельный «сервисный» поток.
+  const [orders, deliveryTotal, deliveryByDay] = await Promise.all([
+    prisma.order.findMany({
+      where: {
+        deliveryDate: { gte: from, lte: to },
+        status: { in: REVENUE_STATUSES },
+      },
+      select: {
+        id: true,
+        deliveryDate: true,
+        portions: true,
+        totalPrice: true,
+        clientId: true,
+        client: { select: { id: true, name: true } },
+      },
+    }),
+    sumDeliveryRevenue({ from, to: endOfDay(to) }),
+    deliveryRevenueByDay({ from, to: endOfDay(to) }),
+  ])
+
+  const deliveryRevenue = Number(deliveryTotal)
 
   // daily — только для коротких диапазонов
   const periodDays = daysBetweenInclusive(from, to)
   const buildDaily = periodDays <= MAX_DAILY_POINTS
 
-  const dailyMap = new Map<string, { revenue: number; orders: number }>()
+  const dailyMap = new Map<string, { revenue: number; deliveryRevenue: number; orders: number }>()
   if (buildDaily) {
     for (let i = 0; i < periodDays; i++) {
       const d = new Date(from)
       d.setDate(from.getDate() + i)
       const key = toMskDateString(d)
-      dailyMap.set(key, { revenue: 0, orders: 0 })
+      dailyMap.set(key, { revenue: 0, deliveryRevenue: 0, orders: 0 })
+    }
+    // Раскладываем сервисную выручку по дням (join по МСК-ISO-дате).
+    for (const dr of deliveryByDay) {
+      const key = toMskDateString(dr.date)
+      const day = dailyMap.get(key)
+      if (day) day.deliveryRevenue += Number(dr.deliveryRevenue)
     }
   }
 
@@ -146,7 +181,7 @@ export async function getAdminDashboardData(
       const dayLabel = useWeekdayLabel
         ? `${WEEKDAY_NAMES_SHORT_BY_DOW[d.getDay()]} ${d.getDate()}.${(d.getMonth() + 1).toString().padStart(2, '0')}`
         : `${d.getDate()} ${RU_MONTHS_SHORT[d.getMonth()]}`
-      daily.push({ date: key, dayLabel, revenue: val.revenue, orders: val.orders })
+      daily.push({ date: key, dayLabel, revenue: val.revenue, deliveryRevenue: val.deliveryRevenue, orders: val.orders })
     }
   }
 
@@ -176,24 +211,31 @@ export async function getAdminDashboardData(
     compareCutoff.setDate(from.getDate() + daysCompared - 1)
     compareCutoff.setHours(23, 59, 59, 999)
 
-    const [compareAgg, thisAggUpToCutoff] = await Promise.all([
-      prisma.order.aggregate({
-        where: {
-          deliveryDate: { gte: compareFrom, lte: compareTo },
-          status: { in: REVENUE_STATUSES },
-        },
-        _sum: { totalPrice: true },
-      }),
-      isOngoing
-        ? prisma.order.aggregate({
-            where: {
-              deliveryDate: { gte: from, lte: compareCutoff },
-              status: { in: REVENUE_STATUSES },
-            },
-            _sum: { totalPrice: true },
-          })
-        : Promise.resolve({ _sum: { totalPrice: totalRevenue } }),
-    ])
+    // Волна 4: сервисная выручка для обоих окон сравнения (food-логика WoW
+    // не меняется — delivery считается рядом, отдельным полем).
+    const [compareAgg, thisAggUpToCutoff, compareDelivery, thisDeliveryUpToCutoff] =
+      await Promise.all([
+        prisma.order.aggregate({
+          where: {
+            deliveryDate: { gte: compareFrom, lte: compareTo },
+            status: { in: REVENUE_STATUSES },
+          },
+          _sum: { totalPrice: true },
+        }),
+        isOngoing
+          ? prisma.order.aggregate({
+              where: {
+                deliveryDate: { gte: from, lte: compareCutoff },
+                status: { in: REVENUE_STATUSES },
+              },
+              _sum: { totalPrice: true },
+            })
+          : Promise.resolve({ _sum: { totalPrice: totalRevenue } }),
+        sumDeliveryRevenue({ from: compareFrom, to: compareTo }),
+        isOngoing
+          ? sumDeliveryRevenue({ from, to: compareCutoff })
+          : Promise.resolve(deliveryTotal),
+      ])
 
     const comparePrevRevenue = Number(compareAgg._sum.totalPrice ?? 0)
     const thisRevenueProrated = isOngoing
@@ -209,6 +251,8 @@ export async function getAdminDashboardData(
       comparePrevRevenue,
       prorated: isOngoing && daysCompared < periodDays,
       daysCompared,
+      deliveryRevenue: Number(thisDeliveryUpToCutoff),
+      comparePrevDeliveryRevenue: Number(compareDelivery),
     }
   }
 
@@ -217,6 +261,9 @@ export async function getAdminDashboardData(
     rangeTo: to.toISOString(),
     thisPeriod: {
       totalRevenue,
+      foodRevenue: totalRevenue,
+      deliveryRevenue,
+      grandTotalRevenue: totalRevenue + deliveryRevenue,
       totalOrders: orders.length,
       totalPortions,
       daily,
@@ -229,8 +276,14 @@ export async function getAdminDashboardData(
 export interface PeriodMargin {
   marginAbsolute: number
   marginPct: number | null
+  /** Выручка по ЕДЕ — база маржи. Формула маржи food-only, не менялась. */
   totalRevenue: number
   totalCost: number
+  /**
+   * Сервисная выручка (доставка) за период. Волна 4: добавлено ОТДЕЛЬНЫМ полем
+   * и НЕ участвует в расчёте marginAbsolute/marginPct (маржа считается по еде).
+   */
+  deliveryRevenue: number
 }
 
 /**
@@ -250,11 +303,19 @@ export async function getMarginForPeriod(from: Date, to: Date): Promise<PeriodMa
     getMaterialCostForRange(from, to, REVENUE_STATUSES),
   ])
 
+  // Маржа — СТРОГО по еде: (foodRevenue − materialCost) / foodRevenue.
+  // Доставка (data.thisPeriod.deliveryRevenue) НЕ входит в формулу.
   const totalRevenue = data.thisPeriod.totalRevenue
   const totalCost = materialCost.totalCost
   const marginAbsolute = totalRevenue - totalCost
   const marginPct =
     totalRevenue > 0 ? Math.round((marginAbsolute / totalRevenue) * 1000) / 10 : null
 
-  return { marginAbsolute, marginPct, totalRevenue, totalCost }
+  return {
+    marginAbsolute,
+    marginPct,
+    totalRevenue,
+    totalCost,
+    deliveryRevenue: data.thisPeriod.deliveryRevenue,
+  }
 }

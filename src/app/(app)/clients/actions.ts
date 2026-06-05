@@ -165,6 +165,8 @@ const locationSchema = z.object({
   sameDayDelivery: z.boolean().optional(),
   cutoffHourMsk: z.number().int().min(0).max(23).nullable().optional(),
   cutoffMinuteMsk: z.number().int().min(0).max(59).nullable().optional(),
+  // Boris wave 4: стоимость доставки за день (Decimal в БД). null/пусто = бесплатно.
+  deliveryFee: z.number().min(0).nullable().optional(),
 })
 
 const mealConfigSchema = z.object({
@@ -497,6 +499,7 @@ export async function createLocation(
       sameDayDelivery: parsed.data.sameDayDelivery ?? false,
       cutoffHourMsk: parsed.data.cutoffHourMsk ?? null,
       cutoffMinuteMsk: parsed.data.cutoffMinuteMsk ?? null,
+      deliveryFee: parsed.data.deliveryFee ?? null,
     },
   })
 
@@ -528,6 +531,7 @@ export async function updateLocation(
       sameDayDelivery: parsed.data.sameDayDelivery ?? false,
       cutoffHourMsk: parsed.data.cutoffHourMsk ?? null,
       cutoffMinuteMsk: parsed.data.cutoffMinuteMsk ?? null,
+      deliveryFee: parsed.data.deliveryFee ?? null,
     },
   })
 

@@ -37,7 +37,8 @@ type OrderFull = Prisma.OrderGetPayload<{
 }>
 
 // Сборка снапшотов поставщика/покупателя/строк из подгруженных Order'ов одной группы.
-function buildSnapshots(orders: OrderFull[]): {
+// Экспортируется для юнит-тестов (генерация строки доставки + тоталов).
+export function buildSnapshots(orders: OrderFull[]): {
   supplierSnapshot: UpdSupplierSnapshot
   buyerSnapshot: UpdBuyerSnapshot
   linesSnapshot: UpdLineSnapshot[]
@@ -97,12 +98,37 @@ function buildSnapshots(orders: OrderFull[]): {
   for (const o of orders) {
     const amounts = calculateUpdAmounts(o.totalPrice, vatRate)
     linesSnapshot.push({
+      kind: 'FOOD',
       orderId: o.id,
       mealType: o.mealType,
       mealLabel: MEAL_TYPE_LABELS[o.mealType],
       deliveryDateIso: o.deliveryDate.toISOString(),
       portions: o.portions,
       pricePerPortion: o.pricePerPortion.toFixed(2),
+      lineTotal: amounts.totalAmount.toFixed(2),
+      lineTotalWithoutVat: amounts.amountWithoutVat.toFixed(2),
+      lineVat: amounts.vatAmount ? amounts.vatAmount.toFixed(2) : null,
+    })
+    totalSum = totalSum.add(amounts.totalAmount)
+    withoutVatSum = withoutVatSum.add(amounts.amountWithoutVat)
+    if (amounts.vatAmount) vatSum = vatSum.add(amounts.vatAmount)
+  }
+
+  // Строка «Услуги по доставке» (Волна «доставка как выручка»). Одна
+  // агрегированная позиция на УПД: доставка стоит ОДИН раз на (локация, день),
+  // а не на каждый mealType-заказ. Добавляем только если у точки задан
+  // deliveryFee > 0 И есть хотя бы одна строка еды (пустую УПД не плодим).
+  // НДС наследует ставку УПД (ставка еды) — через тот же calculateUpdAmounts,
+  // что и для еды. deliveryFee = null трактуется как бесплатная доставка → строки
+  // нет, тоталы идентичны прежним (полная обратная совместимость).
+  const deliveryFee = location.deliveryFee
+  if (deliveryFee != null && deliveryFee.gt(0) && orders.length > 0) {
+    const amounts = calculateUpdAmounts(new Prisma.Decimal(deliveryFee), vatRate)
+    linesSnapshot.push({
+      kind: 'DELIVERY',
+      orderId: `delivery-${first.locationId}`,
+      portions: 1,
+      pricePerPortion: deliveryFee.toFixed(2),
       lineTotal: amounts.totalAmount.toFixed(2),
       lineTotalWithoutVat: amounts.amountWithoutVat.toFixed(2),
       lineVat: amounts.vatAmount ? amounts.vatAmount.toFixed(2) : null,

@@ -175,6 +175,13 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
               </span>
             )}
           </div>
+          {/* Волна 4: сервисная выручка (доставка) — ненавязчивой строкой, только если > 0.
+              food-выручка выше не меняется; это отдельный поток, в маржу не входит. */}
+          {data.thisPeriod.deliveryRevenue > 0 && (
+            <p className="mt-1.5 text-xs text-data-revenue-ink/80">
+              Сервисная выручка (доставка): {formatMoney(data.thisPeriod.deliveryRevenue)}
+            </p>
+          )}
         </div>
 
         {/* 2. МАРЖА — только admin-like. MANAGER НЕ видит. */}

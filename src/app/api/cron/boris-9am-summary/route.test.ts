@@ -78,6 +78,25 @@ describe('buildNineAmSummary', () => {
     expect(text).toContain('Заказов на сегодня пока нет')
     expect(text.startsWith('☀️ Доброе утро. Сегодня на доставку:')).toBe(true)
   })
+
+  it('Волна 4: deliveryRevenue>0 добавляет строку «Доставка: X ₽»; food-итог не меняется', () => {
+    const rows: NineAmOrderRow[] = [
+      row({ locationId: 'a', locationName: 'Авангард', portions: 10, totalPrice: 5000 }),
+    ]
+    const text = buildNineAmSummary(rows, MONDAY_9AM_MSK, (s) => s, 1200)
+    // food-итог как был.
+    expect(text).toContain('Итого: 10 порций, 5 000 ₽')
+    // отдельная строка доставки.
+    expect(text).toContain('Доставка: 1 200 ₽')
+  })
+
+  it('Волна 4: deliveryRevenue=0 → строки доставки нет', () => {
+    const rows: NineAmOrderRow[] = [
+      row({ locationId: 'a', locationName: 'Авангард', portions: 10, totalPrice: 5000 }),
+    ]
+    const text = buildNineAmSummary(rows, MONDAY_9AM_MSK, (s) => s, 0)
+    expect(text).not.toContain('Доставка:')
+  })
 })
 
 describe('borisPhraseForDay (ротация по дню недели МСК, детерминированно)', () => {

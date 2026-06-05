@@ -10,6 +10,7 @@ import {
   formatProductionSummary,
   computeUnconfirmedConfigs,
 } from '@/lib/boris/production-summary-format'
+import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,7 @@ async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
   const tomorrowMsk = mskMidnightUtc(now, 1)
+  const dayAfterMsk = mskMidnightUtc(now, 2)
   const tomorrowIso = tomorrowMsk.toISOString().slice(0, 10)
 
   // Идемпотентность на сутки (защита от Vercel cron retry).
@@ -79,6 +81,8 @@ async function handler(_request: Request) {
   // Метрики.
   const totalPortions = orders.reduce((s, o) => s + o.portions, 0)
   const totalRevenue = orders.reduce((s, o) => s + Number(o.totalPrice), 0)
+  // Волна 4: сервисная выручка (доставка) на завтра — для хвоста «+ X ₽ доставка».
+  const deliveryRevenue = Number(await sumDeliveryRevenue({ from: tomorrowMsk, to: dayAfterMsk }))
   const uniqueClientIds = new Set(orders.map((o) => o.client.id))
   const uniqueLocationIds = new Set(orders.map((o) => o.location.id))
 
@@ -135,6 +139,7 @@ async function handler(_request: Request) {
     orders: orderRows,
     totalPortions,
     totalRevenue,
+    deliveryRevenue,
     unconfirmed: unconfirmedRows,
   })
   // notifyProductionChannel: канал производства с фолбэком в личку ADMIN_PRO.
@@ -153,6 +158,7 @@ async function handler(_request: Request) {
         date: tomorrowIso,
         total: totalPortions,
         revenue: totalRevenue,
+        deliveryRevenue,
         clients: uniqueClientIds.size,
         locations: uniqueLocationIds.size,
         orders: orderRows.length,
@@ -168,6 +174,7 @@ async function handler(_request: Request) {
     date: tomorrowIso,
     total: totalPortions,
     revenue: totalRevenue,
+    deliveryRevenue,
     clients: uniqueClientIds.size,
     locations: uniqueLocationIds.size,
     orders: orderRows.length,

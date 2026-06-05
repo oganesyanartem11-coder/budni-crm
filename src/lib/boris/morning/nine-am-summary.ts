@@ -49,14 +49,18 @@ function formatRub(value: number): string {
 /**
  * Собирает финальный текст сводки.
  *
- * @param rows    заказы на сегодня (уже отфильтрованы по статусам доставки)
- * @param now     момент запуска (для выбора фразы по дню недели МСК)
- * @param escape  функция HTML-экранирования имён локаций (parseMode='HTML')
+ * @param rows             заказы на сегодня (уже отфильтрованы по статусам доставки)
+ * @param now              момент запуска (для выбора фразы по дню недели МСК)
+ * @param escape           функция HTML-экранирования имён локаций (parseMode='HTML')
+ * @param deliveryRevenue  Волна 4: сервисная выручка (доставка) за сегодня, ₽.
+ *                         Если > 0 — добавляется отдельная строка «Доставка: X ₽».
+ *                         food-итог («Итого: … ₽») остаётся прежним.
  */
 export function buildNineAmSummary(
   rows: NineAmOrderRow[],
   now: Date,
-  escape: (s: string) => string = (s) => s
+  escape: (s: string) => string = (s) => s,
+  deliveryRevenue = 0
 ): string {
   const phrase = borisPhraseForDay(now)
 
@@ -95,10 +99,14 @@ export function buildNineAmSummary(
     (g) => `${escape(g.locationName)} — ${g.portions} порций`
   )
 
+  // Волна 4: сервисная выручка (доставка) — отдельной строкой, food-итог не трогаем.
+  const deliveryLine =
+    deliveryRevenue > 0 ? `\nДоставка: ${formatRub(deliveryRevenue)} ₽` : ''
+
   return (
     `☀️ Доброе утро. Сегодня на доставку:\n\n` +
     lines.join('\n') +
-    `\n\nИтого: ${totalPortions} порций, ${formatRub(totalRub)} ₽\n\n` +
+    `\n\nИтого: ${totalPortions} порций, ${formatRub(totalRub)} ₽${deliveryLine}\n\n` +
     `— ${phrase}`
   )
 }

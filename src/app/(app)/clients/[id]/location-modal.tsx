@@ -7,9 +7,13 @@ import { createLocation, updateLocation } from '../actions'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { ClientLocation } from '@prisma/client'
 
+// Boris wave 4: location приходит после serialize() — deliveryFee уже number | null,
+// а не Prisma Decimal. Держим тип в синхроне с SerializedLocation в client-detail.tsx.
+type SerializedLocation = Omit<ClientLocation, 'deliveryFee'> & { deliveryFee: number | null }
+
 interface Props {
   clientId: string
-  location?: ClientLocation
+  location?: SerializedLocation
   open: boolean
   onClose: () => void
 }
@@ -24,6 +28,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
   const [tags, setTags] = useState<string[]>(location?.tags ?? [])
   const [tagInput, setTagInput] = useState('')
   const [sameDayDelivery, setSameDayDelivery] = useState<boolean>(location?.sameDayDelivery ?? false)
+  const [deliveryFee, setDeliveryFee] = useState<string>(location?.deliveryFee?.toString() ?? '')
   const [cutoffTimeStr, setCutoffTimeStr] = useState<string>(
     location != null && location.cutoffHourMsk != null
       ? `${String(location.cutoffHourMsk).padStart(2, '0')}:${String(location.cutoffMinuteMsk ?? 0).padStart(2, '0')}`
@@ -41,6 +46,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
       setTagInput('')
       setSameDayDelivery(false)
       setCutoffTimeStr('')
+      setDeliveryFee('')
     } else if (open && location) {
       setName(location.name)
       setAddress(location.address)
@@ -49,6 +55,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
       setPackaging(location.packaging)
       setTags(location.tags)
       setSameDayDelivery(location.sameDayDelivery ?? false)
+      setDeliveryFee(location.deliveryFee?.toString() ?? '')
       setCutoffTimeStr(
         location.cutoffHourMsk != null
           ? `${String(location.cutoffHourMsk).padStart(2, '0')}:${String(location.cutoffMinuteMsk ?? 0).padStart(2, '0')}`
@@ -106,6 +113,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
         sameDayDelivery,
         cutoffHourMsk,
         cutoffMinuteMsk,
+        deliveryFee: deliveryFee.trim() !== '' ? parseFloat(deliveryFee) : null,
       }
 
       const result = location
@@ -227,6 +235,20 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
                 ))}
               </div>
             )}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Стоимость доставки, ₽</label>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={deliveryFee}
+              onChange={(e) => setDeliveryFee(e.target.value)}
+              placeholder="Например, 500"
+              className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors tabular-nums"
+            />
+            <p className="text-xs text-fg-subtle">Если пусто — доставка бесплатная (фин-показатели не меняются)</p>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

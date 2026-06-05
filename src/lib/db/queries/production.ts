@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
+import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
 import type { MealType, OrderStatus } from '@prisma/client'
 
 const PRODUCTION_STATUSES: OrderStatus[] = [
@@ -25,7 +26,10 @@ export interface ProductionSummary {
   }>
   pendingPortions: number // сколько порций в PENDING на эту дату
   totalPortions: number
+  /** Выручка по ЕДЕ за день (sum totalPrice) — формула не менялась. */
   totalRevenue: number
+  /** Сервисная выручка (доставка) за день. Волна 4: отдельное поле. */
+  deliveryRevenue: number
   hasMenu: boolean
 }
 
@@ -154,12 +158,16 @@ export async function getProductionSummary(targetDate: Date): Promise<Production
   const totalPortions = Object.values(mealTypes).reduce((s, m) => s + m.totalPortions, 0)
   const totalRevenue = Object.values(mealTypes).reduce((s, m) => s + m.totalRevenue, 0)
 
+  // Волна 4: сервисная выручка (доставка) за этот день — отдельно от food.
+  const deliveryRevenue = Number(await sumDeliveryRevenue({ from: date, to: dayEnd }))
+
   return {
     date: date.toISOString(),
     mealTypes,
     pendingPortions,
     totalPortions,
     totalRevenue,
+    deliveryRevenue,
     hasMenu: !!menu,
   }
 }

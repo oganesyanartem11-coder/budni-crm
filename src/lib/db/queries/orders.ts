@@ -190,7 +190,7 @@ export async function getOrderDetail(orderId: string) {
     where: { id: orderId },
     include: {
       client: { select: { id: true, name: true, contactName: true, contactPhone: true } },
-      location: { select: { id: true, name: true, address: true, packaging: true, tags: true, deliveryWindowFrom: true, deliveryWindowTo: true } },
+      location: { select: { id: true, name: true, address: true, packaging: true, tags: true, deliveryWindowFrom: true, deliveryWindowTo: true, deliveryFee: true } },
       sourceConfig: { select: { id: true, orderType: true, scheduleType: true, fixedPortions: true } },
       createdBy: { select: { id: true, name: true, role: true } },
       delivery: { select: { id: true, status: true, deliveredAt: true, courierName: true, issueReportedAt: true, issueReason: true, issueComment: true, issueReportedById: true } },

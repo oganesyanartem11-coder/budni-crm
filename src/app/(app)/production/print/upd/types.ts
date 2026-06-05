@@ -40,11 +40,22 @@ export interface UpdBuyerSnapshot {
 }
 
 // Все денежные значения — строки (Decimal сериализуется в string).
+//
+// Строка бывает двух видов (Волна «доставка как выручка»):
+//  - kind отсутствует или 'FOOD' — обычная позиция «обеды» (по одному заказу).
+//    Заполнены mealType/mealLabel/deliveryDateIso (привязка к Order).
+//  - kind === 'DELIVERY' — агрегированная строка «Услуги по доставке» (одна на
+//    УПД, привязки к заказу нет). orderId — синтетический ключ delivery-<loc>,
+//    mealType/mealLabel/deliveryDateIso отсутствуют.
+// БЭКВАРД-СОВМЕСТИМОСТЬ: старые персистентные снапшоты не имеют поля kind и
+// всегда содержат заполненные mealType/mealLabel/deliveryDateIso — они парсятся
+// как FOOD без изменений. Поэтому order-поля сделаны опциональными, а не убраны.
 export interface UpdLineSnapshot {
+  kind?: 'FOOD' | 'DELIVERY'
   orderId: string
-  mealType: MealType
-  mealLabel: string
-  deliveryDateIso: string
+  mealType?: MealType
+  mealLabel?: string
+  deliveryDateIso?: string
   portions: number
   pricePerPortion: string
   lineTotal: string

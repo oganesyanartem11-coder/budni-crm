@@ -32,8 +32,13 @@ export interface ProductionSummaryInput {
   orders: ProductionSummaryOrderRow[]
   /** Сумма порций по всем заказам. */
   totalPortions: number
-  /** Выручка по всем заказам, ₽. */
+  /** Выручка по ЕДЕ по всем заказам, ₽. Формула не менялась. */
   totalRevenue: number
+  /**
+   * Волна 4: сервисная выручка (доставка) за день, ₽. Опционально — если > 0,
+   * к итоговой строке добавляется «+ X ₽ доставка». Маржа на это НЕ опирается.
+   */
+  deliveryRevenue?: number
   /** DYNAMIC-конфиги без ответа (опционально показываем отдельным блоком). */
   unconfirmed?: ProductionSummaryUnconfirmedRow[]
 }
@@ -127,7 +132,7 @@ export function formatProductionSummaryRow(row: ProductionSummaryOrderRow): stri
  * Полный текст сводки 16:00 (HTML для Telegram).
  */
 export function formatProductionSummary(input: ProductionSummaryInput): string {
-  const { dateLabel, orders, totalPortions, totalRevenue, unconfirmed = [] } = input
+  const { dateLabel, orders, totalPortions, totalRevenue, deliveryRevenue = 0, unconfirmed = [] } = input
 
   const sorted = sortProductionSummaryRows(orders)
 
@@ -136,8 +141,10 @@ export function formatProductionSummary(input: ProductionSummaryInput): string {
   // Шапка: один эмодзи + итог.
   lines.push(`📋 Заказы на завтра, <i>${escapeHtml(dateLabel)}</i>`)
   lines.push('')
+  // Волна 4: сервисную выручку добавляем хвостом «+ X ₽ доставка» только когда > 0.
+  const deliveryTail = deliveryRevenue > 0 ? ` + ${formatMoney(deliveryRevenue)} доставка` : ''
   lines.push(
-    `Завтра: ${formatOrders(orders.length)}, ${formatPortions(totalPortions)}, ${formatMoney(totalRevenue)}`
+    `Завтра: ${formatOrders(orders.length)}, ${formatPortions(totalPortions)}, ${formatMoney(totalRevenue)}${deliveryTail}`
   )
 
   // Единый список заказов (DYNAMIC + FIXED), без разделения на блоки.

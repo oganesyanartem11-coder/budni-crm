@@ -26,6 +26,10 @@ import {
 import { cn } from '@/lib/utils/cn'
 import type { Client, ClientLocation, MealType, OrderType, ScheduleType, DeliveryHorizon, Prisma } from '@prisma/client'
 
+// Boris wave 4: deliveryFee — Decimal в БД, serialize() конвертит в number на границе RSC.
+// Локация на клиенте видит deliveryFee как number | null, остальные поля — как у Prisma.
+type SerializedLocation = Omit<ClientLocation, 'deliveryFee'> & { deliveryFee: number | null }
+
 interface SerializedConfig {
   id: string
   locationId: string | null
@@ -44,7 +48,7 @@ interface SerializedConfig {
 
 interface SerializedClientDetail extends Omit<Client, never> {
   contacts: ClientContactDTO[]
-  locations: ClientLocation[]
+  locations: SerializedLocation[]
   mealConfigs: SerializedConfig[]
   defaultOurLegalEntity: {
     id: string
@@ -78,7 +82,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const [, startTransition] = useTransition()
 
-  const [locModal, setLocModal] = useState<{ open: boolean; location?: ClientLocation }>({ open: false })
+  const [locModal, setLocModal] = useState<{ open: boolean; location?: SerializedLocation }>({ open: false })
   const [cfgModal, setCfgModal] = useState<{ open: boolean; config?: SerializedConfig }>({ open: false })
   const [contactModal, setContactModal] = useState<{ open: boolean; contact?: ClientContactDTO }>({ open: false })
 
@@ -383,11 +387,11 @@ function LocationsTab({
   onEdit,
   onArchive,
 }: {
-  locations: ClientLocation[]
+  locations: SerializedLocation[]
   // MEGA-BACKEND блок B: список активных курьеров для селекта «Курьер».
   couriers: Array<{ id: string; name: string }>
   onAdd: () => void
-  onEdit: (loc: ClientLocation) => void
+  onEdit: (loc: SerializedLocation) => void
   onArchive: (id: string, name: string, isActive: boolean) => void
 }) {
   const [, startTransition] = useTransition()

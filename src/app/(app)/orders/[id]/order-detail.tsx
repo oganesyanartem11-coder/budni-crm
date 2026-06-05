@@ -73,7 +73,8 @@ interface OrderData {
   lockedAt: Date | string | null
   editedAfterLockAt: Date | string | null
   client: Pick<Client, 'id' | 'name' | 'contactName' | 'contactPhone'>
-  location: Pick<ClientLocation, 'id' | 'name' | 'address' | 'packaging' | 'tags' | 'deliveryWindowFrom' | 'deliveryWindowTo'>
+  // Boris wave 4: deliveryFee — Decimal в БД, но order прокидывается через serialize() → number | null.
+  location: Pick<ClientLocation, 'id' | 'name' | 'address' | 'packaging' | 'tags' | 'deliveryWindowFrom' | 'deliveryWindowTo'> & { deliveryFee: number | null }
   sourceConfig: { id: string; orderType: string; scheduleType: string; fixedPortions: number | null } | null
   createdBy: Pick<PrismaUser, 'id' | 'name' | 'role'> | null
   delivery: {
@@ -563,6 +564,12 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
               <dd className="tabular-nums">{formatMoney(order.pricePerPortion)}</dd>
             </div>
           </dl>
+
+          {order.location.deliveryFee != null && Number(order.location.deliveryFee) > 0 && (
+            <p className="mt-2 text-xs text-fg-subtle">
+              Доставка: {formatMoney(order.location.deliveryFee)} (за день, не входит в сумму заказа)
+            </p>
+          )}
 
           <div className="border-t border-border my-4" />
 

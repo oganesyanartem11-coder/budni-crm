@@ -16,6 +16,7 @@ import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
+import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
 import { getFinancialWeek, getPreviousFinancialWeek } from '@/lib/utils/week'
 import type {
   ClientOrderAggregate,
@@ -87,7 +88,7 @@ export async function buildDayContext(now: Date = new Date()): Promise<DayContex
   // из-за чего EVENING в 20:00 включал вчерашние реакции и Боря писал
   // «на фоне 4 грубых тонов за день», хотя грубости были вчера. EVENING
   // должен говорить только про факты текущего дня.
-  const [todayAgg, todayOrders, tomorrowOrders, materialCostToday, events, tones] =
+  const [todayAgg, todayOrders, tomorrowOrders, materialCostToday, events, tones, deliveryToday] =
     await Promise.all([
       prisma.order.aggregate({
         where: { deliveryDate: todayMsk, status: { in: TODAY_STATUSES } },
@@ -112,10 +113,13 @@ export async function buildDayContext(now: Date = new Date()): Promise<DayContex
         orderBy: { createdAt: 'asc' },
       }),
       getToneSummary(todayMsk, tomorrowMsk),
+      // Волна 4: сервисная выручка (доставка) за сегодня — отдельно от food.
+      sumDeliveryRevenue({ from: todayMsk, to: tomorrowMsk }),
     ])
 
   const portionsToday = todayAgg._sum.portions ?? 0
   const revenueToday = Number(todayAgg._sum.totalPrice ?? 0)
+  const deliveryRevenueToday = Number(deliveryToday)
 
   const tomorrowByClient = aggregateByClient(tomorrowOrders)
   const portionsTomorrow = tomorrowOrders.reduce((s, o) => s + o.portions, 0)
@@ -156,6 +160,9 @@ export async function buildDayContext(now: Date = new Date()): Promise<DayContex
     today: {
       portionsTotal: portionsToday,
       revenueRub: revenueToday,
+      foodRevenueRub: revenueToday,
+      deliveryRevenueRub: deliveryRevenueToday,
+      totalRevenueRub: revenueToday + deliveryRevenueToday,
       materialCostRub: materialCostToday.totalCost,
       daysWithoutMenu: materialCostToday.daysWithoutMenu,
       byClient: aggregateByClient(todayOrders),
@@ -185,7 +192,12 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
 
   // Для запросов по @db.Date Order.deliveryDate границы должны быть МСК-полуночами;
   // getFinancialWeek уже возвращает корректные MSK-полночи как UTC-точки.
-  const [weekAgg, weekOrders, prevWeekAgg, materialCostWeek, events, tones] = await Promise.all([
+  // Волна 4: верхняя граница для delivery-хелпера полу-открытая [from, to) —
+  // прибавляем сутки к weekTo (МСК-полночь последнего дня), чтобы включить его.
+  const weekToExclusive = new Date(weekTo.getTime() + DAY_MS)
+
+  const [weekAgg, weekOrders, prevWeekAgg, materialCostWeek, events, tones, deliveryWeek] =
+    await Promise.all([
     prisma.order.aggregate({
       where: { deliveryDate: { gte: weekFrom, lte: weekTo }, status: { in: TODAY_STATUSES } },
       _sum: { totalPrice: true, portions: true },
@@ -210,7 +222,12 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
       orderBy: { createdAt: 'asc' },
     }),
     getToneSummary(weekFrom, weekTo),
+    // Волна 4: сервисная выручка (доставка) за неделю — отдельно от food.
+    sumDeliveryRevenue({ from: weekFrom, to: weekToExclusive }),
   ])
+
+  const weekRevenueRub = Number(weekAgg._sum.totalPrice ?? 0)
+  const deliveryRevenueWeek = Number(deliveryWeek)
 
   const byClientAgg = aggregateByClient(weekOrders)
   const topClients = byClientAgg.slice(0, 5)
@@ -254,7 +271,10 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
     weekFrom,
     weekTo,
     portionsTotal: weekAgg._sum.portions ?? 0,
-    revenueRub: Number(weekAgg._sum.totalPrice ?? 0),
+    revenueRub: weekRevenueRub,
+    foodRevenueRub: weekRevenueRub,
+    deliveryRevenueRub: deliveryRevenueWeek,
+    totalRevenueRub: weekRevenueRub + deliveryRevenueWeek,
     materialCostRub: materialCostWeek.totalCost,
     daysWithoutMenu: materialCostWeek.daysWithoutMenu,
     ordersCount: weekAgg._count._all,

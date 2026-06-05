@@ -104,6 +104,30 @@ describe('formatProductionSummary', () => {
     expect(text).not.toContain('Фиксированные')
   })
 
+  it('Волна 4: deliveryRevenue>0 добавляет хвост «+ X ₽ доставка», food-итог не меняется', () => {
+    const text = formatProductionSummary({
+      dateLabel: 'чт, 5 июня',
+      orders: [{ clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      totalPortions: 10,
+      totalRevenue: 12450,
+      deliveryRevenue: 800,
+    })
+    // food-итог остался как был.
+    expect(text).toContain(`Завтра: 1 заказ, 10 порций, ${formatMoney(12450)}`)
+    // и к нему приклеился хвост доставки.
+    expect(text).toContain(`${formatMoney(12450)} + ${formatMoney(800)} доставка`)
+  })
+
+  it('Волна 4: deliveryRevenue=0/отсутствует → хвоста доставки нет', () => {
+    const text = formatProductionSummary({
+      dateLabel: 'чт, 5 июня',
+      orders: [{ clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      totalPortions: 10,
+      totalRevenue: 1000,
+    })
+    expect(text).not.toContain('доставка')
+  })
+
   it('блок «Не ответили» отображается отдельно при наличии', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
