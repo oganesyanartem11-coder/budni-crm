@@ -20,6 +20,8 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'reminder-and-summary-2',      scheduleUtc: '30 12 * * *', description: 'Reminder менеджеру #2',                maxAgeHours: 26 },
   { jobName: 'cutoff-notice',               scheduleUtc: '0 13 * * *',  description: 'Cut-off нотификация клиентам',         maxAgeHours: 26 },
   { jobName: 'production-summary',          scheduleUtc: '5 13 * * *',  description: 'Сводка для шефа в группу',             maxAgeHours: 26 },
+  { jobName: 'route-sheet-evening',         scheduleUtc: '10 13 * * *', description: 'Маршрутный лист на завтра в чат-производство (16:10 МСК)', maxAgeHours: 26 },
+  { jobName: 'route-sheet-sameday',         scheduleUtc: '50 4 * * *',  description: 'Same-day маршрутный лист на сегодня (07:50 МСК)', maxAgeHours: 26 },
   { jobName: 'check-late-deliveries',       scheduleUtc: '*/10 6-19 * * *', description: 'Поздние доставки — алерт каждые 10 минут (9-22 МСК)', maxAgeHours: 14 },
   { jobName: 'courier-evening-preview',     scheduleUtc: '0 15 * * *',  description: 'Вечерний обзор заказов без курьера на завтра (18:00 МСК)', maxAgeHours: 26 },
   { jobName: 'courier-hour-before-window',  scheduleUtc: '*/30 2-8 * * *', description: 'Заказ без курьера за час до окна доставки (каждые 30 мин)', maxAgeHours: 2 },

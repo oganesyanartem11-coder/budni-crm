@@ -3,7 +3,7 @@
 import { useState, useTransition, useEffect } from 'react'
 import { X, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
-import { createMealConfigBulk, updateMealConfig } from '../actions'
+import { createMealConfigBulk, updateMealConfig, previewPriceCascade, cascadePriceToFutureOrders } from '../actions'
 import {
   MEAL_TYPE_LABELS,
   ORDER_TYPE_LABELS,
@@ -52,6 +52,10 @@ const MEAL_TYPES_ORDER: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
 export function MealConfigModal({ clientId, locations, config, open, onClose }: Props) {
   const isEditing = !!config
   const [isPending, startTransition] = useTransition()
+
+  // П6: исходная цена конфига на момент открытия модалки — сравниваем с
+  // отправленной, чтобы понять, нужно ли предлагать каскад цены на заказы.
+  const originalPrice = config?.pricePerPortion ?? null
 
   // При создании, если у клиента ровно одна локация — преселектим её.
   // При редактировании сохраняем существующий locationId.
@@ -131,6 +135,18 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     newPortions: number
   } | null>(null)
 
+  // П6: подтверждение каскада ЦЕНЫ на будущие заказы. После успешного апдейта
+  // конфига, если цена изменилась — показываем второй диалог с превью (число
+  // заказов + сумма OLD ₽ → NEW ₽) и предлагаем применить новую цену ко всем.
+  // НЕ блокирует закрытие модалки конфига — это follow-up шаг.
+  const [priceCascadeState, setPriceCascadeState] = useState<{
+    configId: string
+    newPrice: number
+    count: number
+    oldTotal: number
+    newTotal: number
+  } | null>(null)
+
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
@@ -176,6 +192,28 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     if (result.ok) {
       toast.success('Питание обновлено')
       setConfirmState(null)
+
+      // П6: цена изменилась → предлагаем каскад на будущие заказы. Сначала
+      // запрашиваем превью; если затронутых заказов нет — просто закрываем.
+      const priceChanged =
+        originalPrice !== null && Math.abs(data.pricePerPortion - originalPrice) > 1e-9
+      if (priceChanged) {
+        const preview = await previewPriceCascade({
+          configId: config.id,
+          newPrice: data.pricePerPortion,
+        })
+        if (preview.count > 0) {
+          setPriceCascadeState({
+            configId: config.id,
+            newPrice: data.pricePerPortion,
+            count: preview.count,
+            oldTotal: preview.oldTotal,
+            newTotal: preview.newTotal,
+          })
+          return
+        }
+      }
+
       onClose()
       return
     }
@@ -238,6 +276,29 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     if (!payload) return
     startTransition(async () => {
       await submitUpdate(payload, confirm)
+    })
+  }
+
+  // П6: применить новую цену ко всем будущим заказам (или отказаться). В обоих
+  // случаях закрываем модалку — конфиг уже сохранён, каскад это follow-up.
+  function handlePriceCascade(apply: boolean) {
+    const state = priceCascadeState
+    setPriceCascadeState(null)
+    if (!apply || !state) {
+      onClose()
+      return
+    }
+    startTransition(async () => {
+      const res = await cascadePriceToFutureOrders({
+        configId: state.configId,
+        newPrice: state.newPrice,
+      })
+      if (res.ok) {
+        toast.success(`Цена применена к заказам: ${res.affectedCount}`)
+      } else {
+        toast.error(res.error)
+      }
+      onClose()
     })
   }
 
@@ -673,6 +734,42 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
             </AlertDialogFooter>
           </>
         )}
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* П6: подтверждение каскада ЦЕНЫ на будущие заказы. */}
+    <AlertDialog
+      open={priceCascadeState !== null}
+      onOpenChange={(o) => { if (!o) handlePriceCascade(false) }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="font-display">Применить новую цену к будущим заказам?</AlertDialogTitle>
+          <AlertDialogDescription className="text-fg-muted">
+            {priceCascadeState && (
+              <>
+                Найдено {priceCascadeState.count} будущих заказов (подтверждённых и
+                ожидающих). Сумма: {priceCascadeState.oldTotal.toLocaleString('ru-RU')} ₽
+                {' → '}
+                {priceCascadeState.newTotal.toLocaleString('ru-RU')} ₽.
+              </>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel
+            disabled={isPending}
+            onClick={() => handlePriceCascade(false)}
+          >
+            Не применять
+          </AlertDialogCancel>
+          <AlertDialogAction
+            disabled={isPending}
+            onClick={() => handlePriceCascade(true)}
+          >
+            {priceCascadeState ? `Применить ко всем ${priceCascadeState.count}` : 'Применить'}
+          </AlertDialogAction>
+        </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
     </>

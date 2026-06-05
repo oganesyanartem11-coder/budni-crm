@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
+import type { MealType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { generateOnboardingToken, buildOnboardingDeeplink } from '@/lib/bot/onboarding'
@@ -731,6 +732,153 @@ export async function updateMealConfig(
 
   revalidatePath(`/clients/${config.clientId}`)
   return { ok: true, data: undefined }
+}
+
+// П6: каскад изменения ЦЕНЫ конфига на будущие заказы ===============
+//
+// Когда менеджер меняет pricePerPortion в ClientMealConfig, уже сгенерированные
+// будущие заказы (CONFIRMED + PENDING_CONFIRMATION) остаются со старой ценой —
+// это «снапшот на момент создания». П6 даёт явный, подтверждаемый шаг:
+// применить новую цену ко всем будущим заказам этого клиента/локации/типа.
+//
+// КРИТИЧНО — матчим по БИЗНЕС-КЛЮЧУ (clientId, locationId, mealType), а НЕ по
+// sourceConfigId: бот/DYNAMIC-заказы создаются с source='BOT', sourceConfigId=NULL
+// (save-orders.ts), поэтому матчинг по sourceConfigId пропустил бы основной кейс.
+// Это зеркалит computeUnconfirmedConfigs в production-summary.
+//
+// Граница «будущие» — deliveryDate >= ЗАВТРА по МСК (сегодняшний заказ уже в
+// работе, не трогаем). totalPrice пересчитываем per-order: newPrice * portions.
+
+const CASCADE_STATUSES = ['CONFIRMED', 'PENDING_CONFIRMATION'] as const
+
+/**
+ * Where-clause для «будущих заказов под этот конфиг по бизнес-ключу».
+ * Выделено, чтобы preview и cascade гарантированно совпадали по выборке.
+ */
+function futureOrdersByBusinessKeyWhere(config: {
+  clientId: string
+  locationId: string
+  mealType: MealType
+}): Prisma.OrderWhereInput {
+  return {
+    clientId: config.clientId,
+    locationId: config.locationId,
+    mealType: config.mealType,
+    status: { in: [...CASCADE_STATUSES] },
+    deliveryDate: { gte: getMskCalendarDayUtc(new Date(), 1) },
+  }
+}
+
+/**
+ * П6 (A.2): read-only превью каскада цены для диалога подтверждения.
+ * Возвращает число затронутых будущих заказов и сумму totalPrice ДО и ПОСЛЕ.
+ * oldTotal — сумма текущих totalPrice; newTotal — newPrice * portions по каждому.
+ */
+export async function previewPriceCascade(params: {
+  configId: string
+  newPrice: number
+}): Promise<{ count: number; oldTotal: number; newTotal: number }> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  const config = await prisma.clientMealConfig.findUnique({
+    where: { id: params.configId },
+    select: { clientId: true, locationId: true, mealType: true },
+  })
+  if (!config) return { count: 0, oldTotal: 0, newTotal: 0 }
+
+  const orders = await prisma.order.findMany({
+    where: futureOrdersByBusinessKeyWhere(config),
+    select: { portions: true, totalPrice: true },
+  })
+
+  const newPrice = new Prisma.Decimal(params.newPrice)
+  let oldTotal = new Prisma.Decimal(0)
+  let newTotal = new Prisma.Decimal(0)
+  for (const o of orders) {
+    oldTotal = oldTotal.add(o.totalPrice)
+    newTotal = newTotal.add(newPrice.mul(o.portions))
+  }
+
+  return {
+    count: orders.length,
+    oldTotal: oldTotal.toNumber(),
+    newTotal: newTotal.toNumber(),
+  }
+}
+
+/**
+ * П6 (A.1): применяет новую цену конфига ко ВСЕМ будущим заказам по бизнес-ключу
+ * (CONFIRMED + PENDING_CONFIRMATION, deliveryDate >= завтра по МСК).
+ *
+ * pricePerPortion := newPrice, totalPrice := newPrice * portions (Decimal).
+ * Обновляем партиями по 100 — каждая партия в своей $transaction (как cascade
+ * порций в updateMealConfig). Идемпотентно: повторный вызов перезапишет тем же.
+ */
+export async function cascadePriceToFutureOrders(params: {
+  configId: string
+  newPrice: Prisma.Decimal | number
+}): Promise<
+  | { ok: true; affectedCount: number; oldPrice: number; newPrice: number }
+  | { ok: false; error: string }
+> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+
+  const config = await prisma.clientMealConfig.findUnique({
+    where: { id: params.configId },
+    select: { clientId: true, locationId: true, mealType: true, pricePerPortion: true },
+  })
+  if (!config) return { ok: false, error: 'Питание не найдено' }
+
+  const newPrice = new Prisma.Decimal(params.newPrice)
+  if (newPrice.isNegative()) {
+    return { ok: false, error: 'Цена не может быть отрицательной' }
+  }
+
+  const orders = await prisma.order.findMany({
+    where: futureOrdersByBusinessKeyWhere(config),
+    select: { id: true, portions: true },
+  })
+
+  const CHUNK_SIZE = 100
+  for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
+    const chunk = orders.slice(i, i + CHUNK_SIZE)
+    await prisma.$transaction(
+      chunk.map((o) =>
+        prisma.order.update({
+          where: { id: o.id },
+          data: {
+            pricePerPortion: newPrice,
+            totalPrice: newPrice.mul(o.portions),
+          },
+        })
+      )
+    )
+  }
+
+  const oldPrice = config.pricePerPortion.toNumber()
+  const newPriceNum = newPrice.toNumber()
+
+  await prisma.activityLog.create({
+    data: {
+      userId: user.id,
+      userRole: user.role,
+      action: 'MEAL_CONFIG_PRICE_CASCADED',
+      entityType: 'ClientMealConfig',
+      entityId: params.configId,
+      payload: {
+        configId: params.configId,
+        oldPrice,
+        newPrice: newPriceNum,
+        affectedCount: orders.length,
+        affectedOrderIds: orders.slice(0, 100).map((o) => o.id),
+      },
+    },
+  })
+
+  revalidatePath(`/clients/${config.clientId}`)
+  revalidatePath('/orders')
+
+  return { ok: true, affectedCount: orders.length, oldPrice, newPrice: newPriceNum }
 }
 
 export async function deleteMealConfig(id: string): Promise<ActionResult> {

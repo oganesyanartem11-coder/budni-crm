@@ -4,6 +4,12 @@ import { processClientMessage } from '@/lib/bot/process-message'
 import { logBotMessage } from '@/lib/bot/log-message'
 import { pickWelcomeKind, getWelcomeText } from '@/lib/bot/welcome'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { findClientByMaxChatId } from '@/lib/db/queries/bot'
+import { createInboxItem } from '@/lib/bot/create-inbox-item'
+import {
+  handleWeeklyPhotoSubmission,
+  handleWeeklyTextSubmission,
+} from '@/lib/max/handlers/weekly'
 
 /**
  * Входящее сообщение от клиента.
@@ -31,6 +37,70 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
       })
     } catch (err) {
       console.warn('[bot] back-fill maxUsername failed:', err)
+    }
+  }
+
+  // MEGA wiring (Subagent C): WEEKLY-клиент прислал заявку (фото бумажного
+  // списка или SMS-текст). Резолвим клиента и, если он WEEKLY, обрабатываем
+  // через выделенный пайплайн (parser → sanity → actions → notify) и
+  // ОБЯЗАТЕЛЬНО early-return — WEEKLY-сообщения НЕ должны попадать в
+  // processClientMessage (иначе двойная обработка). Не-WEEKLY клиенты (и
+  // случаи, когда клиент не найден) идут по старому пути без изменений.
+  const client = await findClientByMaxChatId(maxChatId)
+  const isWeekly =
+    !!client &&
+    client.isActive &&
+    client.locations.some((l) =>
+      l.mealConfigs.some((c) => c.orderType === 'WEEKLY' && c.isActive)
+    )
+
+  if (isWeekly && client) {
+    // Любой исход WEEKLY-ветки — early-return: эти сообщения НИКОГДА не уходят
+    // в processClientMessage (иначе двойная обработка). Ошибки внутри глотаем,
+    // не пробрасывая в общий поток.
+    try {
+      const attachments = ctx.message?.body?.attachments ?? []
+      const imageAttachment = attachments.find(
+        (a): a is typeof a & { payload?: { url?: string } } => a?.type === 'image'
+      )
+      const nonImageAttachment = attachments.find((a) => a?.type !== 'image')
+
+      // Не-image вложение (документ/файл) — парсер не умеет. В inbox менеджеру.
+      if (nonImageAttachment && !imageAttachment) {
+        await createInboxItem({
+          clientId: client.id,
+          reason: 'NON_NUMERIC',
+          humanReason: `WEEKLY-клиент прислал не-image вложение (${nonImageAttachment.type}) — обработать вручную`,
+          priority: 'NORMAL',
+          clientMessage: text || null,
+        })
+        await sendBotMessage(maxChatId, 'Получили файл, обрабатываем…')
+        return
+      }
+
+      // Фото заявки.
+      const attachmentUrl = imageAttachment?.payload?.url
+      if (attachmentUrl) {
+        await handleWeeklyPhotoSubmission({
+          client,
+          attachmentUrl,
+          caption: text || undefined,
+          chatId: maxChatId,
+        })
+        return
+      }
+
+      // Текст-заявка (SMS-style список).
+      if (text.trim()) {
+        await handleWeeklyTextSubmission({ client, text, chatId: maxChatId })
+        return
+      }
+
+      // Пусто (ни фото, ни текста) — нечего обрабатывать.
+      return
+    } catch (err) {
+      console.error('[bot] WEEKLY submission handling failed:', err)
+      return
     }
   }
 

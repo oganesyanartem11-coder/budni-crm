@@ -12,6 +12,8 @@
     { "path": "/api/cron/reminder-and-summary-2", "schedule": "30 12 * * *" },
     { "path": "/api/cron/cutoff-notice", "schedule": "0 13 * * *" },
     { "path": "/api/cron/production-summary", "schedule": "5 13 * * *" },
+    { "path": "/api/cron/route-sheet-evening", "schedule": "10 13 * * *" },
+    { "path": "/api/cron/route-sheet-sameday", "schedule": "50 4 * * *" },
     { "path": "/api/cron/check-late-deliveries", "schedule": "*/10 6-19 * * *" },
     { "path": "/api/cron/courier-evening-preview", "schedule": "0 15 * * *" },
     { "path": "/api/cron/courier-hour-before-window", "schedule": "*/30 2-8 * * *" },

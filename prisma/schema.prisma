@@ -819,6 +819,11 @@ model Order {
   // Один флаг на оба cron'а (вечерний обзор + за час до окна).
   courierMissingNotifiedAt DateTime?
 
+  // П2: антидубль для cron'ов маршрутного листа (route-sheet-evening / -sameday).
+  // Ставится после успешной отправки листа в чат-производство — повторный
+  // заход cron'а за тот же день не шлёт лист снова.
+  routeSheetSentAt DateTime?
+
   // 7b-2: snapshot нашего юрлица отгрузки и ставки НДС на момент создания заказа.
   // Копируется из client.defaultOurLegalEntityId. Меняется отдельным action'ом
   // changeOrderLegalEntity (только до lock). Используется в УПД (7c).
