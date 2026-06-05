@@ -85,15 +85,19 @@ function readAppBaseUrl(): string {
  * П5: опциональный ID чата производства (TELEGRAM_PRODUCTION_CHAT_ID).
  * В отличие от groupChatId — НЕ обязателен и НЕ роняет систему:
  *  - не задан / пустой → null (вызывающий код делает фолбэк в личку ADMIN_PRO);
- *  - задан, но не похож на групповой chat_id (не начинается с -100) → console.warn + null.
+ *  - задан, но не похож на chat_id (не начинается с минуса) → console.warn + null.
  * Никогда не throw — чтобы отсутствие/опечатка ENV не ломала cron'ы и сводки.
  */
 export function readProductionChatId(): string | null {
   const v = process.env.TELEGRAM_PRODUCTION_CHAT_ID?.trim()
   if (!v) return null
-  if (!v.startsWith('-100')) {
+  // П1-фикс: id чата в Telegram отрицательный — обычная группа начинается с
+  // «-NNN», супергруппа/канал с «-100…». Раньше требовали строго «-100», из-за
+  // чего корректный id обычной группы отвергался → фолбэк в личку. Теперь та же
+  // мягкая проверка, что у readGroupChatId — достаточно ведущего минуса.
+  if (!v.startsWith('-')) {
     console.warn(
-      `[telegram/env] TELEGRAM_PRODUCTION_CHAT_ID выглядит некорректно (ожидался групповой chat_id, начинающийся с -100, получено: ${v}). Фолбэк в личку ADMIN_PRO.`
+      `[telegram/env] TELEGRAM_PRODUCTION_CHAT_ID выглядит некорректно — id чата должен начинаться с минуса (получено: ${v}). Фолбэк в личку ADMIN_PRO.`
     )
     return null
   }

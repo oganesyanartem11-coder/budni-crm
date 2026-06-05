@@ -11,7 +11,7 @@ vi.mock('@/lib/db/prisma', () => ({ prisma: {} }))
 vi.mock('@/lib/auth/current-user', () => ({ requireRole: vi.fn() }))
 vi.mock('@/lib/upd/document-number', () => ({ getNextDocumentNumber: vi.fn() }))
 
-import { buildSnapshots } from './actions'
+import { buildSnapshots } from './build-snapshots'
 
 type OrderFull = Parameters<typeof buildSnapshots>[0][number]
 
