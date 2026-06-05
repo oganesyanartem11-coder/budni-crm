@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowLeft, Printer, ChefHat, Package, FileText, FileStack, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, Printer, ChefHat, Package, FileText, FileStack, Truck, type LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 
@@ -51,6 +51,12 @@ export default async function PrintMenuPage({ searchParams }: PageProps) {
           icon={FileText}
           title="УПД"
           description="Универсальный передаточный документ. Превью, формирование, печать в двух экземплярах."
+        />
+        <PrintCard
+          href={`/production/print/route-sheet?date=${date}`}
+          icon={Truck}
+          title="Маршрутный лист"
+          description="Точка → заказы → порции → упаковка. Для курьера/развоза."
         />
         <PrintCard
           href="/production/print/upd/list"
