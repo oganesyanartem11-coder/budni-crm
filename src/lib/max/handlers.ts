@@ -5,6 +5,7 @@ import { logBotMessage } from '@/lib/bot/log-message'
 import { pickWelcomeKind, getWelcomeText } from '@/lib/bot/welcome'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { findClientByMaxChatId } from '@/lib/db/queries/bot'
+import { withDbRetry } from '@/lib/db-retry'
 import { createInboxItem } from '@/lib/bot/create-inbox-item'
 import {
   handleWeeklyPhotoSubmission,
@@ -46,7 +47,11 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
   // ОБЯЗАТЕЛЬНО early-return — WEEKLY-сообщения НЕ должны попадать в
   // processClientMessage (иначе двойная обработка). Не-WEEKLY клиенты (и
   // случаи, когда клиент не найден) идут по старому пути без изменений.
-  const client = await findClientByMaxChatId(maxChatId)
+  // P1001-фикс: первый запрос холодного Neon падает с P1001. Ретраим этот
+  // (первый) read, чтобы прогреть compute — дальше по handler'у БД уже тёплая.
+  const client = await withDbRetry(() => findClientByMaxChatId(maxChatId), {
+    label: 'max-webhook',
+  })
   const isWeekly =
     !!client &&
     client.isActive &&

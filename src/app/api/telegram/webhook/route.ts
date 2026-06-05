@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import type { Update } from 'grammy/types'
 import { getTelegramBot } from '@/lib/telegram/bot'
 import { getTelegramEnv } from '@/lib/telegram/env'
+import { withDbRetry } from '@/lib/db-retry'
 
 // grammy не работает на edge — явно фиксируем Node.js runtime.
 export const runtime = 'nodejs'
@@ -33,7 +34,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   try {
     const bot = await getTelegramBot()
-    await bot.handleUpdate(update)
+    // P1001-фикс: на холодном Neon первый DB-запрос внутри grammy-хендлера
+    // падает с P1001 ДО любой отправки сообщения. Ретраим update — прогреваем
+    // compute. Ретрай срабатывает только на P1001/P1002, поэтому двойной
+    // отправки не будет (на cold-start падение происходит до сайд-эффектов).
+    await withDbRetry(() => bot.handleUpdate(update), { label: 'telegram-webhook' })
   } catch (err) {
     // Не пробрасываем 5xx — Telegram начал бы ретраить с экспоненциальным
     // бэкоффом, нам это не нужно: ошибка уже залогирована.

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
+import { withDbRetry } from '@/lib/db-retry'
 import { CRON_HEARTBEAT_ACTION, CRON_ENTITY_TYPE } from './job-registry'
 
 export type CronHandler = (request: Request) => Promise<NextResponse>
@@ -28,7 +29,10 @@ export function withCronHeartbeat(jobName: string, handler: CronHandler): CronHa
     let payload: Record<string, unknown>
 
     try {
-      response = await handler(request)
+      // P1001-фикс: первый запрос холодного Neon падает с P1001. Ретраим весь
+      // handler (cron'ы идемпотентны — внутри свои anti-dup guard'ы), чтобы
+      // прогреть compute. Финальный heartbeat-write ниже после этого пройдёт.
+      response = await withDbRetry(() => handler(request), { label: `cron:${jobName}` })
       // Best-effort вытащить body для heartbeat-payload (не блокируем при ошибке).
       try {
         const cloned = response.clone()

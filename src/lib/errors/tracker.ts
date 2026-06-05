@@ -17,6 +17,7 @@
 
 import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/db/prisma'
+import { withDbRetry } from '@/lib/db-retry'
 
 export type ErrorLevel = 'error' | 'warn' | 'fatal'
 
@@ -115,27 +116,35 @@ export async function trackError(input: TrackErrorInput): Promise<void> {
     const payloadJson = input.extra && Object.keys(input.extra).length > 0 ? input.extra : null
 
     // Сначала пробуем найти существующую запись по fingerprint — нужна для escalation.
-    const existing = await prisma.errorLog.findUnique({
-      where: { fingerprint },
-      select: { id: true, level: true },
-    })
+    const existing = await withDbRetry(
+      () =>
+        prisma.errorLog.findUnique({
+          where: { fingerprint },
+          select: { id: true, level: true },
+        }),
+      { maxAttempts: 2, label: 'errorLog-find' }
+    )
 
     if (!existing) {
       // Новая ошибка: создаём + алертим в Telegram.
-      const created = await prisma.errorLog.create({
-        data: {
-          fingerprint,
-          message: message.slice(0, 1000),
-          stack: stack ? stack.slice(0, 8000) : null,
-          url: url ? url.slice(0, 500) : null,
-          method: method ?? null,
-          userId: input.user?.id ?? null,
-          userRole: input.user?.role ?? null,
-          environment: env,
-          level,
-          payload: payloadJson as never,
-        },
-      })
+      const created = await withDbRetry(
+        () =>
+          prisma.errorLog.create({
+            data: {
+              fingerprint,
+              message: message.slice(0, 1000),
+              stack: stack ? stack.slice(0, 8000) : null,
+              url: url ? url.slice(0, 500) : null,
+              method: method ?? null,
+              userId: input.user?.id ?? null,
+              userRole: input.user?.role ?? null,
+              environment: env,
+              level,
+              payload: payloadJson as never,
+            },
+          }),
+        { maxAttempts: 2, label: 'errorLog-create' }
+      )
 
       try {
         const { notifyTelegramOnNewError } = await import('./notify')
@@ -149,17 +158,21 @@ export async function trackError(input: TrackErrorInput): Promise<void> {
     // Существующая: increment count + update lastSeenAt.
     // Escalation: если уровень растёт до fatal — поднимаем уровень и алертим повторно.
     const shouldEscalate = existing.level !== 'fatal' && level === 'fatal'
-    const updated = await prisma.errorLog.update({
-      where: { fingerprint },
-      data: {
-        count: { increment: 1 },
-        lastSeenAt: new Date(),
-        ...(shouldEscalate ? { level: 'fatal' } : {}),
-        // Снимаем resolved, если ошибка снова появилась.
-        resolvedAt: null,
-        resolvedBy: null,
-      },
-    })
+    const updated = await withDbRetry(
+      () =>
+        prisma.errorLog.update({
+          where: { fingerprint },
+          data: {
+            count: { increment: 1 },
+            lastSeenAt: new Date(),
+            ...(shouldEscalate ? { level: 'fatal' } : {}),
+            // Снимаем resolved, если ошибка снова появилась.
+            resolvedAt: null,
+            resolvedBy: null,
+          },
+        }),
+      { maxAttempts: 2, label: 'errorLog-update' }
+    )
 
     if (shouldEscalate) {
       try {
