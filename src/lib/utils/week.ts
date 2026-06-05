@@ -243,17 +243,12 @@ export function getPresetRange(preset: ReportPreset, customFrom?: string, custom
 
   switch (preset) {
     case 'today': {
-      const from = new Date(now)
-      const to = new Date(now)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Сегодня' }
+      const today = mskTodayYmd(new Date())
+      return { from: mskStartOfDayUtc(today), to: mskEndOfDayUtc(today), label: 'Сегодня' }
     }
     case 'yesterday': {
-      const from = new Date(now)
-      from.setDate(from.getDate() - 1)
-      const to = new Date(from)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Вчера' }
+      const ymd = mskTodayYmd(new Date(Date.now() - DAY_MS))
+      return { from: mskStartOfDayUtc(ymd), to: mskEndOfDayUtc(ymd), label: 'Вчера' }
     }
     case 'this_week': {
       const { from, to } = getFinancialWeek(now)

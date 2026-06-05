@@ -46,6 +46,7 @@ import {
 import { MenuTreeView, type SerializedCycle } from './menu-tree-view'
 import { DishesListView, type SerializedDish } from './dishes-list-view'
 import { MENU_STATUS_LABELS } from '@/lib/constants/menu-status'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import type { MenuStatus, UserRole } from '@prisma/client'
 
 export interface AllIngredient {
@@ -104,7 +105,7 @@ export function ImportView({
     setTab('dishes')
   }
 
-  const isAdmin = userRole === 'ADMIN'
+  const isAdmin = isAdminLike(userRole)
   const isDraft = status === 'DRAFT'
   const isPendingApproval = status === 'PENDING_APPROVAL'
   const canEdit = isDraft

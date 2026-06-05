@@ -36,6 +36,7 @@ import {
   getDateForDayOfWeek,
 } from '@/lib/utils/week'
 import { MENU_STATUS_LABELS, MENU_STATUS_VARIANT } from '@/lib/constants/menu-status'
+import { isAdminLike } from '@/lib/auth/role-helpers'
 import { DISH_CATEGORY_ICONS } from '@/lib/constants/dish-categories'
 import {
   AlertDialog,
@@ -124,7 +125,7 @@ export function MenuView({ weekStartIso, menu, dishes, userRole, previewImportId
   const monday = new Date(weekStartIso)
   const isCurrent = isCurrentWeek(monday)
   const canEdit = userRole === 'ADMIN' || userRole === 'CHEF'
-  const isAdmin = userRole === 'ADMIN'
+  const isAdmin = isAdminLike(userRole)
   const isChef = userRole === 'CHEF'
   const isEditable = !!menu && menu.status === 'DRAFT' && canEdit
 
