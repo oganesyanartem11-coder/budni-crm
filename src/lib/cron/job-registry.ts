@@ -24,7 +24,10 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'route-sheet-sameday',         scheduleUtc: '50 4 * * *',  description: 'Same-day маршрутный лист на сегодня (07:50 МСК)', maxAgeHours: 26 },
   { jobName: 'check-late-deliveries',       scheduleUtc: '*/10 6-19 * * *', description: 'Поздние доставки — алерт каждые 10 минут (9-22 МСК)', maxAgeHours: 14 },
   { jobName: 'courier-evening-preview',     scheduleUtc: '0 15 * * *',  description: 'Вечерний обзор заказов без курьера на завтра (18:00 МСК)', maxAgeHours: 26 },
-  { jobName: 'courier-hour-before-window',  scheduleUtc: '*/30 2-8 * * *', description: 'Заказ без курьера за час до окна доставки (каждые 30 мин)', maxAgeHours: 2 },
+  // 20h: cron работает 05–11 МСК, монитор в 22:00 МСК (≈11h после последнего
+  // запуска) + запас на выходные, когда окон доставки почти нет. Прежние 2h
+  // давали вечный false-positive «stale» при дневном прогоне монитора.
+  { jobName: 'courier-hour-before-window',  scheduleUtc: '*/30 2-8 * * *', description: 'Заказ без курьера за час до окна доставки (каждые 30 мин)', maxAgeHours: 20 },
   { jobName: 'expire-pending-changes',      scheduleUtc: '*/10 * * * *', description: 'Протухшие запросы клиентов на изменение заказа (каждые 10 мин)', maxAgeHours: 1 },
   { jobName: 'unpriced-ingredients-digest', scheduleUtc: '0 9 * * 1',   description: 'Ингредиенты без цены (понедельник)',   maxAgeHours: 170 },
   { jobName: 'monitor-heartbeats',          scheduleUtc: '0 19 * * *',  description: 'Monitor cron heartbeats (себя не алертит)', maxAgeHours: 26 },
@@ -34,8 +37,15 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'market-check-reminder',       scheduleUtc: '0 7 * * 0',   description: 'Воскресная проверка рынка (овощи)',                 maxAgeHours: 170 },
   { jobName: 'weekly-request-reminder',     scheduleUtc: '0 9 * * 4',   description: 'Недельная заявка — напоминание клиенту (Чт 12:00 МСК)', maxAgeHours: 168 },
   { jobName: 'weekly-missing-alert',        scheduleUtc: '0 12 * * 5',  description: 'Недельная заявка — алёрт менеджеру если нет заявки (Пт 15:00 МСК)', maxAgeHours: 168 },
+  // Закрываем дыру мониторинга: cron бежал, но в реестре его не было → монитор
+  // его не отслеживал. 90h: работает Пн–Пт 08:00 МСК, монитор должен пережить
+  // перерыв Пт–Пн (макс ≈86h от Пт 08:00 МСК до Пн 22:00 МСК).
+  { jobName: 'boris-morning-briefing',      scheduleUtc: '0 5 * * 1-5', description: 'Утренний бриф Бори менеджерам (8:00 МСК, Пн–Пт)',   maxAgeHours: 90 },
   { jobName: 'boris-9am-summary',           scheduleUtc: '0 6 * * *',   description: 'Утренняя сводка отгрузок на сегодня в группу (9:00 МСК)', maxAgeHours: 26 },
-  { jobName: 'boris-team-evening-digest',   scheduleUtc: '0 17 * * 1-4', description: 'Итог дня в группу (Командный Боря)',                maxAgeHours: 26 },
+  // 80h: cron работает Пн–Чт 20:00 МСК, монитор должен пережить перерыв Пт–Вс
+  // (макс ≈74h от Чт 20:00 МСК до Пн 22:00 МСК). Прежние 26h давали
+  // false-positive «stale» в Пт/Сб/Вс.
+  { jobName: 'boris-team-evening-digest',   scheduleUtc: '0 17 * * 1-4', description: 'Итог дня в группу (Командный Боря)',                maxAgeHours: 80 },
   { jobName: 'boris-team-friday',           scheduleUtc: '0 16 * * 5',  description: 'Пятничный недельный итог (Командный Боря)',         maxAgeHours: 170 },
 ]
 
