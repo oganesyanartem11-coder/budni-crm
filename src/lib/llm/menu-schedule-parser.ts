@@ -67,14 +67,14 @@ ${rawMenuText}
     () =>
       client.messages.create({
         model: getParserModel(),
-        max_tokens: 8000,
+        max_tokens: 16000,
         system: cachedSystem,
         messages: [{ role: 'user', content: userPrompt }],
       }),
     () =>
       client.messages.create({
         model: getFallbackModel(),
-        max_tokens: 8000,
+        max_tokens: 16000,
         system: cachedSystem,
         messages: [{ role: 'user', content: userPrompt }],
       }),
@@ -104,6 +104,7 @@ ${rawMenuText}
     parsed = JSON.parse(jsonText)
   } catch {
     console.error('[LLM] menu-schedule-parser failed to parse JSON, raw:', rawLlmResponse)
+    console.error('[menu-schedule-parser] JSON.parse failed, raw response (first 2000 chars):', rawLlmResponse?.slice(0, 2000))
     return {
       entries: [],
       uniqueDishes: [],
