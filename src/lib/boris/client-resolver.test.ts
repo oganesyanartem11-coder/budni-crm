@@ -62,6 +62,22 @@ describe('normalizeClientName', () => {
     expect(normalizeClientName('ПАО Сбер')).toBe('сбер')
     expect(normalizeClientName('АО Тест')).toBe('тест')
   })
+
+  it('обрабатывает ОАО/НКО/ТОО', () => {
+    expect(normalizeClientName('ОАО Завод')).toBe('завод')
+    expect(normalizeClientName('НКО Фонд')).toBe('фонд')
+    expect(normalizeClientName('ТОО Алмаз')).toBe('алмаз')
+  })
+
+  it('прод-кейс ИНПАРТ: ООО + кавычки → "инпарт авто"', () => {
+    expect(normalizeClientName('ООО "ИНПАРТ АВТО"')).toBe('инпарт авто')
+  })
+
+  it('ИП с длинным ФИО → срезает только ИП', () => {
+    expect(normalizeClientName('ИП Комель Денис Владимирович')).toBe(
+      'комель денис владимирович'
+    )
+  })
 })
 
 describe('resolveClient', () => {
@@ -156,6 +172,96 @@ describe('resolveClient', () => {
     expect(r.matched.map((c) => c.id)).toEqual(['exact', 'startsWith', 'contains'])
     // exact один → suggested
     expect(r.suggested?.id).toBe('exact')
+  })
+})
+
+describe('resolveClient фаззи (Левенштейн ≤2)', () => {
+  it('exact (после нормализации) имеет приоритет над фаззи', async () => {
+    const prisma = makePrisma([client('ООО "ИНПАРТ АВТО"'), client('Другой')])
+    const r = await resolveClient('инпарт авто', prisma)
+    expect(r.suggested?.name).toBe('ООО "ИНПАРТ АВТО"')
+    expect(r.exact).toHaveLength(1)
+    expect(r.fuzzy).toHaveLength(0) // фаззи не запускается — чистый тир сработал
+    expect(r.rejected).toBeNull()
+  })
+
+  it('startsWith имеет приоритет над фаззи', async () => {
+    const prisma = makePrisma([client('Инпарт Логистика'), client('Розница')])
+    const r = await resolveClient('инпарт', prisma)
+    expect(r.startsWith).toHaveLength(1)
+    expect(r.fuzzy).toHaveLength(0)
+    expect(r.suggested?.name).toBe('Инпарт Логистика')
+  })
+
+  it('прод-кейс опечатки: "импарт авто" (И→М, dist 1) → фаззи единственный', async () => {
+    const prisma = makePrisma([
+      client('ООО "ИНПАРТ АВТО"'),
+      client('Розница соседи'),
+      client('Сириус'),
+    ])
+    const r = await resolveClient('импарт авто', prisma)
+    // чистые тиры пусты (подстрока «импарт» не найдена), фаззи находит одного
+    expect(r.exact).toHaveLength(0)
+    expect(r.startsWith).toHaveLength(0)
+    expect(r.contains).toHaveLength(0)
+    expect(r.fuzzy).toHaveLength(1)
+    expect(r.suggested?.name).toBe('ООО "ИНПАРТ АВТО"')
+    expect(r.rejected).toBeNull()
+  })
+
+  it('no_match: "абракадабра" → фаззи пуст, suggested null', async () => {
+    const prisma = makePrisma([client('Сириус'), client('Будни')])
+    const r = await resolveClient('абракадабра', prisma)
+    expect(r.fuzzy).toHaveLength(0)
+    expect(r.suggested).toBeNull()
+    expect(r.rejected).toBe('no_match')
+    expect(r.matched).toHaveLength(0)
+  })
+
+  it('дистанция 3 (за порогом) → no_match', async () => {
+    // «сириус» vs «сиплтт» — больше 2 правок → не фаззи.
+    const prisma = makePrisma([client('Сириус')])
+    const r = await resolveClient('сиплтт', prisma)
+    expect(r.fuzzy).toHaveLength(0)
+    expect(r.suggested).toBeNull()
+    expect(r.rejected).toBe('no_match')
+  })
+
+  it('два кандидата на dist 1 → ambiguous (не угадывание)', async () => {
+    // «сириус» ← оба «сириуа» и «сириум» на дистанции 1.
+    const prisma = makePrisma([client('Сириуа'), client('Сириум')])
+    const r = await resolveClient('сириус', prisma)
+    expect(r.fuzzy).toHaveLength(2)
+    expect(r.suggested).toBeNull()
+    expect(r.rejected).toBe('ambiguous')
+    expect(r.matched).toHaveLength(2)
+  })
+
+  it('ближайший на dist 1 побеждает дальнего на dist 2 (берётся минимум)', async () => {
+    const prisma = makePrisma([
+      client('Сириуа'), // dist 1
+      client('Сириаа'), // dist 2
+    ])
+    const r = await resolveClient('сириус', prisma)
+    expect(r.fuzzy).toHaveLength(1)
+    expect(r.suggested?.name).toBe('Сириуа')
+    expect(r.rejected).toBeNull()
+  })
+
+  it('фаззи учитывает ОПФ/кавычки в имени кандидата', async () => {
+    // DB: ООО "ИМПАРТ АВТО" с опечаткой запроса «инпарт авто» → нормализация
+    // обеих сторон, дистанция 1.
+    const prisma = makePrisma([client('ООО «ИМПАРТ АВТО»')])
+    const r = await resolveClient('инпарт авто', prisma)
+    expect(r.fuzzy).toHaveLength(1)
+    expect(r.suggested?.name).toBe('ООО «ИМПАРТ АВТО»')
+  })
+
+  it('фаззи не трогает неактивных клиентов', async () => {
+    const prisma = makePrisma([client('Сириуа', false)])
+    const r = await resolveClient('сириус', prisma)
+    expect(r.fuzzy).toHaveLength(0)
+    expect(r.rejected).toBe('no_match')
   })
 })
 

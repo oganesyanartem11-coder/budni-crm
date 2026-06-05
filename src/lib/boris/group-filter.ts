@@ -33,6 +33,69 @@ export function shouldRespondInChat(ctx: Context): boolean {
   return false
 }
 
+/**
+ * Boris reorg: размер «контекстного окна» группового диалога в сообщениях.
+ *
+ * Telegram message_id монотонно растёт per-chat, поэтому разница
+ * (messageId - lastBorisReplyMessageId) ≈ числу сообщений после последнего
+ * ответа Бориса. Если это «расстояние» > окна — считаем разговор уехавшим,
+ * молчим без Haiku-вызова.
+ *
+ * Caveat: удалённые/отредактированные сообщения не сдвигают message_id, так что
+ * оценка приблизительная (может слегка переоценивать дистанцию). Для гейта
+ * «отвечать ли вообще» этого достаточно.
+ */
+const BORIS_CONTEXT_WINDOW_MESSAGES = 20
+
+export interface ShouldRespondInGroupInput {
+  /** Текст входящего сообщения. */
+  text: string
+  /** TG chat id (для логов/будущего; в самой логике не участвует). */
+  chatId: number | string
+  /** message_id входящего сообщения (монотонный per-chat). */
+  messageId: number
+  /**
+   * message_id последнего ответа Бориса в этом чате, если он персистится.
+   * null → Борис ещё ни разу не отвечал здесь (или persistence не реализован).
+   */
+  lastBorisReplyMessageId: number | null
+}
+
+export interface ShouldRespondInGroupResult {
+  /** Отвечать ли на это групповое сообщение. */
+  should: boolean
+  /** Машинно-читаемая причина решения (для логов/тестов). */
+  reason: 'direct_mention' | 'no_prior_boris' | 'window_closed' | 'in_window'
+  /** Нужен ли Haiku-классификатор, чтобы окончательно решить (relates?). */
+  needsHaiku: boolean
+}
+
+/**
+ * Boris reorg: чистый гейт «отвечать ли Борису в группе».
+ *
+ * НЕ делает БД-работы — все нужные значения принимает параметрами. Решение:
+ *  1. Прямое адресное «Борис» в тексте → отвечаем сразу, Haiku не нужен.
+ *  2. Нет message_id прошлого ответа Бориса → нет контекста → молчим.
+ *  3. Дистанция от последнего ответа Бориса > окна → разговор уехал → молчим.
+ *  4. Иначе мы в окне без явного упоминания → нужен Haiku-классификатор,
+ *     который решит, относится ли сообщение к Борису (продолжение/спасибо/
+ *     жалоба) или это люди говорят между собой.
+ */
+export function shouldRespondInGroup(
+  input: ShouldRespondInGroupInput,
+): ShouldRespondInGroupResult {
+  if (mentionsBoris(input.text)) {
+    return { should: true, reason: 'direct_mention', needsHaiku: false }
+  }
+  if (input.lastBorisReplyMessageId == null) {
+    return { should: false, reason: 'no_prior_boris', needsHaiku: false }
+  }
+  if (input.messageId - input.lastBorisReplyMessageId > BORIS_CONTEXT_WINDOW_MESSAGES) {
+    return { should: false, reason: 'window_closed', needsHaiku: false }
+  }
+  return { should: true, reason: 'in_window', needsHaiku: true }
+}
+
 export type BorisChatType = 'private' | 'group' | 'supergroup' | 'channel'
 
 export interface BorisAccess {

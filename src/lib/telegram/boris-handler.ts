@@ -6,9 +6,11 @@ import { executePendingAction } from '@/lib/boris/executor'
 import { TOOL_TITLES } from '@/lib/boris/preview'
 import {
   shouldRespondInChat,
+  shouldRespondInGroup,
   resolveBorisAccess,
   type BorisChatType,
 } from '@/lib/boris/group-filter'
+import { classifyMessageRelatesToBoris } from '@/lib/boris/context-classifier'
 import { runAgentLoop } from '@/lib/llm/agent-loop'
 import { getBorisModel } from '@/lib/ai/models'
 import { getBorisSystemPrompt } from '@/lib/boris/personality'
@@ -91,13 +93,35 @@ async function answerStatelessReadOnly(ctx: Context, userText: string): Promise<
 }
 
 export async function handleBorisMessage(ctx: Context): Promise<void> {
-  // 7.28: в группах отвечаем только на адресное «Борис»; в личке — всегда.
-  if (!shouldRespondInChat(ctx)) return
-
+  // 7.28: в личке — всегда отвечаем. В группе — раньше отвечали ТОЛЬКО на
+  // адресное «Борис»; теперь добавлено 20-сообщений контекстное окно: если
+  // Борис недавно отвечал и новое сообщение в пределах окна — спрашиваем
+  // дешёвый Haiku-классификатор, относится ли реплика к Борису.
+  const chatType = (ctx.chat?.type ?? 'private') as BorisChatType
   const text = ctx.message?.text ?? ''
   if (!text || text.startsWith('/')) return // /команды не наш case
 
-  const chatType = (ctx.chat?.type ?? 'private') as BorisChatType
+  if (chatType === 'group' || chatType === 'supergroup') {
+    // Boris reorg: lastBorisReplyMessageId пока НИГДЕ не персистится для
+    // интерактивных групповых ответов (см. сводку — это follow-up со схемой).
+    // Передаём null → пока что работает только прямое упоминание «Борис»,
+    // что эквивалентно прежнему mentionsBoris-поведению (no regression).
+    const lastBorisReplyMessageId: number | null = null
+    const decision = shouldRespondInGroup({
+      text,
+      chatId: ctx.chat?.id ?? 0,
+      messageId: ctx.message?.message_id ?? 0,
+      lastBorisReplyMessageId,
+    })
+    if (!decision.should) return
+    if (decision.needsHaiku) {
+      const { relates } = await classifyMessageRelatesToBoris({ text })
+      if (!relates) return
+    }
+  } else if (!shouldRespondInChat(ctx)) {
+    // private / прочие типы — прежний гейт (личка всегда true, channel false).
+    return
+  }
   const user = await identifyTelegramUser(ctx)
   const access = resolveBorisAccess(chatType, !!user)
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mentionsBoris, resolveBorisAccess } from './group-filter'
+import { mentionsBoris, resolveBorisAccess, shouldRespondInGroup } from './group-filter'
 
 describe('mentionsBoris', () => {
   it('срабатывает на адресное обращение в начале', () => {
@@ -92,5 +92,47 @@ describe('resolveBorisAccess (П4: доступ Бориса по chatType + н�
     expect(resolveBorisAccess('channel', false).respond).toBe(false)
     expect(resolveBorisAccess('channel', true).respond).toBe(false)
     expect(resolveBorisAccess(undefined, false).respond).toBe(false)
+  })
+})
+
+describe('shouldRespondInGroup (Boris reorg: 20-сообщений контекстное окно)', () => {
+  const base = { chatId: -100, messageId: 100, lastBorisReplyMessageId: 95 }
+
+  it('прямое упоминание «Борис» → should:true, direct_mention, Haiku не нужен', () => {
+    expect(shouldRespondInGroup({ ...base, text: 'Борис, посчитай' })).toEqual({
+      should: true,
+      reason: 'direct_mention',
+      needsHaiku: false,
+    })
+  })
+
+  it('упоминание имеет приоритет даже без прошлого ответа Бориса', () => {
+    expect(
+      shouldRespondInGroup({ ...base, text: 'спроси Бориса', lastBorisReplyMessageId: null }),
+    ).toEqual({ should: true, reason: 'direct_mention', needsHaiku: false })
+  })
+
+  it('нет прошлого ответа Бориса (null) и без упоминания → should:false, no_prior_boris', () => {
+    expect(
+      shouldRespondInGroup({ ...base, text: 'ребят, кто на обед', lastBorisReplyMessageId: null }),
+    ).toEqual({ should: false, reason: 'no_prior_boris', needsHaiku: false })
+  })
+
+  it('в окне (дистанция ≤ 20, без упоминания) → should:true, in_window, needsHaiku:true', () => {
+    expect(
+      shouldRespondInGroup({ text: 'а если на 5 больше?', chatId: -100, messageId: 110, lastBorisReplyMessageId: 95 }),
+    ).toEqual({ should: true, reason: 'in_window', needsHaiku: true })
+  })
+
+  it('ровно на границе окна (дистанция = 20) → ещё в окне, needsHaiku:true', () => {
+    expect(
+      shouldRespondInGroup({ text: 'спасибо', chatId: -100, messageId: 115, lastBorisReplyMessageId: 95 }),
+    ).toEqual({ should: true, reason: 'in_window', needsHaiku: true })
+  })
+
+  it('дистанция > 20 → окно закрыто, should:false, window_closed, Haiku не нужен', () => {
+    expect(
+      shouldRespondInGroup({ text: 'что там по поставке', chatId: -100, messageId: 116, lastBorisReplyMessageId: 95 }),
+    ).toEqual({ should: false, reason: 'window_closed', needsHaiku: false })
   })
 })
