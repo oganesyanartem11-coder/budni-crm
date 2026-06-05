@@ -116,11 +116,11 @@ export function sortProductionSummaryRows<
 }
 
 /**
- * Одна строка клиента в сводке: «{Клиент}, {Локация} — N порций».
- * Без юр.лица (ООО/ИП/legalName) — только имя клиента и название точки.
+ * Одна строка в сводке: «📍 {Локация} — N порций».
+ * Без имени клиента и юр.лица — только название точки и число порций.
  */
 export function formatProductionSummaryRow(row: ProductionSummaryOrderRow): string {
-  return `${escapeHtml(row.clientName)}, ${escapeHtml(row.locationName)} — ${formatPortions(row.portions)}`
+  return `📍 ${escapeHtml(row.locationName)} — ${formatPortions(row.portions)}`
 }
 
 /**
@@ -154,7 +154,7 @@ export function formatProductionSummary(input: ProductionSummaryInput): string {
     lines.push('')
     lines.push(`⚠️ Не ответили (${sortedUnconfirmed.length}):`)
     for (const c of sortedUnconfirmed) {
-      lines.push(`${escapeHtml(c.clientName)}, ${escapeHtml(c.locationName)}`)
+      lines.push(`⏳ ${escapeHtml(c.locationName)}`)
     }
   }
 

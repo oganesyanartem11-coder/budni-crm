@@ -24,10 +24,6 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'route-sheet-sameday',         scheduleUtc: '50 4 * * *',  description: 'Same-day маршрутный лист на сегодня (07:50 МСК)', maxAgeHours: 26 },
   { jobName: 'check-late-deliveries',       scheduleUtc: '*/10 6-19 * * *', description: 'Поздние доставки — алерт каждые 10 минут (9-22 МСК)', maxAgeHours: 14 },
   { jobName: 'courier-evening-preview',     scheduleUtc: '0 15 * * *',  description: 'Вечерний обзор заказов без курьера на завтра (18:00 МСК)', maxAgeHours: 26 },
-  // 20h: cron работает 05–11 МСК, монитор в 22:00 МСК (≈11h после последнего
-  // запуска) + запас на выходные, когда окон доставки почти нет. Прежние 2h
-  // давали вечный false-positive «stale» при дневном прогоне монитора.
-  { jobName: 'courier-hour-before-window',  scheduleUtc: '*/30 2-8 * * *', description: 'Заказ без курьера за час до окна доставки (каждые 30 мин)', maxAgeHours: 20 },
   { jobName: 'expire-pending-changes',      scheduleUtc: '*/10 * * * *', description: 'Протухшие запросы клиентов на изменение заказа (каждые 10 мин)', maxAgeHours: 1 },
   { jobName: 'unpriced-ingredients-digest', scheduleUtc: '0 9 * * 1',   description: 'Ингредиенты без цены (понедельник)',   maxAgeHours: 170 },
   { jobName: 'monitor-heartbeats',          scheduleUtc: '0 19 * * *',  description: 'Monitor cron heartbeats (себя не алертит)', maxAgeHours: 26 },

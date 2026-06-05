@@ -97,10 +97,27 @@ describe('courier-evening-preview handler', () => {
 })
 
 describe('buildEveningPreviewText', () => {
-  it('шапка «БЕЗ КУРЬЕРА» + N + футер', () => {
+  it('шапка «Курьеров на завтра» + N + InDrive', () => {
     const text = buildEveningPreviewText([order(), order({ orderId: 'o2' })])
-    expect(text).toContain('Завтра БЕЗ КУРЬЕРА: 2 заказов')
-    expect(text).toContain('Закажите курьеров заранее.')
+    expect(text).toContain('Курьеров на завтра: 2 заказов')
+    expect(text).toContain('Закажите через InDrive')
+  })
+
+  it('адрес и телефон обёрнуты в <code>', () => {
+    const text = buildEveningPreviewText([
+      order({ locationAddress: 'Ленина 1', clientContactPhone: '+7900' }),
+    ])
+    expect(text).toContain('Адрес: <code>Ленина 1</code>')
+    expect(text).toContain('Телефон: <code>+7900</code>')
+  })
+
+  it('пункты пронумерованы; имя точки в <b>, клиент в скобках', () => {
+    const text = buildEveningPreviewText([
+      order({ locationName: 'Точка', clientName: 'Кафе' }),
+      order({ orderId: 'o2', locationName: 'Точка2', clientName: 'Кафе2' }),
+    ])
+    expect(text).toContain('1. <b>Точка</b> (Кафе)')
+    expect(text).toContain('2. <b>Точка2</b> (Кафе2)')
   })
 
   it('окно=null → «не указано»', () => {
@@ -110,9 +127,9 @@ describe('buildEveningPreviewText', () => {
     expect(text).toContain('Окно: не указано')
   })
 
-  it('контакт=null → «не указан»', () => {
+  it('контакт=null → «не указан» (без <code>)', () => {
     const text = buildEveningPreviewText([order({ clientContactPhone: null })])
-    expect(text).toContain('Контакт: не указан')
+    expect(text).toContain('Телефон: не указан')
   })
 
   it('окно задано → «from-to»; объём с ₽', () => {

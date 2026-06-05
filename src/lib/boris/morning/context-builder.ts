@@ -133,6 +133,15 @@ function mskWeekdayFromMidnight(midnight: Date): number {
   return d === 0 ? 7 : d
 }
 
+/**
+ * П6: понедельник ли это по МСК-календарю для момента `now`.
+ * Берём МСК-полночь текущих суток и переводим в день недели (Пн=1).
+ * Чистая функция (вынесена для тестируемости — buildMorningContext требует БД).
+ */
+export function isMondayMsk(now: Date): boolean {
+  return mskWeekdayFromMidnight(mskMidnightUtc(now, 0)) === 1
+}
+
 export async function buildMorningContext(now: Date): Promise<MorningContext | null> {
   const todayMsk = mskMidnightUtc(now, 0)
   const tomorrowMsk = mskMidnightUtc(now, 1)
@@ -415,6 +424,11 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
   if (deltaPercent > 15) triggers.push('big_volume')
   if (attentionSliced.some((a) => a.type === 'first_delivery')) triggers.push('new_client')
   if (attentionSliced.length >= 3) triggers.push('hard_day')
+
+  // П6: понедельник — всегда заряжаем команду, задаём темп на неделю.
+  // Этот триггер сам по себе делает chargeContext непустым (recommendCharge=true),
+  // даже если других триггеров нет.
+  if (isMondayMsk(now)) triggers.push('monday_start_of_week')
 
   // streak_no_complaints — считаем подряд дни без rude/urgent. День = МСК-сутки.
   // Для каждого из последних N+1 дней (включая текущий) проверяем наличие.

@@ -8,23 +8,28 @@ import {
 } from './production-summary-format'
 
 describe('formatProductionSummaryRow', () => {
-  it('строка клиента: «{Клиент}, {Локация} — N порций» без юр.лица', () => {
+  it('строка: «📍 {Локация} — N порций», без имени клиента', () => {
     const row = formatProductionSummaryRow({
       clientName: 'Кофейня У Дома',
       locationName: 'Тверская',
       portions: 12,
     })
-    expect(row).toBe('Кофейня У Дома, Тверская — 12 порций')
+    expect(row).toBe('📍 Тверская — 12 порций')
+    expect(row).not.toContain('Кофейня У Дома')
   })
 
-  it('не содержит ООО/ИП/юридического названия', () => {
+  it('не содержит имя клиента, ООО/ИП/юридического названия; содержит локацию, порции и 📍', () => {
     const row = formatProductionSummaryRow({
       clientName: 'Сеть Кафе',
       locationName: 'Арбат',
       portions: 1,
     })
-    // только имя клиента + локация + порции
-    expect(row).toBe('Сеть Кафе, Арбат — 1 порция')
+    // только 📍 + локация + порции
+    expect(row).toBe('📍 Арбат — 1 порция')
+    expect(row).toContain('📍')
+    expect(row).toContain('Арбат')
+    expect(row).toContain('1 порция')
+    expect(row).not.toContain('Сеть Кафе')
     expect(row).not.toMatch(/ООО|ИП|юр/i)
   })
 })
@@ -72,11 +77,14 @@ describe('formatProductionSummary', () => {
       totalPortions: 15,
       totalRevenue: 1000,
     })
-    const arbat = text.indexOf('Альфа, Арбат')
-    const tverskaya = text.indexOf('Бета, Тверская')
+    const arbat = text.indexOf('📍 Арбат')
+    const tverskaya = text.indexOf('📍 Тверская')
     expect(arbat).toBeGreaterThan(-1)
     expect(tverskaya).toBeGreaterThan(-1)
     expect(arbat).toBeLessThan(tverskaya)
+    // имена клиентов не отображаются в строках
+    expect(text).not.toContain('Альфа')
+    expect(text).not.toContain('Бета')
   })
 
   it('заказы DYNAMIC и FIXED в одном списке без разделения на блоки', () => {
@@ -89,8 +97,9 @@ describe('formatProductionSummary', () => {
       totalPortions: 12,
       totalRevenue: 5000,
     })
-    expect(text).toContain('Клиент-А, Точка-1 — 8 порций')
-    expect(text).toContain('Клиент-А, Точка-2 — 4 порции')
+    expect(text).toContain('📍 Точка-1 — 8 порций')
+    expect(text).toContain('📍 Точка-2 — 4 порции')
+    expect(text).not.toContain('Клиент-А')
     expect(text).not.toContain('Подтверждено')
     expect(text).not.toContain('Фиксированные')
   })
@@ -104,7 +113,8 @@ describe('formatProductionSummary', () => {
       unconfirmed: [{ clientName: 'Гамма', locationName: 'Никитская' }],
     })
     expect(text).toContain('⚠️ Не ответили (1):')
-    expect(text).toContain('Гамма, Никитская')
+    expect(text).toContain('⏳ Никитская')
+    expect(text).not.toContain('Гамма')
   })
 })
 

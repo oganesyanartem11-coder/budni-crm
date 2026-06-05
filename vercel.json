@@ -16,7 +16,6 @@
     { "path": "/api/cron/route-sheet-sameday", "schedule": "50 4 * * *" },
     { "path": "/api/cron/check-late-deliveries", "schedule": "*/10 6-19 * * *" },
     { "path": "/api/cron/courier-evening-preview", "schedule": "0 15 * * *" },
-    { "path": "/api/cron/courier-hour-before-window", "schedule": "*/30 2-8 * * *" },
     { "path": "/api/cron/expire-pending-changes", "schedule": "*/10 * * * *" },
     { "path": "/api/cron/unpriced-ingredients-digest", "schedule": "0 9 * * 1" },
     { "path": "/api/cron/monitor-heartbeats", "schedule": "0 19 * * *" },

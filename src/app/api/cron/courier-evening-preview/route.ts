@@ -19,8 +19,7 @@ export const maxDuration = 60
  * Антидубль: markCourierNotified вызывается ТОЛЬКО после успешной отправки.
  * notifyProductionChannel по контракту не кидает (внутри фолбэк в личку
  * ADMIN_PRO), но если бросит — пометка не ставится и заказы попадут в
- * следующий запуск (хотя при "0 15 * * *" он один в сутки — повтор будет
- * подхвачен cron'ом за час до окна).
+ * следующий запуск (при "0 15 * * *" он один в сутки).
  */
 export async function handler(_request: Request): Promise<NextResponse> {
   const orders = await getOrdersWithoutCourierTomorrow()
@@ -46,22 +45,23 @@ export async function handler(_request: Request): Promise<NextResponse> {
 export function buildEveningPreviewText(orders: OrderWithoutCourier[]): string {
   const sorted = [...orders].sort(compareByWindowFrom)
 
-  let text = `📦 Завтра БЕЗ КУРЬЕРА: ${sorted.length} заказов\n\n`
-  for (const o of sorted) {
+  let text = `📦 Курьеров на завтра: ${sorted.length} заказов. Закажите через InDrive\n\n`
+  sorted.forEach((o, i) => {
     const windowLine =
       o.deliveryWindowFrom && o.deliveryWindowTo
         ? `${o.deliveryWindowFrom}-${o.deliveryWindowTo}`
         : 'не указано'
-    const contact = o.clientContactPhone ? escapeHtml(o.clientContactPhone) : 'не указан'
+    const phoneLine = o.clientContactPhone
+      ? `<code>${escapeHtml(o.clientContactPhone)}</code>`
+      : 'не указан'
     text +=
-      `${escapeHtml(o.clientName)} (${escapeHtml(o.locationName)})\n` +
-      `  Окно: ${windowLine}\n` +
-      `  Адрес: ${escapeHtml(o.locationAddress)}\n` +
-      `  Контакт: ${contact}\n` +
-      `  Объём: ${o.portions} порций (${o.totalPrice} ₽)\n\n`
-  }
-  text += 'Закажите курьеров заранее.'
-  return text
+      `${i + 1}. <b>${escapeHtml(o.locationName)}</b> (${escapeHtml(o.clientName)})\n` +
+      `Окно: ${windowLine}\n` +
+      `Адрес: <code>${escapeHtml(o.locationAddress)}</code>\n` +
+      `Телефон: ${phoneLine}\n` +
+      `Объём: ${o.portions} порций (${o.totalPrice} ₽)\n\n`
+  })
+  return text.trimEnd()
 }
 
 /** null/пустое окно сортируется в конец списка. */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatUrgentAttention, buildExcerpt, countUncoveredPending } from './context-builder'
+import { formatUrgentAttention, buildExcerpt, countUncoveredPending, isMondayMsk } from './context-builder'
 
 describe('formatUrgentAttention', () => {
   it('содержит ClientName, LocationName и tone в формате', () => {
@@ -113,5 +113,27 @@ describe('countUncoveredPending (П3-механизм2: брифинг pending-�
 
   it('пустой pending → 0', () => {
     expect(countUncoveredPending([], [{ clientId: 'c1', locationId: 'l1', mealType: 'LUNCH' }])).toBe(0)
+  })
+})
+
+describe('isMondayMsk (П6: понедельничный заряд)', () => {
+  it('UTC-инстант, который в МСК = понедельник 08:00 → true', () => {
+    // 2026-06-01 — понедельник. 05:00Z = 08:00 МСК (реальное время утреннего брифа).
+    expect(isMondayMsk(new Date('2026-06-01T05:00:00Z'))).toBe(true)
+  })
+
+  it('UTC-инстант поздним вечером воскресенья, но в МСК уже понедельник → true', () => {
+    // 2026-05-31 22:00Z = 2026-06-01 01:00 МСК (понедельник по МСК-календарю).
+    expect(isMondayMsk(new Date('2026-05-31T22:00:00Z'))).toBe(true)
+  })
+
+  it('UTC-инстант, который в МСК = вторник → false', () => {
+    // 2026-06-02 05:00Z = 08:00 МСК вторника.
+    expect(isMondayMsk(new Date('2026-06-02T05:00:00Z'))).toBe(false)
+  })
+
+  it('UTC-инстант понедельника, который в МСК уже вторник → false', () => {
+    // 2026-06-01 21:30Z = 2026-06-02 00:30 МСК (вторник по МСК).
+    expect(isMondayMsk(new Date('2026-06-01T21:30:00Z'))).toBe(false)
   })
 })
