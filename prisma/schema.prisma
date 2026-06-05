@@ -1312,6 +1312,17 @@ model BorisConversation {
   @@index([userId, lastMessageAt])
 }
 
+// Boris reorg (волна 2): per-чат трекер последнего ГРУППОВОГО ответа Бори.
+// BorisConversation привязан к userId (личка), для групп не подходит. Здесь
+// храним messageId последнего ответа Бори в каждом групповом чате, чтобы
+// shouldRespondInGroup мог считать дистанцию-окно (20 сообщений) до новой реплики.
+model BorisGroupReplyTracker {
+  id                 String   @id @default(cuid())
+  tgChatId           String   @unique // id группового чата Telegram
+  lastReplyMessageId Int // message_id последнего ответа Бори в этом чате
+  updatedAt          DateTime @updatedAt
+}
+
 model BorisMessage {
   id             String            @id @default(cuid())
   conversationId String

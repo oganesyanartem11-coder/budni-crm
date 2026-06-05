@@ -11,6 +11,10 @@ import {
   type BorisChatType,
 } from '@/lib/boris/group-filter'
 import { classifyMessageRelatesToBoris } from '@/lib/boris/context-classifier'
+import {
+  getLastBorisGroupReplyMessageId,
+  recordBorisGroupReply,
+} from '@/lib/boris/group-reply-tracker'
 import { runAgentLoop } from '@/lib/llm/agent-loop'
 import { getBorisModel } from '@/lib/ai/models'
 import { getBorisSystemPrompt } from '@/lib/boris/personality'
@@ -89,7 +93,9 @@ async function answerStatelessReadOnly(ctx: Context, userText: string): Promise<
       console.log('[boris] (group/anon) tool_use', name)
     },
   })
-  await ctx.reply(result.finalText, { parse_mode: 'HTML' })
+  const sent = await ctx.reply(result.finalText, { parse_mode: 'HTML' })
+  // group/anon-путь — всегда группа: фиксируем messageId для контекстного окна.
+  await recordBorisGroupReply(String(ctx.chat?.id ?? ''), sent.message_id)
 }
 
 export async function handleBorisMessage(ctx: Context): Promise<void> {
@@ -102,11 +108,12 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
   if (!text || text.startsWith('/')) return // /команды не наш case
 
   if (chatType === 'group' || chatType === 'supergroup') {
-    // Boris reorg: lastBorisReplyMessageId пока НИГДЕ не персистится для
-    // интерактивных групповых ответов (см. сводку — это follow-up со схемой).
-    // Передаём null → пока что работает только прямое упоминание «Борис»,
-    // что эквивалентно прежнему mentionsBoris-поведению (no regression).
-    const lastBorisReplyMessageId: number | null = null
+    // Boris reorg (волна 2): читаем messageId последнего группового ответа Бори
+    // из BorisGroupReplyTracker. Не найдено/ошибка → null (фолбэк на «только
+    // прямое упоминание»). Окно «20 сообщений + Haiku» теперь активно.
+    const lastBorisReplyMessageId = await getLastBorisGroupReplyMessageId(
+      String(ctx.chat?.id ?? '')
+    )
     const decision = shouldRespondInGroup({
       text,
       chatId: ctx.chat?.id ?? 0,
@@ -176,8 +183,9 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
       userRole: user.role,
     })
 
+    let sent
     if (result.pendingActionId && result.preview) {
-      await ctx.reply(result.preview, {
+      sent = await ctx.reply(result.preview, {
         reply_markup: {
           inline_keyboard: [
             [
@@ -195,7 +203,11 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
         parse_mode: 'HTML',
       })
     } else {
-      await ctx.reply(result.reply, { parse_mode: 'HTML' })
+      sent = await ctx.reply(result.reply, { parse_mode: 'HTML' })
+    }
+    // Только для групп: фиксируем messageId ответа Бори для контекстного окна.
+    if (chatType === 'group' || chatType === 'supergroup') {
+      await recordBorisGroupReply(String(ctx.chat?.id ?? ''), sent.message_id)
     }
   } catch (e) {
     console.error('[boris-handler]', e)
