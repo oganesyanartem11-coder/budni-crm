@@ -158,6 +158,25 @@ export function getPreviousFinancialWeek(date: Date): { from: Date; to: Date } {
 }
 
 /**
+ * Финансовая неделя Сб→Пт для фильтров по @db.Date Order.deliveryDate.
+ *
+ * getFinancialWeek().from = UTC-инстант МСК-полуночи субботы (Пт 21:00Z). Для
+ * @db.Date Prisma усекает инстант до его UTC-КАЛЕНДАРНОЙ даты (пятницы) → gte
+ * втягивает лишний день прошлой фин-недели (class-of-bug «Два midnight»). Здесь
+ * from = UTC-ПОЛНОЧЬ МСК-субботы (Сб 00:00 UTC, чья UTC-дата = суббота), как и
+ * хранится @db.Date. `to` не отличается от getFinancialWeek — конец дня Пт через
+ * mskEndOfDayUtc уже усекается в правильную дату.
+ *
+ * Для DateTime-полей (createdAt, eventDate) использовать обычный getFinancialWeek —
+ * там МСК-инстант корректен (Postgres не усекает DateTime).
+ */
+export function getFinancialWeekForDbDate(date: Date): { from: Date; to: Date } {
+  const base = getFinancialWeek(date)
+  // getMskCalendarDayUtc берёт МСК-календарный день инстанта: Пт 21:00Z → Сб → Сб 00:00 UTC.
+  return { from: getMskCalendarDayUtc(base.from, 0), to: base.to }
+}
+
+/**
  * true, если заданная дата попадает в текущую финансовую неделю (Сб-Пт).
  */
 export function isInCurrentFinancialWeek(date: Date): boolean {
@@ -302,7 +321,9 @@ export function getPresetRange(preset: ReportPreset, customFrom?: string, custom
     //    МСК-дня (никогда не в будущем). dashboard-stats использует lte:to.
     case 'week_to_date': {
       const realNow = new Date()
-      const { from } = getFinancialWeek(realNow) // Сб 00:00 МСК текущей фин-недели
+      // @db.Date: from = UTC-полночь МСК-субботы (не МСК-инстант Пт 21:00Z, иначе
+      // gte втянет лишнюю пятницу прошлой фин-недели — «Два midnight»).
+      const { from } = getFinancialWeekForDbDate(realNow)
       const to = mskEndOfDayUtc(mskTodayYmd(realNow))
       return { from, to, label: 'Неделя по сегодня' }
     }

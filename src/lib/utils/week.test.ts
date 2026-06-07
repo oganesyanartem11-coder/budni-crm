@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getPresetRange } from './week'
+import { getPresetRange, getFinancialWeekForDbDate } from './week'
 
 /**
  * Sprint 7.46: дашбордные rolling-окна week_to_date / month_rolling / last_3_months.
@@ -10,9 +10,10 @@ import { getPresetRange } from './week'
  * ВНИМАНИЕ к `from` (после fix «Два midnight»): для @db.Date Order.deliveryDate
  * нужна UTC-полночь МСК-дня (XT00:00:00.000Z), а не UTC-инстант МСК-полночи
  * ((X−1)T21:00:00.000Z) — иначе Prisma усекает инстант до даты пред.дня.
- *   - month_rolling / last_3_months: from = UTC-полночь МСК-дня (XT00:00:00.000Z).
- *   - week_to_date: from пока МСК-инстант через getFinancialWeek (load-bearing,
- *     отдельный аудит V-15.2).
+ *   - month_rolling / last_3_months / week_to_date: from = UTC-полночь МСК-дня
+ *     (XT00:00:00.000Z). week_to_date через getFinancialWeekForDbDate (V-15.2).
+ *   - this_week / last_week: from пока МСК-инстант через getFinancialWeek
+ *     (load-bearing; their @db.Date consumers — отдельный заход V-15.2.thisweek).
  *
  * Фиксируем «сейчас» через vi.setSystemTime — getPresetRange внутри зовёт
  * new Date() для новых кейсов, fake timers делают их детерминированными.
@@ -35,7 +36,7 @@ afterEach(() => {
 describe('getPresetRange — новые rolling-ключи на 2026-06-03 12:00 МСК', () => {
   it('week_to_date: Сб 30 мая 00:00 МСК → Ср 3 июня 23:59:59.999 МСК', () => {
     const { from, to } = getPresetRange('week_to_date')
-    expect(from.toISOString()).toBe('2026-05-29T21:00:00.000Z') // 30 мая 00:00 МСК
+    expect(from.toISOString()).toBe('2026-05-30T00:00:00.000Z') // 30 мая 00:00 МСК (UTC-полночь МСК-дня)
     expect(to.toISOString()).toBe('2026-06-03T20:59:59.999Z') // 3 июня 23:59:59.999 МСК
   })
 
@@ -49,6 +50,26 @@ describe('getPresetRange — новые rolling-ключи на 2026-06-03 12:00
     const { from, to } = getPresetRange('last_3_months')
     expect(from.toISOString()).toBe('2026-03-03T00:00:00.000Z') // 3 марта 00:00 МСК (UTC-полночь МСК-дня)
     expect(to.toISOString()).toBe('2026-06-03T20:59:59.999Z')
+  })
+})
+
+/**
+ * V-15.2: фикс «Нед» на проде 7 июня — показывала лишнюю пятницу прошлой фин-недели
+ * (165 950₽ = Пт 5.06 + Сб 6.06 + Вс 7.06 вместо 73 800₽). from должен быть
+ * UTC-полночь МСК-субботы, не МСК-инстант (Пт 21:00Z).
+ */
+describe('getFinancialWeekForDbDate (V-15.2 «Два midnight»)', () => {
+  it('Вс 7 июня 17:39 МСК → from = UTC-полночь МСК-субботы 6 июня', () => {
+    // 2026-06-07T14:39:51Z = Вс 7 июня 17:39 МСК; фин-неделя Сб 6.06 → Пт 12.06.
+    const { from } = getFinancialWeekForDbDate(new Date('2026-06-07T14:39:51.000Z'))
+    expect(from.toISOString()).toBe('2026-06-06T00:00:00.000Z') // НЕ 2026-06-05T21:00:00.000Z
+  })
+
+  it('getPresetRange(week_to_date) на Вс 7 июня → from = Сб 6.06 00:00 UTC (без лишней пятницы)', () => {
+    freeze('2026-06-07T14:39:51.000Z') // Вс 7 июня 17:39 МСК
+    const { from, to } = getPresetRange('week_to_date')
+    expect(from.toISOString()).toBe('2026-06-06T00:00:00.000Z')
+    expect(to.toISOString()).toBe('2026-06-07T20:59:59.999Z') // конец Вс 7.06 МСК
   })
 })
 
