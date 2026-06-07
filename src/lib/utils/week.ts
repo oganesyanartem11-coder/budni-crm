@@ -1,5 +1,6 @@
 import { ru } from 'date-fns/locale'
 import { formatInTimeZone } from 'date-fns-tz'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 
 // UTC+3 круглый год — Россия отменила переход на летнее время в 2011-м,
 // MSK сейчас фиксированный UTC+3 без DST.
@@ -243,12 +244,14 @@ export function getPresetRange(preset: ReportPreset, customFrom?: string, custom
 
   switch (preset) {
     case 'today': {
-      const today = mskTodayYmd(new Date())
-      return { from: mskStartOfDayUtc(today), to: mskEndOfDayUtc(today), label: 'Сегодня' }
+      const from = getMskCalendarDayUtc(new Date(), 0)
+      const to = new Date(getMskCalendarDayUtc(new Date(), 1).getTime() - 1)
+      return { from, to, label: 'Сегодня' }
     }
     case 'yesterday': {
-      const ymd = mskTodayYmd(new Date(Date.now() - DAY_MS))
-      return { from: mskStartOfDayUtc(ymd), to: mskEndOfDayUtc(ymd), label: 'Вчера' }
+      const from = getMskCalendarDayUtc(new Date(), -1)
+      const to = new Date(getMskCalendarDayUtc(new Date(), 0).getTime() - 1)
+      return { from, to, label: 'Вчера' }
     }
     case 'this_week': {
       const { from, to } = getFinancialWeek(now)
