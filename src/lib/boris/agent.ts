@@ -161,6 +161,28 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
   const canMutate = isPrivate && isAdminPro
   const tools = canMutate ? BORIS_TOOLS : BORIS_READ_TOOLS
 
+  // TEMP DIAGNOSTIC #4 chat-type — удалить после расследования.
+  // Артём (ADMIN_PRO) в ЛИЧНОМ TG-чате получил отказ «в групповом чате не делаю»
+  // на ВТОРОЕ сообщение диалога. Роль/chat-type подтверждены чистыми → ловим
+  // multi-turn: лог срабатывает на КАЖДЫЙ turn (chatWithBoris зовётся на каждое
+  // сообщение). conversationId + historyCount различают turn-1 (история короткая)
+  // и turn-2 (длиннее, та же беседа). Если canMutate=true на обоих — код чист,
+  // отказ на turn-2 = поведение LLM. Текст — только превью 50.
+  console.log(
+    '[boris-chattype]',
+    JSON.stringify({
+      chatType: input.chatType,
+      userRole: input.userRole,
+      isPrivate,
+      isAdminPro,
+      canMutate,
+      userId: input.userId,
+      conversationId: conversation.id,
+      historyCount: historyMessages.length,
+      textPreview: input.userText.slice(0, 50),
+    })
+  )
+
   const startedAt = Date.now()
   let result
   try {
