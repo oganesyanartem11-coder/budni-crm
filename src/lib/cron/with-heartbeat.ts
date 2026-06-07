@@ -60,17 +60,24 @@ export function withCronHeartbeat(jobName: string, handler: CronHandler): CronHa
     const durationMs = Date.now() - startedAt
 
     // Heartbeat — best-effort, не должен ронять ответ.
+    // На cold-start (P1001) сам heartbeat-write падал и попадал в errorLog как
+    // «production error», хотя cron-handler уже отработал. Ретраим 2 раза
+    // (короткий backoff) — лечит cold-start, но не задерживает cron надолго.
     try {
-      await prisma.activityLog.create({
-        data: {
-          userId: null,
-          userRole: 'ADMIN',
-          action: CRON_HEARTBEAT_ACTION,
-          entityType: CRON_ENTITY_TYPE,
-          entityId: jobName,
-          payload: { ...payload, durationMs },
-        },
-      })
+      await withDbRetry(
+        () =>
+          prisma.activityLog.create({
+            data: {
+              userId: null,
+              userRole: 'ADMIN',
+              action: CRON_HEARTBEAT_ACTION,
+              entityType: CRON_ENTITY_TYPE,
+              entityId: jobName,
+              payload: { ...payload, durationMs },
+            },
+          }),
+        { maxAttempts: 2, baseDelayMs: 500, label: 'heartbeat' }
+      )
     } catch (heartbeatErr) {
       console.error(`[cron:${jobName}] heartbeat write failed:`, heartbeatErr)
     }

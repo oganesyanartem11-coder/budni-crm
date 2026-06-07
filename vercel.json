@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "regions": ["fra1"],
   "crons": [
-    { "path": "/api/cron/keep-warm", "schedule": "56 0,4 * * *" },
+    { "path": "/api/cron/keep-warm", "schedule": "*/30 2-21 * * *" },
     { "path": "/api/cron/extend-active-menu", "schedule": "0 1 * * *" },
     { "path": "/api/cron/generate-fixed-orders", "schedule": "0 3 * * *" },
     { "path": "/api/cron/daily-questions-sameday", "schedule": "40 4 * * *" },
