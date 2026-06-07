@@ -116,7 +116,11 @@ ${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — 
   })
 
   const elapsed = Date.now() - startTime
-  console.log(`[LLM] parse took ${elapsed}ms`)
+  console.log(
+    `[LLM] parse took ${elapsed}ms, ` +
+      `stop_reason=${response.stop_reason ?? 'null'}, ` +
+      `output_tokens=${response.usage.output_tokens ?? 0}`
+  )
 
   const textBlock = response.content.find((b) => b.type === 'text')
   if (!textBlock || textBlock.type !== 'text') {
@@ -139,6 +143,10 @@ ${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — 
     parsed = JSON.parse(jsonText)
   } catch {
     console.error('[LLM] failed to parse JSON, raw:', rawLlmResponse)
+    console.error(
+      `[parser] JSON.parse failed (stop_reason=${response.stop_reason ?? 'null'}), raw response (first 2000 chars):`,
+      rawLlmResponse?.slice(0, 2000)
+    )
     return {
       type: 'noise',
       items: [],

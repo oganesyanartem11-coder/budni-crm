@@ -84,6 +84,8 @@ ${rawMenuText}
   const elapsed = Date.now() - startTime
   console.log(
     `[LLM] menu schedule parse took ${elapsed}ms, ` +
+      `stop_reason=${response.stop_reason ?? 'null'}, ` +
+      `output_tokens=${response.usage.output_tokens ?? 0}, ` +
       `cache_read=${response.usage.cache_read_input_tokens ?? 0}, ` +
       `cache_write=${response.usage.cache_creation_input_tokens ?? 0}`
   )
@@ -104,7 +106,7 @@ ${rawMenuText}
     parsed = JSON.parse(jsonText)
   } catch {
     console.error('[LLM] menu-schedule-parser failed to parse JSON, raw:', rawLlmResponse)
-    console.error('[menu-schedule-parser] JSON.parse failed, raw response (first 2000 chars):', rawLlmResponse?.slice(0, 2000))
+    console.error(`[menu-schedule-parser] JSON.parse failed (stop_reason=${response.stop_reason ?? 'null'}), raw response (first 2000 chars):`, rawLlmResponse?.slice(0, 2000))
     return {
       entries: [],
       uniqueDishes: [],

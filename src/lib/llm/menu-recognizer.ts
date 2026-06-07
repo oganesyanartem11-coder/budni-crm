@@ -152,7 +152,11 @@ ${
   })
 
   const elapsed = Date.now() - startTime
-  console.log(`[LLM] menu recognition took ${elapsed}ms`)
+  console.log(
+    `[LLM] menu recognition took ${elapsed}ms, ` +
+      `stop_reason=${response.stop_reason ?? 'null'}, ` +
+      `output_tokens=${response.usage.output_tokens ?? 0}`
+  )
 
   const textBlock = response.content.find((b) => b.type === 'text')
   if (!textBlock || textBlock.type !== 'text') {
@@ -170,6 +174,10 @@ ${
     parsed = JSON.parse(jsonText)
   } catch {
     console.error('[LLM] menu-recognizer failed to parse JSON, raw:', rawLlmResponse)
+    console.error(
+      `[menu-recognizer] JSON.parse failed (stop_reason=${response.stop_reason ?? 'null'}), raw response (first 2000 chars):`,
+      rawLlmResponse?.slice(0, 2000)
+    )
     return {
       dishes: [],
       confidence: 0,
