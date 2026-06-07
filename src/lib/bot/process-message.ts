@@ -23,7 +23,8 @@ import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-cha
 import { toMskDateString } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
 import { sendTelegramMessage } from '@/lib/telegram/send'
-import { escapeHtml } from '@/lib/telegram/notify'
+import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
+import { formatMskDayMonth } from '@/lib/utils/format'
 import { parseChangeIntent } from '@/lib/bot/parse-change-intent'
 import { resolveOrderChangeTarget } from '@/lib/order-changes/resolve-target'
 import { createPendingChange } from '@/lib/order-changes/actions'
@@ -665,6 +666,29 @@ async function handleBotResponse(
       } catch (err) {
         console.error('[boris-team] sameday-locked trigger failed', err)
       }
+    }
+
+    // #5: уведомить производство о подтверждённом заказе. Раньше notify тут был
+    // только для same-day (SAMEDAY_ORDER_LOCKED → emitLivePost в чат команды);
+    // обычные FIXED/DYNAMIC заказы уходили в производство без сигнала. Отдельный
+    // канал (TELEGRAM_PRODUCTION_CHAT_ID), fire-and-forget. Идемпотентность — за
+    // счёт wasFirstAnswer (single-shot на переходе PENDING→CONFIRMED).
+    if (save.savedItems.length > 0) {
+      const dateStr = formatMskDayMonth(conv.deliveryDate)
+      const clientNameHtml = escapeHtml(client.name)
+      let prodText: string
+      if (save.savedItems.length === 1) {
+        const it = save.savedItems[0]
+        prodText = `✅ <b>${clientNameHtml}</b> подтвердил заказ на ${dateStr}: ${escapeHtml(it.locationName)} — ${it.portions}`
+      } else {
+        const rows = save.savedItems
+          .map((it) => `📍 ${escapeHtml(it.locationName)} — ${it.portions}`)
+          .join('\n')
+        prodText = `✅ <b>${clientNameHtml}</b> подтвердил заказ на ${dateStr}:\n${rows}`
+      }
+      await notifyProductionChannel(prodText).catch((e) => {
+        console.error('[bot] notifyProductionChannel failed (order confirmed):', e)
+      })
     }
 
     const reply = formatAcceptedReply(itemsForReply)

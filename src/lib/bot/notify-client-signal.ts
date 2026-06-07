@@ -103,30 +103,40 @@ export async function notifyClientSignal(input: ClientSignalInput): Promise<void
     titleText = 'Недоволен'
   }
 
-  const lines: string[] = []
-  lines.push(`${titleEmoji} <b>${titleText}</b>: ${escapeHtml(client.name)}`)
-  lines.push('')
-
-  const meta: string[] = []
-  if (reason && REASON_RU[reason]) {
-    meta.push(`Причина: ${REASON_RU[reason]}`)
-  }
-  // Tone-строка нужна только когда title не отражает tone напрямую
-  // (т.е. title=rude/urgent уже всё сказали; title=HIGH/NORMAL — дополним).
-  if (tone === 'rude' && titleText !== 'Недоволен') {
-    meta.push('Тон: 😠 Недоволен')
-  } else if (tone === 'urgent' && titleText !== 'Срочно') {
-    meta.push('Тон: 🚨 Срочно')
-  }
-  if (meta.length > 0) {
-    lines.push(...meta)
-    lines.push('')
-  }
-
   const preview = messageText.length > 200 ? messageText.slice(0, 197) + '…' : messageText
-  lines.push(`<i>«${escapeHtml(preview)}»</i>`)
 
-  const text = lines.join('\n')
+  let text: string
+  if (reason === 'POST_CUTOFF' && tone !== 'rude' && tone !== 'urgent') {
+    // #2: человечный пуш для «после 16:00» вместо генерик «Новое в Inbox».
+    // Заказ уже принят — менеджеру нужен сам факт + текст, без формальной «Причины».
+    text =
+      `⏰ <b>${escapeHtml(client.name)}</b> написал после 16:00:\n` +
+      `<i>«${escapeHtml(preview)}»</i>`
+  } else {
+    const lines: string[] = []
+    lines.push(`${titleEmoji} <b>${titleText}</b>: ${escapeHtml(client.name)}`)
+    lines.push('')
+
+    const meta: string[] = []
+    if (reason && REASON_RU[reason]) {
+      meta.push(`Причина: ${REASON_RU[reason]}`)
+    }
+    // Tone-строка нужна только когда title не отражает tone напрямую
+    // (т.е. title=rude/urgent уже всё сказали; title=HIGH/NORMAL — дополним).
+    if (tone === 'rude' && titleText !== 'Недоволен') {
+      meta.push('Тон: 😠 Недоволен')
+    } else if (tone === 'urgent' && titleText !== 'Срочно') {
+      meta.push('Тон: 🚨 Срочно')
+    }
+    if (meta.length > 0) {
+      lines.push(...meta)
+      lines.push('')
+    }
+
+    lines.push(`<i>«${escapeHtml(preview)}»</i>`)
+
+    text = lines.join('\n')
+  }
 
   const result = await notifyAlertRecipients(text, {
     parseMode: 'HTML',

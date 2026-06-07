@@ -70,6 +70,26 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
       )
       const nonImageAttachment = attachments.find((a) => a?.type !== 'image')
 
+      // #6: раньше WEEKLY-ветка делала early-return МИМО processClientMessage,
+      // где обычно пишется logBotMessage(IN) — поэтому заявка клиента не попадала
+      // в тред /inbox (виден был только welcome OUT). Логируем входящее здесь.
+      // Пустой text (фото без подписи) → плейсхолдер, иначе IN-запись была бы пустой.
+      const inboundText = text.trim()
+        ? text
+        : imageAttachment
+          ? '[фото заявки]'
+          : nonImageAttachment
+            ? `[вложение: ${nonImageAttachment.type}]`
+            : ''
+      if (inboundText) {
+        await logBotMessage({
+          clientId: client.id,
+          conversationId: null,
+          direction: 'IN',
+          text: inboundText,
+        })
+      }
+
       // Не-image вложение (документ/файл) — парсер не умеет. В inbox менеджеру.
       if (nonImageAttachment && !imageAttachment) {
         await createInboxItem({
