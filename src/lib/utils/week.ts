@@ -219,7 +219,10 @@ function daysInMonthUtc(year: number, monthIndex: number): number {
 /**
  * Вычитает n месяцев из МСК-даты с clamp на последний день целевого месяца:
  * 31 марта − 1 мес → 28 февраля (а не 3 марта из-за JS Date overflow).
- * Возвращает «МСК 00:00 целевой даты» как UTC-точку.
+ * Возвращает UTC-полночь МСК-календарного дня (как getMskCalendarDayUtc), НЕ
+ * UTC-инстант МСК-полночи (mskStartOfDayUtc): для @db.Date Order.deliveryDate
+ * Prisma усекает инстант Пт-21:00Z до даты пред.дня → лишний день в начале окна
+ * (class-of-bug «Два midnight»).
  */
 function mskSubMonthsStartOfDay(today: MskYmd, n: number): Date {
   let monthIdx = today.m - n
@@ -229,7 +232,7 @@ function mskSubMonthsStartOfDay(today: MskYmd, n: number): Date {
     year -= 1
   }
   const day = Math.min(today.d, daysInMonthUtc(year, monthIdx))
-  return mskStartOfDayUtc({ y: year, m: monthIdx, d: day })
+  return new Date(Date.UTC(year, monthIdx, day, 0, 0, 0))
 }
 
 export interface PeriodRange {
