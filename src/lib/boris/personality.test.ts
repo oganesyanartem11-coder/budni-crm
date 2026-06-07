@@ -50,3 +50,43 @@ describe('getBorisSystemPrompt — hardened rules', () => {
     expect(prompt).toContain('edit_order_portions')
   })
 })
+
+describe('getBorisSystemPrompt — #4 динамический контекст-блок', () => {
+  // Изолируем именно динамический КОНТЕКСТ-БЛОК (## ТЕКУЩИЙ КОНТЕКСТ ... Кто ты:),
+  // т.к. фразы отказа живут и в статичном Правиле Г — на полном промпте их не
+  // различить. Блок берём от заголовка до начала «Кто ты:».
+  function contextBlockOf(p: string): string {
+    const start = p.indexOf('## ТЕКУЩИЙ КОНТЕКСТ')
+    if (start === -1) return ''
+    const end = p.indexOf('Кто ты:', start)
+    return p.slice(start, end === -1 ? undefined : end)
+  }
+
+  it('без ctx — блок не инжектится (старое поведение)', () => {
+    expect(getBorisSystemPrompt()).not.toContain('## ТЕКУЩИЙ КОНТЕКСТ')
+  })
+
+  it('canMutate=true (личка+ADMIN_PRO) — явно разрешает mutate, запрещает отказ про группу', () => {
+    const block = contextBlockOf(
+      getBorisSystemPrompt({ canMutate: true, chatType: 'private', isAdminPro: true })
+    )
+    expect(block).toMatch(/РАЗРЕШЕНЫ/)
+    expect(block).toMatch(/НЕ отказывай/i)
+  })
+
+  it('canMutate=false + группа — детерминированная причина «только в личной переписке»', () => {
+    const block = contextBlockOf(
+      getBorisSystemPrompt({ canMutate: false, chatType: 'group', isAdminPro: false })
+    )
+    expect(block).toMatch(/только в личной переписке со мной/i)
+    expect(block).not.toMatch(/только администратору/i)
+  })
+
+  it('canMutate=false + личка не-ADMIN_PRO — детерминированная причина «только администратору»', () => {
+    const block = contextBlockOf(
+      getBorisSystemPrompt({ canMutate: false, chatType: 'private', isAdminPro: false })
+    )
+    expect(block).toMatch(/только администратору/i)
+    expect(block).not.toMatch(/только в личной переписке со мной/i)
+  })
+})

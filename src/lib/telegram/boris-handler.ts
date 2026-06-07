@@ -84,7 +84,12 @@ async function answerStatelessReadOnly(ctx: Context, userText: string): Promise<
   })
   const result = await runAgentLoop({
     model: getBorisModel(),
-    systemPrompt: getBorisSystemPrompt(),
+    // #4: анон-группа read-only — mutate недоступен, контекст-блок «групповой чат».
+    systemPrompt: getBorisSystemPrompt({
+      canMutate: false,
+      chatType: ctx.chat?.type ?? 'group',
+      isAdminPro: false,
+    }),
     initialMessages: [{ role: 'user', content: userText }],
     tools: BORIS_READ_TOOLS,
     maxIterations: 8,

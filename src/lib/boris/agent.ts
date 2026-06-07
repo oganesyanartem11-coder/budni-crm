@@ -188,7 +188,9 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
   try {
     result = await runAgentLoop({
       model: getBorisModel(),
-      systemPrompt: getBorisSystemPrompt(),
+      // #4: прокидываем реальный контекст в промпт, чтобы модель знала, что
+      // mutate разрешён ПРЯМО СЕЙЧАС (личка+ADMIN_PRO) и не галлюцинировала отказ.
+      systemPrompt: getBorisSystemPrompt({ canMutate, chatType: input.chatType, isAdminPro }),
       initialMessages: [...historyMessages, userMessage],
       tools,
       maxIterations: 8,
