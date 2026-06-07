@@ -1,6 +1,7 @@
 import { getAnthropicClient } from './client'
 import { getRecipesModel, getFallbackModel } from '@/lib/ai/models'
 import { callWithFallback } from '@/lib/ai/with-fallback'
+import { chunk } from '@/lib/utils/chunk'
 
 export type DishCategory =
   | 'SOUP'
@@ -89,12 +90,6 @@ const DEFAULT_PORTION_BY_CATEGORY: Record<DishCategory, number> = {
 // max_tokens (~52 техкарты на кириллице в 16000). 15 блюд → ~4500 output-токенов,
 // запас ~3.5× в лимите. На 59 блюдах = 4 батча параллельно.
 const BATCH_SIZE = 15
-
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
-  return out
-}
 
 // Публичный контракт неизменен: N блюд → N техкарт (или меньше при сбое батча,
 // что run-import/assemble отвергнут как «неполную генерацию»). Внутри — режем

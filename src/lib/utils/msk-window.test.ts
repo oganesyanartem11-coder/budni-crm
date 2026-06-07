@@ -65,6 +65,24 @@ describe('getMskCalendarDayUtc', () => {
   })
 })
 
+/**
+ * MEGA-C дополнение: вечерние МСК-часы (UTC та же календарная дата). Существующие
+ * кейсы выше покрывают окно 00:00-03:00 МСК (UTC-вчера) — критичное для Bug 7.25.
+ * Здесь — комплемент: offset=+1 из вечера МСК идёт через другой путь Intl-форматтера
+ * (UTC-дата == МСК-дата), важно для half-open границ today/yesterday/rolling-окон.
+ */
+describe('getMskCalendarDayUtc — вечерние МСК-часы (MEGA-C)', () => {
+  it('22:00 МСК offsetDays=0 → UTC-полночь того же МСК-дня', () => {
+    const now = new Date('2026-06-01T19:00:00.000Z') // МСК 22:00
+    expect(getMskCalendarDayUtc(now, 0).toISOString()).toBe('2026-06-01T00:00:00.000Z')
+  })
+
+  it('22:00 МСК offsetDays=+1 → UTC-полночь МСК-завтра (half-open граница)', () => {
+    const now = new Date('2026-06-01T19:00:00.000Z') // МСК 22:00
+    expect(getMskCalendarDayUtc(now, 1).toISOString()).toBe('2026-06-02T00:00:00.000Z')
+  })
+})
+
 describe('toMskDateString', () => {
   it('обычный день (МСК 12:00): даёт МСК-сегодня', () => {
     const date = new Date('2026-06-01T09:00:00.000Z') // МСК 12:00
