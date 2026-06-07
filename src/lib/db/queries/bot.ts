@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { isScheduledForDate } from '@/lib/orders/generate-orders'
+import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import type { MealType } from '@prisma/client'
 
 /**
@@ -72,7 +73,15 @@ const FIND_CONV_LOOKBACK_DAYS = 30
  * клиент может ответить ещё раз — это кейс B в 5.7b).
  *
  * AWAITING_MANAGER исключаем — это «спонтанный» поток без cron-вопроса.
- * EXPIRED/CANCELLED исключаем — мёртвые ветки.
+ * CANCELLED исключаем — мёртвая ветка.
+ *
+ * СЕГОДНЯШНЮЮ EXPIRED включаем СПЕЦИАЛЬНО (late-ответ): cron cutoff-notice
+ * помечает молчащую сегодняшнюю conv EXPIRED в 16:00, но клиент может ответить
+ * на сегодняшний вопрос «сколько на завтра?» уже после 16:00. Без этого findFirst
+ * брал бы вчерашнюю CONFIRMED (deliveryDate=сегодня) и заказ создавался бы на
+ * неверный день. ORDER BY createdAt DESC → сегодняшняя EXPIRED (создана cron'ом
+ * в 11:00) выигрывает у вчерашней CONFIRMED. Старые EXPIRED (createdAt < сегодня
+ * по МСК) НЕ включаются — их отсекает граница mskMidnightUtc(now, 0).
  *
  * Окно 30 дней — защита: если клиент молчал месяц и старая PENDING-conv
  * висит, не пытаемся парсить ответ к ней.
@@ -83,11 +92,16 @@ const FIND_CONV_LOOKBACK_DAYS = 30
  */
 export async function findLatestBotConv(clientId: string) {
   const since = new Date(Date.now() - FIND_CONV_LOOKBACK_DAYS * 24 * 60 * 60 * 1000)
+  const todayMskMidnight = mskMidnightUtc(new Date(), 0)
   return prisma.botConversation.findFirst({
     where: {
       clientId,
-      status: { in: ['PENDING', 'CONFIRMED'] },
       createdAt: { gte: since },
+      OR: [
+        { status: { in: ['PENDING', 'CONFIRMED'] } },
+        // Late-ответ: сегодняшняя EXPIRED (помечена cutoff-notice в 16:00).
+        { status: 'EXPIRED', createdAt: { gte: todayMskMidnight } },
+      ],
     },
     orderBy: { createdAt: 'desc' },
   })

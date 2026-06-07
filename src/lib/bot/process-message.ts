@@ -568,8 +568,8 @@ async function handleBotResponse(
   }))
 
   if (afterCutoff) {
-    // КЕЙС C — после 16:00 МСК. Заказ создан/обновлён, но клиент должен знать
-    // что это вне cutoff. InboxItem c POST_CUTOFF, push менеджеру (срочно).
+    // КЕЙС C — после cutoff МСК. Заказ уже создан/обновлён saveBotOrders выше
+    // (на conv.deliveryDate). InboxItem c POST_CUTOFF — пометка менеджеру.
     if (conv.status !== 'CONFIRMED') {
       await prisma.botConversation.update({
         where: { id: conv.id },
@@ -577,7 +577,43 @@ async function handleBotResponse(
       })
     }
 
-    const postCutoffReply = getPostCutoffReply(cutoffStr)
+    // #3: если заказ реально создан/обновлён (savedItems непуст) — человечное
+    // подтверждение клиенту + уведомление производства (поздний приём). Иначе
+    // (нет конфига/цены или антидубль no-op) — старый generic, менеджер разрулит
+    // через POST_CUTOFF inbox.
+    let postCutoffReply: string
+    if (save.savedItems.length > 0) {
+      const dateStr = formatMskDayMonth(conv.deliveryDate)
+      const itemsStr = save.savedItems
+        .map((s) => `${s.locationName} — ${s.portions}`)
+        .join(', ')
+      postCutoffReply =
+        `Принято: ${itemsStr} на ${dateStr}. ` +
+        `Пожалуйста, на будущее присылайте заказы до ${cutoffStr} — ` +
+        `после этого времени производство может не успеть.`
+
+      const clientNameHtml = escapeHtml(client.name)
+      let prodText: string
+      if (save.savedItems.length === 1) {
+        const it = save.savedItems[0]
+        prodText =
+          `⚠️ <b>${clientNameHtml}</b> ответил после приёма заявок на ${dateStr}: ` +
+          `${escapeHtml(it.locationName)} — ${it.portions}. Имейте ввиду.`
+      } else {
+        const rows = save.savedItems
+          .map((s) => `• ${escapeHtml(s.locationName)} — ${s.portions}`)
+          .join('\n')
+        prodText =
+          `⚠️ <b>${clientNameHtml}</b> ответил после приёма заявок. ` +
+          `Я добавил заказ на ${dateStr}:\n${rows}\nИмейте ввиду.`
+      }
+      await notifyProductionChannel(prodText).catch((e) => {
+        console.error('[bot] notifyProductionChannel failed (post-cutoff):', e)
+      })
+    } else {
+      postCutoffReply = getPostCutoffReply(cutoffStr)
+    }
+
     await sendBotMessage(client.maxChatId!, postCutoffReply)
     await logBotMessage({
       clientId: client.id,

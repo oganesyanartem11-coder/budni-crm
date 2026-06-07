@@ -30,6 +30,7 @@ const {
   mockCreatePendingChange,
   mockFindActiveOrder,
   mockNotifyManagerOrderChange,
+  mockNotifyProduction,
 } = vi.hoisted(() => ({
   mockPrisma: {
     user: { findMany: vi.fn() },
@@ -56,6 +57,7 @@ const {
   mockCreatePendingChange: vi.fn(),
   mockFindActiveOrder: vi.fn(),
   mockNotifyManagerOrderChange: vi.fn(),
+  mockNotifyProduction: vi.fn(),
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
@@ -91,6 +93,12 @@ vi.mock('@/lib/db/queries/orders', () => ({ findActiveOrder: mockFindActiveOrder
 vi.mock('@/lib/telegram/handlers/order-change', () => ({
   notifyManagerAboutOrderChange: mockNotifyManagerOrderChange,
 }))
+// #3: спай на notifyProductionChannel (post-cutoff уведомление производства),
+// escapeHtml оставляем реальным через importActual — иначе сломается HTML-форматирование.
+vi.mock('@/lib/telegram/notify', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/telegram/notify')>()
+  return { ...actual, notifyProductionChannel: mockNotifyProduction }
+})
 
 import { processClientMessage } from './process-message'
 
@@ -147,6 +155,7 @@ beforeEach(() => {
   })
   mockCreateInbox.mockResolvedValue({ id: 'inbox_1', reason: 'POST_CUTOFF', priority: 'NORMAL' })
   mockNotifySignal.mockResolvedValue(undefined)
+  mockNotifyProduction.mockResolvedValue(undefined)
   mockLogBotMessage.mockResolvedValue(undefined)
   mockSendBotMessage.mockResolvedValue(undefined)
   mockPrisma.client.update.mockResolvedValue({})
@@ -195,7 +204,7 @@ describe('process-message cut-off (П5/П9)', () => {
     expect(res.reply).not.toMatch(/сложнее/i)
   })
 
-  it('post-cutoff 16:30 МСК (обычный клиент) → post-cutoff ответ', async () => {
+  it('post-cutoff 16:30 МСК + заказ создан (savedItems непуст) → человечный приём', async () => {
     mockFindClient.mockResolvedValue(makeClient())
     mockFindConv.mockResolvedValue({
       id: 'conv_1',
@@ -207,9 +216,37 @@ describe('process-message cut-off (П5/П9)', () => {
 
     const res = await processClientMessage({ maxChatId: 'max_1', text: '10' })
 
+    // #3: при savedItems непусто (заказ создан на завтра) — человечное подтверждение
+    // «Принято: ... на DD MMMM. ... до 16:00», а не generic «сложнее».
+    expect(res.action).toBe('post_cutoff')
+    expect(res.reply).toContain('Принято')
+    expect(res.reply).toContain('Офис — 10')
+    expect(res.reply).toContain('5 июня')
+    expect(res.reply).toContain('16:00')
+    expect(res.reply).not.toMatch(/сложнее/i)
+
+    // Side-effect: производство уведомлено о позднем приёме (ключевой признак фикса).
+    expect(mockNotifyProduction).toHaveBeenCalledTimes(1)
+    const prodText = mockNotifyProduction.mock.calls[0][0] as string
+    expect(prodText).toContain('ответил после приёма заявок')
+    expect(prodText).toContain('Офис — 10')
+  })
+
+  it('post-cutoff 16:30 МСК + savedItems=[] (нет конфига/цены) → generic «сложнее»', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 6, 5),
+    })
+    mockSave.mockResolvedValue({ savedItems: [] })
+    // 16:30 МСК = 13:30 UTC
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 13, 30, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '10' })
+
     expect(res.action).toBe('post_cutoff')
     expect(res.reply).toMatch(/сложнее/i)
-    expect(res.reply).toContain('16:00')
   })
 
   it('SAME-DAY клиент (cut-off 08:40) в 09:00 МСК → post-cutoff с упоминанием 08:40, НЕ 16:00', async () => {
