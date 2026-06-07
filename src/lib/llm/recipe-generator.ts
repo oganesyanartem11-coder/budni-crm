@@ -85,7 +85,66 @@ const DEFAULT_PORTION_BY_CATEGORY: Record<DishCategory, number> = {
   OTHER: 200,
 }
 
+// Размер батча для generateRecipes. Один LLM-вызов на ВСЕ блюда обрезается по
+// max_tokens (~52 техкарты на кириллице в 16000). 15 блюд → ~4500 output-токенов,
+// запас ~3.5× в лимите. На 59 блюдах = 4 батча параллельно.
+const BATCH_SIZE = 15
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
+// Публичный контракт неизменен: N блюд → N техкарт (или меньше при сбое батча,
+// что run-import/assemble отвергнут как «неполную генерацию»). Внутри — режем
+// блюда на батчи и шлём параллельно, обходя обрезку одиночного ответа по max_tokens.
 export async function generateRecipes(input: RecipeGenInput): Promise<RecipeGenOutput> {
+  const batches = chunk(input.dishes, BATCH_SIZE)
+  const startTime = Date.now()
+
+  // system prompt с cache_control ephemeral читается каждым батчем (cache hit, дёшево).
+  const batchResults = await Promise.all(
+    batches.map((batch, i) =>
+      generateRecipesBatch(
+        { dishes: batch, existingIngredients: input.existingIngredients },
+        `${i + 1}/${batches.length}`
+      )
+    )
+  )
+
+  const recipes = batchResults.flatMap((b) => b.recipes)
+  console.log(
+    `[LLM] recipe generation took ${Date.now() - startTime}ms across ${batches.length} batch(es), ` +
+      `recipes=${recipes.length}/${input.dishes.length}`
+  )
+
+  // confidence — самый консервативный (min): провал/слабость любого батча всплывёт.
+  const confidence =
+    batchResults.length > 0 ? Math.min(...batchResults.map((b) => b.confidence)) : 0
+  // shortfall — батчи, вернувшие меньше техкарт, чем блюд в них (обрезка/невалидный JSON).
+  const shortfall = batchResults
+    .map((b, i) => ({ n: i + 1, got: b.recipes.length, want: batches[i].length }))
+    .filter((x) => x.got < x.want)
+  const reason =
+    shortfall.length === 0
+      ? batchResults.map((b) => b.reason).filter(Boolean).join(' | ')
+      : `Неполная генерация: ${shortfall
+          .map((x) => `батч ${x.n}/${batches.length} вернул ${x.got}/${x.want}`)
+          .join(', ')}`
+  const rawLlmResponse = batchResults
+    .map((b, i) => `=== batch ${i + 1}/${batches.length} ===\n${b.rawLlmResponse}`)
+    .join('\n\n')
+
+  return { recipes, confidence, reason, rawLlmResponse }
+}
+
+// Один батч блюд → один LLM-вызов → распарсенные техкарты. batchLabel ("2/4")
+// идёт в логи, чтобы при сбое было видно, какой батч упал.
+async function generateRecipesBatch(
+  input: RecipeGenInput,
+  batchLabel: string
+): Promise<RecipeGenOutput> {
   const client = getAnthropicClient()
 
   const systemPrompt = `Ты технолог кейтеринг-компании «Будни». По названию блюда и его слоту в меню составляешь типовую техническую карту: список ингредиентов с весом в граммах на одну порцию. Это ЧЕРНОВИК для шефа — он проверит и поправит.
@@ -168,12 +227,14 @@ ${ingredientsList}
         system: cachedSystem,
         messages: [{ role: 'user', content: userPrompt }],
       }),
-    'generateRecipes'
+    `generateRecipes batch ${batchLabel}`
   )
 
   const elapsed = Date.now() - startTime
   console.log(
-    `[LLM] recipe generation took ${elapsed}ms, ` +
+    `[LLM] recipe batch ${batchLabel} took ${elapsed}ms, ` +
+      `stop_reason=${response.stop_reason ?? 'null'}, ` +
+      `output_tokens=${response.usage.output_tokens ?? 0}, ` +
       `cache_read=${response.usage.cache_read_input_tokens ?? 0}, ` +
       `cache_write=${response.usage.cache_creation_input_tokens ?? 0}`
   )
@@ -193,11 +254,18 @@ ${ingredientsList}
   try {
     parsed = JSON.parse(jsonText)
   } catch {
-    console.error('[LLM] recipe-generator failed to parse JSON, raw:', rawLlmResponse)
+    console.error(
+      `[LLM] recipe-generator failed to parse JSON (batch ${batchLabel}), raw:`,
+      rawLlmResponse
+    )
+    console.error(
+      `[recipe-generator] JSON.parse failed (batch ${batchLabel}, stop_reason=${response.stop_reason ?? 'null'}), raw response (first 2000 chars):`,
+      rawLlmResponse?.slice(0, 2000)
+    )
     return {
       recipes: [],
       confidence: 0,
-      reason: 'LLM вернул невалидный JSON',
+      reason: `батч ${batchLabel} вернул невалидный JSON`,
       rawLlmResponse,
     }
   }
