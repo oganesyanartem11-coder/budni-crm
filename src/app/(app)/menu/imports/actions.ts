@@ -560,6 +560,19 @@ export async function approveMenuImport(
           },
         })
 
+        // Сносим СОБСТВЕННЫЕ pre-approval DRAFT-циклы (menuImportId=NULL), которые
+        // assemble создал при импорте для превью дерева. Предикат { not: X } выше
+        // их не захватывает (в SQL NOT не матчит NULL-строки), а expandMenuFromStructure
+        // создаёт циклы с тем же validFrom → коллизия @unique(validFrom). Каскад уберёт
+        // их MenuDay/MenuDayDish, expand пересоберёт полную структуру заново.
+        await tx.menuCycle.deleteMany({
+          where: {
+            menuImportId: null,
+            status: 'DRAFT',
+            validFrom: { gte: startDate },
+          },
+        })
+
         const created = await expandMenuFromStructure(
           structure,
           startDate,

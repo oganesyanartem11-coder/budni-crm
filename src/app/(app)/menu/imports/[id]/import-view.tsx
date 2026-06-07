@@ -398,7 +398,7 @@ export function ImportView({
             <DialogTitle>Утвердить импорт</DialogTitle>
             <DialogDescription>
               Выберите дату-понедельник, с которой меню начнёт действовать.
-              Меню развернётся на 13 недель вперёд, чередуя Нед.А / Нед.Б.
+              Меню развернётся на 13 недель вперёд, чередуя А / Б / В.
             </DialogDescription>
           </DialogHeader>
 
