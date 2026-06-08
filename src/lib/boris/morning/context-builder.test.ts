@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatUrgentAttention, buildExcerpt, countUncoveredPending, isMondayMsk } from './context-builder'
+import { formatUrgentAttention, buildExcerpt, countUncoveredPending, isMondayMsk, isFirstDelivery } from './context-builder'
 
 describe('formatUrgentAttention', () => {
   it('содержит ClientName, LocationName и tone в формате', () => {
@@ -135,5 +135,24 @@ describe('isMondayMsk (П6: понедельничный заряд)', () => {
   it('UTC-инстант понедельника, который в МСК уже вторник → false', () => {
     // 2026-06-01 21:30Z = 2026-06-02 00:30 МСК (вторник по МСК).
     expect(isMondayMsk(new Date('2026-06-01T21:30:00Z'))).toBe(false)
+  })
+})
+
+describe('isFirstDelivery (F1: «первая отгрузка» без ложных срабатываний)', () => {
+  it('ноль прошлых не отменённых заказов → первая отгрузка', () => {
+    expect(isFirstDelivery(0)).toBe(true)
+  })
+
+  it('прошлый CONFIRMED/LOCKED/IN_PRODUCTION (не отменён, count ≥ 1) → НЕ первая отгрузка', () => {
+    // Фикс F1: давний FIXED-клиент с прошлым заказом, который не был помечен DELIVERED,
+    // больше не считается новым — count учитывает любой не отменённый статус.
+    expect(isFirstDelivery(1)).toBe(false)
+    expect(isFirstDelivery(5)).toBe(false)
+  })
+
+  it('только прошлые CANCELLED (они не попадают в count → 0) → первая отгрузка', () => {
+    // Отменённые заказы исключены фильтром status: { not: CANCELLED }, поэтому
+    // для клиента, у которого все прошлые заказы отменены, count = 0.
+    expect(isFirstDelivery(0)).toBe(true)
   })
 })

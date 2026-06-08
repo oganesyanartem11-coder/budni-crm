@@ -115,6 +115,17 @@ export function countUncoveredPending(
   return pendingOrders.filter((o) => !coveringKeys.has(key(o))).length
 }
 
+/**
+ * F1: первая ли это отгрузка клиента. Считаем по числу его прошлых НЕ отменённых
+ * заказов (любой статус кроме CANCELLED) с deliveryDate < сегодня. Раньше учитывались
+ * только status='DELIVERED', из-за чего давние FIXED-клиенты с прошлыми заказами в
+ * CONFIRMED/LOCKED/IN_PRODUCTION (никогда не помеченными DELIVERED) ложно считались
+ * новыми. Чистая функция (вынесена для тестируемости — buildMorningContext требует БД).
+ */
+export function isFirstDelivery(priorNonCancelledOrderCount: number): boolean {
+  return priorNonCancelledOrderCount === 0
+}
+
 /** Обрезает текст до limit символов, добавляя «…» если был длиннее. Пустой/null → ''. */
 export function buildExcerpt(message: string | null | undefined, limit: number): string {
   if (!message) return ''
@@ -305,12 +316,14 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
   const uniqueTodayClients = Array.from(todayClientIds)
   const clientNameById = new Map(todayOrders.map((o) => [o.clientId, o.client.name]))
 
-  const deliveredCounts = await Promise.all(
+  // Прошлая отгрузка = любой не отменённый заказ до сегодня (CONFIRMED/LOCKED/
+  // IN_PRODUCTION/DELIVERED и т.д.), а не только status='DELIVERED'.
+  const priorOrderCounts = await Promise.all(
     uniqueTodayClients.map((cid) =>
       prisma.order.count({
         where: {
           clientId: cid,
-          status: 'DELIVERED',
+          status: { not: 'CANCELLED' },
           deliveryDate: { lt: todayMsk },
         },
       })
@@ -318,7 +331,7 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
   )
 
   uniqueTodayClients.forEach((cid, idx) => {
-    if (deliveredCounts[idx] === 0) {
+    if (isFirstDelivery(priorOrderCounts[idx])) {
       attention.push({
         type: 'first_delivery',
         severity: 'medium',
