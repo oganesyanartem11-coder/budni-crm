@@ -37,8 +37,8 @@ export { ROLE_LABELS } from '@/lib/constants/roles'
 //   daily/orders          → sales
 //   daily/delivery        → more
 //   production/production  → production
-//   production/menu        → sales (Меню недели)
-//   production/menu/imports→ sales (Импорт меню) [плоско — см. TODO 1]
+//   production/menu        → production (Меню недели) (7.50: возвращены в Производство)
+//   production/menu/imports→ production (Импорт меню) [плоско — см. TODO 1] (7.50: возвращены в Производство)
 //   production/invoices    → production (Накладные)
 //   directory/clients      → sales
 //   directory/dishes       → sales
@@ -100,9 +100,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/orders',        label: 'Заказы',      icon: ClipboardList, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'pendingCount' },
       { href: '/inbox',         label: 'Сообщения',   icon: Inbox,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'inboxCount' },
       { href: '/clients',       label: 'Клиенты',     icon: Users,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
-      { href: '/menu',          label: 'Меню недели', icon: CalendarDays,  roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
-      // TODO Артём: menu/imports оставлен ПЛОСКО (не вложен в menu) — см. todosForArtem #1.
-      { href: '/menu/imports',  label: 'Импорт меню', icon: Sparkles,      roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
       { href: '/dishes',        label: 'Блюда',       icon: Utensils,      roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
     ],
   },
@@ -110,6 +107,10 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'production',
     title: 'Производство',
     items: [
+      // 7.50: «Меню недели» + «Импорт меню» перенесены из Продаж — планирование меню относится к Производству.
+      { href: '/menu',          label: 'Меню недели', icon: CalendarDays,  roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
+      // menu/imports оставлен ПЛОСКО (не вложен в menu) — см. todosForArtem #1.
+      { href: '/menu/imports',  label: 'Импорт меню', icon: Sparkles,      roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
       { href: '/production',  label: 'Производство', icon: ChefHat,     roles: ['ADMIN_PRO', 'ADMIN', 'CHEF', 'MANAGER'] },
       { href: '/invoices',    label: 'Поставки',    icon: ReceiptText, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'], badge: 'invoicesAwaitingCount' },
       { href: '/ingredients', label: 'Сырьё',        icon: Wheat,       roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },
