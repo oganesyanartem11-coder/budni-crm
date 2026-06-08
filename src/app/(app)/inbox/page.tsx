@@ -18,7 +18,7 @@ export default async function InboxPage({ searchParams }: PageProps) {
 
   return (
     <>
-      <PageHeader title="Inbox" subtitle="Переписка с клиентами" />
+      <PageHeader title="Сообщения" subtitle="Переписка с клиентами" />
       <Suspense fallback={null}>
         <ToneFilterBar activeTone={tone} />
       </Suspense>

@@ -98,7 +98,7 @@ export const NAV_GROUPS: NavGroup[] = [
     title: 'Продажи',
     items: [
       { href: '/orders',        label: 'Заказы',      icon: ClipboardList, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'pendingCount' },
-      { href: '/inbox',         label: 'Inbox',       icon: Inbox,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'inboxCount' },
+      { href: '/inbox',         label: 'Сообщения',   icon: Inbox,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'inboxCount' },
       { href: '/clients',       label: 'Клиенты',     icon: Users,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
       { href: '/menu',          label: 'Меню недели', icon: CalendarDays,  roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
       // TODO Артём: menu/imports оставлен ПЛОСКО (не вложен в menu) — см. todosForArtem #1.
@@ -171,14 +171,14 @@ export const MOBILE_TABBAR_BY_ROLE: Record<UserRole, TabbarItem[]> = {
   // (drawer-маркер MORE_HREF удалён).
   ADMIN_PRO: [
     { href: '/dashboard',  label: 'Главная',      icon: Home },
-    { href: '/inbox',      label: 'Inbox',        icon: Bot,         badge: 'inboxCount' },
+    { href: '/inbox',      label: 'Сообщения',    icon: Bot,         badge: 'inboxCount' },
     { href: '/orders',     label: 'Продажи',      icon: ShoppingBag, badge: 'pendingCount' },
     { href: '/production', label: 'Производство', icon: Factory },
     { href: '/more',       label: 'Ещё',          icon: Menu },
   ],
   ADMIN: [
     { href: '/dashboard',  label: 'Главная',      icon: Home },
-    { href: '/inbox',      label: 'Inbox',        icon: Bot,         badge: 'inboxCount' },
+    { href: '/inbox',      label: 'Сообщения',    icon: Bot,         badge: 'inboxCount' },
     { href: '/orders',     label: 'Продажи',      icon: ShoppingBag, badge: 'pendingCount' },
     { href: '/production', label: 'Производство', icon: Factory },
     { href: '/more',       label: 'Ещё',          icon: Menu },
@@ -186,7 +186,7 @@ export const MOBILE_TABBAR_BY_ROLE: Record<UserRole, TabbarItem[]> = {
   // MANAGER входит в roles dashboard (TOP_NAV) и production (NAV_GROUPS) — те же 5 вкладок.
   MANAGER: [
     { href: '/dashboard',  label: 'Главная',      icon: Home },
-    { href: '/inbox',      label: 'Inbox',        icon: Bot,         badge: 'inboxCount' },
+    { href: '/inbox',      label: 'Сообщения',    icon: Bot,         badge: 'inboxCount' },
     { href: '/orders',     label: 'Продажи',      icon: ShoppingBag, badge: 'pendingCount' },
     { href: '/production', label: 'Производство', icon: Factory },
     { href: '/more',       label: 'Ещё',          icon: Menu },
