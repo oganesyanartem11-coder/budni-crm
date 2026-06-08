@@ -9,7 +9,9 @@ import { escapeHtml } from '@/lib/telegram/notify'
  */
 
 export interface ProductionSummaryOrderRow {
-  /** Название клиента. */
+  /** ID клиента (юр.лица). Ключ группировки one-vs-many локаций. */
+  clientId: string
+  /** Название клиента (юр.лицо). */
   clientName: string
   /** Название точки/локации. */
   locationName: string
@@ -121,11 +123,24 @@ export function sortProductionSummaryRows<
 }
 
 /**
- * Одна строка в сводке: «📍 {Локация} — N порций».
- * Без имени клиента и юр.лица — только название точки и число порций.
+ * Одна строка в сводке. Юр.лицо клиента отображается ВСЕГДА; точка/локация —
+ * только когда у этого клиента в сводке больше одной локации (иначе точка
+ * избыточна).
+ *   • >1 локации: «🏢 {Клиент} · {Локация} — N порций»
+ *   • ровно 1 локация: «🏢 {Клиент} — N порций»
+ * Решение one-vs-many считается над ВСЕМ набором заказов сводки и передаётся
+ * сюда флагом showLocation.
  */
-export function formatProductionSummaryRow(row: ProductionSummaryOrderRow): string {
-  return `📍 ${escapeHtml(row.locationName)} — ${formatPortions(row.portions)}`
+export function formatProductionSummaryRow(
+  row: ProductionSummaryOrderRow,
+  opts: { showLocation: boolean }
+): string {
+  const client = escapeHtml(row.clientName)
+  const portions = formatPortions(row.portions)
+  if (opts.showLocation) {
+    return `🏢 ${client} · ${escapeHtml(row.locationName)} — ${portions}`
+  }
+  return `🏢 ${client} — ${portions}`
 }
 
 /**
@@ -135,6 +150,19 @@ export function formatProductionSummary(input: ProductionSummaryInput): string {
   const { dateLabel, orders, totalPortions, totalRevenue, deliveryRevenue = 0, unconfirmed = [] } = input
 
   const sorted = sortProductionSummaryRows(orders)
+
+  // Решение «одна vs много локаций» считаем над ВСЕМ набором заказов сводки
+  // (а не по строке в отрыве), группируя по clientId. Имя точки показываем
+  // только когда у клиента в этой сводке больше одной локации.
+  const locationsByClient = new Map<string, Set<string>>()
+  for (const o of orders) {
+    let set = locationsByClient.get(o.clientId)
+    if (!set) {
+      set = new Set<string>()
+      locationsByClient.set(o.clientId, set)
+    }
+    set.add(o.locationName)
+  }
 
   const lines: string[] = []
 
@@ -151,7 +179,8 @@ export function formatProductionSummary(input: ProductionSummaryInput): string {
   if (sorted.length > 0) {
     lines.push('')
     for (const row of sorted) {
-      lines.push(formatProductionSummaryRow(row))
+      const showLocation = (locationsByClient.get(row.clientId)?.size ?? 1) > 1
+      lines.push(formatProductionSummaryRow(row, { showLocation }))
     }
   }
 

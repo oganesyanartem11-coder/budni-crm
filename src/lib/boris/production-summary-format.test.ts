@@ -8,38 +8,46 @@ import {
 } from './production-summary-format'
 
 describe('formatProductionSummaryRow', () => {
-  it('строка: «📍 {Локация} — N порций», без имени клиента', () => {
-    const row = formatProductionSummaryRow({
-      clientName: 'Кофейня У Дома',
-      locationName: 'Тверская',
-      portions: 12,
-    })
-    expect(row).toBe('📍 Тверская — 12 порций')
-    expect(row).not.toContain('Кофейня У Дома')
+  it('showLocation=false: «🏢 {Клиент} — N порций», без точки', () => {
+    const row = formatProductionSummaryRow(
+      {
+        clientId: 'c1',
+        clientName: 'Кофейня У Дома',
+        locationName: 'Тверская',
+        portions: 12,
+      },
+      { showLocation: false }
+    )
+    expect(row).toBe('🏢 Кофейня У Дома — 12 порций')
+    expect(row).toContain('🏢')
+    expect(row).not.toContain('Тверская')
+    expect(row).not.toContain('·')
   })
 
-  it('не содержит имя клиента, ООО/ИП/юридического названия; содержит локацию, порции и 📍', () => {
-    const row = formatProductionSummaryRow({
-      clientName: 'Сеть Кафе',
-      locationName: 'Арбат',
-      portions: 1,
-    })
-    // только 📍 + локация + порции
-    expect(row).toBe('📍 Арбат — 1 порция')
-    expect(row).toContain('📍')
+  it('showLocation=true: «🏢 {Клиент} · {Локация} — N порций» — клиент + точка', () => {
+    const row = formatProductionSummaryRow(
+      {
+        clientId: 'c1',
+        clientName: 'Сеть Кафе',
+        locationName: 'Арбат',
+        portions: 1,
+      },
+      { showLocation: true }
+    )
+    expect(row).toBe('🏢 Сеть Кафе · Арбат — 1 порция')
+    expect(row).toContain('🏢')
+    expect(row).toContain('Сеть Кафе')
     expect(row).toContain('Арбат')
     expect(row).toContain('1 порция')
-    expect(row).not.toContain('Сеть Кафе')
-    expect(row).not.toMatch(/ООО|ИП|юр/i)
   })
 })
 
 describe('sortProductionSummaryRows', () => {
   it('сортирует по локации алфавитно, затем по клиенту', () => {
     const sorted = sortProductionSummaryRows([
-      { clientName: 'Бета', locationName: 'Тверская', portions: 5 },
-      { clientName: 'Гамма', locationName: 'Арбат', portions: 5 },
-      { clientName: 'Альфа', locationName: 'Арбат', portions: 5 },
+      { clientId: 'b', clientName: 'Бета', locationName: 'Тверская', portions: 5 },
+      { clientId: 'g', clientName: 'Гамма', locationName: 'Арбат', portions: 5 },
+      { clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 5 },
     ])
     expect(sorted.map((r) => `${r.locationName}/${r.clientName}`)).toEqual([
       'Арбат/Альфа',
@@ -54,8 +62,8 @@ describe('formatProductionSummary', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientName: 'Альфа', locationName: 'Арбат', portions: 10 },
-        { clientName: 'Бета', locationName: 'Тверская', portions: 5 },
+        { clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 },
+        { clientId: 'b', clientName: 'Бета', locationName: 'Тверская', portions: 5 },
       ],
       totalPortions: 15,
       totalRevenue: 12450,
@@ -68,46 +76,81 @@ describe('formatProductionSummary', () => {
   })
 
   it('единый список заказов отсортирован по локации, затем по клиенту', () => {
+    // У каждого клиента по одному заказу, но клиенты разные — каждый показан
+    // строкой «🏢 {Клиент}». Сортировка идёт по локации, затем по клиенту.
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientName: 'Бета', locationName: 'Тверская', portions: 5 },
-        { clientName: 'Альфа', locationName: 'Арбат', portions: 10 },
+        { clientId: 'b', clientName: 'Бета', locationName: 'Тверская', portions: 5 },
+        { clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 },
       ],
       totalPortions: 15,
       totalRevenue: 1000,
     })
-    const arbat = text.indexOf('📍 Арбат')
-    const tverskaya = text.indexOf('📍 Тверская')
-    expect(arbat).toBeGreaterThan(-1)
-    expect(tverskaya).toBeGreaterThan(-1)
-    expect(arbat).toBeLessThan(tverskaya)
-    // имена клиентов не отображаются в строках
-    expect(text).not.toContain('Альфа')
-    expect(text).not.toContain('Бета')
+    const alpha = text.indexOf('🏢 Альфа')
+    const beta = text.indexOf('🏢 Бета')
+    expect(alpha).toBeGreaterThan(-1)
+    expect(beta).toBeGreaterThan(-1)
+    // Альфа на «Арбат» сортируется раньше Беты на «Тверская».
+    expect(alpha).toBeLessThan(beta)
+    // У каждого клиента ровно одна локация → точка не показывается.
+    expect(text).not.toContain('Арбат')
+    expect(text).not.toContain('Тверская')
   })
 
-  it('заказы DYNAMIC и FIXED в одном списке без разделения на блоки', () => {
+  it('клиент с 2 локациями: каждая строка «🏢 {Клиент} · {Локация} — N»', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientName: 'Клиент-А', locationName: 'Точка-1', portions: 8 },
-        { clientName: 'Клиент-А', locationName: 'Точка-2', portions: 4 },
+        { clientId: 'a', clientName: 'Клиент-А', locationName: 'Точка-1', portions: 8 },
+        { clientId: 'a', clientName: 'Клиент-А', locationName: 'Точка-2', portions: 4 },
       ],
       totalPortions: 12,
       totalRevenue: 5000,
     })
-    expect(text).toContain('📍 Точка-1 — 8 порций')
-    expect(text).toContain('📍 Точка-2 — 4 порции')
-    expect(text).not.toContain('Клиент-А')
+    expect(text).toContain('🏢 Клиент-А · Точка-1 — 8 порций')
+    expect(text).toContain('🏢 Клиент-А · Точка-2 — 4 порции')
     expect(text).not.toContain('Подтверждено')
     expect(text).not.toContain('Фиксированные')
+  })
+
+  it('клиент с 1 локацией: строка «🏢 {Клиент} — N», точка опущена', () => {
+    const text = formatProductionSummary({
+      dateLabel: 'чт, 5 июня',
+      orders: [
+        { clientId: 'a', clientName: 'Клиент-А', locationName: 'Точка-1', portions: 8 },
+      ],
+      totalPortions: 8,
+      totalRevenue: 5000,
+    })
+    expect(text).toContain('🏢 Клиент-А — 8 порций')
+    expect(text).not.toContain('Точка-1')
+    expect(text).not.toContain('·')
+  })
+
+  it('решение one-vs-many считается per-client: один клиент с 2 точками + другой с 1', () => {
+    const text = formatProductionSummary({
+      dateLabel: 'чт, 5 июня',
+      orders: [
+        { clientId: 'multi', clientName: 'Мульти', locationName: 'Север', portions: 3 },
+        { clientId: 'multi', clientName: 'Мульти', locationName: 'Юг', portions: 2 },
+        { clientId: 'solo', clientName: 'Соло', locationName: 'Центр', portions: 7 },
+      ],
+      totalPortions: 12,
+      totalRevenue: 5000,
+    })
+    // У «Мульти» две локации → точки показаны.
+    expect(text).toContain('🏢 Мульти · Север — 3 порции')
+    expect(text).toContain('🏢 Мульти · Юг — 2 порции')
+    // У «Соло» одна локация → точка опущена.
+    expect(text).toContain('🏢 Соло — 7 порций')
+    expect(text).not.toContain('Центр')
   })
 
   it('Волна 4: deliveryRevenue>0 добавляет хвост «+ X ₽ доставка», food-итог не меняется', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
-      orders: [{ clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      orders: [{ clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
       totalPortions: 10,
       totalRevenue: 12450,
       deliveryRevenue: 800,
@@ -121,7 +164,7 @@ describe('formatProductionSummary', () => {
   it('Волна 4: deliveryRevenue=0/отсутствует → хвоста доставки нет', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
-      orders: [{ clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      orders: [{ clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
       totalPortions: 10,
       totalRevenue: 1000,
     })
@@ -131,7 +174,7 @@ describe('formatProductionSummary', () => {
   it('блок «Не ответили» отображается отдельно при наличии', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
-      orders: [{ clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      orders: [{ clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
       totalPortions: 10,
       totalRevenue: 1000,
       unconfirmed: [{ clientName: 'Гамма', locationName: 'Никитская' }],
