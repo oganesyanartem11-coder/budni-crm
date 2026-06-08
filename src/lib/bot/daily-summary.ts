@@ -23,6 +23,12 @@ const REMINDER_COOLDOWN_MINUTES = 10
 /**
  * Молчащие PENDING-conv созданные сегодня (созданные cron'ом 11:00 МСК).
  * «Молчит» = ни одного BotMessage(direction=IN) на этой conv.
+ *
+ * ВНИМАНИЕ: эта функция НЕ исключает same-day-клиентов и passed-cutoff —
+ * это намеренно делается у потребителей: sendRemindersToSilentClients (7.51 F-B)
+ * и cutoff-notice/route.ts фильтруют same-day сами. Не добавляй рассылку поверх
+ * этой выборки без такого фильтра, иначе повторишь баг 7.51 (same-day получали
+ * «до 16:00» после своего утреннего cut-off).
  */
 export async function findSilentPendingConvsCreatedToday(now: Date) {
   const todayUtc = mskMidnightUtc(now, 0)
@@ -65,8 +71,28 @@ export async function sendRemindersToSilentClients(
   const convs = await findSilentPendingConvsCreatedToday(now)
   const outcome: SendOutcome = { sent: 0, skipped: 0, errors: [] }
 
+  // 7.51 / F-B: исключаем same-day-клиентов из напоминаний. У них утренний
+  // персональный cut-off (напр. 08:40), который к 14:00/15:30 уже прошёл —
+  // «до 16:00» им неуместно. Тот же фильтр, что в cutoff-notice/route.ts.
+  // Это покрывает и passed-cutoff: same-day cut-off всегда в первой половине
+  // дня, а reminder-1/2 идут в 14:00/15:30 (позже). NEXT_DAY-клиенты держат
+  // глобальный 16:00 (ещё не наступил в 14:00/15:30) — их не трогаем.
+  const clientIds = [...new Set(convs.map((c) => c.clientId))]
+  const sameDayClients = clientIds.length
+    ? await prisma.client.findMany({
+        where: { id: { in: clientIds }, locations: { some: { sameDayDelivery: true } } },
+        select: { id: true },
+      })
+    : []
+  const sameDayClientIds = new Set(sameDayClients.map((c) => c.id))
+
   for (const conv of convs) {
     try {
+      if (sameDayClientIds.has(conv.clientId)) {
+        // same-day — их cut-off уже прошёл, пропускаем (см. коммент выше).
+        outcome.skipped++
+        continue
+      }
       if (!conv.client.maxChatId) {
         outcome.skipped++
         continue
