@@ -120,7 +120,7 @@ function CutoffBadge({ cutoff }: { cutoff: ReturnType<typeof getCutoffStatus> })
     return (
       <div className="flex items-center gap-1.5 px-3 py-1 rounded-pill bg-danger-bg text-danger-fg text-xs font-medium">
         <AlertTriangle className="w-3.5 h-3.5" />
-        Cut-off прошёл
+        Приём закрыт
       </div>
     )
   }

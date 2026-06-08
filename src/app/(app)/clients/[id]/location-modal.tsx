@@ -187,7 +187,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
               <span className="text-sm font-medium text-fg">Заказ день-в-день</span>
               <span
                 aria-label="Подсказка"
-                title="Для клиентов которые узнают количество людей утром (например в 8:00) и доставка идёт в этот же день. При включении заказы создаются на сегодня, не на завтра. Вопрос клиенту шлётся в 07:40 МСК, индивидуальный cut-off настраивается ниже."
+                title="Для клиентов которые узнают количество людей утром (например в 8:00) и доставка идёт в этот же день. При включении заказы создаются на сегодня, не на завтра. Вопрос клиенту шлётся в 07:40 МСК, индивидуальное время приёма заявок настраивается ниже."
                 className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-surface-2 text-fg-muted text-[10px] font-bold cursor-help"
               >
                 ⓘ
@@ -195,7 +195,7 @@ export function LocationModal({ clientId, location, open, onClose }: Props) {
             </label>
             {sameDayDelivery && (
               <div className="space-y-1.5 pt-1">
-                <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Cut-off (МСК)</label>
+                <label className="text-xs uppercase tracking-wide font-bold text-fg-muted">Время приёма заявок (МСК)</label>
                 <input
                   type="time"
                   placeholder="08:40"

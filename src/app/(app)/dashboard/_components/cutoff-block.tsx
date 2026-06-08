@@ -50,7 +50,7 @@ export async function CutOffBlock() {
       <section
         className="rounded-3xl border border-border bg-surface p-6"
         style={{ boxShadow: 'var(--shadow-card)' }}
-        aria-label="Cut-off дня"
+        aria-label="Приём заявок дня"
       >
         <div className="flex items-center gap-3">
           <span
@@ -62,7 +62,7 @@ export async function CutOffBlock() {
 
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-bold uppercase tracking-widest text-fg-muted">
-              Cut-off
+              Приём заявок
             </p>
             <p className="mt-0.5 text-sm font-medium text-fg-subtle">
               Нет заказов, ожидающих приёма
@@ -80,7 +80,7 @@ export async function CutOffBlock() {
     <section
       className="rounded-3xl border border-border bg-surface p-6"
       style={{ boxShadow: 'var(--shadow-card)' }}
-      aria-label="Cut-off дня"
+      aria-label="Приём заявок дня"
     >
       <div className="flex items-center gap-3">
         <span
@@ -95,11 +95,11 @@ export async function CutOffBlock() {
 
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-bold uppercase tracking-widest text-fg-muted">
-            Cut-off
+            Приём заявок
           </p>
           {countdown.isPast ? (
             <p className="mt-0.5 text-sm font-medium text-fg-subtle">
-              Cut-off закрыт сегодня · приём заказов до {mskTime} МСК
+              Приём закрыт сегодня · приём заказов до {mskTime} МСК
             </p>
           ) : (
             <p className="mt-0.5 text-sm text-fg">

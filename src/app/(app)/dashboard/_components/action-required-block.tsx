@@ -71,10 +71,10 @@ export async function ActionRequiredBlock() {
         <p className="mt-0.5 text-sm text-fg-muted">
           <b className="font-bold text-brand-orange-dark">{n} DYNAMIC</b> ждут ·{' '}
           {countdown.isPast || !target ? (
-            <>cut-off прошёл</>
+            <>приём закрыт</>
           ) : (
             <>
-              cut-off через{' '}
+              приём через{' '}
               <b className="font-bold tabular-nums text-fg">
                 {countdown.hoursLeft}ч {countdown.minutesLeft}мин
               </b>{' '}
