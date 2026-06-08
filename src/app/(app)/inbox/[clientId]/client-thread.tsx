@@ -13,6 +13,7 @@ import {
 } from '../actions'
 import { formatTime, formatDateShort } from '@/lib/utils/format'
 import { cn } from '@/lib/utils/cn'
+import { groupMessagesByMskDay, formatDayChipLabel } from './group-by-day'
 import { ToneChip } from '@/components/inbox/ToneChip'
 import { isToneLabel } from '@/lib/inbox/tone-labels'
 import type {
@@ -332,8 +333,24 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
           </div>
         ) : (
           <div ref={messagesBoxRef} className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} clientName={client.name} />
+            {groupMessagesByMskDay(messages).map((group) => (
+              <div key={group.dayKey} className="space-y-2">
+                <div className="sticky top-0 z-10 flex justify-center py-1">
+                  <span
+                    className="inline-flex items-center mx-auto h-6 px-3 rounded-pill text-[12px] leading-none text-fg-muted whitespace-nowrap"
+                    style={{
+                      backgroundColor: 'color-mix(in srgb, var(--color-surface-2) 80%, transparent)',
+                      backdropFilter: 'blur(8px)',
+                      WebkitBackdropFilter: 'blur(8px)',
+                    }}
+                  >
+                    {formatDayChipLabel(group.dayKey, new Date())}
+                  </span>
+                </div>
+                {group.messages.map((m) => (
+                  <MessageBubble key={m.id} message={m} clientName={client.name} />
+                ))}
+              </div>
             ))}
             <div ref={messagesEndRef} />
           </div>
