@@ -120,6 +120,20 @@ describe('saveBotOrders — П3 status bump', () => {
     expect(data.status).toBeUndefined()
     expect(data.confirmedAt).toBeUndefined()
     expect(res.savedItems).toHaveLength(1)
+    // F3: update-ветка возвращает старое значение порций для notify производства.
+    expect(res.savedItems[0].wasUpdate).toBe(true)
+    expect(res.savedItems[0].previousPortions).toBe(25)
+  })
+
+  it('F3: новый заказ (create-ветка) → previousPortions undefined, wasUpdate=false', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue(null)
+
+    const res = await saveBotOrders(makeInput(40))
+
+    expect(mockPrisma.order.create).toHaveBeenCalledTimes(1)
+    expect(res.savedItems).toHaveLength(1)
+    expect(res.savedItems[0].wasUpdate).toBe(false)
+    expect(res.savedItems[0].previousPortions).toBeUndefined()
   })
 
   it('LOCKED, portions 25, клиент шлёт 30 → status НЕ понижается, portions=30, 1 savedItem', async () => {

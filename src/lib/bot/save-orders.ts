@@ -8,6 +8,8 @@ export interface SavedItem {
   mealType: MealType
   portions: number
   wasUpdate: boolean
+  /** Порции ДО обновления. Заполняется только в update-ветке (wasUpdate=true). */
+  previousPortions?: number
 }
 
 export interface SaveBotOrdersInput {
@@ -86,6 +88,7 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
             mealType: cfg.mealType,
             portions: item.portions,
             wasUpdate: true,
+            previousPortions: existing.portions,
           })
         }
       } else {

@@ -773,6 +773,40 @@ async function handleBotResponse(
     return { reply: noChangeReply, action: 'noop' }
   }
 
+  // F3: производство ДОЛЖНО узнать об изменении уже подтверждённого заказа.
+  // Раньше CASE B создавал только InboxItem менеджеру и НИЧЕГО не слал в
+  // производственный канал — изменение порций могло пройти незамеченным.
+  // Сигналим по ВСЕМ savedItems (update'ы и новые локации), без дедупа —
+  // лучше пере-уведомить, чем потерять изменение. fire-and-forget, как CASE A.
+  {
+    const dateStr = formatMskDayMonth(conv.deliveryDate)
+    const clientNameHtml = escapeHtml(client.name)
+    let prodText: string
+    if (save.savedItems.length === 1) {
+      const it = save.savedItems[0]
+      const locHtml = escapeHtml(it.locationName)
+      if (it.wasUpdate && it.previousPortions != null) {
+        prodText = `✏️ <b>${clientNameHtml}</b> обновил заказ на ${dateStr}: ${locHtml} было ${it.previousPortions} → стало ${it.portions} порций`
+      } else {
+        prodText = `✏️ <b>${clientNameHtml}</b> обновил заказ на ${dateStr}: ${locHtml} — ${it.portions} порций (новая)`
+      }
+    } else {
+      const rows = save.savedItems
+        .map((it) => {
+          const locHtml = escapeHtml(it.locationName)
+          if (it.wasUpdate && it.previousPortions != null) {
+            return `📍 ${locHtml}: ${it.previousPortions} → ${it.portions}`
+          }
+          return `📍 ${locHtml}: +${it.portions} (новая)`
+        })
+        .join('\n')
+      prodText = `✏️ <b>${clientNameHtml}</b> обновил заказ на ${dateStr}:\n${rows}`
+    }
+    await notifyProductionChannel(prodText).catch((e) => {
+      console.error('[bot] notifyProductionChannel failed (order updated):', e)
+    })
+  }
+
   // Что-то изменилось: InboxItem создаём (чтобы менеджер видел изменение в
   // /inbox), но БЕЗ push'а в MAX — повтор не срочный, увидим в следующей сводке.
   // NB: схема InboxItemReason не содержит ORDER_UPDATED — используем
