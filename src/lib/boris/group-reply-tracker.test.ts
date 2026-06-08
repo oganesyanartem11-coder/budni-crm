@@ -12,6 +12,7 @@ const { mockPrisma } = vi.hoisted(() => ({
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 
 import {
+  getLastBorisGroupReply,
   getLastBorisGroupReplyMessageId,
   recordBorisGroupReply,
 } from './group-reply-tracker'
@@ -27,7 +28,7 @@ describe('getLastBorisGroupReplyMessageId', () => {
     expect(await getLastBorisGroupReplyMessageId('-100123')).toBe(4242)
     expect(mockPrisma.borisGroupReplyTracker.findUnique).toHaveBeenCalledWith({
       where: { tgChatId: '-100123' },
-      select: { lastReplyMessageId: true },
+      select: { lastReplyMessageId: true, updatedAt: true },
     })
   })
 
@@ -44,6 +45,39 @@ describe('getLastBorisGroupReplyMessageId', () => {
   it('ошибка БД → null (fail-safe, не бросает)', async () => {
     mockPrisma.borisGroupReplyTracker.findUnique.mockRejectedValue(new Error('P1001'))
     expect(await getLastBorisGroupReplyMessageId('-100123')).toBeNull()
+  })
+})
+
+describe('getLastBorisGroupReply', () => {
+  it('есть запись → возвращает { messageId, updatedAt }', async () => {
+    const updatedAt = new Date('2026-06-08T10:00:00.000Z')
+    mockPrisma.borisGroupReplyTracker.findUnique.mockResolvedValue({
+      lastReplyMessageId: 4242,
+      updatedAt,
+    })
+    expect(await getLastBorisGroupReply('-100123')).toEqual({
+      messageId: 4242,
+      updatedAt,
+    })
+    expect(mockPrisma.borisGroupReplyTracker.findUnique).toHaveBeenCalledWith({
+      where: { tgChatId: '-100123' },
+      select: { lastReplyMessageId: true, updatedAt: true },
+    })
+  })
+
+  it('нет записи → null', async () => {
+    mockPrisma.borisGroupReplyTracker.findUnique.mockResolvedValue(null)
+    expect(await getLastBorisGroupReply('-100123')).toBeNull()
+  })
+
+  it('пустой chatId → null без запроса', async () => {
+    expect(await getLastBorisGroupReply('')).toBeNull()
+    expect(mockPrisma.borisGroupReplyTracker.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('ошибка БД → null (fail-safe, не бросает)', async () => {
+    mockPrisma.borisGroupReplyTracker.findUnique.mockRejectedValue(new Error('P1001'))
+    expect(await getLastBorisGroupReply('-100123')).toBeNull()
   })
 })
 

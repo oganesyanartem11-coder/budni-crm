@@ -16,6 +16,10 @@ const chatWithBoris = vi.fn()
 const runAgentLoop = vi.fn()
 const borisConversationFindFirst = vi.fn()
 const borisMetricsCount = vi.fn()
+const borisMessageFindFirst = vi.fn()
+const classifyMessageRelatesToBoris = vi.fn()
+const getLastBorisGroupReply = vi.fn()
+const recordBorisGroupReply = vi.fn()
 
 vi.mock('./identify-user', () => ({
   identifyTelegramUser: (...args: unknown[]) => identifyTelegramUser(...args),
@@ -45,29 +49,38 @@ vi.mock('@/lib/boris/personality', () => ({
 vi.mock('@/lib/boris/tools', () => ({
   BORIS_READ_TOOLS: [{ name: 'find_orders' }],
 }))
+vi.mock('@/lib/boris/context-classifier', () => ({
+  classifyMessageRelatesToBoris: (...args: unknown[]) =>
+    classifyMessageRelatesToBoris(...args),
+}))
+vi.mock('@/lib/boris/group-reply-tracker', () => ({
+  getLastBorisGroupReply: (...args: unknown[]) => getLastBorisGroupReply(...args),
+  recordBorisGroupReply: (...args: unknown[]) => recordBorisGroupReply(...args),
+}))
 vi.mock('@/lib/db/prisma', () => ({
   prisma: {
     borisConversation: { findFirst: (...a: unknown[]) => borisConversationFindFirst(...a) },
     borisMetrics: { count: (...a: unknown[]) => borisMetricsCount(...a) },
+    borisMessage: { findFirst: (...a: unknown[]) => borisMessageFindFirst(...a) },
   },
 }))
 
 import { handleBorisMessage } from './boris-handler'
 
 type FakeCtx = {
-  chat: { type: string }
-  message: { text: string }
+  chat: { type: string; id: number }
+  message: { text: string; message_id: number }
   from: { id: number }
   reply: ReturnType<typeof vi.fn>
   replyWithChatAction: ReturnType<typeof vi.fn>
 }
 
-function makeCtx(chatType: string, text: string): FakeCtx {
+function makeCtx(chatType: string, text: string, messageId = 100): FakeCtx {
   return {
-    chat: { type: chatType },
-    message: { text },
+    chat: { type: chatType, id: -100123 },
+    message: { text, message_id: messageId },
     from: { id: 42 },
-    reply: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue({ message_id: 999 }),
     replyWithChatAction: vi.fn().mockResolvedValue(undefined),
   }
 }
@@ -90,6 +103,10 @@ beforeEach(() => {
   chatWithBoris.mockResolvedValue({ conversationId: 'conv1', reply: 'Ок, менеджер.' })
   borisConversationFindFirst.mockResolvedValue(null)
   borisMetricsCount.mockResolvedValue(0)
+  borisMessageFindFirst.mockResolvedValue(null)
+  classifyMessageRelatesToBoris.mockResolvedValue({ relates: true, confidence: 1 })
+  getLastBorisGroupReply.mockResolvedValue(null)
+  recordBorisGroupReply.mockResolvedValue(undefined)
 })
 
 describe('handleBorisMessage — ветка group + user=null (П4)', () => {
@@ -174,5 +191,78 @@ describe('handleBorisMessage — игнор не-нашей зоны', () => {
     expect(ctx.reply).not.toHaveBeenCalled()
     expect(runAgentLoop).not.toHaveBeenCalled()
     expect(chatWithBoris).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleBorisMessage — Haiku-ветка (F-grp-1)', () => {
+  // Без упоминания «Борис», но в пределах окна (messageId - lastReply <= 20) →
+  // shouldRespondInGroup вернёт needsHaiku=true.
+  it('нет ответа Бори в чате (borisMessage.findFirst → null) → молчим, классификатор НЕ зовём', async () => {
+    identifyTelegramUser.mockResolvedValue(null)
+    // В окне: последний ответ Бори — messageId 95, новое — 100 (дистанция 5),
+    // updatedAt свежий (внутри TTL).
+    getLastBorisGroupReply.mockResolvedValue({
+      messageId: 95,
+      updatedAt: new Date(),
+    })
+    borisMessageFindFirst.mockResolvedValue(null)
+    const ctx = makeCtx('group', 'это вообще неправильно', 100)
+
+    await handleBorisMessage(ctx as never)
+
+    expect(classifyMessageRelatesToBoris).not.toHaveBeenCalled()
+    expect(ctx.reply).not.toHaveBeenCalled()
+    expect(runAgentLoop).not.toHaveBeenCalled()
+    expect(chatWithBoris).not.toHaveBeenCalled()
+  })
+
+  it('есть ответ Бори → классификатор зовётся с lastBorisReply (извлечённый непустой текст)', async () => {
+    identifyTelegramUser.mockResolvedValue(null)
+    getLastBorisGroupReply.mockResolvedValue({
+      messageId: 95,
+      updatedAt: new Date(),
+    })
+    borisMessageFindFirst.mockResolvedValue({
+      content: [
+        { type: 'text', text: 'Сегодня 120 порций для Ромашки.' },
+        { type: 'tool_use', name: 'find_orders', input: {} },
+      ],
+    })
+    // relates=false → дальше не идём, но факт вызова классификатора с контекстом важен.
+    classifyMessageRelatesToBoris.mockResolvedValue({ relates: false, confidence: 0.9 })
+    const ctx = makeCtx('group', 'спасибо, понял', 100)
+
+    await handleBorisMessage(ctx as never)
+
+    expect(classifyMessageRelatesToBoris).toHaveBeenCalledTimes(1)
+    const arg = classifyMessageRelatesToBoris.mock.calls[0][0] as {
+      text: string
+      lastBorisReply: string
+    }
+    expect(arg.text).toBe('спасибо, понял')
+    expect(arg.lastBorisReply).toBe('Сегодня 120 порций для Ромашки.')
+    // relates=false → молчим.
+    expect(ctx.reply).not.toHaveBeenCalled()
+    expect(chatWithBoris).not.toHaveBeenCalled()
+  })
+
+  it('борис-фетч по chatId: findFirst фильтрует role=assistant + conversation.chatId', async () => {
+    identifyTelegramUser.mockResolvedValue(null)
+    getLastBorisGroupReply.mockResolvedValue({
+      messageId: 95,
+      updatedAt: new Date(),
+    })
+    borisMessageFindFirst.mockResolvedValue({
+      content: [{ type: 'text', text: 'ответ Бори' }],
+    })
+    const ctx = makeCtx('group', 'а почему так', 100)
+
+    await handleBorisMessage(ctx as never)
+
+    expect(borisMessageFindFirst).toHaveBeenCalledWith({
+      where: { role: 'assistant', conversation: { chatId: '-100123' } },
+      orderBy: { createdAt: 'desc' },
+      select: { content: true },
+    })
   })
 })

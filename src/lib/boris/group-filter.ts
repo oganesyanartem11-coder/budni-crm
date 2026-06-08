@@ -1,17 +1,20 @@
 import type { Context } from 'grammy'
+import { BORIS_GROUP_REPLY_TTL_MINUTES } from './config'
 
 /**
- * Проверяет упоминание слова «Борис» в тексте (любое склонение,
+ * Проверяет упоминание имени «Борис» или «Боря» в тексте (любое склонение,
  * любое место). Word boundary для кириллицы — через Unicode property
  * classes \p{L}\p{N} с флагом /u (стандартный \b НЕ работает
  * с русскими буквами в JS).
  *
- * Совпадает: «Борис, …», «спроси Бориса», «БОРИС подскажи», «нам Борис»
- * НЕ совпадает: «борисович», «Borisbot», «borisич»
+ * Совпадает: «Борис, …», «спроси Бориса», «БОРИС подскажи», «нам Борис»,
+ *   «Боря, …», «позови Борю», «спроси у Бори»
+ * НЕ совпадает: «борисович», «Borisbot», «borisич», «борщ», «борода»,
+ *   «борьба», «бор», «отбор», «забор»
  */
 export function mentionsBoris(text: string): boolean {
   if (!text) return false
-  return /(?:^|[^\p{L}\p{N}])борис(а|у|ом|е|ами|ы)?(?=[^\p{L}\p{N}]|$)/iu.test(text)
+  return /(?:^|[^\p{L}\p{N}])(?:борис(?:а|у|ом|е|ы)?|бор(?:я|и|е|ю|ей|ёй|ею|ями|ях))(?=[^\p{L}\p{N}]|$)/iu.test(text)
 }
 
 /**
@@ -59,13 +62,25 @@ export interface ShouldRespondInGroupInput {
    * null → Борис ещё ни разу не отвечал здесь (или persistence не реализован).
    */
   lastBorisReplyMessageId: number | null
+  /**
+   * epoch ms времени последнего ответа Бориса (BorisGroupReplyTracker.updatedAt);
+   * null → ответов ещё не было. Используется для time-TTL окна прослушки.
+   */
+  lastBorisReplyAt: number | null
+  /** Инъекция часов для тестов; в проде опускается → Date.now(). */
+  nowMs?: number
 }
 
 export interface ShouldRespondInGroupResult {
   /** Отвечать ли на это групповое сообщение. */
   should: boolean
   /** Машинно-читаемая причина решения (для логов/тестов). */
-  reason: 'direct_mention' | 'no_prior_boris' | 'window_closed' | 'in_window'
+  reason:
+    | 'direct_mention'
+    | 'no_prior_boris'
+    | 'window_closed'
+    | 'window_expired_by_time'
+    | 'in_window'
   /** Нужен ли Haiku-классификатор, чтобы окончательно решить (relates?). */
   needsHaiku: boolean
 }
@@ -77,6 +92,8 @@ export interface ShouldRespondInGroupResult {
  *  1. Прямое адресное «Борис» в тексте → отвечаем сразу, Haiku не нужен.
  *  2. Нет message_id прошлого ответа Бориса → нет контекста → молчим.
  *  3. Дистанция от последнего ответа Бориса > окна → разговор уехал → молчим.
+ *  3b. Прошло > BORIS_GROUP_REPLY_TTL_MINUTES с момента ответа Бориса →
+ *      разговор стух по времени → молчим (window_expired_by_time).
  *  4. Иначе мы в окне без явного упоминания → нужен Haiku-классификатор,
  *     который решит, относится ли сообщение к Борису (продолжение/спасибо/
  *     жалоба) или это люди говорят между собой.
@@ -92,6 +109,11 @@ export function shouldRespondInGroup(
   }
   if (input.messageId - input.lastBorisReplyMessageId > BORIS_CONTEXT_WINDOW_MESSAGES) {
     return { should: false, reason: 'window_closed', needsHaiku: false }
+  }
+  const now = input.nowMs ?? Date.now()
+  const ttlMs = BORIS_GROUP_REPLY_TTL_MINUTES * 60_000
+  if (input.lastBorisReplyAt != null && now - input.lastBorisReplyAt > ttlMs) {
+    return { should: false, reason: 'window_expired_by_time', needsHaiku: false }
   }
   return { should: true, reason: 'in_window', needsHaiku: true }
 }

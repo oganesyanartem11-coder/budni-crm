@@ -34,3 +34,19 @@ export const BORIS_HISTORY_WINDOW = Number(
 export const BORIS_CONVERSATION_TTL_MINUTES = Number(
   process.env.BORIS_CONVERSATION_TTL_MINUTES ?? 120,
 )
+
+/**
+ * Сколько минут после ответа Бориса в группе он продолжает «слушать» чат
+ * по ВРЕМЕНИ. Дополняет существующее окно по дистанции в 20 сообщений
+ * (BORIS_CONTEXT_WINDOW_MESSAGES в group-filter): окно открыто, только если
+ * выполнены ОБА условия — и сообщений после ответа Бориса прошло немного,
+ * и времени прошло немного.
+ *
+ * Без этого ограничения «тихий» групповой чат, где после ответа Бориса почти
+ * не пишут, держал бы Бориса в режиме прослушки часами (дистанция-то не растёт).
+ * 60 мин — стухший разговор: новое сообщение почти наверняка новая тема,
+ * слушать дальше незачем.
+ */
+export const BORIS_GROUP_REPLY_TTL_MINUTES = Number(
+  process.env.BORIS_GROUP_REPLY_TTL_MINUTES ?? 60,
+)

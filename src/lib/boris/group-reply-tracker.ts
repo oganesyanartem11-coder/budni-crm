@@ -11,21 +11,34 @@ import { prisma } from '@/lib/db/prisma'
  * ответ Бори. На ошибке чтения → null (фолбэк на «только прямое упоминание»).
  */
 
-/** messageId последнего ответа Бори в группе, или null (нет записи / ошибка). */
-export async function getLastBorisGroupReplyMessageId(
+/**
+ * Последний групповой ответ Бори: messageId + updatedAt, или null.
+ *
+ * shouldRespondInGroup теперь использует не только messageId (дистанция-окно),
+ * но и updatedAt (lastBorisReplyAt) — временное окно. Best-effort: на ошибке → null.
+ */
+export async function getLastBorisGroupReply(
   tgChatId: string
-): Promise<number | null> {
+): Promise<{ messageId: number; updatedAt: Date } | null> {
   if (!tgChatId) return null
   try {
     const row = await prisma.borisGroupReplyTracker.findUnique({
       where: { tgChatId },
-      select: { lastReplyMessageId: true },
+      select: { lastReplyMessageId: true, updatedAt: true },
     })
-    return row?.lastReplyMessageId ?? null
+    return row ? { messageId: row.lastReplyMessageId, updatedAt: row.updatedAt } : null
   } catch (err) {
     console.error('[boris:group-reply-tracker] read failed (swallowed):', err)
     return null
   }
+}
+
+/** messageId последнего ответа Бори в группе, или null (нет записи / ошибка). */
+export async function getLastBorisGroupReplyMessageId(
+  tgChatId: string
+): Promise<number | null> {
+  const row = await getLastBorisGroupReply(tgChatId)
+  return row?.messageId ?? null
 }
 
 /** Upsert messageId последнего ответа Бори в группе. Best-effort, не бросает. */

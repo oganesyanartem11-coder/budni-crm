@@ -12,7 +12,7 @@ import {
 } from '@/lib/boris/group-filter'
 import { classifyMessageRelatesToBoris } from '@/lib/boris/context-classifier'
 import {
-  getLastBorisGroupReplyMessageId,
+  getLastBorisGroupReply,
   recordBorisGroupReply,
 } from '@/lib/boris/group-reply-tracker'
 import { runAgentLoop } from '@/lib/llm/agent-loop'
@@ -103,6 +103,26 @@ async function answerStatelessReadOnly(ctx: Context, userText: string): Promise<
   await recordBorisGroupReply(String(ctx.chat?.id ?? ''), sent.message_id)
 }
 
+/**
+ * Извлекает текст из BorisMessage.content (Json = массив Anthropic content-блоков).
+ * Возвращает null, если текста нет (пустой / не массив / только не-text блоки).
+ */
+function extractBorisText(content: unknown): string | null {
+  if (!Array.isArray(content)) return null
+  const text = content
+    .filter(
+      (b): b is { type: 'text'; text: string } =>
+        !!b &&
+        typeof b === 'object' &&
+        (b as { type?: unknown }).type === 'text' &&
+        typeof (b as { text?: unknown }).text === 'string'
+    )
+    .map((b) => b.text)
+    .join('\n')
+    .trim()
+  return text.length > 0 ? text : null
+}
+
 export async function handleBorisMessage(ctx: Context): Promise<void> {
   // 7.28: в личке — всегда отвечаем. В группе — раньше отвечали ТОЛЬКО на
   // адресное «Борис»; теперь добавлено 20-сообщений контекстное окно: если
@@ -119,18 +139,30 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
     // Boris reorg (волна 2): читаем messageId последнего группового ответа Бори
     // из BorisGroupReplyTracker. Не найдено/ошибка → null (фолбэк на «только
     // прямое упоминание»). Окно «20 сообщений + Haiku» теперь активно.
-    const lastBorisReplyMessageId = await getLastBorisGroupReplyMessageId(
-      String(ctx.chat?.id ?? '')
-    )
+    const tracker = await getLastBorisGroupReply(String(ctx.chat?.id ?? ''))
     const decision = shouldRespondInGroup({
       text,
       chatId: ctx.chat?.id ?? 0,
       messageId: ctx.message?.message_id ?? 0,
-      lastBorisReplyMessageId,
+      lastBorisReplyMessageId: tracker?.messageId ?? null,
+      lastBorisReplyAt: tracker?.updatedAt ? tracker.updatedAt.getTime() : null,
     })
     if (!decision.should) return
     if (decision.needsHaiku) {
-      const { relates } = await classifyMessageRelatesToBoris({ text })
+      // Haiku больше не зовём вслепую: подаём ему последний ответ Бори как контекст.
+      // conv.id тут ещё нет (гейт до identify/fetch), поэтому ключуем по chatId.
+      const lastRow = await prisma.borisMessage.findFirst({
+        where: { role: 'assistant', conversation: { chatId } },
+        orderBy: { createdAt: 'desc' },
+        select: { content: true },
+      })
+      const lastBorisReply = extractBorisText(lastRow?.content ?? null)
+      if (lastBorisReply === null) {
+        // Нет ни одного ответа Бори в этом чате — молчим, классификатор не зовём.
+        console.log('[boris-handler]', { reason: 'no_prior_boris_in_conv', chatId })
+        return
+      }
+      const { relates } = await classifyMessageRelatesToBoris({ text, lastBorisReply })
       if (!relates) return
     }
   } else if (!shouldRespondInChat(ctx)) {
