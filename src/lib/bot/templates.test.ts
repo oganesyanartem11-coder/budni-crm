@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatUpdatedReply, type SavedItemForReply } from './templates'
+import { formatUpdatedReply, getDailyQuestionText, type SavedItemForReply } from './templates'
 
 /**
  * П8: повтор того же заказа без изменений не должен давать пустой
@@ -22,5 +22,22 @@ describe('formatUpdatedReply (КЕЙС B, П8)', () => {
       { locationName: 'Склад', portions: 5 },
     ]
     expect(formatUpdatedReply(items)).toBe('Принято, обновили: Офис — 10, Склад — 5.')
+  })
+})
+
+describe('getDailyQuestionText — персональный cut-off в шапке (7.51 F-A)', () => {
+  // 2026-06-08T00:00:00Z → в МСК это пн 08.06 03:00 (getDay=1) → isReminderDay.
+  const mondayMsk = new Date('2026-06-08T00:00:00Z')
+  const delivery = new Date('2026-06-08T00:00:00Z')
+
+  it('передан cutoffStr → шапка использует его вместо 16:00', () => {
+    const text = getDailyQuestionText(delivery, mondayMsk, '08:40')
+    expect(text).toContain('Ожидаем заявку до 08:40')
+    expect(text).not.toContain('до 16:00')
+  })
+
+  it('cutoffStr не передан → шапка использует глобальный «до 16:00»', () => {
+    const text = getDailyQuestionText(delivery, mondayMsk)
+    expect(text).toContain('Ожидаем заявку до 16:00')
   })
 })

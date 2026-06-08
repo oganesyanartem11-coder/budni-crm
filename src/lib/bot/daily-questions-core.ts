@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { getNextActiveDayForClient } from '@/lib/db/queries/bot'
 import { getDailyQuestionText } from '@/lib/bot/templates'
+import { getEarliestSameDayCutoff, formatCutoff } from '@/lib/utils/cutoff'
 import { sendBotMessage } from '@/lib/max/send-message'
 
 /**
@@ -100,7 +101,20 @@ async function resolveTargetDate(
 export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise<RunResult> {
   const candidates = await prisma.client.findMany({
     where: opts.where,
-    select: { id: true, name: true, maxChatId: true },
+    select: {
+      id: true,
+      name: true,
+      maxChatId: true,
+      locations: {
+        select: {
+          id: true,
+          sameDayDelivery: true,
+          cutoffHourMsk: true,
+          cutoffMinuteMsk: true,
+          isActive: true,
+        },
+      },
+    },
   })
 
   const result: RunResult = {
@@ -140,7 +154,15 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
         continue
       }
 
-      const text = getDailyQuestionText(targetDate, opts.todayMsk)
+      // 7.51 / F-A: для same-day-вопроса (today-only) подставляем персональный
+      // cut-off клиента вместо хардкода «16:00». Несколько same-day локаций →
+      // самый ранний. Для NEXT_DAY (next-active) cutoffStr=undefined → «16:00».
+      const sameDayCutoff =
+        opts.targetMode === 'today-only'
+          ? getEarliestSameDayCutoff(client.locations)
+          : null
+      const cutoffStr = sameDayCutoff ? formatCutoff(sameDayCutoff) : undefined
+      const text = getDailyQuestionText(targetDate, opts.todayMsk, cutoffStr)
       const variantIdx = targetDate.getDate() % 7
 
       if (opts.dryRun) {

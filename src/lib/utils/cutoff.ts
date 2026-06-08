@@ -101,3 +101,30 @@ export function getClientCutoffForDate({
     minute: location.cutoffMinuteMsk ?? DEFAULT_CUTOFF.minute,
   }
 }
+
+/**
+ * Самый ранний cut-off среди активных same-day локаций клиента.
+ * null → нет активной same-day локации (персональный cut-off неприменим,
+ * текст оставит глобальный fallback «до 16:00»).
+ * Несколько same-day локаций с разными cut-off → минимальный (самый ранний
+ * дедлайн), чтобы текст не обещал больше времени, чем есть. Та же семантика
+ * «min среди same-day», что в process-message.ts (КЕЙС C).
+ */
+export function getEarliestSameDayCutoff(
+  locations: LocationForCutoff[]
+): CutoffTime | null {
+  const sameDay = locations.filter(
+    (l) => l.sameDayDelivery && l.isActive !== false
+  )
+  let best: CutoffTime | null = null
+  for (const l of sameDay) {
+    const c: CutoffTime = {
+      hour: l.cutoffHourMsk ?? DEFAULT_CUTOFF.hour,
+      minute: l.cutoffMinuteMsk ?? DEFAULT_CUTOFF.minute,
+    }
+    if (!best || c.hour * 60 + c.minute < best.hour * 60 + best.minute) {
+      best = c
+    }
+  }
+  return best
+}

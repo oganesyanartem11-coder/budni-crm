@@ -18,8 +18,11 @@ const MSK_TIMEZONE = 'Europe/Moscow'
  *
  * Тело — одна из 7 формулировок по `deliveryDate.getDate() % 7`. Детерминированно:
  * все клиенты с одинаковым deliveryDate видят одинаковый текст.
+ *
+ * Если передан `cutoffStr`, он подставляется в шапку вместо «16:00»
+ * (для same-day-клиентов с персональным cut-off).
  */
-export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): string {
+export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date, cutoffStr?: string): string {
   const dateNumeric = fnsFormat(deliveryDate, 'dd.MM', { locale: ru })
   const weekdayFull = fnsFormat(deliveryDate, 'EEEE', { locale: ru })
   const line1 = `Заявка на ${dateNumeric}, ${weekdayFull}`
@@ -27,7 +30,8 @@ export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date): stri
   const mskToday = toZonedTime(todayInMsk, MSK_TIMEZONE)
   const dow = mskToday.getDay()
   const isReminderDay = dow === 1 || dow === 4
-  const header = isReminderDay ? `${line1}\nОжидаем заявку до 16:00` : line1
+  const cutoffLabel = cutoffStr ?? '16:00'
+  const header = isReminderDay ? `${line1}\nОжидаем заявку до ${cutoffLabel}` : line1
 
   const idx = deliveryDate.getDate() % 7
   const variants = [
