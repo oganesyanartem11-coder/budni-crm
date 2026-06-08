@@ -170,7 +170,7 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
         <div className="rounded-2xl bg-data-revenue-bg p-5">
           <p className="text-[11px] font-bold uppercase tracking-widest text-data-revenue-ink">Выручка</p>
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="font-display text-2xl font-bold tabular-nums text-fg-strong sm:text-3xl">
+            <span className="font-display text-4xl font-bold tabular-nums text-fg-strong sm:text-5xl">
               {formatMoney(data.thisPeriod.totalRevenue)}
             </span>
             {hasWow && (
@@ -210,7 +210,7 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
             <p className="text-[11px] font-bold uppercase tracking-widest text-data-margin-ink">Маржа</p>
             <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3">
               {margin ? (
-                <span className="font-display text-2xl font-extrabold tabular-nums text-fg-strong">
+                <span className="font-display text-2xl font-extrabold tabular-nums text-fg-strong sm:text-3xl">
                   {margin.marginPct === null ? '—' : `${margin.marginPct}%`}
                 </span>
               ) : (

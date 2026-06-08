@@ -48,12 +48,12 @@
   --color-primary-fg: #FFFFFF;
 
   /* === DATA — категориальные пастельные токены === */
-  --color-data-revenue: #83A2DB;
-  --color-data-revenue-bg: #D6E2F2;
-  --color-data-revenue-ink: #3A5897;
-  --color-data-margin: #A89AC9;
-  --color-data-margin-bg: #E5DEF2;
-  --color-data-margin-ink: #5D4F87;
+  --color-data-revenue: #0F6E56;
+  --color-data-revenue-bg: #D3EDE4;
+  --color-data-revenue-ink: #0B5947;
+  --color-data-margin: #1D9E75;
+  --color-data-margin-bg: #E3F4ED;
+  --color-data-margin-ink: #11684E;
   --color-data-orders: #94C9A9;
   --color-data-orders-bg: #DCEEE2;
   --color-data-orders-ink: #36694B;
