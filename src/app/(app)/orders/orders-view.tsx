@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { ChevronLeft, ChevronRight, MoreVertical } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MoreVertical, CalendarDays } from 'lucide-react'
 import { toast } from 'sonner'
 import { OrdersList } from './orders-list'
 import { OrdersWeek } from './orders-week'
@@ -12,6 +12,9 @@ import { toMskDateString, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { formatWeekRange, shiftWeek, isCurrentWeek } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
 import { SegmentedControl } from '@/components/ui/segmented-control'
+import { ru } from 'date-fns/locale'
+import { Calendar } from '@/components/ui/calendar'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Order, Client, ClientLocation } from '@prisma/client'
 
 type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
@@ -157,6 +160,8 @@ export function OrdersView({
             isTomorrow={isTomorrow}
             onJumpToday={jumpToToday}
             onJumpTomorrow={jumpToTomorrow}
+            selectedDate={selectedDate}
+            onPickDate={(d) => updateParams({ date: toMskDateString(d) })}
           />
         ) : weekStart && (
           <WeekNav
@@ -201,6 +206,8 @@ function DateNav({
   isTomorrow,
   onJumpToday,
   onJumpTomorrow,
+  selectedDate,
+  onPickDate,
 }: {
   onPrev: () => void
   onNext: () => void
@@ -209,7 +216,10 @@ function DateNav({
   isTomorrow: boolean
   onJumpToday: () => void
   onJumpTomorrow: () => void
+  selectedDate: Date
+  onPickDate: (d: Date) => void
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false)
   return (
     <div className="flex items-center gap-1">
       <button
@@ -250,6 +260,32 @@ function DateNav({
       >
         <ChevronRight className="w-4 h-4" />
       </button>
+      <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            aria-label="Выбрать дату"
+            className="w-9 h-9 rounded-full hover:bg-surface-2 flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
+          >
+            <CalendarDays className="w-4 h-4" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="end">
+          <Calendar
+            mode="single"
+            locale={ru}
+            weekStartsOn={1}
+            defaultMonth={selectedDate}
+            selected={selectedDate}
+            onSelect={(d) => {
+              if (d) {
+                onPickDate(d)
+                setPickerOpen(false)
+              }
+            }}
+          />
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
