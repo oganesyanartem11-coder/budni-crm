@@ -238,3 +238,74 @@ export function formatMskDayMonth(date: Date | string = new Date()): string {
     month: 'long',
   }).format(d)
 }
+
+// Названия месяцев в родительном падеже («6 июня») и сокращённо («дек»).
+// Индекс = 0-based MSK-месяц (0=январь). Заданы явно, а не через Intl, чтобы
+// гарантировать стабильный родительный падеж и короткую форму без точки.
+const MSK_MONTHS_GENITIVE = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+] as const
+
+const MSK_MONTHS_ABBR = [
+  'янв',
+  'фев',
+  'мар',
+  'апр',
+  'мая',
+  'июн',
+  'июл',
+  'авг',
+  'сен',
+  'окт',
+  'ноя',
+  'дек',
+] as const
+
+/** МСК-календарные компоненты (день/месяц/год) для UTC-инстанта. */
+function mskDayMonthYear(date: Date): { day: number; month: number; year: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const year = Number(parts.find((p) => p.type === 'year')!.value)
+  const month = Number(parts.find((p) => p.type === 'month')!.value) // 1-based
+  const day = Number(parts.find((p) => p.type === 'day')!.value)
+  return { day, month: month - 1, year } // month → 0-based
+}
+
+/**
+ * Диапазон дат для UI в МСК-календаре:
+ *   один месяц и год:      «6–12 июня»
+ *   разные месяцы, год тот же: «28 мая – 3 июня»
+ *   разные годы:           «28 дек 2025 – 3 янв 2026»
+ *
+ * Все компоненты извлекаются в Europe/Moscow через Intl, поэтому UTC-инстант
+ * рендерится как корректный МСК-календарный день (важно для Vercel-UTC).
+ */
+export function formatDateRangeRu(from: Date, to: Date): string {
+  const a = mskDayMonthYear(from)
+  const b = mskDayMonthYear(to)
+
+  if (a.year !== b.year) {
+    return `${a.day} ${MSK_MONTHS_ABBR[a.month]} ${a.year} – ${b.day} ${MSK_MONTHS_ABBR[b.month]} ${b.year}`
+  }
+
+  if (a.month !== b.month) {
+    return `${a.day} ${MSK_MONTHS_GENITIVE[a.month]} – ${b.day} ${MSK_MONTHS_GENITIVE[b.month]}`
+  }
+
+  return `${a.day}–${b.day} ${MSK_MONTHS_GENITIVE[b.month]}`
+}

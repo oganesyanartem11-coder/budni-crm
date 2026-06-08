@@ -5,7 +5,8 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { TrendingUp, TrendingDown, Minus, Calendar } from 'lucide-react'
 import { AreaChart, Area, Tooltip, ResponsiveContainer } from 'recharts'
 import type { AdminDashboardData, PeriodMargin } from '@/lib/db/queries/dashboard-stats'
-import { formatMoney } from '@/lib/utils/format'
+import { formatMoney, formatDateRangeRu } from '@/lib/utils/format'
+import { getPresetRange, type ReportPreset } from '@/lib/utils/week'
 import { cn } from '@/lib/utils/cn'
 import { SegmentedControl } from '@/components/ui/segmented-control'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
@@ -103,6 +104,22 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
   const hasWow = wowPct !== null
   const wowUp = hasWow && (wowPct as number) >= 0
 
+  // Подпись с конкретным диапазоном дат под переключателем периода (F-1).
+  // today/yesterday — без подписи (период очевиден). custom — границы из URL.
+  // Остальные пресеты — диапазон из getPresetRange (MSK-окна, считается на
+  // клиенте; week.ts client-safe). Все FinancePreset входят в ReportPreset.
+  const rangeLabel = (() => {
+    if (preset === 'today' || preset === 'yesterday') return null
+    if (preset === 'custom') {
+      if (!customFrom || !customTo) return null
+      // 'YYYY-MM-DD' → МСК-полдень того же дня (T09:00Z), чтобы формат прочитал
+      // верный МСК-календарный день вне зависимости от TZ.
+      return formatDateRangeRu(new Date(`${customFrom}T09:00:00.000Z`), new Date(`${customTo}T09:00:00.000Z`))
+    }
+    const { from, to } = getPresetRange(preset as ReportPreset)
+    return formatDateRangeRu(from, to)
+  })()
+
   return (
     <section
       className="rounded-3xl border border-border bg-surface p-7"
@@ -137,6 +154,9 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
             onCustom={applyCustomRange}
           />
         </div>
+
+        {/* Конкретный диапазон дат выбранного периода (F-1) — мелким серым. */}
+        {rangeLabel && <p className="-mt-2 text-[13px] text-fg-muted">{rangeLabel}</p>}
       </div>
 
       {/* Grid карточек */}
