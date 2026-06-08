@@ -109,6 +109,9 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
   // Борис недавно отвечал и новое сообщение в пределах окна — спрашиваем
   // дешёвый Haiku-классификатор, относится ли реплика к Борису.
   const chatType = (ctx.chat?.type ?? 'private') as BorisChatType
+  // #4: id чата для ключевания беседы (личка vs группа раздельно). Для лички
+  // chat.id == from.id. '' — безопасный fallback (у message всегда есть chat).
+  const chatId = ctx.chat?.id?.toString() ?? ''
   const text = ctx.message?.text ?? ''
   if (!text || text.startsWith('/')) return // /команды не наш case
 
@@ -168,9 +171,10 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
     return
   }
 
-  // Найти открытую conversation (последняя где closedAt = null).
+  // Найти открытую conversation для ЭТОГО чата (последняя где closedAt = null).
+  // #4: фильтр по chatId — личная и групповая истории не смешиваются.
   const conv = await prisma.borisConversation.findFirst({
-    where: { userId: user.id, closedAt: null },
+    where: { userId: user.id, chatId, closedAt: null },
     orderBy: { lastMessageAt: 'desc' },
   })
 
@@ -185,6 +189,7 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
       conversationId: conv?.id,
       userText: text,
       chatType,
+      chatId,
       userRole: user.role,
     })
 

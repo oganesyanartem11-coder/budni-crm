@@ -1308,12 +1308,20 @@ model BorisConversation {
   // продолжает фиксировать момент реального закрытия (= now на тот момент).
   expiresAt     DateTime?
 
+  // #4: id чата Telegram (ctx.chat.id). Беседа ключуется по userId+chatId, чтобы
+  // личная и групповая истории были РАЗДЕЛЬНЫМИ (раньше — только userId, и
+  // групповые отказы Бори протекали в личный контекст, самоусиливаясь). Nullable:
+  // старые беседы остаются legacy (chatId=NULL не матчится новым lookup'ом по
+  // chatId='<id>' → авто-ретайр, backfill не нужен).
+  chatId        String?
+
   messages       BorisMessage[]
   pendingActions BorisPendingAction[]
   metrics        BorisMetrics[]
 
   @@index([userId, closedAt])
   @@index([userId, lastMessageAt])
+  @@index([userId, chatId, closedAt])
 }
 
 // Boris reorg (волна 2): per-чат трекер последнего ГРУППОВОГО ответа Бори.

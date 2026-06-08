@@ -44,6 +44,10 @@ export interface ChatWithBorisInput {
   /** Тип чата откуда пришло сообщение. Влияет на доступные tools:
    *  в group/supergroup — только READ-tools (mutate отключаются). */
   chatType: 'private' | 'group' | 'supergroup' | 'channel'
+  /** #4: id чата Telegram (ctx.chat.id). Беседа ключуется по userId+chatId —
+   *  личная и групповая истории РАЗДЕЛЬНЫЕ (иначе групповые отказы протекают
+   *  в личный контекст). Для лички chat.id == from.id → одна беседа на юзера. */
+  chatId: string
   /** Роль пользователя. MUTATE-tools доступны ТОЛЬКО для ADMIN_PRO. */
   userRole: UserRole
 }
@@ -65,22 +69,27 @@ export interface ChatWithBorisResult {
  *   и создаём новую. Если нет open беседы — создаём.
  *
  * Lazy auto-close работает per-request — фоновый cron не нужен.
+ *
+ * Экспортируется для unit-тестов (#4: проверка ключевания по chatId).
  */
-async function resolveActiveConversation(
+export async function resolveActiveConversation(
   userId: string,
-  conversationId?: string,
+  conversationId: string | undefined,
+  chatId: string,
   now: Date = new Date(),
 ): Promise<BorisConversation> {
   if (conversationId) {
+    // #4: фильтр по chatId — переданный conversationId из ДРУГОГО чата НЕ
+    // подхватываем (иначе личка переиспользовала бы групповую беседу и наоборот).
     const explicit = await prisma.borisConversation.findFirst({
-      where: { id: conversationId, userId, closedAt: null },
+      where: { id: conversationId, userId, chatId, closedAt: null },
     })
     if (explicit) return explicit
   }
 
   const ttlCutoff = new Date(now.getTime() - BORIS_CONVERSATION_TTL_MINUTES * 60_000)
   const last = await prisma.borisConversation.findFirst({
-    where: { userId, closedAt: null },
+    where: { userId, chatId, closedAt: null },
     orderBy: { lastMessageAt: 'desc' },
   })
 
@@ -101,7 +110,7 @@ async function resolveActiveConversation(
   }
 
   return prisma.borisConversation.create({
-    data: { userId },
+    data: { userId, chatId },
   })
 }
 
@@ -110,6 +119,7 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
   const conversation = await resolveActiveConversation(
     input.userId,
     input.conversationId,
+    input.chatId,
   )
 
   // 2. Загрузить чуть больше чем целевое окно (запас на расширение в clip).
