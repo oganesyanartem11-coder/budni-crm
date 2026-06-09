@@ -2,12 +2,13 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { ClientDetail } from './client-detail'
-import { MaxChatIdSection } from './max-chat-id-section'
+import { MaxUsersBlock } from './max-users-block'
 import { OnboardingChecklist } from './onboarding-checklist'
 import { requireRole } from '@/lib/auth/current-user'
 import { prisma } from '@/lib/db/prisma'
 import { serialize } from '@/lib/utils/serialize'
 import { getClientAnalytics } from '@/lib/db/queries/client-analytics'
+import { MAX_BOT_USERNAME } from '@/lib/bot/onboarding'
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole(['ADMIN', 'MANAGER'])
@@ -29,6 +30,30 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         },
         defaultOurLegalEntity: {
           select: { id: true, shortName: true, entityType: true },
+        },
+        // 7.56: multi-user MAX — привязки + ожидающие захода инвайты.
+        maxUsers: {
+          orderBy: [{ isActive: 'desc' }, { lastSeenAt: { sort: 'desc', nulls: 'last' } }],
+          select: {
+            id: true,
+            chatId: true,
+            username: true,
+            isActive: true,
+            lastSeenAt: true,
+            linkedAt: true,
+          },
+        },
+        maxInvites: {
+          where: { usedAt: null, expiresAt: { gt: new Date() } },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            phone: true,
+            label: true,
+            token: true,
+            expiresAt: true,
+            createdAt: true,
+          },
         },
         _count: {
           select: { orders: true },
@@ -58,11 +83,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         </Link>
       </div>
       <OnboardingChecklist client={client} />
-      <MaxChatIdSection
+      <MaxUsersBlock
         clientId={client.id}
-        currentValue={client.maxChatId}
-        onboardingToken={client.maxOnboardingToken}
-        onboardedAt={null}
+        users={serialize(client.maxUsers)}
+        invites={serialize(client.maxInvites)}
+        botUsername={MAX_BOT_USERNAME}
       />
       <ClientDetail client={serialize(client)} analytics={serialize(analytics)} couriers={couriers} />
     </>

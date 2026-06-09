@@ -160,8 +160,60 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
     return
   }
 
-  // 1. Клиент
   const username = ctx.user?.username ?? null
+
+  // 7.56: инвайт-флоу multi-user. Сначала пробуем одноразовый ClientMaxInvite по
+  // токену. Если найден и валиден — привязываем нового MAX-пользователя. Если не
+  // найден — падаем в legacy-путь по maxOnboardingToken (Client/User) ниже.
+  const invite = await prisma.clientMaxInvite.findUnique({
+    where: { token: payload },
+    include: { client: { select: { id: true, name: true } } },
+  })
+  if (invite) {
+    const now = new Date()
+    if (invite.usedAt || invite.expiresAt <= now) {
+      await ctx.reply('Эта ссылка уже использована или истекла. Получите новую у менеджера.')
+      return
+    }
+    // Первый пользователь клиента → сразу активный; иначе «запасной» (менеджер
+    // переключит вручную в UI). chatId @unique → upsert (повторный заход не падает).
+    const activeCount = await prisma.clientMaxUser.count({
+      where: { clientId: invite.clientId, isActive: true },
+    })
+    const makeActive = activeCount === 0
+    await prisma.$transaction([
+      prisma.clientMaxUser.upsert({
+        where: { chatId: chatIdStr },
+        create: {
+          clientId: invite.clientId,
+          chatId: chatIdStr,
+          username,
+          isActive: makeActive,
+        },
+        update: {
+          clientId: invite.clientId,
+          username,
+          ...(makeActive ? { isActive: true } : {}),
+        },
+      }),
+      prisma.clientMaxInvite.update({
+        where: { id: invite.id },
+        data: { usedAt: now, usedByChatId: chatIdStr },
+      }),
+    ])
+    const greeting = `Добро пожаловать! Вы привязаны к компании ${invite.client.name}. Когда нужно будет ответить на сообщение бота — просто пишите сюда.`
+    await sendBotMessage(chatIdStr, greeting)
+    await logBotMessage({
+      clientId: invite.clientId,
+      conversationId: null,
+      direction: 'OUT',
+      text: greeting,
+    })
+    return
+  }
+
+  // 1. Клиент (legacy onboarding-токен — переходный период до полного перехода
+  //    на инвайты; новые привязки идут через ClientMaxInvite выше).
   const client = await prisma.client.findUnique({
     where: { maxOnboardingToken: payload },
     // Welcome ветвится по типу клиента (см. welcome.ts) — подгружаем минимум:

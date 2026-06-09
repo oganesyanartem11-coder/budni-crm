@@ -6,7 +6,6 @@ import { Prisma } from '@prisma/client'
 import type { MealType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
-import { generateOnboardingToken, buildOnboardingDeeplink } from '@/lib/bot/onboarding'
 import { startOfTodayMsk, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import {
   validateInn,
@@ -999,34 +998,8 @@ export async function createMealConfigBulk(
 }
 
 
-export async function updateClientMaxChatId(
-  clientId: string,
-  maxChatId: string | null
-): Promise<ActionResult> {
-  await requireRole(['ADMIN', 'MANAGER'])
-
-  const value = maxChatId?.trim() ?? null
-  if (value !== null) {
-    if (!/^\d+$/.test(value)) {
-      return { ok: false, error: 'chat_id должен состоять только из цифр' }
-    }
-    const existing = await prisma.client.findFirst({
-      where: { maxChatId: value, NOT: { id: clientId } },
-      select: { name: true },
-    })
-    if (existing) {
-      return { ok: false, error: `Этот chat_id уже привязан к клиенту «${existing.name}»` }
-    }
-  }
-
-  await prisma.client.update({
-    where: { id: clientId },
-    data: { maxChatId: value },
-  })
-
-  revalidatePath(`/clients/${clientId}`)
-  return { ok: true, data: undefined }
-}
+// 7.56: updateClientMaxChatId (ручная запись Client.maxChatId) удалён — привязки
+// теперь только через инвайт-флоу (см. clients/max-users-actions.ts).
 
 /**
  * Список активных наших юрлиц для Select в форме клиента.
@@ -1045,30 +1018,6 @@ export async function listActiveOurLegalEntitiesForClientForm(): Promise<
   })
 }
 
-/**
- * Возвращает (или генерирует впервые) onboarding-токен и deep-link для клиента.
- * Идемпотентно: повторный вызов вернёт сохранённый токен.
- */
-export async function ensureClientOnboardingToken(
-  clientId: string
-): Promise<ActionResult<{ token: string; deeplink: string }>> {
-  await requireRole(['ADMIN', 'MANAGER'])
-
-  const client = await prisma.client.findUnique({
-    where: { id: clientId },
-    select: { id: true, maxOnboardingToken: true },
-  })
-  if (!client) return { ok: false, error: 'Клиент не найден' }
-
-  let token = client.maxOnboardingToken
-  if (!token) {
-    token = generateOnboardingToken()
-    await prisma.client.update({
-      where: { id: clientId },
-      data: { maxOnboardingToken: token },
-    })
-  }
-
-  revalidatePath(`/clients/${clientId}`)
-  return { ok: true, data: { token, deeplink: buildOnboardingDeeplink(token) } }
-}
+// 7.56: ensureClientOnboardingToken удалён — генерация ссылок переехала в
+// инвайт-флоу (createMaxInvite в clients/max-users-actions.ts). Legacy-путь
+// bot_started по maxOnboardingToken пока сохранён в handlers.ts как fallback.

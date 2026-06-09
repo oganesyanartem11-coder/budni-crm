@@ -21,3 +21,11 @@ export function generateOnboardingToken(): string {
 export function buildOnboardingDeeplink(token: string): string {
   return `https://max.ru/${MAX_BOT_USERNAME}?start=${token}`
 }
+
+/**
+ * 7.56: токен инвайта для привязки MAX-пользователя — 16 символов base64url
+ * (12 случайных байт). Короче onboarding-токена, влезает в payload (лимит 128).
+ */
+export function generateInviteToken(): string {
+  return randomBytes(12).toString('base64url')
+}

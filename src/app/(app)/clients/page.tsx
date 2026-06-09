@@ -24,6 +24,8 @@ export default async function ClientsPage() {
         where: { isActive: true },
         select: { id: true, mealType: true, orderType: true, fixedPortions: true, pricePerPortion: true, isActive: true },
       },
+      // 7.56: «MAX подключён» в onboarding-чек-листе считается по активному ClientMaxUser.
+      maxUsers: { select: { isActive: true } },
       _count: {
         select: {
           orders: true,

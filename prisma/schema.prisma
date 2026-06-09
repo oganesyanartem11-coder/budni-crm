@@ -346,6 +346,7 @@ model User {
   // MEGA-BACKEND блок B: курьер опционально привязан к точкам клиента.
   // Курьер видит свои точки + непривязанные. ADMIN/MANAGER — всё.
   assignedLocations ClientLocation[] @relation("CourierLocations")
+  maxInvitesCreated ClientMaxInvite[] @relation("ClientMaxInviteCreator")
 
   @@index([role, isActive])
 }
@@ -439,6 +440,7 @@ model Client {
   pendingOrderChanges PendingOrderChange[]
   contacts            ClientContact[]
   maxUsers            ClientMaxUser[]
+  maxInvites          ClientMaxInvite[]
 
   @@index([isActive])
   @@index([name])
@@ -460,6 +462,27 @@ model ClientMaxUser {
   lastSeenAt DateTime?
 
   @@index([clientId, isActive])
+}
+
+// 7.56: одноразовое приглашение для привязки нового MAX-пользователя к клиенту.
+// Менеджер генерирует ссылку https://max.ru/<bot>?start=<token>; сотрудник
+// клиента переходит → bot_started с payload=token → создаётся ClientMaxUser.
+model ClientMaxInvite {
+  id           String    @id @default(cuid())
+  token        String    @unique
+  clientId     String
+  client       Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  phone        String
+  label        String?
+  createdById  String?
+  createdBy    User?     @relation("ClientMaxInviteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  expiresAt    DateTime
+  usedAt       DateTime?
+  usedByChatId String?
+  createdAt    DateTime  @default(now())
+
+  @@index([clientId])
+  @@index([token])
 }
 
 model ClientContact {

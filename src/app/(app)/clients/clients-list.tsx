@@ -21,6 +21,7 @@ type SerializedClient = Omit<Client, never> & {
     pricePerPortion: number
     isActive: boolean
   }>
+  maxUsers: Array<{ isActive: boolean }>
   _count: {
     orders: number
     locations: number

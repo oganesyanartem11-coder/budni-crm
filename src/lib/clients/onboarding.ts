@@ -22,7 +22,8 @@ export interface ClientForOnboarding {
   id: string
   contactPhone: string | null
   defaultOurLegalEntityId: string | null
-  maxChatId: string | null
+  // 7.56: «MAX подключён» = есть активный ClientMaxUser (не Client.maxChatId).
+  maxUsers: Array<{ isActive: boolean }>
   locations: Array<{ isActive: boolean }>
   mealConfigs: Array<{ isActive: boolean }>
 }
@@ -40,7 +41,7 @@ export function getOnboardingStatus(client: ClientForOnboarding): OnboardingStat
   const hasActiveMealConfig = client.mealConfigs.some((m) => m.isActive)
   const hasPhone = !!client.contactPhone && client.contactPhone.trim().length > 0
   const hasLegalEntity = !!client.defaultOurLegalEntityId
-  const hasMax = !!client.maxChatId
+  const hasMax = client.maxUsers?.some((u) => u.isActive) ?? false
 
   const editHref = `/clients/${client.id}/edit`
 
@@ -73,7 +74,7 @@ export function getOnboardingStatus(client: ClientForOnboarding): OnboardingStat
       key: 'max',
       label: 'MAX-привязка',
       done: hasMax,
-      actionHref: '#max-chat-id-section',
+      actionHref: '#max-users-section',
     },
   ]
 
