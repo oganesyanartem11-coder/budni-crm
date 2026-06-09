@@ -13,6 +13,8 @@ export interface ProductionSummaryOrderRow {
   clientId: string
   /** Название клиента (юр.лицо). */
   clientName: string
+  /** ID точки/локации — ключ дедупа (две точки с одинаковым именем не схлопываются). */
+  locationId: string
   /** Название точки/локации. */
   locationName: string
   /** Суммарное число порций по строке. */
@@ -152,8 +154,10 @@ export function formatProductionSummary(input: ProductionSummaryInput): string {
   const sorted = sortProductionSummaryRows(orders)
 
   // Решение «одна vs много локаций» считаем над ВСЕМ набором заказов сводки
-  // (а не по строке в отрыве), группируя по clientId. Имя точки показываем
-  // только когда у клиента в этой сводке больше одной локации.
+  // (а не по строке в отрыве), группируя по clientId. Уникальность точек считаем
+  // по locationId (а не по имени) — две разные точки с одинаковым названием не
+  // схлопываются в Set. Имя точки показываем только когда у клиента в этой сводке
+  // больше одной локации.
   const locationsByClient = new Map<string, Set<string>>()
   for (const o of orders) {
     let set = locationsByClient.get(o.clientId)
@@ -161,7 +165,7 @@ export function formatProductionSummary(input: ProductionSummaryInput): string {
       set = new Set<string>()
       locationsByClient.set(o.clientId, set)
     }
-    set.add(o.locationName)
+    set.add(o.locationId)
   }
 
   const lines: string[] = []

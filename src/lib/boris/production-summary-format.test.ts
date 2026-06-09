@@ -13,6 +13,7 @@ describe('formatProductionSummaryRow', () => {
       {
         clientId: 'c1',
         clientName: 'Кофейня У Дома',
+        locationId: 'l1',
         locationName: 'Тверская',
         portions: 12,
       },
@@ -29,6 +30,7 @@ describe('formatProductionSummaryRow', () => {
       {
         clientId: 'c1',
         clientName: 'Сеть Кафе',
+        locationId: 'l1',
         locationName: 'Арбат',
         portions: 1,
       },
@@ -45,9 +47,9 @@ describe('formatProductionSummaryRow', () => {
 describe('sortProductionSummaryRows', () => {
   it('сортирует по локации алфавитно, затем по клиенту', () => {
     const sorted = sortProductionSummaryRows([
-      { clientId: 'b', clientName: 'Бета', locationName: 'Тверская', portions: 5 },
-      { clientId: 'g', clientName: 'Гамма', locationName: 'Арбат', portions: 5 },
-      { clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 5 },
+      { clientId: 'b', clientName: 'Бета', locationId: 'l1', locationName: 'Тверская', portions: 5 },
+      { clientId: 'g', clientName: 'Гамма', locationId: 'l2', locationName: 'Арбат', portions: 5 },
+      { clientId: 'a', clientName: 'Альфа', locationId: 'l3', locationName: 'Арбат', portions: 5 },
     ])
     expect(sorted.map((r) => `${r.locationName}/${r.clientName}`)).toEqual([
       'Арбат/Альфа',
@@ -62,8 +64,8 @@ describe('formatProductionSummary', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 },
-        { clientId: 'b', clientName: 'Бета', locationName: 'Тверская', portions: 5 },
+        { clientId: 'a', clientName: 'Альфа', locationId: 'l1', locationName: 'Арбат', portions: 10 },
+        { clientId: 'b', clientName: 'Бета', locationId: 'l2', locationName: 'Тверская', portions: 5 },
       ],
       totalPortions: 15,
       totalRevenue: 12450,
@@ -81,8 +83,8 @@ describe('formatProductionSummary', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientId: 'b', clientName: 'Бета', locationName: 'Тверская', portions: 5 },
-        { clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 },
+        { clientId: 'b', clientName: 'Бета', locationId: 'l2', locationName: 'Тверская', portions: 5 },
+        { clientId: 'a', clientName: 'Альфа', locationId: 'l1', locationName: 'Арбат', portions: 10 },
       ],
       totalPortions: 15,
       totalRevenue: 1000,
@@ -102,8 +104,8 @@ describe('formatProductionSummary', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientId: 'a', clientName: 'Клиент-А', locationName: 'Точка-1', portions: 8 },
-        { clientId: 'a', clientName: 'Клиент-А', locationName: 'Точка-2', portions: 4 },
+        { clientId: 'a', clientName: 'Клиент-А', locationId: 'l1', locationName: 'Точка-1', portions: 8 },
+        { clientId: 'a', clientName: 'Клиент-А', locationId: 'l2', locationName: 'Точка-2', portions: 4 },
       ],
       totalPortions: 12,
       totalRevenue: 5000,
@@ -114,11 +116,30 @@ describe('formatProductionSummary', () => {
     expect(text).not.toContain('Фиксированные')
   })
 
+  it('V-prodsum-locid: 2 РАЗНЫЕ точки одного клиента с ОДИНАКОВЫМ именем → обе показывают точку (дедуп по locationId, не по имени)', () => {
+    const text = formatProductionSummary({
+      dateLabel: 'чт, 5 июня',
+      orders: [
+        { clientId: 'c1', clientName: 'Клиент-А', locationId: 'l1', locationName: 'Склад', portions: 8 },
+        { clientId: 'c1', clientName: 'Клиент-А', locationId: 'l2', locationName: 'Склад', portions: 4 },
+      ],
+      totalPortions: 12,
+      totalRevenue: 5000,
+    })
+    // Две локации (по locationId) → showLocation сработал: символ « · » и имя точки
+    // присутствуют, строки НЕ схлопнулись в одну «🏢 Клиент-А».
+    expect(text).toContain('·')
+    expect(text).toContain('🏢 Клиент-А · Склад — 8 порций')
+    expect(text).toContain('🏢 Клиент-А · Склад — 4 порции')
+    // Голой строки без точки быть не должно (иначе showLocation не сработал).
+    expect(text).not.toContain('🏢 Клиент-А — ')
+  })
+
   it('клиент с 1 локацией: строка «🏢 {Клиент} — N», точка опущена', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientId: 'a', clientName: 'Клиент-А', locationName: 'Точка-1', portions: 8 },
+        { clientId: 'a', clientName: 'Клиент-А', locationId: 'l1', locationName: 'Точка-1', portions: 8 },
       ],
       totalPortions: 8,
       totalRevenue: 5000,
@@ -132,9 +153,9 @@ describe('formatProductionSummary', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
       orders: [
-        { clientId: 'multi', clientName: 'Мульти', locationName: 'Север', portions: 3 },
-        { clientId: 'multi', clientName: 'Мульти', locationName: 'Юг', portions: 2 },
-        { clientId: 'solo', clientName: 'Соло', locationName: 'Центр', portions: 7 },
+        { clientId: 'multi', clientName: 'Мульти', locationId: 'l1', locationName: 'Север', portions: 3 },
+        { clientId: 'multi', clientName: 'Мульти', locationId: 'l2', locationName: 'Юг', portions: 2 },
+        { clientId: 'solo', clientName: 'Соло', locationId: 'l3', locationName: 'Центр', portions: 7 },
       ],
       totalPortions: 12,
       totalRevenue: 5000,
@@ -150,7 +171,7 @@ describe('formatProductionSummary', () => {
   it('Волна 4: deliveryRevenue>0 добавляет хвост «+ X ₽ доставка», food-итог не меняется', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
-      orders: [{ clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      orders: [{ clientId: 'a', clientName: 'Альфа', locationId: 'l1', locationName: 'Арбат', portions: 10 }],
       totalPortions: 10,
       totalRevenue: 12450,
       deliveryRevenue: 800,
@@ -164,7 +185,7 @@ describe('formatProductionSummary', () => {
   it('Волна 4: deliveryRevenue=0/отсутствует → хвоста доставки нет', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
-      orders: [{ clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      orders: [{ clientId: 'a', clientName: 'Альфа', locationId: 'l1', locationName: 'Арбат', portions: 10 }],
       totalPortions: 10,
       totalRevenue: 1000,
     })
@@ -174,7 +195,7 @@ describe('formatProductionSummary', () => {
   it('блок «Не ответили» отображается отдельно при наличии', () => {
     const text = formatProductionSummary({
       dateLabel: 'чт, 5 июня',
-      orders: [{ clientId: 'a', clientName: 'Альфа', locationName: 'Арбат', portions: 10 }],
+      orders: [{ clientId: 'a', clientName: 'Альфа', locationId: 'l1', locationName: 'Арбат', portions: 10 }],
       totalPortions: 10,
       totalRevenue: 1000,
       unconfirmed: [{ clientName: 'Гамма', locationName: 'Никитская' }],

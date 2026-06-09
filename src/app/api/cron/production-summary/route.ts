@@ -110,7 +110,7 @@ async function handler(_request: Request) {
   // одна строка с суммарными порциями. Разные локации одного клиента = разные строки.
   const orderMap = new Map<
     string,
-    { clientId: string; clientName: string; locationName: string; portions: number }
+    { clientId: string; clientName: string; locationId: string; locationName: string; portions: number }
   >()
   for (const o of orders) {
     const key = `${o.client.id}:${o.location.id}`
@@ -120,6 +120,7 @@ async function handler(_request: Request) {
       orderMap.set(key, {
         clientId: o.client.id,
         clientName: o.client.name,
+        locationId: o.location.id,
         locationName: o.location.name,
         portions: o.portions,
       })
