@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { findActiveOrder } from '@/lib/db/queries/orders'
 import { editOrderPortionsCore, createOneTimeOrderCore } from '@/app/(app)/orders/actions'
 import { getPostCutoffReply } from '@/lib/bot/templates'
-import { formatCutoff, DEFAULT_CUTOFF } from '@/lib/utils/cutoff'
+import { formatCutoff, DEFAULT_CUTOFF, getClientCutoffForDate } from '@/lib/utils/cutoff'
 
 /**
  * MEGA-4b (П3): бизнес-логика жизненного цикла PendingOrderChange —
@@ -266,12 +266,40 @@ export async function rejectPendingChange(params: {
 
   const change = await prisma.pendingOrderChange.findUnique({
     where: { id: changeId },
-    select: { sourceMaxChatId: true },
+    select: {
+      sourceMaxChatId: true,
+      deliveryDate: true,
+      locationId: true,
+      client: {
+        select: {
+          locations: {
+            select: {
+              id: true,
+              sameDayDelivery: true,
+              cutoffHourMsk: true,
+              cutoffMinuteMsk: true,
+              isActive: true,
+            },
+          },
+        },
+      },
+    },
   })
   // change не может быть null после успешного claim, но защищаемся типом.
   const clientMaxChatId = change?.sourceMaxChatId ?? ''
 
-  const postCutoffReplyText = getPostCutoffReply(formatCutoff(DEFAULT_CUTOFF))
+  // V-postcutoff-default (7.53 F-A): персональный cut-off локации заказа вместо
+  // хардкода 16:00. getClientCutoffForDate сам падает на DEFAULT_CUTOFF, если
+  // локация не same-day / доставка не сегодня / не резолвится.
+  const cutoff = change
+    ? getClientCutoffForDate({
+        client: { locations: change.client.locations },
+        deliveryDate: change.deliveryDate,
+        locationId: change.locationId,
+        now,
+      })
+    : DEFAULT_CUTOFF
+  const postCutoffReplyText = getPostCutoffReply(formatCutoff(cutoff))
 
   return { ok: true, clientMaxChatId, postCutoffReplyText }
 }

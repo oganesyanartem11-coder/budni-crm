@@ -280,7 +280,15 @@ describe('confirmPendingChange — CREATE menu/price failure', () => {
 describe('rejectPendingChange', () => {
   it('claim → REJECTED + postCutoffReplyText', async () => {
     mockPrisma.pendingOrderChange.updateMany.mockResolvedValue({ count: 1 })
-    mockPrisma.pendingOrderChange.findUnique.mockResolvedValue({ sourceMaxChatId: '444' })
+    // 7.53 F-A: select расширен (deliveryDate/locationId/client.locations) для
+    // резолва персонального cut-off. Пустые locations → getClientCutoffForDate
+    // падает на DEFAULT_CUTOFF (16:00), что и проверяет ассерт ниже.
+    mockPrisma.pendingOrderChange.findUnique.mockResolvedValue({
+      sourceMaxChatId: '444',
+      deliveryDate: DELIVERY,
+      locationId: 'L1',
+      client: { locations: [] },
+    })
 
     const res = await rejectPendingChange({ changeId: 'poc_6', confirmedById: 'mgr1' })
     expect(res.ok).toBe(true)
