@@ -201,7 +201,8 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
         data: { usedAt: now, usedByChatId: chatIdStr },
       }),
     ])
-    const greeting = `Добро пожаловать! Вы привязаны к компании ${invite.client.name}. Когда нужно будет ответить на сообщение бота — просто пишите сюда.`
+    const greeting =
+      'Здравствуйте! Меня зовут Олеся, я из Будней — занимаюсь заказами обедов. Пишите сюда, когда нужно оформить заказ или что-то уточнить.'
     await sendBotMessage(chatIdStr, greeting)
     await logBotMessage({
       clientId: invite.clientId,

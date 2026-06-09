@@ -184,7 +184,7 @@ function findFirstVisibleCard(): HTMLElement | null {
 function formatPreview(text: string, direction: 'IN' | 'OUT' | 'MANAGER_OUT'): string {
   const prefix =
     direction === 'IN' ? '' :
-    direction === 'OUT' ? 'Бот: ' :
+    direction === 'OUT' ? 'Олеся: ' :
     'Вы: '
   return prefix + text
 }

@@ -88,6 +88,8 @@ interface ClientLight {
   contactPhone: string | null
   maxChatId: string | null
   maxUsername: string | null
+  // 7.57: активные MAX-привязки (ClientMaxUser). Непустой массив → боту есть кому писать.
+  maxUsers: Array<{ id: string }>
 }
 
 interface ActiveItem {
@@ -227,8 +229,8 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
       toast.error('Текст ответа пуст')
       return
     }
-    if (!client.maxChatId) {
-      toast.error('У клиента не задан maxChatId')
+    if (client.maxUsers.length === 0) {
+      toast.error('У клиента нет активной MAX-привязки')
       return
     }
     if (!confirm(`Отправить клиенту «${client.name}»?\n\n${text}`)) return
@@ -380,9 +382,9 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
           className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors text-base md:text-sm resize-y"
         />
 
-        {!client.maxChatId && (
+        {client.maxUsers.length === 0 && (
           <p className="text-xs text-warning-fg mt-2">
-            ⚠️ У клиента не задан maxChatId — отправка не сработает. Привяжите chat_id в карточке клиента.
+            ⚠️ У клиента нет активной MAX-привязки — добавьте пользователя в карточке клиента.
           </p>
         )}
 
@@ -390,7 +392,7 @@ export function ClientInboxView({ client, activeItem: initialActive, history, me
           <button
             type="button"
             onClick={handleSend}
-            disabled={isPending || !replyText.trim() || !client.maxChatId || !activeItem}
+            disabled={isPending || !replyText.trim() || client.maxUsers.length === 0 || !activeItem}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-pill bg-accent text-accent-fg text-sm font-medium hover:opacity-90 disabled:opacity-50"
           >
             <Send className="w-3.5 h-3.5" />
@@ -465,7 +467,7 @@ function MessageBubble({
 }) {
   const isClient = message.direction === 'IN'
   const isBot = message.direction === 'OUT'
-  const author = isClient ? clientName : isBot ? 'Бот' : 'Менеджер'
+  const author = isClient ? clientName : isBot ? 'Олеся' : 'Менеджер'
 
   return (
     <div className={cn('flex flex-col', isClient ? 'items-start' : 'items-end')}>

@@ -24,6 +24,9 @@ export default async function ClientInboxPage({ params }: PageProps) {
     select: {
       id: true, name: true, contactPhone: true,
       maxChatId: true, maxUsername: true,
+      // 7.57: «можно ли писать клиенту» определяется активным ClientMaxUser,
+      // а не legacy Client.maxChatId.
+      maxUsers: { where: { isActive: true }, take: 1, select: { id: true } },
     },
   })
   if (!client) notFound()

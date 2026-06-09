@@ -378,7 +378,7 @@ export async function sendReplyAndResolve(
 
   const chatId = await getActiveMaxChatIdForClient(item.client.id)
   if (!chatId) {
-    return { ok: false, error: 'У клиента не задан maxChatId' }
+    return { ok: false, error: 'У клиента нет активной MAX-привязки' }
   }
 
   try {
