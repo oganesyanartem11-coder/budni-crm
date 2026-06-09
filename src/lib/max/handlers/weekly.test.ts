@@ -32,6 +32,12 @@ const {
     clientMealConfig: { findFirst: vi.fn() },
     order: { aggregate: vi.fn() },
     weeklyOrderSubmission: { findFirst: vi.fn() },
+    clientMaxUser: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
   },
   mockFindClient: vi.fn(),
   mockProcessClientMessage: vi.fn(),
@@ -46,7 +52,11 @@ const {
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
-vi.mock('@/lib/db/queries/bot', () => ({ findClientByMaxChatId: mockFindClient }))
+vi.mock('@/lib/bot/max-users', () => ({
+  resolveClientByChatId: mockFindClient,
+  promoteToActiveByChatId: vi.fn(async () => {}),
+  getActiveMaxChatIdForClient: vi.fn(async () => '999'),
+}))
 vi.mock('@/lib/bot/process-message', () => ({ processClientMessage: mockProcessClientMessage }))
 vi.mock('@/lib/bot/create-inbox-item', () => ({ createInboxItem: mockCreateInbox }))
 vi.mock('@/lib/max/send-message', () => ({ sendBotMessage: mockSendBotMessage }))

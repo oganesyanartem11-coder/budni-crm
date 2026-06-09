@@ -4,6 +4,7 @@ import { getNextActiveDayForClient } from '@/lib/db/queries/bot'
 import { getDailyQuestionText } from '@/lib/bot/templates'
 import { getEarliestSameDayCutoff, formatCutoff } from '@/lib/utils/cutoff'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 
 /**
  * Общее ядро для cron'ов daily-questions и daily-questions-sameday.
@@ -104,7 +105,6 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
     select: {
       id: true,
       name: true,
-      maxChatId: true,
       locations: {
         select: {
           id: true,
@@ -128,7 +128,8 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
 
   for (const client of candidates) {
     try {
-      if (!client.maxChatId) {
+      const chatId = await getActiveMaxChatIdForClient(client.id)
+      if (!chatId) {
         result.skipped_not_onboarded++
         console.log(`[${opts.label}] skip not-onboarded: ${client.name}`)
         continue
@@ -182,7 +183,7 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
         },
       })
 
-      await sendBotMessage(client.maxChatId, text, { delay: false })
+      await sendBotMessage(chatId, text, { delay: false })
 
       await prisma.botMessage.create({
         data: {

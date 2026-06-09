@@ -4,7 +4,7 @@ import { processClientMessage } from '@/lib/bot/process-message'
 import { logBotMessage } from '@/lib/bot/log-message'
 import { pickWelcomeKind, getWelcomeText } from '@/lib/bot/welcome'
 import { sendBotMessage } from '@/lib/max/send-message'
-import { findClientByMaxChatId } from '@/lib/db/queries/bot'
+import { resolveClientByChatId } from '@/lib/bot/max-users'
 import { withDbRetry } from '@/lib/db-retry'
 import { createInboxItem } from '@/lib/bot/create-inbox-item'
 import {
@@ -28,16 +28,16 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
 
   console.log(`[bot] incoming: chat=${maxChatId} text=${JSON.stringify(text).slice(0, 200)}`)
 
-  // Back-fill maxUsername для клиентов, привязанных до 5.4a
+  // Back-fill username привязки (7.55: на уровне ClientMaxUser, не Client).
   const senderUsername = ctx.message?.sender?.username ?? null
   if (senderUsername) {
     try {
-      await prisma.client.updateMany({
-        where: { maxChatId, maxUsername: null },
-        data: { maxUsername: senderUsername },
+      await prisma.clientMaxUser.updateMany({
+        where: { chatId: maxChatId, username: null },
+        data: { username: senderUsername },
       })
     } catch (err) {
-      console.warn('[bot] back-fill maxUsername failed:', err)
+      console.warn('[bot] back-fill username failed:', err)
     }
   }
 
@@ -49,7 +49,7 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
   // случаи, когда клиент не найден) идут по старому пути без изменений.
   // P1001-фикс: первый запрос холодного Neon падает с P1001. Ретраим этот
   // (первый) read, чтобы прогреть compute — дальше по handler'у БД уже тёплая.
-  const client = await withDbRetry(() => findClientByMaxChatId(maxChatId), {
+  const client = await withDbRetry(() => resolveClientByChatId(maxChatId), {
     label: 'max-webhook',
   })
   const isWeekly =
@@ -180,6 +180,21 @@ export async function handleBotStarted(ctx: FilteredContext<Context, 'bot_starte
         // onboardedAt отсутствует в модели Client — фиксируем только chat_id и username
       },
     })
+    // 7.55: dual-write в ClientMaxUser — привязка через /start сразу попадает в
+    // новую таблицу. Этот пользователь становится активным, прежний активный у
+    // клиента гасится (соблюдает partial-unique «один активный на клиента»).
+    // upsert по chatId @unique → идемпотентно при повторном /start.
+    await prisma.$transaction([
+      prisma.clientMaxUser.updateMany({
+        where: { clientId: client.id, isActive: true, chatId: { not: chatIdStr } },
+        data: { isActive: false },
+      }),
+      prisma.clientMaxUser.upsert({
+        where: { chatId: chatIdStr },
+        create: { clientId: client.id, chatId: chatIdStr, username, isActive: true },
+        update: { clientId: client.id, username, isActive: true },
+      }),
+    ])
     const kind = pickWelcomeKind(client)
     console.log(`[max-welcome] client=${client.id} kind=${kind}`)
     const greeting = getWelcomeText(kind)

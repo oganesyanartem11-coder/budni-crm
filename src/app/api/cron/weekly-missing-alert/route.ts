@@ -31,7 +31,8 @@ async function findWeeklyClients() {
       isActive: true,
       mealConfigs: { some: { orderType: 'WEEKLY', isActive: true } },
     },
-    select: { id: true, name: true, maxChatId: true },
+    // 7.55: maxChatId убран — алерт идёт менеджерам по имени, поле не использовалось.
+    select: { id: true, name: true },
   })
 }
 

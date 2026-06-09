@@ -3,28 +3,11 @@ import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import type { MealType } from '@prisma/client'
 
-/**
- * Возвращает клиента по MAX chat_id, со всеми активными точками
- * и активными meal-конфигами на каждой точке.
- * Используется в bot-orchestrator для парсинга ответов клиента.
- */
-export async function findClientByMaxChatId(maxChatId: string) {
-  return prisma.client.findUnique({
-    where: { maxChatId },
-    include: {
-      locations: {
-        where: { isActive: true },
-        include: {
-          mealConfigs: {
-            where: { isActive: true },
-          },
-        },
-      },
-    },
-  })
-}
-
-export type ClientWithBotContext = NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>
+// 7.55: findClientByMaxChatId удалён — резолв клиента по входящему chatId теперь
+// идёт через ClientMaxUser (multi-user). Используй resolveClientByChatId из
+// '@/lib/bot/max-users'. Тип ClientWithBotContext ре-экспортируется оттуда для
+// обратной совместимости импортов.
+export type { ClientWithBotContext } from '@/lib/bot/max-users'
 
 export interface DynamicConfigForDate {
   configId: string

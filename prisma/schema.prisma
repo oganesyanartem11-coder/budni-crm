@@ -395,6 +395,9 @@ model Client {
   updatedAt        DateTime @updatedAt
 
   // Бот-ассистент в MAX (Спринт 5)
+  // @deprecated 7.55 — привязки переехали в ClientMaxUser (multi-user). Поле
+  // оставлено на переходный период (@unique как защита от двойной записи);
+  // дропнется отдельной миграцией после 7.56 smoke + неделя в проде.
   maxChatId          String? @unique
   maxUsername        String? // username в MAX, для deeplink «https://max.ru/<username>»
   maxOnboardingToken String? @unique
@@ -435,10 +438,28 @@ model Client {
   weeklySubmissions   WeeklyOrderSubmission[]
   pendingOrderChanges PendingOrderChange[]
   contacts            ClientContact[]
+  maxUsers            ClientMaxUser[]
 
   @@index([isActive])
   @@index([name])
   @@index([defaultOurLegalEntityId])
+}
+
+// 7.55: фундамент multi-user MAX. N привязанных пользователей на клиента, в
+// любой момент ровно один isActive=true — бот пушит только активному. Партиальный
+// уникальный индекс «один активный на клиента» добавлен raw-SQL в миграции
+// (Prisma его декларативно не выражает): ClientMaxUser_clientId_active_unique.
+model ClientMaxUser {
+  id         String    @id @default(cuid())
+  clientId   String
+  client     Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  chatId     String    @unique
+  username   String?
+  isActive   Boolean   @default(true)
+  linkedAt   DateTime  @default(now())
+  lastSeenAt DateTime?
+
+  @@index([clientId, isActive])
 }
 
 model ClientContact {

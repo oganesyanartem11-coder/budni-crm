@@ -26,6 +26,12 @@ const { mockPrisma, mockFindActiveOrder, mockEditCore, mockCreateCore } = vi.hoi
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
+// 7.55: confirm/reject/expire резолвят активного пользователя через
+// getActiveMaxChatIdForClient; при null падают на sourceMaxChatId (снимок/fallback).
+// По умолчанию возвращаем null → существующие ассерты на sourceMaxChatId сохраняются.
+vi.mock('@/lib/bot/max-users', () => ({
+  getActiveMaxChatIdForClient: vi.fn(async () => null),
+}))
 vi.mock('@/lib/db/queries/orders', () => ({ findActiveOrder: mockFindActiveOrder }))
 vi.mock('@/app/(app)/orders/actions', () => ({
   editOrderPortionsCore: mockEditCore,

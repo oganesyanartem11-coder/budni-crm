@@ -4,6 +4,7 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { alreadyRanToday, markRanToday } from '@/lib/bot/daily-summary'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { getMondayOfWeek, shiftWeek } from '@/lib/utils/week'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,7 @@ async function findWeeklyClients() {
       isActive: true,
       mealConfigs: { some: { orderType: 'WEEKLY', isActive: true } },
     },
-    select: { id: true, name: true, maxChatId: true },
+    select: { id: true, name: true },
   })
 }
 
@@ -64,7 +65,8 @@ export async function handler(request: Request) {
       skippedHasSubmission++
       continue
     }
-    if (!client.maxChatId) {
+    const chatId = await getActiveMaxChatIdForClient(client.id)
+    if (!chatId) {
       skippedNoChat++
       continue
     }
@@ -77,7 +79,7 @@ export async function handler(request: Request) {
       // бота. На MVP-масштабе (~7 WEEKLY-клиентов) суммарная задержка не
       // упрётся в лимит Vercel-функции, поэтому консистентность с «живой»
       // перепиской важнее.
-      await sendBotMessage(client.maxChatId, WEEKLY_REMINDER_TO_CLIENT, { delay: true })
+      await sendBotMessage(chatId, WEEKLY_REMINDER_TO_CLIENT, { delay: true })
       console.log(`[weekly-reminder] sent to client=${client.id}`)
       sent++
     } catch (err) {

@@ -4,6 +4,7 @@ import { findActiveOrder } from '@/lib/db/queries/orders'
 import { editOrderPortionsCore, createOneTimeOrderCore } from '@/app/(app)/orders/actions'
 import { getPostCutoffReply } from '@/lib/bot/templates'
 import { formatCutoff, DEFAULT_CUTOFF, getClientCutoffForDate } from '@/lib/utils/cutoff'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 
 /**
  * MEGA-4b (П3): бизнес-логика жизненного цикла PendingOrderChange —
@@ -145,7 +146,10 @@ export async function confirmPendingChange(params: {
   }
 
   const dateStr = formatDateDDMM(change.deliveryDate)
-  const clientMaxChatId = change.sourceMaxChatId
+  // 7.55: резолвим активного пользователя на момент отправки; sourceMaxChatId —
+  // снимок-аудит и fallback, если активного пользователя нет.
+  const clientMaxChatId =
+    (await getActiveMaxChatIdForClient(change.clientId)) ?? change.sourceMaxChatId
   const actor = { id: confirmedById, role: 'ADMIN_PRO' as const }
 
   // Хелперы пометки итогового статуса.
@@ -268,6 +272,7 @@ export async function rejectPendingChange(params: {
     where: { id: changeId },
     select: {
       sourceMaxChatId: true,
+      clientId: true,
       deliveryDate: true,
       locationId: true,
       client: {
@@ -286,7 +291,10 @@ export async function rejectPendingChange(params: {
     },
   })
   // change не может быть null после успешного claim, но защищаемся типом.
-  const clientMaxChatId = change?.sourceMaxChatId ?? ''
+  // 7.55: резолв активного на момент отправки; sourceMaxChatId — снимок/fallback.
+  const clientMaxChatId = change
+    ? ((await getActiveMaxChatIdForClient(change.clientId)) ?? change.sourceMaxChatId)
+    : ''
 
   // V-postcutoff-default (7.53 F-A): персональный cut-off локации заказа вместо
   // хардкода 16:00. getClientCutoffForDate сам падает на DEFAULT_CUTOFF, если
@@ -322,7 +330,7 @@ export async function expirePendingChanges(): Promise<ExpirePendingChangesResult
 
   const candidates = await prisma.pendingOrderChange.findMany({
     where: { status: 'PENDING', expiresAt: { lt: now } },
-    select: { id: true, sourceMaxChatId: true },
+    select: { id: true, clientId: true, sourceMaxChatId: true },
   })
 
   const expired: ExpirePendingChangesResult['expired'] = []
@@ -333,9 +341,12 @@ export async function expirePendingChanges(): Promise<ExpirePendingChangesResult
       data: { status: 'EXPIRED', expiredAt: now },
     })
     if (claim.count === 1) {
+      // 7.55: резолв активного на момент отправки; sourceMaxChatId — снимок/fallback.
+      const clientMaxChatId =
+        (await getActiveMaxChatIdForClient(c.clientId)) ?? c.sourceMaxChatId
       expired.push({
         id: c.id,
-        clientMaxChatId: c.sourceMaxChatId,
+        clientMaxChatId,
         postCutoffReplyText: EXPIRED_REPLY,
       })
     }

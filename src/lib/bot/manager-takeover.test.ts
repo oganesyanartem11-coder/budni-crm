@@ -34,6 +34,13 @@ const {
     inboxItem: { findFirst: vi.fn(), update: vi.fn() },
     order: { findFirst: vi.fn() },
     botMessage: { findFirst: vi.fn() },
+    clientMaxUser: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    $transaction: vi.fn(async () => []),
   },
   mockFindClient: vi.fn(),
   mockFindConv: vi.fn(),
@@ -51,8 +58,12 @@ const {
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('@/lib/db/queries/bot', () => ({
-  findClientByMaxChatId: mockFindClient,
   findLatestBotConv: mockFindConv,
+}))
+vi.mock('@/lib/bot/max-users', () => ({
+  resolveClientByChatId: mockFindClient,
+  getActiveMaxChatIdForClient: vi.fn(async () => '999'),
+  promoteToActiveByChatId: vi.fn(async () => {}),
 }))
 vi.mock('@/lib/llm/parser', () => ({ parseClientResponse: mockParse }))
 vi.mock('./save-orders', () => ({ saveBotOrders: mockSave }))

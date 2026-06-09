@@ -8,6 +8,7 @@ import {
   markRanToday,
 } from '@/lib/bot/daily-summary'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,8 +49,9 @@ async function handler(_request: Request) {
       continue
     }
     try {
-      if (!conv.client.maxChatId) {
-        // Без maxChatId не можем отправить, но статус всё равно закрываем.
+      const chatId = await getActiveMaxChatIdForClient(conv.clientId)
+      if (!chatId) {
+        // Без активного chatId не можем отправить, но статус всё равно закрываем.
         await prisma.botConversation.update({
           where: { id: conv.id },
           data: { status: 'EXPIRED' },
@@ -57,7 +59,7 @@ async function handler(_request: Request) {
         continue
       }
 
-      await sendBotMessage(conv.client.maxChatId, CUTOFF_NOTICE_TEXT, { delay: false })
+      await sendBotMessage(chatId, CUTOFF_NOTICE_TEXT, { delay: false })
       await prisma.botMessage.create({
         data: {
           clientId: conv.clientId,

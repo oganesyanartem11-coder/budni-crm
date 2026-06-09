@@ -2,6 +2,7 @@ import { toZonedTime } from 'date-fns-tz'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 import { notifyAllManagersDirect } from '@/lib/telegram/notify'
 import { inboxListButton } from '@/lib/telegram/buttons'
 import { formatPortions } from '@/lib/utils/format'
@@ -39,7 +40,7 @@ export async function findSilentPendingConvsCreatedToday(now: Date) {
       messages: { none: { direction: 'IN' } },
     },
     include: {
-      client: { select: { id: true, name: true, maxChatId: true } },
+      client: { select: { id: true, name: true } },
     },
   })
 }
@@ -93,7 +94,8 @@ export async function sendRemindersToSilentClients(
         outcome.skipped++
         continue
       }
-      if (!conv.client.maxChatId) {
+      const chatId = await getActiveMaxChatIdForClient(conv.client.id)
+      if (!chatId) {
         outcome.skipped++
         continue
       }
@@ -105,7 +107,7 @@ export async function sendRemindersToSilentClients(
       const text = textFor(conv.deliveryDate)
       // Cron-рассылка (reminder-1/2): получателей может быть много, естественная
       // задержка из sendBotMessage упёрлась бы в timeout Vercel-функции.
-      await sendBotMessage(conv.client.maxChatId, text, { delay: false })
+      await sendBotMessage(chatId, text, { delay: false })
       await prisma.botMessage.create({
         data: {
           clientId: conv.clientId,

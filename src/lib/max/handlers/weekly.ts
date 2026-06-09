@@ -3,6 +3,7 @@ import { put } from '@vercel/blob'
 import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { createInboxItem } from '@/lib/bot/create-inbox-item'
 import { sendBotMessage } from '@/lib/max/send-message'
+import { promoteToActiveByChatId } from '@/lib/bot/max-users'
 import { fetchAttachmentAsBase64 } from '@/lib/max/fetch-attachment'
 import { parseWeeklySubmission } from '@/lib/weekly/parser'
 import { runSanityChecks, type SanityContext } from '@/lib/weekly/sanity-checks'
@@ -114,7 +115,9 @@ async function deriveSanityContext(
  */
 async function handleDuplicateGuard(
   client: ClientWithBotContext,
-  weekStartDate: Date
+  weekStartDate: Date,
+  // 7.55: chatId отправителя — отвечаем тому, кто прислал заявку (multi-user).
+  chatId: string
 ): Promise<boolean> {
   const existing = await prisma.weeklyOrderSubmission.findFirst({
     where: {
@@ -132,9 +135,7 @@ async function handleDuplicateGuard(
     humanReason: `Дубль заявки на неделю ${formatWeekStart(weekStartDate)}. Уже есть submission #${existing.id} в статусе ${existing.status}.`,
     priority: 'NORMAL',
   })
-  if (client.maxChatId) {
-    await sendBotMessage(client.maxChatId, REPLY_DUP)
-  }
+  await sendBotMessage(chatId, REPLY_DUP)
   return true
 }
 
@@ -148,8 +149,10 @@ async function finalizeSubmission(params: {
   blobUrl?: string
   rawText: string | null
   parsed: ParseResult
+  // 7.55: chatId отправителя — ответ идёт тому, кто прислал заявку.
+  chatId: string
 }): Promise<void> {
-  const { client, weekStartDate, source, blobUrl, rawText, parsed } = params
+  const { client, weekStartDate, source, blobUrl, rawText, parsed, chatId } = params
 
   const sanityContext = await deriveSanityContext(client.id, weekStartDate)
   const sanityResult = runSanityChecks(parsed, sanityContext)
@@ -180,11 +183,13 @@ async function finalizeSubmission(params: {
     rawText: rawText ?? undefined,
   })
 
-  if (client.maxChatId) {
-    const reply =
-      result.status === 'AUTO_CONFIRMED' ? REPLY_RECEIVED_AUTO : REPLY_RECEIVED_PROCESSING
-    await sendBotMessage(client.maxChatId, reply)
-  }
+  const reply =
+    result.status === 'AUTO_CONFIRMED' ? REPLY_RECEIVED_AUTO : REPLY_RECEIVED_PROCESSING
+  await sendBotMessage(chatId, reply)
+
+  // 7.55: успешная недельная заявка (content-bearing) → отправитель становится
+  // активным пользователем клиента. Идемпотентно.
+  await promoteToActiveByChatId(chatId)
 }
 
 /**
@@ -196,10 +201,10 @@ export async function handleWeeklyPhotoSubmission(params: {
   caption?: string
   chatId: string
 }): Promise<void> {
-  const { client, attachmentUrl, caption } = params
+  const { client, attachmentUrl, caption, chatId } = params
   const weekStartDate = nextFutureMondayMsk()
 
-  if (await handleDuplicateGuard(client, weekStartDate)) return
+  if (await handleDuplicateGuard(client, weekStartDate, chatId)) return
 
   const { base64, buffer, mediaType } = await fetchAttachmentAsBase64(attachmentUrl)
 
@@ -220,6 +225,7 @@ export async function handleWeeklyPhotoSubmission(params: {
     blobUrl: blob.url,
     rawText: caption ?? null,
     parsed,
+    chatId,
   })
 }
 
@@ -231,10 +237,10 @@ export async function handleWeeklyTextSubmission(params: {
   text: string
   chatId: string
 }): Promise<void> {
-  const { client, text } = params
+  const { client, text, chatId } = params
   const weekStartDate = nextFutureMondayMsk()
 
-  if (await handleDuplicateGuard(client, weekStartDate)) return
+  if (await handleDuplicateGuard(client, weekStartDate, chatId)) return
 
   const parsed = await parseWeeklySubmission(
     { type: 'text', text },
@@ -247,5 +253,6 @@ export async function handleWeeklyTextSubmission(params: {
     source: 'TEXT',
     rawText: text,
     parsed,
+    chatId,
   })
 }

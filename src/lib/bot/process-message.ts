@@ -1,5 +1,10 @@
 import { prisma } from '@/lib/db/prisma'
-import { findClientByMaxChatId, findLatestBotConv } from '@/lib/db/queries/bot'
+import { findLatestBotConv } from '@/lib/db/queries/bot'
+import {
+  resolveClientByChatId,
+  promoteToActiveByChatId,
+  type ClientWithBotContext,
+} from '@/lib/bot/max-users'
 import { parseClientResponse } from '@/lib/llm/parser'
 import { detectAnomalies, detectPortionAnomaly } from '@/lib/orders/anomaly-detector'
 import { getClientStats } from '@/lib/orders/client-stats'
@@ -127,7 +132,7 @@ export async function processClientMessage(
     return { reply: null, action: 'empty_message' }
   }
 
-  const client = await findClientByMaxChatId(maxChatId)
+  const client = await resolveClientByChatId(maxChatId)
   if (!client) {
     console.warn(`[bot] unknown maxChatId=${maxChatId}, text="${text.slice(0, 100)}"`)
     return { reply: null, action: 'unknown_client' }
@@ -163,9 +168,9 @@ export async function processClientMessage(
 
   const botConv = await findLatestBotConv(client.id)
   if (botConv) {
-    return handleBotResponse(client, botConv, text)
+    return handleBotResponse(client, botConv, text, maxChatId)
   }
-  return handleSpontaneous(client, text)
+  return handleSpontaneous(client, text, maxChatId)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -174,7 +179,7 @@ export async function processClientMessage(
 // если есть) и создаём/обновляем InboxItem, чтобы менеджер видел сообщение.
 // ─────────────────────────────────────────────────────────────────────
 async function handleManagerTakeover(
-  client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,
+  client: ClientWithBotContext,
   text: string
 ): Promise<ProcessMessageResult> {
   console.log(`[bot] manager-takeover: client=${client.id} — автоответ подавлен`)
@@ -230,9 +235,11 @@ async function handleManagerTakeover(
 // PARSER branch — клиент отвечает на cron-вопрос. Кейсы A/B/C/D.
 // ─────────────────────────────────────────────────────────────────────
 async function handleBotResponse(
-  client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,
+  client: ClientWithBotContext,
   conv: BotConversation,
-  text: string
+  text: string,
+  // 7.55: chatId отправителя — отвечаем именно тому, кто написал (multi-user).
+  senderChatId: string
 ): Promise<ProcessMessageResult> {
   const dayOfWeek = conv.deliveryDate.getUTCDay()
   const stats = await getClientStats(client.id, dayOfWeek)
@@ -502,6 +509,10 @@ async function handleBotResponse(
     clientMessage: text,
   })
 
+  // 7.55: клиент реально ответил по заказу (content-bearing) → делаем отправителя
+  // активным пользователем клиента. Идемпотентно (если уже активный — no-op).
+  await promoteToActiveByChatId(senderChatId)
+
   // 6.8a: orphan-config escalation удалён — после NOT NULL миграции
   // ClientMealConfig.locationId конфиги без локации больше невозможны.
 
@@ -614,7 +625,7 @@ async function handleBotResponse(
       postCutoffReply = getPostCutoffReply(cutoffStr)
     }
 
-    await sendBotMessage(client.maxChatId!, postCutoffReply)
+    await sendBotMessage(senderChatId, postCutoffReply)
     await logBotMessage({
       clientId: client.id,
       conversationId: conv.id,
@@ -728,7 +739,7 @@ async function handleBotResponse(
     }
 
     const reply = formatAcceptedReply(itemsForReply)
-    await sendBotMessage(client.maxChatId!, reply)
+    await sendBotMessage(senderChatId, reply)
     await logBotMessage({
       clientId: client.id,
       conversationId: conv.id,
@@ -763,7 +774,7 @@ async function handleBotResponse(
       conversationId: conv.id,
     })
     const noChangeReply = 'Принято, без изменений.'
-    await sendBotMessage(client.maxChatId!, noChangeReply)
+    await sendBotMessage(senderChatId, noChangeReply)
     await logBotMessage({
       clientId: client.id,
       conversationId: conv.id,
@@ -812,7 +823,7 @@ async function handleBotResponse(
   // NB: схема InboxItemReason не содержит ORDER_UPDATED — используем
   // ANOMALY_HISTORICAL (решение пользователя). UI-метка «Отклонение от нормы».
   const reply = formatUpdatedReply(itemsForReply)
-  await sendBotMessage(client.maxChatId!, reply)
+  await sendBotMessage(senderChatId, reply)
   await logBotMessage({
     clientId: client.id,
     conversationId: conv.id,
@@ -837,8 +848,10 @@ async function handleBotResponse(
 // SPONTANEOUS branch — кейс E. Legacy 5.4 логика.
 // ─────────────────────────────────────────────────────────────────────
 async function handleSpontaneous(
-  client: NonNullable<Awaited<ReturnType<typeof findClientByMaxChatId>>>,
-  text: string
+  client: ClientWithBotContext,
+  text: string,
+  // 7.55: chatId отправителя — для snapshot sourceMaxChatId и promote при заявке.
+  senderChatId: string
 ): Promise<ProcessMessageResult> {
   // Ищем существующую spontaneous conv (НЕ PENDING/CONFIRMED — те мы уже исключили).
   // Берём последнюю по createdAt: AWAITING_MANAGER продолжаем, EXPIRED/CANCELLED
@@ -1110,10 +1123,14 @@ async function handleSpontaneous(
         proposedPortions: intent.portions,
         currentOrderId: existingOrder?.id,
         currentPortions: existingOrder?.portions ?? null,
-        sourceMaxChatId: client.maxChatId!,
+        sourceMaxChatId: senderChatId,
         rawClientMessage: text,
         parsedConfidence: intent.confidence,
       })
+
+      // 7.55: клиент создал реальный запрос на изменение заказа (content-bearing)
+      // → отправитель становится активным пользователем клиента. Идемпотентно.
+      await promoteToActiveByChatId(senderChatId)
 
       await notifyManagerAboutOrderChange({
         changeId: pending.id,

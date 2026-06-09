@@ -7,6 +7,7 @@ import { generateDraftReply } from '@/lib/llm/draft-generator'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { logBotMessage } from '@/lib/bot/log-message'
 import { isToneLabel, type ToneLabel } from '@/lib/inbox/tone-labels'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
@@ -368,14 +369,15 @@ export async function sendReplyAndResolve(
 
   const item = await prisma.inboxItem.findUnique({
     where: { id: inboxItemId },
-    include: { client: { select: { id: true, maxChatId: true } } },
+    include: { client: { select: { id: true } } },
   })
   if (!item) return { ok: false, error: 'Inbox item не найден' }
 
   const textToSend = (customText ?? item.draftReply ?? '').trim()
   if (!textToSend) return { ok: false, error: 'Текст ответа пуст' }
 
-  if (!item.client.maxChatId) {
+  const chatId = await getActiveMaxChatIdForClient(item.client.id)
+  if (!chatId) {
     return { ok: false, error: 'У клиента не задан maxChatId' }
   }
 
@@ -383,7 +385,7 @@ export async function sendReplyAndResolve(
     // delay: false — manager уже написал ответ вручную в UI; имитировать
     // «бот печатает» 15-30 сек нет смысла, а server-action блокировался бы
     // и упирался в Vercel function timeout (Hobby = 10 сек).
-    await sendBotMessage(item.client.maxChatId, textToSend, { delay: false })
+    await sendBotMessage(chatId, textToSend, { delay: false })
   } catch (e) {
     return { ok: false, error: `Ошибка отправки в MAX: ${(e as Error).message}` }
   }
