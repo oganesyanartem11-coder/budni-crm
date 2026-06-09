@@ -55,7 +55,7 @@ export type MorningContext = {
     // П12: SAME-DAY локации, которые сегодня ещё не подтвердили заказ (deliveryDate=сегодня,
     // status=PENDING_CONFIRMATION). У них индивидуальный утренний cut-off (cutoffLabel «HH:mm»),
     // обычный pendingConfirmationTomorrow их не ловит (там фильтр по завтрашней дате).
-    pendingSameDayToday: { locationName: string; cutoffLabel: string }[]
+    pendingSameDayToday: { clientName: string; locationName: string; cutoffLabel: string }[]
     avgWeekdayPortions: number
     deltaPercent: number
   }
@@ -217,16 +217,20 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
     },
     select: {
       locationId: true,
+      client: {
+        select: { name: true },
+      },
       location: {
         select: { name: true, cutoffHourMsk: true, cutoffMinuteMsk: true },
       },
     },
   })
   // Дедуп по локации (несколько mealType на одной точке = одна строка).
-  const pendingSameDayMap = new Map<string, { locationName: string; cutoffLabel: string }>()
+  const pendingSameDayMap = new Map<string, { clientName: string; locationName: string; cutoffLabel: string }>()
   for (const o of pendingSameDayOrders) {
     if (pendingSameDayMap.has(o.locationId)) continue
     pendingSameDayMap.set(o.locationId, {
+      clientName: o.client.name,
       locationName: o.location.name,
       cutoffLabel: formatCutoff(o.location.cutoffHourMsk, o.location.cutoffMinuteMsk),
     })
@@ -357,8 +361,8 @@ export async function buildMorningContext(now: Date): Promise<MorningContext | n
     attention.push({
       type: 'unconfirmed_sameday_today',
       severity: 'high',
-      description: `${s.locationName}: не подтвердили на сегодня (утренние, cut-off ${s.cutoffLabel})`,
-      relatedData: { locationName: s.locationName, cutoffLabel: s.cutoffLabel },
+      description: `${s.clientName} (${s.locationName}): не подтвердили на сегодня (утренние, cut-off ${s.cutoffLabel})`,
+      relatedData: { clientName: s.clientName, locationName: s.locationName, cutoffLabel: s.cutoffLabel },
     })
   }
 
