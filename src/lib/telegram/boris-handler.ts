@@ -11,6 +11,7 @@ import {
   type BorisChatType,
 } from '@/lib/boris/group-filter'
 import { classifyMessageRelatesToBoris } from '@/lib/boris/context-classifier'
+import { BORIS_GROUP_REPLY_TTL_MINUTES } from '@/lib/boris/config'
 import {
   getLastBorisGroupReply,
   recordBorisGroupReply,
@@ -152,7 +153,14 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
       // Haiku больше не зовём вслепую: подаём ему последний ответ Бори как контекст.
       // conv.id тут ещё нет (гейт до identify/fetch), поэтому ключуем по chatId.
       const lastRow = await prisma.borisMessage.findFirst({
-        where: { role: 'assistant', conversation: { chatId } },
+        where: {
+          role: 'assistant',
+          conversation: { chatId },
+          // V-haiku-no-timebound (7.53 F-C): только свежие ответы Бори в TTL-окне.
+          // Старше окна «слушаю» (BORIS_GROUP_REPLY_TTL_MINUTES) — контекст
+          // протух, не подставляем в classifier, молчим (тот же путь no_prior).
+          createdAt: { gte: new Date(Date.now() - BORIS_GROUP_REPLY_TTL_MINUTES * 60_000) },
+        },
         orderBy: { createdAt: 'desc' },
         select: { content: true },
       })
@@ -162,7 +170,7 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
         console.log('[boris-handler]', { reason: 'no_prior_boris_in_conv', chatId })
         return
       }
-      const { relates } = await classifyMessageRelatesToBoris({ text, lastBorisReply })
+      const { relates } = await classifyMessageRelatesToBoris({ text, lastBorisReply, chatId })
       if (!relates) return
     }
   } else if (!shouldRespondInChat(ctx)) {

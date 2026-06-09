@@ -246,6 +246,35 @@ describe('handleBorisMessage — Haiku-ветка (F-grp-1)', () => {
     expect(chatWithBoris).not.toHaveBeenCalled()
   })
 
+  it('ответ Бори старше TTL (time-bound where отфильтровал) → findFirst=null → молчим, классификатор НЕ зовём (V-haiku-no-timebound)', async () => {
+    identifyTelegramUser.mockResolvedValue(null)
+    // Окно «слушаю» открыто по messageId-дистанции (95 vs 100), updatedAt свежий —
+    // shouldRespondInGroup даёт needsHaiku=true.
+    getLastBorisGroupReply.mockResolvedValue({
+      messageId: 95,
+      updatedAt: new Date(),
+    })
+    // Ассистентское сообщение Бори В ЧАТЕ существует, но старше TTL-окна:
+    // time-bound where (createdAt >= now - TTL) его исключает → Prisma вернёт null.
+    // Мок воспроизводит результат отфильтрованной выборки.
+    borisMessageFindFirst.mockResolvedValue(null)
+    const ctx = makeCtx('group', 'это вообще неправильно', 100)
+
+    await handleBorisMessage(ctx as never)
+
+    // findFirst был вызван с time-bound where (createdAt.gte присутствует).
+    expect(borisMessageFindFirst).toHaveBeenCalledTimes(1)
+    const where = borisMessageFindFirst.mock.calls[0][0].where as {
+      createdAt?: { gte?: Date }
+    }
+    expect(where.createdAt?.gte).toBeInstanceOf(Date)
+    // Протухший контекст → молчим тем же путём, что no_prior: classifier не зовём.
+    expect(classifyMessageRelatesToBoris).not.toHaveBeenCalled()
+    expect(ctx.reply).not.toHaveBeenCalled()
+    expect(runAgentLoop).not.toHaveBeenCalled()
+    expect(chatWithBoris).not.toHaveBeenCalled()
+  })
+
   it('борис-фетч по chatId: findFirst фильтрует role=assistant + conversation.chatId', async () => {
     identifyTelegramUser.mockResolvedValue(null)
     getLastBorisGroupReply.mockResolvedValue({
@@ -260,7 +289,12 @@ describe('handleBorisMessage — Haiku-ветка (F-grp-1)', () => {
     await handleBorisMessage(ctx as never)
 
     expect(borisMessageFindFirst).toHaveBeenCalledWith({
-      where: { role: 'assistant', conversation: { chatId: '-100123' } },
+      where: {
+        role: 'assistant',
+        conversation: { chatId: '-100123' },
+        // V-haiku-no-timebound: time-bound окно TTL добавлено к where.
+        createdAt: { gte: expect.any(Date) },
+      },
       orderBy: { createdAt: 'desc' },
       select: { content: true },
     })
