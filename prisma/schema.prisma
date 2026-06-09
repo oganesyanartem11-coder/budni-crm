@@ -1422,6 +1422,29 @@ model BorisMetrics {
 }
 
 // ============================================================
+// BORIS HAIKU LOG (Спринт 7.53 F-E) — аудит вердиктов дешёвого
+// Haiku-классификатора context-classifier (relates / not relates).
+// Пишется неблокирующе после получения вердикта. costUsd nullable:
+// надёжного прайс-хелпера для Haiku нет, токены логируются отдельно.
+// ============================================================
+
+model BorisHaikuLog {
+  id              String   @id @default(cuid())
+  chatId          String
+  userId          String
+  userMessageText String   @db.Text
+  lastBorisReply  String?  @db.Text
+  verdict         Boolean
+  model           String
+  latencyMs       Int
+  costUsd         Decimal? @db.Decimal(10, 6)
+  createdAt       DateTime @default(now())
+
+  @@index([chatId])
+  @@index([createdAt])
+}
+
+// ============================================================
 // BORIS EVENT LOG (Спринт 7.16.C) — сырое хранилище детектированных
 // событий для Командного Бориса. Триггеры (handleSpontaneous,
 // approveMenuCycle, доставка и т.п.) кладут сюда фактаж; cron-каналы

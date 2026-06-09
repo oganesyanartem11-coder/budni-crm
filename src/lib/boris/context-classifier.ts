@@ -1,5 +1,6 @@
 import { getAnthropicClient } from '@/lib/llm/client'
 import { getInboxModel } from '@/lib/ai/models'
+import { prisma } from '@/lib/db/prisma'
 
 /**
  * Boris reorg: дешёвый Haiku-классификатор «относится ли это сообщение к Борису».
@@ -25,6 +26,10 @@ export interface ClassifyMessageInput {
   text: string
   /** Последний ответ Бориса в этом чате — контекст для классификатора. */
   lastBorisReply?: string
+  /** Для аудита BorisHaikuLog (7.53 F-E). */
+  chatId?: string
+  /** Для аудита BorisHaikuLog. На момент classify user ещё не идентифицирован — обычно undefined. */
+  userId?: string
 }
 
 export interface ClassifyMessageResult {
@@ -69,12 +74,14 @@ export async function classifyMessageRelatesToBoris(
 
 Относится ли новое сообщение к Борису? Верни JSON.`
 
+    const t0 = Date.now()
     const response = await client.messages.create({
       model: getInboxModel(),
       max_tokens: 50,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }],
     })
+    const latencyMs = Date.now() - t0
 
     // C.6: лог стоимости — usage может отсутствовать при нестандартных ответах.
     console.info('[haiku-cost]', {
@@ -101,6 +108,26 @@ export async function classifyMessageRelatesToBoris(
       typeof rawConfidence === 'number' && rawConfidence >= 0 && rawConfidence <= 1
         ? rawConfidence
         : 0
+
+    // 7.53 F-E: неблокирующий аудит вердикта Haiku-классификатора.
+    // Лог не критичен — при ошибке логируем и продолжаем, основной поток не рушим.
+    try {
+      await prisma.borisHaikuLog.create({
+        data: {
+          chatId: input.chatId ?? '',
+          userId: input.userId ?? '',
+          userMessageText: input.text.slice(0, 500),
+          lastBorisReply: input.lastBorisReply ? input.lastBorisReply.slice(0, 500) : null,
+          verdict: relates,
+          model: getInboxModel(),
+          latencyMs,
+          costUsd: null,
+        },
+      })
+    } catch (logErr) {
+      // Аудит-лог не критичен — не блокируем основной поток классификатора.
+      console.error('[context-classifier] BorisHaikuLog write failed:', logErr)
+    }
 
     return { relates, confidence }
   } catch (e) {

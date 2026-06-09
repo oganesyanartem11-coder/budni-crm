@@ -10,11 +10,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  */
 
 const mockCreate = vi.hoisted(() => vi.fn())
+const mockHaikuLogCreate = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/llm/client', () => ({
   getAnthropicClient: () => ({ messages: { create: mockCreate } }),
 }))
 vi.mock('@/lib/ai/models', () => ({ getInboxModel: () => 'claude-test' }))
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: { borisHaikuLog: { create: mockHaikuLogCreate } },
+}))
 
 import { classifyMessageRelatesToBoris } from './context-classifier'
 
@@ -57,6 +61,19 @@ describe('classifyMessageRelatesToBoris — happy path', () => {
     mockCreate.mockResolvedValue(textResponse('{"relates": true, "confidence": 7}'))
     const r = await classifyMessageRelatesToBoris({ text: 'ага' })
     expect(r).toEqual({ relates: true, confidence: 0 })
+  })
+
+  it('при успешном вердикте пишет аудит в BorisHaikuLog с verdict из ответа', async () => {
+    mockCreate.mockResolvedValue(textResponse('{"relates": true, "confidence": 0.8}'))
+    await classifyMessageRelatesToBoris({
+      text: 'спасибо, понял',
+      lastBorisReply: 'Заказ на завтра — 30 порций.',
+      chatId: 'chat-1',
+    })
+    expect(mockHaikuLogCreate).toHaveBeenCalled()
+    expect(mockHaikuLogCreate.mock.calls[0][0]).toMatchObject({
+      data: { verdict: true, chatId: 'chat-1' },
+    })
   })
 
   it('логирует [haiku-cost] из usage', async () => {
