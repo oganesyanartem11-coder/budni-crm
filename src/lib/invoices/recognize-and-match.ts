@@ -115,6 +115,19 @@ export async function recognizeInvoice(invoiceId: string): Promise<void> {
       return
     }
 
+    // matchedIngredientId из ответа LLM может ссылаться на ингредиент, которого
+    // уже нет в Ingredient (владелец удалил из справочника) либо который LLM
+    // выдумал/вернул устаревшим. Собираем все непустые ID для батч-проверки
+    // существования ДО записи — иначе FK InvoiceLine_matchedIngredientId_fkey
+    // роняет всю транзакцию и накладная импортируется пустой.
+    const matchedIds = [
+      ...new Set(
+        matches
+          .map((m) => m.matchedIngredientId)
+          .filter((id): id is string => id !== null)
+      ),
+    ]
+
     // 6. Записать всё в одной транзакции через prismaDirect (interactive tx).
     await prismaDirect.$transaction(async (tx) => {
       // 6a. Обновить Invoice бизнес-данными.
@@ -130,12 +143,34 @@ export async function recognizeInvoice(invoiceId: string): Promise<void> {
         },
       })
 
+      // Какие из заматченных ID реально существуют в Ingredient — один батч-запрос
+      // на всю накладную (не N запросов в цикле). Без фильтра isActive/status:
+      // для FK важно лишь наличие строки.
+      const existingIds = new Set(
+        matchedIds.length > 0
+          ? (
+              await tx.ingredient.findMany({
+                where: { id: { in: matchedIds } },
+                select: { id: true },
+              })
+            ).map((i) => i.id)
+          : []
+      )
+
       // 6b. Создать InvoiceLine для каждой строки.
       for (let i = 0; i < recognized.lines.length; i++) {
         const line = recognized.lines[i]
         const match = matches[i]
-        const matchedIng = match.matchedIngredientId
-          ? existingIngs.find((e) => e.id === match.matchedIngredientId)
+        // Битый/устаревший matchedIngredientId (нет в existingIds) → импортируем
+        // строку без привязки к справочнику, чтобы FK не ронял всю накладную.
+        const safeMatchedId =
+          match.matchedIngredientId && existingIds.has(match.matchedIngredientId)
+            ? match.matchedIngredientId
+            : null
+        const unlinkedBrokenMatch =
+          match.matchedIngredientId !== null && safeMatchedId === null
+        const matchedIng = safeMatchedId
+          ? existingIngs.find((e) => e.id === safeMatchedId)
           : null
 
         // 6c. Нормализация цены
@@ -174,8 +209,10 @@ export async function recognizeInvoice(invoiceId: string): Promise<void> {
             rawUnit: line.unit,
             rawPricePerUnit: line.pricePerUnit,
             rawAmount: line.amount,
-            matchedIngredientId: match.matchedIngredientId,
-            matchedAction: match.action,
+            matchedIngredientId: safeMatchedId,
+            // Битую привязку помечаем SKIPPED (как unlink при удалении ингредиента
+            // в draft-ingredients) — строка импортируется и ждёт ручного матчинга.
+            matchedAction: unlinkedBrokenMatch ? 'SKIPPED' : match.action,
             aiConfidence: match.confidence,
             aiContext: match.context,
             pricePerKgNormalized: pricePerNormalized ?? undefined,
