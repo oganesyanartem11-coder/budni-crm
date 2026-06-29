@@ -13,6 +13,30 @@ export const dynamic = 'force-dynamic'
 
 const ALLOWED_ORIGIN = 'https://budni.pro'
 
+// Человекочитаемые имена источников (data-source блоков лендинга budni.pro).
+// В сообщении показываем читаемое имя; тех-код остаётся в скобках и в хэштеге,
+// чтобы фильтрация в чате не зависела от перевода. Неизвестный source —
+// показываем как есть (fallback, не падаем).
+const SOURCE_LABELS: Record<string, string> = {
+  'mobile-menu': 'Меню (моб.) — Рассчитать бюджет',
+  'hero-secondary': 'Hero — Заказать дегустацию',
+  'aud-office': 'Попап: Офисы',
+  'aud-build': 'Попап: Стройки и объекты',
+  'aud-warehouse': 'Попап: Склады и производства',
+  'aud-med': 'Попап: Медучреждения',
+  'aud-film': 'Попап: Съёмочные группы',
+  'aud-event': 'Попап: Разовые мероприятия',
+  'block-8-shashlyk': 'Шашлык — Хочу шашлык в команду',
+  'menu-full': 'Меню — Получить полное меню',
+  'case-night': 'Кейс — Оставить заявку',
+  chef: 'Шеф Иван — Заказать дегустацию',
+  'tasting-block': 'Блок дегустации',
+  'final-tasting': 'Финал — дегустация',
+  'floating-button': 'Плавающая кнопка',
+  'quiz-block-3': 'Квиз (блок 3)',
+  'quiz-block-18-final': 'Квиз (финал)',
+}
+
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -88,7 +112,15 @@ function buildMessage(body: LeadBody): string {
   // tel: ссылку оставляем кликабельной; для отображения экранируем отдельно.
   lines.push(`📞 Телефон: <a href="tel:${escapeHtml(phoneDigits ?? phone)}">${escapeHtml(phone)}</a>`)
   lines.push(`🗂 Форма: ${formLabel}`)
-  if (source) lines.push(`📍 Источник: ${escapeHtml(source)}`)
+  if (source) {
+    const label = SOURCE_LABELS[source]
+    // Есть перевод → «Читаемое имя (тех-код)»; нет — показываем сам код.
+    lines.push(
+      label
+        ? `📍 Источник: ${escapeHtml(label)} (<code>${escapeHtml(source)}</code>)`
+        : `📍 Источник: ${escapeHtml(source)}`
+    )
+  }
 
   if (utm) {
     const utmLine = Object.entries(utm)
@@ -134,17 +166,28 @@ function buildMessage(body: LeadBody): string {
 }
 
 export async function POST(request: Request) {
-  // 1) Bearer-секрет (свой, не HEALTH_CHECK_SECRET).
-  let expectedSecret: string
+  // 1) Двойная авторизация — легитимно, если ЛЮБОЕ из:
+  //   (а) валидный Authorization: Bearer <LEADS_INTAKE_SECRET> — служебный/тест;
+  //   (б) Origin строго == https://budni.pro — публичная форма лендинга без
+  //       секрета в JS (точное совпадение, без www и прочих доменов).
+  // Иначе — 401. Секрет читаем мягко: если ENV не задан, путь (б) всё равно
+  // работает; падать на 500 не нужно, раз есть валидный Origin.
+  const originOk = request.headers.get('origin') === ALLOWED_ORIGIN
+
+  let bearerOk = false
   try {
-    expectedSecret = readLeadsIntakeSecret()
+    const expectedSecret = readLeadsIntakeSecret()
+    bearerOk = request.headers.get('authorization') === `Bearer ${expectedSecret}`
   } catch (err) {
-    // ENV не задан — это конфиг-ошибка сервера, не утечка секрета.
-    console.error('[leads/intake] LEADS_INTAKE_SECRET misconfigured:', err instanceof Error ? err.message : err)
-    return corsJson({ ok: false, error: 'server_misconfigured' }, 500)
+    // ENV-секрет не задан — Bearer-путь недоступен, но это не повод ронять
+    // легитимный Origin-запрос. Логируем как warn (не error, не утечка).
+    console.warn(
+      '[leads/intake] LEADS_INTAKE_SECRET not set — bearer path disabled, origin path only:',
+      err instanceof Error ? err.message : err
+    )
   }
-  const auth = request.headers.get('authorization')
-  if (auth !== `Bearer ${expectedSecret}`) {
+
+  if (!originOk && !bearerOk) {
     return corsJson({ ok: false, error: 'unauthorized' }, 401)
   }
 
