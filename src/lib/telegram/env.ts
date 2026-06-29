@@ -104,6 +104,45 @@ export function readProductionChatId(): string | null {
   return v
 }
 
+/**
+ * Лиды с лендинга budni.pro (вариант «лид→Telegram», БД не трогаем).
+ *
+ * Отдельный чат заявок TELEGRAM_LEADS_CHAT_ID — тот же бот, что и у Бориса,
+ * но другой chat. Проверка ленивая и кидается только при первом вызове
+ * (как readGroupChatId), чтобы билд/импорт не падал пока переменная не задана.
+ * Роут /api/leads/intake ловит throw и отвечает 500 без утечки секрета.
+ */
+export function readLeadsChatId(): string {
+  const v = process.env.TELEGRAM_LEADS_CHAT_ID?.trim()
+  if (!v) fail('TELEGRAM_LEADS_CHAT_ID', 'not set')
+  if (!v.startsWith('-')) {
+    fail(
+      'TELEGRAM_LEADS_CHAT_ID',
+      'chat_id чата заявок в Telegram всегда отрицательный (начинается с -). Проверь, что добавил бота в чат заявок и взял chat_id оттуда'
+    )
+  }
+  if (v.length < MIN_GROUP_CHAT_ID_LENGTH) {
+    fail('TELEGRAM_LEADS_CHAT_ID', `too short (${v.length} < ${MIN_GROUP_CHAT_ID_LENGTH})`)
+  }
+  return v
+}
+
+/**
+ * Секрет для приёма заявок с лендинга (Bearer в Authorization).
+ * Отдельный от HEALTH_CHECK_SECRET — не переиспользуем. Ленивый throw.
+ */
+export function readLeadsIntakeSecret(): string {
+  const v = process.env.LEADS_INTAKE_SECRET
+  if (!v) fail('LEADS_INTAKE_SECRET', 'not set')
+  if (v.length < MIN_WEBHOOK_SECRET_LENGTH) {
+    fail(
+      'LEADS_INTAKE_SECRET',
+      `too short (${v.length} < ${MIN_WEBHOOK_SECRET_LENGTH}). Сгенерируй: openssl rand -hex 32`
+    )
+  }
+  return v
+}
+
 export function getTelegramEnv(): TelegramEnv {
   return {
     botToken: readBotToken(),

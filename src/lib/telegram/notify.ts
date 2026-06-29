@@ -1,7 +1,7 @@
 import type { InlineKeyboard } from 'grammy'
 import { prisma } from '@/lib/db/prisma'
 import { sendTelegramMessage } from './send'
-import { getTelegramEnv, readProductionChatId } from './env'
+import { getTelegramEnv, readProductionChatId, readLeadsChatId } from './env'
 
 export interface NotifyOptions {
   /** Если не указан — текст шлётся без parseMode (как plain text). */
@@ -301,6 +301,27 @@ export async function notifyGroup(text: string, opts?: NotifyOptions): Promise<N
   })
   if (!result.ok) {
     console.error(`[telegram/notify] notifyGroup failed: ${result.error}`)
+    return { ok: false, error: result.error }
+  }
+  return { ok: true }
+}
+
+/**
+ * Заявки с лендинга budni.pro → отдельный чат заявок (TELEGRAM_LEADS_CHAT_ID).
+ *
+ * Тот же бот, что и у Бориса, но другой chat — по образцу notifyGroup().
+ * parseMode по умолчанию HTML, как и в остальных уведомлениях.
+ * readLeadsChatId() кидает если ENV не задан/невалиден — вызывающий роут
+ * /api/leads/intake ловит и отвечает 500.
+ */
+export async function notifyLeads(text: string, opts?: NotifyOptions): Promise<NotifyGroupResult> {
+  const leadsChatId = readLeadsChatId()
+  const result = await sendTelegramMessage(leadsChatId, text, {
+    parseMode: opts?.parseMode ?? DEFAULT_PARSE_MODE,
+    replyMarkup: opts?.replyMarkup,
+  })
+  if (!result.ok) {
+    console.error(`[telegram/notify] notifyLeads failed: ${result.error}`)
     return { ok: false, error: result.error }
   }
   return { ok: true }
