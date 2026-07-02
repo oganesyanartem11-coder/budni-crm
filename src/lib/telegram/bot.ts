@@ -12,6 +12,10 @@ import '@/lib/telegram/handlers/weekly-submission'
 // Side-effect import: регистрирует callback-handler scope 'poc'
 // (подтверждение/отклонение запроса клиента на изменение заказа). См. handlers/order-change.ts.
 import '@/lib/telegram/handlers/order-change'
+// Борис-Директ: импорт регистрирует callback-scope 'bdir' (кнопки предложений),
+// а handleDirectChatMessage перехватывает команды владельца в чате Директа
+// («Борис, стоп/продолжай/боевой/наблюдение/откати последнее/статус»).
+import { handleDirectChatMessage } from '@/lib/boris-direct/telegram'
 
 interface TelegramBotCache {
   bot: Bot
@@ -108,6 +112,10 @@ function registerHandlers(bot: Bot): void {
   bot.on('my_chat_member', handleMyChatMember)
   bot.command('start', handleStart)
   bot.on('callback_query:data', dispatchCallback)
+  // Борис-Директ: команды владельца в чате «Директ от Бориса» — ПЕРЕД общим
+  // Борисом. Мидлвара сама зовёт next(), если сообщение не для неё
+  // (не тот чат / не команда) — существующее поведение не меняется.
+  bot.on('message', handleDirectChatMessage)
   // Sprint 7.16.A.2 (B3): любое нон-командное сообщение от менеджера
   // обрабатывает Action-Борис (LLM-агент с tools для CRM-действий).
   // Для не-менеджеров/незарегистрированных юзеров handleBorisMessage

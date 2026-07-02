@@ -128,6 +128,27 @@ export function readLeadsChatId(): string {
 }
 
 /**
+ * Борис-Директ: чат «Директ от Бориса» (TELEGRAM_DIRECT_CHAT_ID) — отчёты,
+ * предложения и алёрты роли «трафик Яндекс.Директа». Тот же бот, отдельный
+ * чат. Ленивый throw по образцу readLeadsChatId: билд/импорт не падают,
+ * пока переменная не задана; кроны ловят throw сами.
+ */
+export function readDirectChatId(): string {
+  const v = process.env.TELEGRAM_DIRECT_CHAT_ID?.trim()
+  if (!v) fail('TELEGRAM_DIRECT_CHAT_ID', 'not set')
+  if (!v.startsWith('-')) {
+    fail(
+      'TELEGRAM_DIRECT_CHAT_ID',
+      'chat_id чата Директа в Telegram всегда отрицательный (начинается с -). Проверь, что добавил бота в чат и взял chat_id оттуда'
+    )
+  }
+  if (v.length < MIN_GROUP_CHAT_ID_LENGTH) {
+    fail('TELEGRAM_DIRECT_CHAT_ID', `too short (${v.length} < ${MIN_GROUP_CHAT_ID_LENGTH})`)
+  }
+  return v
+}
+
+/**
  * Секрет для приёма заявок с лендинга (Bearer в Authorization).
  * Отдельный от HEALTH_CHECK_SECRET — не переиспользуем. Ленивый throw.
  */

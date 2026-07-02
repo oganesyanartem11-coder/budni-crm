@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { notifyLeads, escapeHtml } from '@/lib/telegram/notify'
 import { readLeadsIntakeSecret } from '@/lib/telegram/env'
+import { persistLandingLead } from '@/lib/leads/persist-landing-lead'
 
 export const dynamic = 'force-dynamic'
 
@@ -213,6 +214,9 @@ export async function POST(request: Request) {
   if (!phone) {
     return corsJson({ ok: false, error: 'phone_required' }, 400)
   }
+
+  // Аддитивно, ШАГ 2 Борис-Директ: атрибуция yclid/utm; ошибка записи не ломает Telegram.
+  await persistLandingLead(body)
 
   // 5) Сборка сообщения и отправка в чат заявок.
   const text = buildMessage(body)

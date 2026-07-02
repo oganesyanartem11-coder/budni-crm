@@ -14,6 +14,8 @@ const DEFAULT_INBOX_MODEL = 'claude-haiku-4-5-20251001'
 const DEFAULT_FALLBACK_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_VISION_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_BORIS_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_BORIS_DIRECT_MODEL = 'claude-opus-4-7'
+const DEFAULT_BORIS_DIRECT_LIGHT_MODEL = 'claude-haiku-4-5-20251001'
 
 /** parseMenuSchedule: разбор структуры меню из Excel/фото (Opus). */
 export function getParserModel(): string {
@@ -51,4 +53,22 @@ export function getVisionModel(): string {
  */
 export function getBorisModel(): string {
   return process.env.ANTHROPIC_MODEL_BORIS ?? DEFAULT_BORIS_MODEL
+}
+
+/**
+ * Борис-Директ (роль «трафик»): ТЯЖЁЛЫЕ суждения — спорные минусы,
+ * недельный/месячный разбор, стратегия, текст владельцу. Opus: этих вызовов
+ * мало, цена ошибки в деньгах рекламного бюджета высока. Арифметику
+ * (цена заявки, пороги, фильтры) считает КОД, не модель.
+ */
+export function getBorisDirectModel(): string {
+  return process.env.ANTHROPIC_MODEL_BORIS_DIRECT ?? DEFAULT_BORIS_DIRECT_MODEL
+}
+
+/**
+ * Борис-Директ: ЛЁГКОЕ/рутинное (короткие формулировки, классификация
+ * бесспорных случаев). Haiku — дёшево, вызовы частые.
+ */
+export function getBorisDirectLightModel(): string {
+  return process.env.ANTHROPIC_MODEL_BORIS_DIRECT_LIGHT ?? DEFAULT_BORIS_DIRECT_LIGHT_MODEL
 }

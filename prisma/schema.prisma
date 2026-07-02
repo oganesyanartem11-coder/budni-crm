@@ -345,7 +345,7 @@ model User {
 
   // MEGA-BACKEND блок B: курьер опционально привязан к точкам клиента.
   // Курьер видит свои точки + непривязанные. ADMIN/MANAGER — всё.
-  assignedLocations ClientLocation[] @relation("CourierLocations")
+  assignedLocations ClientLocation[]  @relation("CourierLocations")
   maxInvitesCreated ClientMaxInvite[] @relation("ClientMaxInviteCreator")
 
   @@index([role, isActive])
@@ -1357,7 +1357,7 @@ model BorisConversation {
   // групповые отказы Бори протекали в личный контекст, самоусиливаясь). Nullable:
   // старые беседы остаются legacy (chatId=NULL не матчится новым lookup'ом по
   // chatId='<id>' → авто-ретайр, backfill не нужен).
-  chatId        String?
+  chatId String?
 
   messages       BorisMessage[]
   pendingActions BorisPendingAction[]
@@ -1515,4 +1515,203 @@ model BorisEventLog {
   @@index([eventDate])
   @@index([eventType, eventDate])
   @@index([clientId])
+}
+
+// ============================================================
+// БОРИС-ДИРЕКТ (ветка boris-direct) — роль «трафик Яндекс.Директа»
+// для Бориса. Всё аддитивно: существующие модели не меняются.
+// North star: максимум заявок на рубль (цель Метрики «Заявка» 575665118).
+// ============================================================
+
+// Лид с лендинга budni.pro (/api/leads/intake). Раньше yclid/utm приходили
+// в body и терялись — теперь персистим для атрибуции Директ↔Метрика↔заявка.
+enum LandingLeadDealStatus {
+  NONE // сделка не заведена (дефолт)
+  IN_PROGRESS // идёт общение / дегустация
+  WON // сделка состоялась
+  LOST // отказ
+}
+
+model LandingLead {
+  id           String  @id @default(cuid())
+  formType     String // 'popup' | 'quiz'
+  name         String?
+  phone        String
+  phoneDigits  String?
+  source       String? // data-source блока лендинга (см. SOURCE_LABELS в intake)
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  utmContent   String?
+  utmTerm      String?
+  yclid        String? // клик Яндекс.Директа — ключ атрибуции заявка↔фраза
+  gclid        String?
+  pageUrl      String?
+  pageReferrer String?
+  answers      Json? // ответы квиза как пришли
+  meta         Json? // прочее из body.meta (не валидируем структуру)
+
+  // Задел под сделку и офлайн-конверсии Метрики (активируем, когда пойдут данные).
+  dealStatus              LandingLeadDealStatus @default(NONE)
+  dealAmount              Decimal?              @db.Decimal(12, 2)
+  offlineConversionSentAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([yclid])
+  @@index([phoneDigits])
+}
+
+// Режим работы роли «трафик». OBSERVE = читаем/анализируем/отчитываемся,
+// но ни одного пишущего запроса в Директ. LIVE включает только владелец.
+enum BorisDirectMode {
+  OBSERVE
+  LIVE
+}
+
+// Singleton-состояние роли (key='main'). Нет строки в БД = OBSERVE, не frozen.
+model BorisDirectState {
+  id                   String          @id @default(cuid())
+  key                  String          @unique @default("main")
+  mode                 BorisDirectMode @default(OBSERVE)
+  frozen               Boolean         @default(false) // стоп-кран «Борис, стоп»
+  // Гейт спорных минусов снят обучением (≥порога совпадений подряд) —
+  // спорные минус-фразы уходят в автономию. Возвращается командой.
+  autoNegativesEnabled Boolean         @default(false)
+  modeChangedAt        DateTime?
+  frozenChangedAt      DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+}
+
+// Заказанный отчёт Reports API. Тело ответа TSV; 201/202 = «готовится» —
+// поллим ТЕМ ЖЕ POST'ом (params хранит полное тело) до 200 на след. тиках.
+enum BorisDirectReportStatus {
+  PENDING
+  READY
+  PROCESSED
+  FAILED
+}
+
+model BorisDirectReportJob {
+  id          String                  @id @default(cuid())
+  reportName  String                  @unique // уникальное имя (метка времени) — требование API
+  reportType  String // SEARCH_QUERY_PERFORMANCE_REPORT | CUSTOM_REPORT | ...
+  dateFrom    String // YYYY-MM-DD (МСК)
+  dateTo      String
+  params      Json // полное тело запроса — повтор ТОГО ЖЕ POST при поллинге
+  status      BorisDirectReportStatus @default(PENDING)
+  tsv         String?                 @db.Text
+  attempts    Int                     @default(0)
+  error       String?
+  requestedAt DateTime                @default(now())
+  readyAt     DateTime?
+  processedAt DateTime?
+
+  @@index([status, requestedAt])
+}
+
+// Снимок состояния на тике «сбор»: campaigns/keywords/keywordbids/метрика.
+// Тик «обработка» читает отсюда, чтобы не дёргать API повторно.
+model BorisDirectSnapshot {
+  id        String   @id @default(cuid())
+  tickDate  DateTime // МСК-день, за который снято состояние
+  kind      String // 'campaign' | 'keywords' | 'keywordbids' | 'metrika_goal' | ...
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([tickDate, kind])
+  @@index([kind, createdAt])
+}
+
+// Предложение владельцу (ПРЕДЛОЖЕНИЕ → АРГУМЕНТ → ВОПРОС + кнопки да/нет).
+// Отказ → cooldownUntil (тему не поднимать), КРОМЕ заметного сдвига
+// метрики-триггера (порог в конфиге) — тогда можно вернуться раньше.
+enum BorisDirectProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+model BorisDirectProposal {
+  id            String                    @id @default(cuid())
+  type          String // 'minus_words' | 'budget' | 'keyword_remove' | 'strategy' | ...
+  topicKey      String // ключ темы для cooldown/дедупа (напр. 'budget_daily')
+  payload       Json // детали (список фраз, суммы в микроединицах и т.п.)
+  argument      String                    @db.Text
+  question      String?                   @db.Text
+  status        BorisDirectProposalStatus @default(PENDING)
+  // Метрика-триггер и её значение на момент предложения — чтобы после отказа
+  // вернуться к теме, только если значение сдвинулось на порог из конфига.
+  triggerMetric String?
+  triggerValue  Decimal?                  @db.Decimal(14, 4)
+  cooldownUntil DateTime?
+  tgMessageId   String?
+  decidedAt     DateTime?
+  createdAt     DateTime                  @default(now())
+
+  @@index([status, createdAt])
+  @@index([topicKey, cooldownUntil])
+}
+
+// Обучение минусовки: каждый спорный кандидат логируется с вердиктом Бориса
+// и решением владельца; matched = совпало ли. По окну совпадений Борис сам
+// просит снять гейт (autoNegativesEnabled).
+model BorisDirectMinusVerdict {
+  id            String    @id @default(cuid())
+  candidate     String // фраза-кандидат в минусы
+  verdict       String // 'minus' | 'keep' — вердикт Бориса
+  reason        String    @db.Text
+  ownerDecision String? // 'approved' | 'rejected' (null = ещё не решено)
+  matched       Boolean? // вердикт совпал с решением владельца
+  proposalId    String? // ссылка на BorisDirectProposal (без FK — лог переживает чистки)
+  createdAt     DateTime  @default(now())
+  decidedAt     DateTime?
+
+  @@index([createdAt])
+  @@index([matched, decidedAt])
+}
+
+// Лог каждого пишущего действия (или «сделал бы» в observe) + откат.
+model BorisDirectActionLog {
+  id         String          @id @default(cuid())
+  action     String // 'keywordbids.set' | 'campaigns.update.negatives' | 'keywords.suspend' | ...
+  targetType String // 'keyword' | 'campaign' | 'adgroup'
+  targetId   String?
+  before     Json?
+  after      Json?
+  reason     String          @db.Text
+  mode       BorisDirectMode // режим на момент действия
+  applied    Boolean // false в observe = «сделал бы», запрос в Директ НЕ ушёл
+  revertedAt DateTime?
+  revertOfId String? // id записи, которую откатили этой записью
+  createdAt  DateTime        @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([applied, revertedAt])
+}
+
+// Учёт стоимости LLM роли «трафик» (отдельно от рекламного бюджета!).
+// BorisMetrics не трогаем (аддитивность) — свой лог со своими срезами.
+model BorisDirectLlmLog {
+  id                       String   @id @default(cuid())
+  purpose                  String // 'daily_report' | 'minus_judgement' | 'weekly' | ...
+  model                    String
+  tier                     String // 'heavy' (Opus) | 'light' (Haiku)
+  inputTokens              Int      @default(0)
+  outputTokens             Int      @default(0)
+  cacheCreationInputTokens Int      @default(0)
+  cacheReadInputTokens     Int      @default(0)
+  costUsd                  Decimal  @default(0) @db.Decimal(10, 6)
+  durationMs               Int      @default(0)
+  ok                       Boolean  @default(true)
+  errorMessage             String?
+  createdAt                DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([purpose, createdAt])
 }
