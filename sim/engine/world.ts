@@ -80,6 +80,10 @@ interface InternalState {
   fakeWavePhone: Map<number, string>
   /** Лог показов по дням/запросам/группам (ключ day\0group\0query). */
   impLog: Map<string, ImpressionRec>
+  /** ШАГ 3: инъекция device-среза Метрики (читает фейк metrika-client). */
+  deviceStats?: Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>
+  /** ШАГ 3: у кампании нет расписания показов (читает фейк direct-client). */
+  noSchedule?: boolean
 }
 
 function internalOf(world: WorldState): InternalState {
@@ -299,6 +303,9 @@ function createWorld(config: ScenarioConfig, seed: number): WorldState {
     phoneByClick: new Map(),
     fakeWavePhone: new Map(),
     impLog: new Map(),
+    // ШАГ 3: разведочные сигналы сценария (undefined у существующих → инертны).
+    deviceStats: config.diagnostics?.deviceStats,
+    noSchedule: config.diagnostics?.noSchedule,
   }
   const bidsMicro = new Map<number, number>()
   for (const p of config.phrases) bidsMicro.set(p.keywordId, Math.round(p.startBidMicro))

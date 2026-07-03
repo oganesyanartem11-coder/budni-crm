@@ -42,6 +42,10 @@ export type {
   KeywordBidRecord,
   KeywordRecord,
   WriteIssues,
+  BidModifierRecord,
+  AdGroupRecord,
+  TimeTargeting,
+  CampaignSettings,
 } from '../../src/lib/boris-direct/direct-client'
 
 /** Код Директа «дубль ключевой фразы» — как в реальном модуле (warning). */
@@ -149,6 +153,62 @@ export async function getKeywordBids(): Promise<KeywordBidRecord[]> {
       })),
     },
   }))
+}
+
+// ---------- Разведочные чтения (сессия «Прозрение») ----------
+// По умолчанию НЕЙТРАЛЬНЫ: корректировок нет, расписание задано (SCHEDULE_WASTE
+// молчит), device/demo-срезы Метрики пусты (DEVICE_SKEW/AUDIENCE_WASTE молчат) —
+// текущая линейка полигона НЕ меняется. Витку «догнать полигон» (ШАГ 3) здесь
+// подкладываются реальные сигналы (мёртвые часы/выходные, перекос устройств).
+
+import type {
+  AdGroupRecord,
+  BidModifierRecord,
+  CampaignSettings,
+} from '../../src/lib/boris-direct/direct-client'
+
+/** Корректировок в базовом мире нет (ШАГ 3 может подложить через ctx/world). */
+export async function getBidModifiers(): Promise<BidModifierRecord[]> {
+  const over = (getCtx().world.internal as { bidModifiers?: BidModifierRecord[] } | undefined)?.bidModifiers
+  return over ?? []
+}
+
+/** Группы из конфига сценария; групповых минусов в базовом мире нет. */
+export async function getAdGroups(): Promise<AdGroupRecord[]> {
+  const { world } = getCtx()
+  const byId = new Map<string, { id: string; name: string }>()
+  for (const p of world.config.phrases) {
+    if (!byId.has(p.adGroupId)) byId.set(p.adGroupId, { id: p.adGroupId, name: p.adGroupName })
+  }
+  return [...byId.values()].map((g) => ({
+    Id: g.id as unknown as number,
+    Name: g.name,
+    CampaignId: DIRECT_CAMPAIGN_ID,
+    Status: 'ACCEPTED',
+    Type: 'TEXT_AD_GROUP',
+    RegionIds: [1],
+    NegativeKeywords: null,
+  }))
+}
+
+/**
+ * Настройки кампании: расписание ПРИСУТСТВУЕТ (hasSchedule=true) — значит
+ * SCHEDULE_WASTE в базовом мире молчит; живой список минусов кампании — из
+ * world.negatives (то, что Борис реально навесил). ШАГ 3 может убрать
+ * расписание через world.internal, чтобы зажечь диагноз.
+ */
+export async function getCampaignSettings(): Promise<CampaignSettings> {
+  const { world } = getCtx()
+  const noSchedule = (world.internal as { noSchedule?: boolean } | undefined)?.noSchedule === true
+  return {
+    Id: DIRECT_CAMPAIGN_ID,
+    Name: world.config.name,
+    TimeZone: 'Europe/Moscow',
+    StartDate: '2026-06-30',
+    TimeTargeting: noSchedule ? undefined : { Schedule: { Items: [] }, ConsiderWorkingWeekends: 'NO' },
+    NegativeKeywords: { Items: [...world.negatives] },
+    Statistics: { Clicks: 0, Impressions: 0 },
+  }
 }
 
 // ---------- Запись (мутатор движка + CapturedAction; суммы в МИКРОЕДИНИЦАХ) ----------

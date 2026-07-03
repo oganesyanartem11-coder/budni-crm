@@ -133,6 +133,37 @@ export async function getGoalStatsByUtm(
     }))
 }
 
+// ---------- Разведочные срезы (сессия «Прозрение»): устройства/демография/час ----------
+// В базовом мире НЕТ размерности устройства/демографии/часа → пусто, диагнозы
+// DEVICE_SKEW/AUDIENCE_WASTE молчат, линейка не меняется. ШАГ 3 может подложить
+// перекос устройств через world.internal.deviceStats.
+
+export async function getGoalStatsByDevice(
+  dateFrom: string,
+  dateTo: string
+): Promise<Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>> {
+  const over = (getCtx().world.internal as {
+    deviceStats?: Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>
+  } | undefined)?.deviceStats
+  if (!over) return []
+  // Отдаём только если окно захватывает хотя бы один наблюдаемый день.
+  return daysInRange(dateFrom, dateTo).length > 0 ? over : []
+}
+
+export async function getGoalStatsByDemographics(
+  _dateFrom: string,
+  _dateTo: string
+): Promise<Array<{ gender: string; age: string; visits: number; goalReaches: number }>> {
+  return []
+}
+
+export async function getGoalStatsByHour(
+  _dateFrom: string,
+  _dateTo: string
+): Promise<Array<{ hour: string; visits: number; goalReaches: number }>> {
+  return []
+}
+
 /** Страницы входа: в мире одна посадочная — '/' с агрегатом за диапазон. */
 export async function getGoalStatsByLandingPage(
   dateFrom: string,
