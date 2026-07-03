@@ -313,24 +313,37 @@ describe('discipline', () => {
     expect(cat(s, 'discipline').score).toBe(75)
   })
 
-  it('«пила» по фразе (≥2 смен направления) → −10 за фразу, плоско', () => {
-    const base = { startBids: new Map([[1, 90 * RUB]]) }
+  it('«пила» по УРОВНЮ TV (≥2 смен направления) → −10 за фразу, плоско', () => {
+    // startBids 20₽ = TV15; 90₽ = TV75. Скачки между уровнями: 15→75→15→75.
+    const base = { startBids: new Map([[1, 20 * RUB]]) }
     const saw = scoreRun(
       makeInput({
         ...base,
-        run: makeRun({ actions: [bidSet(2, 1, 100 * RUB), bidSet(3, 1, 80 * RUB), bidSet(4, 1, 100 * RUB)] }),
+        run: makeRun({ actions: [bidSet(2, 1, 90 * RUB), bidSet(3, 1, 20 * RUB), bidSet(4, 1, 90 * RUB)] }),
       }),
     )
-    expect(cat(saw, 'discipline').score).toBe(90) // 2 смены направления
+    expect(cat(saw, 'discipline').score).toBe(90) // 2 смены направления уровня
     const longerSaw = scoreRun(
       makeInput({
         ...base,
         run: makeRun({
-          actions: [bidSet(2, 1, 100 * RUB), bidSet(3, 1, 80 * RUB), bidSet(4, 1, 100 * RUB), bidSet(5, 1, 70 * RUB)],
+          actions: [bidSet(2, 1, 90 * RUB), bidSet(3, 1, 20 * RUB), bidSet(4, 1, 90 * RUB), bidSet(5, 1, 20 * RUB)],
         }),
       }),
     )
     expect(cat(longerSaw, 'discipline').score).toBe(90) // 3 смены — штраф тот же
+  })
+
+  it('джиттер ВНУТРИ одного уровня TV → НЕ пила (виток честности)', () => {
+    // startBids 90₽ = TV75; 100/80/95₽ — тоже TV75 (цена уровня 80). Уровень не
+    // меняется → экономически нулевая дрожь → штрафа быть НЕ должно.
+    const jitter = scoreRun(
+      makeInput({
+        startBids: new Map([[1, 90 * RUB]]),
+        run: makeRun({ actions: [bidSet(2, 1, 100 * RUB), bidSet(3, 1, 80 * RUB), bidSet(4, 1, 95 * RUB)] }),
+      }),
+    )
+    expect(cat(jitter, 'discipline').score).toBe(100)
   })
 
   it('suspend кампании без катастрофы → −50; при катастрофе штрафа нет', () => {

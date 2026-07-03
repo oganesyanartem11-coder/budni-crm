@@ -331,12 +331,19 @@ export type CategoryKey =
   | 'discipline' // 7
   | 'memory' // 5
 
+// Веса после калибровки честности (виток линейки 2026-07-03, утв. владельцем).
+// Сдвинуто в сторону economics (north star) + diagnosis (рассуждение).
+// attribution=0: категория считается и показывается, но ИЗ ТОТАЛА ИСКЛЮЧЕНА —
+// group-атрибуция структурно тривиальна (каждый ключ ровно в одной группе,
+// 752/752), шумом utm не спасается; дискриминирующий тест (phrase-level или
+// конвертящая кросс-групповая неоднозначность) — задача будущего витка полигона.
+// Было → стало: economics 30→35, diagnosis 20→25, attribution 10→0.
 export const CATEGORY_WEIGHTS: Record<CategoryKey, number> = {
-  economics: 30,
-  diagnosis: 20,
+  economics: 35,
+  diagnosis: 25,
   bids: 10,
   minus: 10,
-  attribution: 10,
+  attribution: 0,
   anomalies: 8,
   discipline: 7,
   memory: 5,

@@ -389,24 +389,28 @@ function scoreDiscipline(input: ScoreInput): CategoryScore {
     }
   }
 
-  // 2) «Пила»: ≥ SAW_FLIPS_MIN смен направления ставки по фразе за прогон →
-  //    −SAW_PENALTY за фразу (плоско, сколько бы разворотов ни было). Смену
-  //    данных из RunResult не видно, поэтому сценарии пилы строятся на
-  //    стационарном мире (см. каталог сценариев).
+  // 2) «Пила»: ≥ SAW_FLIPS_MIN смен направления по фразе за прогон → −SAW_PENALTY
+  //    за фразу (плоско). ВИТОК ЧЕСТНОСТИ 2026-07-03: направление считаем по
+  //    ДОСТИГНУТОМУ уровню TV (achievedTv по базовым ценам), а не по сырым микро —
+  //    болтанка ВНУТРИ одного уровня (микро-джиттер, экономически ничего не
+  //    меняющий) пилой НЕ считается; штрафуется только реальное перескакивание
+  //    уровней аукциона. Раньше raw-микро наказывал экономически-нулевую дрожь.
   const seqs = bidSequences(input.run)
   for (const [kwId, seq] of seqs) {
     const start = input.startBids.get(kwId)
-    const values = [start ?? seq[0].toMicro, ...seq.map((p) => p.toMicro)]
+    const micros = [start ?? seq[0].toMicro, ...seq.map((p) => p.toMicro)]
+    // Ранг уровня TV (не сам TV) — монотонная лестница, null (нет показов) = ранг −1.
+    const ranks = micros.map((m) => tvRank(achievedTv(m, input.cpcByTv), tvLevels(input.cpcByTv)))
     const dirs: number[] = []
-    for (let i = 1; i < values.length; i++) {
-      const d = Math.sign(values[i] - values[i - 1])
+    for (let i = 1; i < ranks.length; i++) {
+      const d = Math.sign(ranks[i] - ranks[i - 1])
       if (d !== 0) dirs.push(d)
     }
     let flips = 0
     for (let i = 1; i < dirs.length; i++) if (dirs[i] !== dirs[i - 1]) flips++
     if (flips >= SAW_FLIPS_MIN) {
       score -= SAW_PENALTY
-      misses.push(`дисциплина: пила по фразе ${kwId} (${flips} смен(ы) направления ставки) −${SAW_PENALTY}`)
+      misses.push(`дисциплина: пила по фразе ${kwId} (${flips} смен(ы) уровня TV) −${SAW_PENALTY}`)
     }
   }
 
