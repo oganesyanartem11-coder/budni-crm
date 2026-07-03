@@ -393,11 +393,13 @@ describe('runProcessTick', () => {
       expect.objectContaining({ candidate: 'корпоративное питание тендер', verdict: 'keep' })
     )
 
-    // СТАВКИ: конвертер группы 1 → TV75 (200 ₽); хвост уже на месте (микрошум).
+    // СТАВКИ (пофразно): конвертер (2 заявки на своём запросе) → вход в нижний
+    // блок TV65 (150 ₽), было 100 ₽. Ключ 22 без головных данных → тонкая →
+    // держим (ставку не трогаем).
     expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
     expect(mockGate.applyBidChanges).toHaveBeenCalledWith(
-      [{ keywordId: 11, fromMicro: 100 * MICRO, toMicro: 200 * MICRO }],
-      expect.stringContaining('ставки')
+      [{ keywordId: 11, fromMicro: 100 * MICRO, toMicro: 150 * MICRO }],
+      expect.stringContaining('пофразный экономбиддинг')
     )
 
     expect(res.appliedSummaries).toHaveLength(2)

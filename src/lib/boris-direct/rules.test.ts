@@ -159,42 +159,38 @@ describe('recommendBid — бинарная шкала', () => {
     { TrafficVolume: 15, Bid: 50 * MICRO, Price: 40 * MICRO },
   ]
 
-  it('доказанный конвертер → шаг TV75', () => {
+  it('конвертер (desiredTv=75) → шаг TV75', () => {
     const res = recommendBid({
       auctionBids,
-      isProvenConverter: true,
-      isCore: true,
+      desiredTv: 75,
       currentBidMicro: 100 * MICRO,
     })
     expect(res).toEqual({ targetBidMicro: 200 * MICRO, targetTv: 75, changed: true })
   })
 
-  it('ядро без конверсий → вход в нижний блок (наименьший TV ≥ 55)', () => {
+  it('вход в нижний блок (desiredTv=55) → наименьший TV ≥ 55 = 65', () => {
     const res = recommendBid({
       auctionBids,
-      isProvenConverter: false,
-      isCore: true,
+      desiredTv: 55,
       currentBidMicro: 100 * MICRO,
     })
     expect(res).toEqual({ targetBidMicro: 150 * MICRO, targetTv: 65, changed: true })
   })
 
-  it('хвост → TV15 (низ)', () => {
+  it('горелка (desiredTv=15) → TV15 (низ, самый дешёвый)', () => {
     const res = recommendBid({
       auctionBids,
-      isProvenConverter: false,
-      isCore: false,
+      desiredTv: 15,
       currentBidMicro: 100 * MICRO,
     })
     expect(res).toEqual({ targetBidMicro: 50 * MICRO, targetTv: 15, changed: true })
   })
 
-  it('премиум (85/100) — НИКОГДА: конвертеру без позиции 75 не покупаем 85', () => {
+  it('премиум (85/100) — НИКОГДА: цели 75 без позиции 75 не покупаем 85', () => {
     const withoutStep = auctionBids.filter((b) => b.TrafficVolume !== 75)
     const res = recommendBid({
       auctionBids: withoutStep,
-      isProvenConverter: true,
-      isCore: true,
+      desiredTv: 75,
       currentBidMicro: 100 * MICRO,
     })
     expect(res.changed).toBe(false)
@@ -205,8 +201,7 @@ describe('recommendBid — бинарная шкала', () => {
     const expensive = [{ TrafficVolume: 65, Bid: BID_CEILING_MICRO + MICRO, Price: BID_CEILING_MICRO }]
     const res = recommendBid({
       auctionBids: expensive,
-      isProvenConverter: false,
-      isCore: true,
+      desiredTv: 55,
       currentBidMicro: 100 * MICRO,
     })
     expect(res).toEqual({
@@ -220,8 +215,7 @@ describe('recommendBid — бинарная шкала', () => {
   it('микрошум < 5% → не дёргаем ставку', () => {
     const res = recommendBid({
       auctionBids,
-      isProvenConverter: false,
-      isCore: true,
+      desiredTv: 55,
       currentBidMicro: 147 * MICRO, // цель 150 — дельта ~2%
     })
     expect(res.changed).toBe(false)
@@ -230,8 +224,7 @@ describe('recommendBid — бинарная шкала', () => {
   it('пустой аукцион → не менять', () => {
     const res = recommendBid({
       auctionBids: [],
-      isProvenConverter: true,
-      isCore: true,
+      desiredTv: 75,
       currentBidMicro: 100 * MICRO,
     })
     expect(res.changed).toBe(false)
@@ -253,10 +246,21 @@ describe('checkCircuitBreaker', () => {
     expect(res.reason).toContain('много правок')
   })
 
-  it('скачок ставочной массы > порога → стоп', () => {
+  it('РОСТ ставочной массы > порога → стоп (разгон расхода — вне паттерна)', () => {
     const res = checkCircuitBreaker([{ fromMicro: 100 * MICRO, toMicro: 200 * MICRO }])
     expect(res.ok).toBe(false)
     expect(res.reason).toContain('масс')
+  })
+
+  it('СНИЖЕНИЕ ставочной массы на >50% → ОК (пофразный биддинг режет горелки — безопасно)', () => {
+    // Цикл 2.0: снижение ставок расход не разгоняет → предохранитель не мешает.
+    expect(checkCircuitBreaker([{ fromMicro: 200 * MICRO, toMicro: 40 * MICRO }]).ok).toBe(true)
+    expect(
+      checkCircuitBreaker([
+        { fromMicro: 200 * MICRO, toMicro: 50 * MICRO },
+        { fromMicro: 180 * MICRO, toMicro: 45 * MICRO },
+      ]).ok
+    ).toBe(true)
   })
 
   it('умеренная правка → ок', () => {

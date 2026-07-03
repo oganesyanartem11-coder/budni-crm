@@ -9,9 +9,6 @@ import {
   QUARANTINE_MIN_CLICKS,
   MINUS_MIN_IMPRESSIONS,
   MINUS_WORD_MAX_LEN,
-  TV_LOWER_BLOCK_ENTRY,
-  TV_CORE,
-  TV_TAIL,
   BID_CEILING_MICRO,
   CB_MAX_BID_CHANGES_PER_TICK,
   CB_MAX_BID_MASS_SHIFT,
@@ -160,9 +157,13 @@ const BID_NOISE_RATIO = 0.05
 
 export interface RecommendBidInput {
   auctionBids: Array<{ TrafficVolume: number; Bid: number; Price: number }>
-  /** Доказанный конвертер — по ДАННЫМ (группа/фраза с конверсиями), не по чутью. */
-  isProvenConverter: boolean
-  isCore: boolean
+  /**
+   * Целевой уровень TV, выбранный ПОФРАЗНО по головной экономике фразы
+   * (Цикл 2.0): конвертер → вход в нижний блок (TV_LOWER_BLOCK_ENTRY),
+   * «горелка» → минимум (TV_TAIL), тонкая → вход. Значение сравнивается со
+   * шкалой аукциона: берётся наименьший доступный TV ≥ desiredTv.
+   */
+  desiredTv: number
   currentBidMicro: number
 }
 
@@ -180,14 +181,12 @@ export interface RecommendBidResult {
 }
 
 /**
- * Рекомендация ставки по бинарной шкале аукциона:
- * - вход в нижний блок = позиция с наименьшим TrafficVolume ≥ TV_LOWER_BLOCK_ENTRY;
- * - ядро (isCore) — этот вход;
- * - доказанным конвертерам (isProvenConverter) можно шаг TV_CORE;
- * - хвост (не core) — TV_TAIL (низ, минимальная цена);
- * - премиум (TV ≥ 85) — НИКОГДА (рубеж ×3-4 по цене).
+ * Рекомендация ставки по бинарной шкале аукциона (Цикл 2.0 — ПОФРАЗНО):
+ * - целевой уровень desiredTv выбран вызывающим по головной экономике фразы;
+ * - берётся наименьшая доступная позиция аукциона с TrafficVolume ≥ desiredTv;
+ * - премиум (TV ≥ 85) — НИКОГДА (рубеж ×3-4 по цене), из кандидатов исключён.
  *
- * Всегда clamp к BID_CEILING_MICRO; если даже вход дороже потолка —
+ * Всегда clamp к BID_CEILING_MICRO; если даже нужный вход дороже потолка —
  * не меняем (changed=false, targetTv=null). Микрошум < 5% — не меняем.
  */
 export function recommendBid(input: RecommendBidInput): RecommendBidResult {
@@ -206,13 +205,7 @@ export function recommendBid(input: RecommendBidInput): RecommendBidResult {
     .sort((a, b) => a.TrafficVolume - b.TrafficVolume)
   if (available.length === 0) return hold('no_auction')
 
-  const desiredTv = input.isProvenConverter
-    ? TV_CORE
-    : input.isCore
-      ? TV_LOWER_BLOCK_ENTRY
-      : TV_TAIL
-
-  const target = available.find((b) => b.TrafficVolume >= desiredTv)
+  const target = available.find((b) => b.TrafficVolume >= input.desiredTv)
   if (!target) return hold('no_auction')
 
   // Даже нужный вход дороже потолка → не лезем (потолок — предохранитель).
@@ -252,18 +245,24 @@ export function checkCircuitBreaker(
   const sumFrom = changes.reduce((acc, c) => acc + c.fromMicro, 0)
   const sumTo = changes.reduce((acc, c) => acc + c.toMicro, 0)
 
-  // Текущая масса ноль, новая — нет: сдвиг «бесконечный», безопаснее стоп.
+  // ВАЖНО (Цикл 2.0): предохранитель защищает от РАЗГОНА РАСХОДА (баг раздувает
+  // ставки). СНИЖЕНИЕ ставочной массы расход не разгоняет — это всегда безопасно
+  // (пофразный экономбиддинг штатно режет беззаявочные фразы на >50% за тик).
+  // Поэтому масс-шифт ловит только РОСТ; порог кол-ва правок (>N) остаётся
+  // симметричным (баг, брызжущий сотней правок, подозрителен в любую сторону).
+
+  // Текущая масса ноль, новая — растёт: рост «бесконечный», безопаснее стоп.
   if (sumFrom <= 0) {
     return sumTo > 0
       ? { ok: false, reason: 'ставочная масса растёт с нуля — вне паттерна, нужен разбор' }
       : { ok: true }
   }
 
-  const shift = Math.abs(sumTo - sumFrom) / sumFrom
-  if (shift > CB_MAX_BID_MASS_SHIFT) {
+  const increase = (sumTo - sumFrom) / sumFrom
+  if (increase > CB_MAX_BID_MASS_SHIFT) {
     return {
       ok: false,
-      reason: `скачок ставочной массы ${(shift * 100).toFixed(0)}% > ${CB_MAX_BID_MASS_SHIFT * 100}% за тик`,
+      reason: `рост ставочной массы ${(increase * 100).toFixed(0)}% > ${CB_MAX_BID_MASS_SHIFT * 100}% за тик`,
     }
   }
   return { ok: true }

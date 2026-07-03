@@ -34,6 +34,15 @@ export interface AnomalyInput {
   avgLeads7d: number | null
   rejectedAdsCount: number
   apiErrors: string[]
+  /**
+   * Вчера был выходной по МСК (сб/вс)? У нас B2B-доставка обедов: выходные
+   * почти мёртвые по спросу (сигнал движка/жизни есть). Тогда обрыв показов и
+   * ноль заявок — ОЖИДАЕМАЯ сезонность, НЕ аномалия: эти две проверки молчат,
+   * чтобы не сыпать ложными алёртами каждую субботу-воскресенье. Скачок расхода,
+   * слёт тега, отклонения, ошибки API — по-прежнему проверяются (они от дня
+   * недели не зависят).
+   */
+  yesterdayIsWeekend: boolean
 }
 
 export function detectAnomalies(input: AnomalyInput): Anomaly[] {
@@ -53,8 +62,10 @@ export function detectAnomalies(input: AnomalyInput): Anomaly[] {
     })
   }
 
-  // Обрыв показов: вчера < 20% среднего при среднем ≥ 50.
+  // Обрыв показов: вчера < 20% среднего при среднем ≥ 50. В выходной молчим —
+  // низкий охват в сб/вс — это B2B-сезонность, а не «кампанию выключило».
   if (
+    !input.yesterdayIsWeekend &&
     input.impressionsYesterday != null &&
     input.avgImpressions7d != null &&
     input.avgImpressions7d >= IMPRESSIONS_MIN_AVG &&
@@ -76,8 +87,14 @@ export function detectAnomalies(input: AnomalyInput): Anomaly[] {
     })
   }
 
-  // Заявки упали в ноль после того, как БЫЛИ (avg7d ≥ 1).
-  if (input.leadsYesterday === 0 && input.avgLeads7d != null && input.avgLeads7d >= 1) {
+  // Заявки упали в ноль после того, как БЫЛИ (avg7d ≥ 1). В выходной молчим —
+  // ноль заявок в сб/вс у B2B-обедов ожидаем, это не «форма сломалась».
+  if (
+    !input.yesterdayIsWeekend &&
+    input.leadsYesterday === 0 &&
+    input.avgLeads7d != null &&
+    input.avgLeads7d >= 1
+  ) {
     anomalies.push({
       severity: 'warn',
       kind: 'leads_zero',

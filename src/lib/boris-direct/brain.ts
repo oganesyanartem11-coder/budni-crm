@@ -62,7 +62,15 @@ import {
   type QueryStatRow,
 } from './attribution'
 import type { DecisionRecord, ReasonCode } from './reason-codes'
-import { DIRECT_CAMPAIGN_ID, DATA_MISMATCH_RATIO, DATA_MISMATCH_MIN_COUNT } from './config'
+import {
+  DIRECT_CAMPAIGN_ID,
+  DATA_MISMATCH_RATIO,
+  DATA_MISMATCH_MIN_COUNT,
+  PHRASE_MIN_CLICKS,
+  PHRASE_ECON_WINDOW_DAYS,
+  TV_LOWER_BLOCK_ENTRY,
+  TV_TAIL,
+} from './config'
 import { detectAnomalies, type Anomaly } from './anomalies'
 import {
   isInQuarantine,
@@ -90,6 +98,13 @@ const MSK_OFFSET_MS = 3 * HOUR_MS
 /** МСК-день даты в виде 'YYYY-MM-DD'. */
 export function mskDay(date: Date): string {
   return new Date(date.getTime() + MSK_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+/** Нормализация текста запроса/ключа для моста «текст ↔ keywordId» (Цикл 2.0):
+ *  lower, ё→е, схлопывание пробелов. В симуляции тексты совпадают точно;
+ *  в бою страхует регистр/пробелы. */
+function normQueryKey(text: string): string {
+  return text.trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ')
 }
 
 /** Начало МСК-дня 'YYYY-MM-DD' как UTC-момент (для tickDate и границ выборок). */
@@ -340,6 +355,8 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
         ? ads.filter((a) => a.Status === 'REJECTED').length
         : keywords.filter((k) => k.Status === 'REJECTED').length,
       apiErrors,
+      // B2B-сезонность: обрыв показов/ноль заявок в выходной — не аномалия.
+      yesterdayIsWeekend: isWeekend(yesterday),
     })
   } catch (err) {
     pushError('anomalies', err)
@@ -973,103 +990,119 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     pushBlockError('минусовка', err)
   }
 
-  // 7. СТАВКИ: бинарная шкала по снапшоту keywordbids + конверсии из отчёта.
-  //
-  // УПРОЩЕНИЕ (задокументировано): матч фраза↔запрос неточен, поэтому
-  // «доказанный конвертер» считаем на уровне ГРУППЫ — группа с conversions>0
-  // в отчёте по запросам → все её фразы isProvenConverter=true.
-  // ЭВРИСТИКА ядра: ядро = фразы в группах с конверсиями ИЛИ в группах с CTR
-  // выше среднего по кампании (лучший сигнал целевого спроса без конверсий).
+  // 7. СТАВКИ: ПОФРАЗНЫЙ экономбиддинг (Цикл 2.0). Ставка каждой фразы — по её
+  // СОБСТВЕННОЙ головной экономике (запрос фразы = текст её ключа), а не по
+  // групповой корзине. Ключ: CPL(tv) ∝ cpc(tv) (клики/CR сокращаются) — дешевле
+  // уровень при сохранении заявок = дешевле заявка. Поэтому:
+  //   • конвертер (заявки за окно > 0) → вход в нижний блок (дешевле TV75);
+  //   • «горелка» (клики ≥ порога, заявок 0 за зрелое окно) → минимальный уровень;
+  //   • тонкая (мало кликов) → вход/наблюдение.
+  // Групповое усреднение (тянувшее беззаявочные фразы конвертящей группы в TV75)
+  // убрано — оно и топило экономику (M1). Голова фразы наблюдаема без движка:
+  // keyword.Keyword == query отчёта. Окно PHRASE_ECON_WINDOW_DAYS дозревает
+  // заявки сквозь лаг. Потолок 400 ₽, премиум-вето, шум-гейт, карантин,
+  // circuit breaker — в силе.
   try {
     const bidsSnap = (await latestSnapshotPayload<KeywordBidRecord[]>('keywordbids')) ?? []
+    const keywordsForBids = (await latestSnapshotPayload<KeywordRecord[]>('keywords')) ?? []
     if (bidsSnap.length > 0) {
-      const convByGroup = new Map<string, number>()
-      const clicksByGroup = new Map<string, number>()
-      const impressionsByGroup = new Map<string, number>()
-      for (const row of rows) {
-        convByGroup.set(row.adGroupId, (convByGroup.get(row.adGroupId) ?? 0) + row.conversions)
-        clicksByGroup.set(row.adGroupId, (clicksByGroup.get(row.adGroupId) ?? 0) + row.clicks)
-        impressionsByGroup.set(
-          row.adGroupId,
-          (impressionsByGroup.get(row.adGroupId) ?? 0) + row.impressions
-        )
-      }
-
-      const groupCtr = new Map<string, number>()
-      for (const [groupId, groupImpressions] of impressionsByGroup) {
-        if (groupImpressions > 0) {
-          groupCtr.set(groupId, (clicksByGroup.get(groupId) ?? 0) / groupImpressions)
-        }
-      }
-      const ctrValues = [...groupCtr.values()]
-      const avgGroupCtr =
-        ctrValues.length > 0 ? ctrValues.reduce((a, b) => a + b, 0) / ctrValues.length : 0
-
-      const convertingGroups = new Set(
-        [...convByGroup.entries()].filter(([, conv]) => conv > 0).map(([groupId]) => groupId)
+      // Мост keywordId → нормализованный текст ключа (голова фразы).
+      const keyTextById = new Map<number, string>(
+        keywordsForBids.map((k) => [k.Id, normQueryKey(k.Keyword)])
       )
-      const coreGroups = new Set([
-        ...convertingGroups,
-        ...[...groupCtr.entries()].filter(([, c]) => c > avgGroupCtr).map(([groupId]) => groupId),
-      ])
+      // Головная экономика фразы за окно созревания: (adGroupId, normQuery) →
+      // {clicks, leads}. Источник — накопленный BorisDirectQueryDailyStat (в §3
+      // уже дописан вчерашний день) + сегодняшний отчёт rows как подстраховка.
+      const windowStartBids = new Date(dayStart.getTime() - (PHRASE_ECON_WINDOW_DAYS - 1) * DAY_MS)
+      const headStat = new Map<string, { clicks: number; leads: number }>()
+      const addHead = (adGroupId: string, query: string, clicks: number, leads: number) => {
+        const key = `${adGroupId} ${normQueryKey(query)}`
+        const acc = headStat.get(key) ?? { clicks: 0, leads: 0 }
+        acc.clicks += clicks
+        acc.leads += leads
+        headStat.set(key, acc)
+      }
+      try {
+        const ws = await prisma.borisDirectQueryDailyStat.findMany({
+          where: { date: { gte: windowStartBids, lte: dayStart } },
+        })
+        for (const s of ws) addHead(s.adGroupId, s.query, s.clicks, s.conversions)
+      } catch (err) {
+        console.error('[boris-direct/brain] окно пофразной экономики недоступно', err)
+      }
+      for (const row of rows) addHead(row.adGroupId, row.query, row.clicks, row.conversions)
 
       const changes: BidChange[] = []
       // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
       const bidCodes = new Set<ReasonCode>()
-      // Тексты hold-причин для машинных записей (решение уже принято в rules).
-      const HOLD_EMISSION: Record<
-        'ceiling' | 'noise' | 'no_auction',
-        { code: ReasonCode; summary: string }
-      > = {
-        ceiling: { code: 'AUCTION_ABOVE_CEILING', summary: 'вход дороже потолка — держимся' },
-        noise: { code: 'NOISE_HOLD', summary: 'микрошум аукциона < 5% — не дёргаем' },
-        no_auction: { code: 'LOW_COVERAGE', summary: 'нет подходящей позиции аукциона — ждём' },
-      }
       for (const bid of bidsSnap) {
         const auctionBids = bid.Search?.AuctionBids ?? []
         if (auctionBids.length === 0) continue
         const groupId = String(bid.AdGroupId)
         const currentBidMicro = bid.Search?.Bid ?? 0
-        const isProvenConverter = convertingGroups.has(groupId)
-        const isCore = coreGroups.has(groupId)
-        const rec = recommendBid({
-          auctionBids,
-          isProvenConverter,
-          isCore,
-          currentBidMicro,
-        })
-        if (rec.changed) {
-          changes.push({ keywordId: bid.KeywordId, fromMicro: currentBidMicro, toMicro: rec.targetBidMicro })
-          // ЭМИССИЯ: код по исходу recommendBid — конвертер → объём TV75,
-          // ядро → вход в нижний блок, хвост → минимальный уровень.
-          const reasonCode: ReasonCode = isProvenConverter
-            ? 'PROVEN_CONVERTER_VOLUME'
-            : isCore
-              ? 'CORE_LOWER_BLOCK'
-              : 'TAIL_MIN_TV'
-          bidCodes.add(reasonCode)
-          decisions.push({
-            type: 'bid',
-            targetType: 'keyword',
-            targetId: String(bid.KeywordId),
-            summary: `ставка к TV${rec.targetTv ?? '?'} по бинарной шкале`,
-            reasonCode,
-            factors: {
-              fromMicro: currentBidMicro,
-              toMicro: rec.targetBidMicro,
-              targetTv: rec.targetTv ?? 0,
-            },
-          })
-        } else if (rec.holdReason) {
-          // ЭМИССИЯ: почему держимся (changed=false) — из holdReason правил.
-          const emission = HOLD_EMISSION[rec.holdReason]
+        // Головная экономика ЭТОЙ фразы (её собственный запрос).
+        const head = headStat.get(`${groupId} ${keyTextById.get(bid.KeywordId) ?? ''}`) ?? {
+          clicks: 0,
+          leads: 0,
+        }
+        // Тонкая фраза (мало кликов, нет заявок) — НЕ трогаем ставку: судить не
+        // на чем, а болтанка вредит дисциплине (демоутнутая горелка, у которой
+        // клики выпали из окна, не должна прыгать назад в 65). Только наблюдаем.
+        if (head.leads === 0 && head.clicks < PHRASE_MIN_CLICKS) {
           decisions.push({
             type: 'hold',
             targetType: 'keyword',
             targetId: String(bid.KeywordId),
-            summary: emission.summary,
-            reasonCode: emission.code,
-            factors: { fromMicro: currentBidMicro },
+            summary: `тонкая фраза — наблюдаем (клики ${head.clicks})`,
+            reasonCode: 'CORE_LOWER_BLOCK',
+            factors: { fromMicro: currentBidMicro, headLeads: head.leads, headClicks: head.clicks },
+          })
+          continue
+        }
+        // Пофразная классификация → целевой уровень + код природы фразы.
+        const converter = head.leads > 0
+        const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL // конвертер→вход, горелка→минимум
+        const phraseCode: ReasonCode = converter ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
+        const rec = recommendBid({ auctionBids, desiredTv, currentBidMicro })
+        if (rec.changed) {
+          changes.push({ keywordId: bid.KeywordId, fromMicro: currentBidMicro, toMicro: rec.targetBidMicro })
+          bidCodes.add(phraseCode)
+          decisions.push({
+            type: 'bid',
+            targetType: 'keyword',
+            targetId: String(bid.KeywordId),
+            summary: `ставка к TV${rec.targetTv ?? '?'} по пофразной экономике (заявки ${head.leads}, клики ${head.clicks})`,
+            reasonCode: phraseCode,
+            factors: {
+              fromMicro: currentBidMicro,
+              toMicro: rec.targetBidMicro,
+              targetTv: rec.targetTv ?? 0,
+              headLeads: head.leads,
+              headClicks: head.clicks,
+            },
+          })
+        } else {
+          // Держимся. Природа фразы — тот же phraseCode; КРОМЕ случая, когда
+          // держит именно потолок/отсутствие аукциона (это и есть причина).
+          const holdCode: ReasonCode =
+            rec.holdReason === 'ceiling'
+              ? 'AUCTION_ABOVE_CEILING'
+              : rec.holdReason === 'no_auction'
+                ? 'LOW_COVERAGE'
+                : phraseCode
+          const holdSummary =
+            rec.holdReason === 'ceiling'
+              ? 'вход дороже потолка — держимся'
+              : rec.holdReason === 'no_auction'
+                ? 'нет подходящей позиции аукциона — ждём'
+                : `уже на целевом уровне (заявки ${head.leads}, клики ${head.clicks})`
+          decisions.push({
+            type: 'hold',
+            targetType: 'keyword',
+            targetId: String(bid.KeywordId),
+            summary: holdSummary,
+            reasonCode: holdCode,
+            factors: { fromMicro: currentBidMicro, headLeads: head.leads, headClicks: head.clicks },
           })
         }
       }
@@ -1081,7 +1114,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           .join(',')
         const gate = await applyBidChanges(
           changes,
-          `[${bidsCodePrefix}] ставки к бинарной шкале (конвертеры → TV75, ядро → вход в нижний блок, хвост → TV15): ${changes.length} фраз`
+          `[${bidsCodePrefix}] пофразный экономбиддинг (конвертер→нижний блок, горелка→минимум, тонкая→вход): ${changes.length} фраз`
         )
         if (gate.breakerTripped) {
           anomalies.push({

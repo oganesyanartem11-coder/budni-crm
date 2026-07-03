@@ -16,6 +16,7 @@ function makeInput(overrides: Partial<AnomalyInput> = {}): AnomalyInput {
     avgLeads7d: 2,
     rejectedAdsCount: 0,
     apiErrors: [],
+    yesterdayIsWeekend: false,
     ...overrides,
   }
 }
@@ -61,6 +62,28 @@ describe('detectAnomalies', () => {
   it('заявки упали в ноль после того как были (avg7d ≥ 1) → warn', () => {
     const res = detectAnomalies(makeInput({ leadsYesterday: 0, avgLeads7d: 1.5 }))
     expect(res).toContainEqual(expect.objectContaining({ severity: 'warn', kind: 'leads_zero' }))
+  })
+
+  it('ВЫХОДНОЙ: ноль заявок и обрыв показов НЕ аномалия (B2B-сезонность)', () => {
+    const res = detectAnomalies(
+      makeInput({
+        yesterdayIsWeekend: true,
+        leadsYesterday: 0,
+        avgLeads7d: 1.5,
+        impressionsYesterday: 5,
+        avgImpressions7d: 100,
+      })
+    )
+    expect(res.find((a) => a.kind === 'leads_zero')).toBeUndefined()
+    expect(res.find((a) => a.kind === 'impressions_drop')).toBeUndefined()
+  })
+
+  it('ВЫХОДНОЙ: скачок расхода и слёт тега ВСЁ РАВНО ловятся (от дня недели не зависят)', () => {
+    const res = detectAnomalies(
+      makeInput({ yesterdayIsWeekend: true, spentYesterdayRub: 3000, avgSpend7dRub: 1000, addMetricaTag: 'NO' })
+    )
+    expect(res).toContainEqual(expect.objectContaining({ kind: 'spend_spike' }))
+    expect(res).toContainEqual(expect.objectContaining({ kind: 'metrica_tag_off' }))
   })
 
   it('заявок и раньше не было (avg7d < 1) → не аномалия', () => {
