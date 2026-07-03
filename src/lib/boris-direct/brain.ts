@@ -41,7 +41,7 @@ import {
   type QueryStatRow,
 } from './attribution'
 import type { DecisionRecord, ReasonCode } from './reason-codes'
-import { DIRECT_CAMPAIGN_ID } from './config'
+import { DIRECT_CAMPAIGN_ID, DATA_MISMATCH_RATIO, DATA_MISMATCH_MIN_COUNT } from './config'
 import { detectAnomalies, type Anomaly } from './anomalies'
 import {
   isInQuarantine,
@@ -644,6 +644,35 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     })
   } catch (err) {
     pushBlockError('лиды', err)
+  }
+
+  // 4b. ДИАГНОСТИКА (виток 2): сверка источников заявок. Отчёт Директа (конверсии
+  // по клику), Метрика (цель) и БД лидов должны примерно сходиться. Резкое
+  // расхождение = битые данные (слетела разметка / вал пустышек): первопричина
+  // не в трафике — флагаем, чтобы не награждать фразы и не резать по ложному
+  // сигналу. Только ЭМИССИЯ диагноза, действий не меняет.
+  try {
+    const reportConv = rows.reduce((acc, r) => acc + r.conversions, 0)
+    const metrikaGoal =
+      (await latestSnapshotPayload<Array<{ goalReaches?: number }>>('metrika_goal'))?.reduce(
+        (acc, g) => acc + (g.goalReaches ?? 0),
+        0
+      ) ?? 0
+    const counts = [reportConv, metrikaGoal, leadsTotal].filter((c) => Number.isFinite(c))
+    const maxC = Math.max(...counts)
+    const minC = Math.min(...counts)
+    if (maxC >= DATA_MISMATCH_MIN_COUNT && maxC >= minC * DATA_MISMATCH_RATIO) {
+      decisions.push({
+        type: 'diagnosis',
+        targetType: 'campaign',
+        targetId: String(DIRECT_CAMPAIGN_ID),
+        summary: `источники заявок расходятся: отчёт ${reportConv}, Метрика ${metrikaGoal}, БД ${leadsTotal} — первопричина в данных, не в трафике`,
+        reasonCode: 'DATA_MISMATCH',
+        factors: { reportConv, metrikaGoal, leadsTotal },
+      })
+    }
+  } catch (err) {
+    pushBlockError('сверка источников', err)
   }
 
   // 5. Карантин: дней с данными = дни со снапшотом кампании; клики — сумма
