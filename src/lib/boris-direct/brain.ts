@@ -19,9 +19,11 @@ import {
   getAddMetricaTagValue,
   getKeywords,
   getKeywordBids,
+  getAds,
   type CampaignState,
   type KeywordRecord,
   type KeywordBidRecord,
+  type AdRecord,
 } from './direct-client'
 import {
   buildSearchQueryReportBody,
@@ -33,10 +35,13 @@ import { getGoalStatsByDay } from './metrika-client'
 import {
   getLeadsForPeriod,
   splitLeadsByOrigin,
+  matchLeadsToTerms,
   toQueryStatRow,
   computeCostPerLead,
   type QueryStatRow,
 } from './attribution'
+import type { DecisionRecord, ReasonCode } from './reason-codes'
+import { DIRECT_CAMPAIGN_ID } from './config'
 import { detectAnomalies, type Anomaly } from './anomalies'
 import {
   isInQuarantine,
@@ -174,6 +179,15 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
   } catch (err) {
     pushError('keywordbids.get', err)
   }
+  // Объявления (ТОЛЬКО чтение) — снапшот состояния модерации для полигона
+  // и точный счёт REJECTED. Сбой ads не роняет тик (ads остаётся null).
+  let ads: AdRecord[] | null = null
+  try {
+    ads = await getAds()
+    await saveSnapshot(tickToday, 'ads', ads)
+  } catch (err) {
+    pushError('ads.get', err)
+  }
 
   // 2. Метрика за вчера (tickDate = МСК-день, за который данные).
   try {
@@ -262,8 +276,11 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
       addMetricaTag: campaign ? getAddMetricaTagValue(campaign) : null,
       leadsYesterday,
       avgLeads7d: leads7d / 7,
-      // Модерацию объявлений отдельно не читаем — считаем REJECTED по фразам.
-      rejectedAdsCount: keywords.filter((k) => k.Status === 'REJECTED').length,
+      // REJECTED считаем по объявлениям (ads.get); если чтение ads упало —
+      // прежний прокси по фразам, чтобы отказ модерации не потерялся.
+      rejectedAdsCount: ads
+        ? ads.filter((a) => a.Status === 'REJECTED').length
+        : keywords.filter((k) => k.Status === 'REJECTED').length,
       apiErrors,
     })
   } catch (err) {
@@ -316,6 +333,15 @@ export interface DailyReportData {
   llm?: never
 }
 
+/** Экспорт уже вычисляемой атрибуции лида (эмиссия фазы 0, не новая логика). */
+export interface LeadAttributionRecord {
+  /** `${phoneDigits ?? 'x'}@${МСК-день createdAt}` — стабильный ключ лида. */
+  leadKey: string
+  adGroupId: string | null
+  query: string | null
+  matchedBy: 'utm_term' | 'yclid_only' | 'none'
+}
+
 export interface ProcessResult {
   status: 'waiting_report' | 'done' | 'quarantine'
   appliedSummaries: string[]
@@ -324,6 +350,13 @@ export interface ProcessResult {
   verdicts: MinusVerdictDraft[]
   reportData: DailyReportData | null
   anomalies: Anomaly[]
+  /**
+   * Машинные записи УЖЕ принятых решений тика (эмиссия для полигона фазы 0).
+   * Только done/quarantine — waiting_report решений не принимает.
+   */
+  decisions?: DecisionRecord[]
+  /** Атрибуция лидов за вчера — экспорт splitLeadsByOrigin/matchLeadsToTerms. */
+  attribution?: LeadAttributionRecord[]
   /** Итоги памяти-хуков (только для done/quarantine; waiting_report их не запускает). */
   memory?: {
     outcomesMeasured: number
@@ -449,6 +482,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   const wouldDoSummaries: string[] = []
   const proposalDrafts: ProposalDraft[] = []
   const verdicts: MinusVerdictDraft[] = []
+  // ЭМИССИЯ (фаза 0): машинные записи уже принятых решений. Наполнение НЕ
+  // меняет ни одно решение — только делает его видимым полигону.
+  const decisions: DecisionRecord[] = []
+  let attribution: LeadAttributionRecord[] | undefined
 
   const { dateFrom: yesterday } = yesterdayMsk(now)
   const dayStart = mskDayStartUtc(yesterday)
@@ -458,6 +495,22 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[boris-direct/brain] process: блок «${block}» упал`, err)
     anomalies.push({ severity: 'warn', kind: 'process_block_error', text: `блок «${block}»: ${message}` })
+  }
+
+  /** Каждая аномалия результата → alert ANOMALY_ALERT (перед самым return).
+   * circuit_breaker пропускаем — он уже эмитирован собственным кодом. */
+  const emitAnomalyAlerts = () => {
+    for (const anomaly of anomalies) {
+      if (anomaly.kind === 'circuit_breaker') continue
+      decisions.push({
+        type: 'alert',
+        targetType: 'campaign',
+        targetId: String(DIRECT_CAMPAIGN_ID),
+        summary: anomaly.text,
+        reasonCode: 'ANOMALY_ALERT',
+        factors: { kind: anomaly.kind },
+      })
+    }
   }
 
   // 1. Дожать PENDING-отчёты: повтор ТОГО ЖЕ POST (params из БД).
@@ -567,6 +620,28 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     leadsTotal = leads.length
     leadsFromDirect = split.fromDirect.length
     costPerLeadRub = computeCostPerLead(spendRub, leadsFromDirect)
+
+    // ЭМИССИЯ: экспорт уже вычисляемого сопоставления лид↔запрос — тот же
+    // matchLeadsToTerms по Директ-лидам, новой логики атрибуции нет.
+    // adGroupId — из строки отчёта с совпавшим запросом (первое вхождение,
+    // как в matchLeadsToTerms).
+    const adGroupByQuery = new Map<string, string>()
+    for (const row of rows) {
+      if (!adGroupByQuery.has(row.query)) adGroupByQuery.set(row.query, row.adGroupId)
+    }
+    const matchByLeadId = new Map(
+      matchLeadsToTerms(split.fromDirect, rows).map((m) => [m.lead.id, m])
+    )
+    attribution = leads.map((lead): LeadAttributionRecord => {
+      const matchedQuery = matchByLeadId.get(lead.id)?.matchedQuery ?? null
+      const hasYclid = Boolean(lead.yclid && lead.yclid.trim() !== '')
+      return {
+        leadKey: `${lead.phoneDigits ?? 'x'}@${mskDay(lead.createdAt)}`,
+        adGroupId: matchedQuery !== null ? (adGroupByQuery.get(matchedQuery) ?? null) : null,
+        query: matchedQuery,
+        matchedBy: matchedQuery !== null ? 'utm_term' : hasYclid ? 'yclid_only' : 'none',
+      }
+    })
   } catch (err) {
     pushBlockError('лиды', err)
   }
@@ -574,6 +649,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   // 5. Карантин: дней с данными = дни со снапшотом кампании; клики — сумма
   // по дневным итогам (включая только что записанный вчерашний день).
   let quarantine = false
+  // Цифры, на которые опёрся карантин, — для машинной записи (эмиссия).
+  let quarantineFactors: Record<string, number | string> = {}
   try {
     const campaignDays = await prisma.borisDirectSnapshot.findMany({
       where: { kind: 'campaign' },
@@ -582,10 +659,12 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     })
     const allTotals = await loadDailyTotals(dayStart, 30)
     const totalClicks = allTotals.reduce((acc, t) => acc + t.clicks, 0)
+    quarantineFactors = { daysOfData: campaignDays.length, totalClicks }
     quarantine = isInQuarantine({ daysOfData: campaignDays.length, totalClicks })
   } catch (err) {
     pushBlockError('карантин', err)
     quarantine = true // не смогли посчитать → безопаснее не оптимизировать
+    quarantineFactors = { note: 'ошибка расчёта — карантин из осторожности' }
   }
 
   const markProcessed = async () => {
@@ -616,8 +695,18 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   if (quarantine) {
     // В карантине НЕ оптимизируем: только честный отчёт «наблюдаю».
     // Память при этом копится — исходы и уроки меряем и здесь.
+    // ЭМИССИЯ: одна машинная запись «держимся» уровня кампании.
+    decisions.push({
+      type: 'hold',
+      targetType: 'campaign',
+      targetId: String(DIRECT_CAMPAIGN_ID),
+      summary: 'карантин молодой кампании — только наблюдаем, не оптимизируем',
+      reasonCode: 'QUARANTINE_HOLD',
+      factors: quarantineFactors,
+    })
     await markProcessed()
     const memory = await runMemoryHooks(now)
+    emitAnomalyAlerts()
     return {
       status: 'quarantine',
       appliedSummaries,
@@ -626,6 +715,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       verdicts,
       reportData,
       anomalies,
+      decisions,
+      attribution,
       memory,
     }
   }
@@ -683,11 +774,32 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       const verdictByCandidate = new Map(classified.map((c) => [c.candidate, c]))
       const autonomous: string[] = []
       const disputed: string[] = []
+      // Цифры кандидата (показы/клики/конверсии) — факторы машинной записи.
+      const statFactors = (phrase: string): Record<string, number> => {
+        const stat = statByQuery.get(phrase)
+        return {
+          impressions: stat?.impressions ?? 0,
+          clicks: stat?.clicks ?? 0,
+          conversions: stat?.conversions ?? 0,
+        }
+      }
+      // Коды автономной пачки — для префикса reason в write-gate (дубль в лог).
+      const autonomousCodes = new Set<ReasonCode>()
       for (const phrase of prepared.accepted) {
         const cls = verdictByCandidate.get(phrase)
         if (cls && cls.structural && cls.confident) {
           autonomous.push(phrase)
           verdicts.push({ candidate: phrase, verdict: 'minus', reason: cls.reason || 'структурный мусор' })
+          // ЭМИССИЯ: автономный минус из LLM-классификатора (structural+confident).
+          autonomousCodes.add('STRUCTURAL_TRASH')
+          decisions.push({
+            type: 'minus',
+            targetType: 'query',
+            targetId: phrase,
+            summary: cls.reason || 'структурный мусор',
+            reasonCode: 'STRUCTURAL_TRASH',
+            factors: statFactors(phrase),
+          })
         } else if (state.autoNegativesEnabled) {
           // Гейт спорных минусов снят обучением — спорные тоже в автономию.
           autonomous.push(phrase)
@@ -696,12 +808,31 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             verdict: 'minus',
             reason: cls?.reason || 'гейт снят обучением — спорный кандидат в автономию',
           })
+          // ЭМИССИЯ: автономный минус из data-порога (показы ≥ порога, 0 конверсий).
+          autonomousCodes.add('DATA_NO_CONV')
+          decisions.push({
+            type: 'minus',
+            targetType: 'query',
+            targetId: phrase,
+            summary: 'data-порог: показы без конверсий (гейт снят обучением)',
+            reasonCode: 'DATA_NO_CONV',
+            factors: statFactors(phrase),
+          })
         } else {
           disputed.push(phrase)
           verdicts.push({
             candidate: phrase,
             verdict: cls?.structural ? 'minus' : 'keep',
             reason: cls?.reason || 'классификатор не дал уверенного вердикта — решает владелец',
+          })
+          // ЭМИССИЯ: спорный кандидат уходит предложением владельцу.
+          decisions.push({
+            type: 'proposal',
+            targetType: 'query',
+            targetId: phrase,
+            summary: 'спорный минус — предложение владельцу',
+            reasonCode: 'DISPUTED_MINUS',
+            factors: statFactors(phrase),
           })
         }
       }
@@ -715,10 +846,15 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         for (const phrase of autonomous) {
           if (!merged.includes(phrase)) merged.push(phrase)
         }
+        // Префикс машинного кода в reason — дубль записи в payload лога
+        // действий. Текст после скобок прежний.
+        const negativesCodePrefix = (['STRUCTURAL_TRASH', 'DATA_NO_CONV'] as const)
+          .filter((code) => autonomousCodes.has(code))
+          .join(',')
         const gate = await applyNegativeKeywords(
           merged,
           previousList,
-          `минусовка: ${autonomous.length} структурных кандидатов (показы ≥ порога, конверсий 0): ${autonomous.join(', ')}`
+          `[${negativesCodePrefix}] минусовка: ${autonomous.length} структурных кандидатов (показы ≥ порога, конверсий 0): ${autonomous.join(', ')}`
         )
         const summary = `минус-фразы (${autonomous.length}): ${autonomous.join(', ')}`
         if (gate.applied) appliedSummaries.push(summary)
@@ -791,32 +927,89 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       ])
 
       const changes: BidChange[] = []
+      // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
+      const bidCodes = new Set<ReasonCode>()
+      // Тексты hold-причин для машинных записей (решение уже принято в rules).
+      const HOLD_EMISSION: Record<
+        'ceiling' | 'noise' | 'no_auction',
+        { code: ReasonCode; summary: string }
+      > = {
+        ceiling: { code: 'AUCTION_ABOVE_CEILING', summary: 'вход дороже потолка — держимся' },
+        noise: { code: 'NOISE_HOLD', summary: 'микрошум аукциона < 5% — не дёргаем' },
+        no_auction: { code: 'LOW_COVERAGE', summary: 'нет подходящей позиции аукциона — ждём' },
+      }
       for (const bid of bidsSnap) {
         const auctionBids = bid.Search?.AuctionBids ?? []
         if (auctionBids.length === 0) continue
         const groupId = String(bid.AdGroupId)
         const currentBidMicro = bid.Search?.Bid ?? 0
+        const isProvenConverter = convertingGroups.has(groupId)
+        const isCore = coreGroups.has(groupId)
         const rec = recommendBid({
           auctionBids,
-          isProvenConverter: convertingGroups.has(groupId),
-          isCore: coreGroups.has(groupId),
+          isProvenConverter,
+          isCore,
           currentBidMicro,
         })
         if (rec.changed) {
           changes.push({ keywordId: bid.KeywordId, fromMicro: currentBidMicro, toMicro: rec.targetBidMicro })
+          // ЭМИССИЯ: код по исходу recommendBid — конвертер → объём TV75,
+          // ядро → вход в нижний блок, хвост → минимальный уровень.
+          const reasonCode: ReasonCode = isProvenConverter
+            ? 'PROVEN_CONVERTER_VOLUME'
+            : isCore
+              ? 'CORE_LOWER_BLOCK'
+              : 'TAIL_MIN_TV'
+          bidCodes.add(reasonCode)
+          decisions.push({
+            type: 'bid',
+            targetType: 'keyword',
+            targetId: String(bid.KeywordId),
+            summary: `ставка к TV${rec.targetTv ?? '?'} по бинарной шкале`,
+            reasonCode,
+            factors: {
+              fromMicro: currentBidMicro,
+              toMicro: rec.targetBidMicro,
+              targetTv: rec.targetTv ?? 0,
+            },
+          })
+        } else if (rec.holdReason) {
+          // ЭМИССИЯ: почему держимся (changed=false) — из holdReason правил.
+          const emission = HOLD_EMISSION[rec.holdReason]
+          decisions.push({
+            type: 'hold',
+            targetType: 'keyword',
+            targetId: String(bid.KeywordId),
+            summary: emission.summary,
+            reasonCode: emission.code,
+            factors: { fromMicro: currentBidMicro },
+          })
         }
       }
 
       if (changes.length > 0) {
+        // Префикс машинных кодов пачки в reason — дубль в payload лога.
+        const bidsCodePrefix = (['PROVEN_CONVERTER_VOLUME', 'CORE_LOWER_BLOCK', 'TAIL_MIN_TV'] as const)
+          .filter((code) => bidCodes.has(code))
+          .join(',')
         const gate = await applyBidChanges(
           changes,
-          `ставки к бинарной шкале (конвертеры → TV75, ядро → вход в нижний блок, хвост → TV15): ${changes.length} фраз`
+          `[${bidsCodePrefix}] ставки к бинарной шкале (конвертеры → TV75, ядро → вход в нижний блок, хвост → TV15): ${changes.length} фраз`
         )
         if (gate.breakerTripped) {
           anomalies.push({
             severity: 'critical',
             kind: 'circuit_breaker',
             text: `Circuit breaker остановил пачку правок ставок (${changes.length} шт.) — вне паттерна, нужен разбор владельцем.`,
+          })
+          // ЭМИССИЯ: сработавший предохранитель — машинный alert.
+          decisions.push({
+            type: 'alert',
+            targetType: 'campaign',
+            targetId: String(DIRECT_CAMPAIGN_ID),
+            summary: `circuit breaker: пачка правок ставок (${changes.length} шт.) вне паттерна`,
+            reasonCode: 'CIRCUIT_BREAKER',
+            factors: { changes: changes.length },
           })
         } else {
           const summary = `ставки: ${changes.length} фраз к целевым позициям шкалы`
@@ -839,6 +1032,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   // 9. Память-опыт: замер исходов; по понедельникам МСК — уроки.
   const memory = await runMemoryHooks(now)
 
+  emitAnomalyAlerts()
   return {
     status: 'done',
     appliedSummaries,
@@ -847,6 +1041,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     verdicts,
     reportData,
     anomalies,
+    decisions,
+    attribution,
     memory,
   }
 }

@@ -201,6 +201,37 @@ export async function getAutotargetingRecords(): Promise<KeywordRecord[]> {
   return raw.filter((k) => k.Keyword === AUTOTARGETING_KEYWORD)
 }
 
+/** Объявление из ads.get (поля, которые запрашиваем). */
+export interface AdRecord {
+  Id: number
+  AdGroupId: number
+  State: string
+  Status: string
+  StatusClarification?: string
+}
+
+/**
+ * Объявления боевой кампании (ads.get, с пагинацией как у getKeywords).
+ *
+ * ТОЛЬКО чтение — write-методов по объявлениям НЕТ и быть не должно
+ * (инвариант: объявления вне разрешённого набора write-операций).
+ */
+export async function getAds(): Promise<AdRecord[]> {
+  const all: AdRecord[] = []
+  let offset = 0
+  for (;;) {
+    const result = await directCall<{ Ads?: AdRecord[]; LimitedBy?: number }>('ads', 'get', {
+      SelectionCriteria: { CampaignIds: [DIRECT_CAMPAIGN_ID] },
+      FieldNames: ['Id', 'AdGroupId', 'State', 'Status', 'StatusClarification'],
+      Page: { Limit: PAGE_LIMIT, Offset: offset },
+    })
+    all.push(...(result?.Ads ?? []))
+    if (result?.LimitedBy == null) break
+    offset = result.LimitedBy
+  }
+  return all
+}
+
 /** Позиция аукциона: суммы Bid/Price в МИКРОЕДИНИЦАХ. */
 export interface AuctionBid {
   TrafficVolume: number

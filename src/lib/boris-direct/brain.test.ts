@@ -25,6 +25,7 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
       getCampaignState: vi.fn(),
       getKeywords: vi.fn(),
       getKeywordBids: vi.fn(),
+      getAds: vi.fn(),
     },
     mockPollReport: vi.fn(),
     mockGetGoalStatsByDay: vi.fn(),
@@ -180,6 +181,8 @@ function setupProcessHappyPath() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Фаза 0: чтение объявлений — нейтральный дефолт (нет REJECTED).
+  mockDirect.getAds.mockResolvedValue([])
   // Память-опыт: нейтральные дефолты (модули lessons/outcomes мокнуты целиком).
   mockOutcomes.measureActionOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
   mockOutcomes.measureProposalOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
@@ -220,9 +223,10 @@ describe('runCollectTick', () => {
 
     const res = await runCollectTick(NOW)
 
-    // Четыре снапшота: campaign/keywords/keywordbids (сегодня) + metrika_goal (вчера).
+    // Пять снапшотов: campaign/keywords/keywordbids/ads (сегодня, ads — фаза 0
+    // полигона) + metrika_goal (вчера).
     const kinds = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data.kind)
-    expect(kinds).toEqual(['campaign', 'keywords', 'keywordbids', 'metrika_goal'])
+    expect(kinds).toEqual(['campaign', 'keywords', 'keywordbids', 'ads', 'metrika_goal'])
 
     // Два отчёта с уникальными именами за вчера.
     expect(res.requestedReports).toHaveLength(2)

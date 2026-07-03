@@ -18,6 +18,7 @@ import {
   getKeywords,
   getAutotargetingRecords,
   getKeywordBids,
+  getAds,
   setKeywordBids,
   updateCampaignNegatives,
   restoreMetricaTag,

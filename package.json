@@ -29,7 +29,9 @@
     "test:e2e:ci": "dotenv -e .env.test -- playwright test --grep @ci",
     "test:e2e:report": "playwright show-report",
     "telegram:setup-webhook": "dotenv -e .env.local -- tsx scripts/setup-telegram-webhook.ts",
-    "generate-icons": "tsx scripts/generate-icons.ts"
+    "generate-icons": "tsx scripts/generate-icons.ts",
+    "sim:calibrate": "dotenv -e .env.local -- vitest run --config sim/vitest.config.ts sim/runner/calibrate.simtest.ts",
+    "sim:baseline": "dotenv -e .env.local -- vitest run --config sim/vitest.config.ts sim/runner/baseline.simtest.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",

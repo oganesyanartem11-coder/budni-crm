@@ -61,3 +61,7 @@ next-env.d.ts
 *.log
 test-data/
 .env.test
+
+# Полигон Бориса-Директа: результаты прогонов и LLM-кеш (генерируемое)
+sim/results/
+sim/cache/

@@ -170,6 +170,13 @@ export interface RecommendBidResult {
   targetBidMicro: number
   targetTv: number | null
   changed: boolean
+  /**
+   * Почему держимся (заполнено ТОЛЬКО при changed=false) — машинное
+   * объяснение уже принятого решения, на само решение не влияет:
+   * 'ceiling' — вход дороже потолка; 'noise' — микрошум/нулевые ставки;
+   * 'no_auction' — нет подходящей позиции аукциона (пусто или только премиум).
+   */
+  holdReason?: 'ceiling' | 'noise' | 'no_auction'
 }
 
 /**
@@ -184,17 +191,20 @@ export interface RecommendBidResult {
  * не меняем (changed=false, targetTv=null). Микрошум < 5% — не меняем.
  */
 export function recommendBid(input: RecommendBidInput): RecommendBidResult {
-  const noChange: RecommendBidResult = {
+  // «Не менять» + машинная причина. Решение то же, что и раньше, — добавлено
+  // только объяснение holdReason (эмиссия для полигона, не новая логика).
+  const hold = (holdReason: 'ceiling' | 'noise' | 'no_auction'): RecommendBidResult => ({
     targetBidMicro: input.currentBidMicro,
     targetTv: null,
     changed: false,
-  }
+    holdReason,
+  })
 
   // Кандидаты — только НЕ премиум, по возрастанию объёма.
   const available = input.auctionBids
     .filter((b) => b.TrafficVolume < PREMIUM_TV_MIN)
     .sort((a, b) => a.TrafficVolume - b.TrafficVolume)
-  if (available.length === 0) return noChange
+  if (available.length === 0) return hold('no_auction')
 
   const desiredTv = input.isProvenConverter
     ? TV_CORE
@@ -203,19 +213,19 @@ export function recommendBid(input: RecommendBidInput): RecommendBidResult {
       : TV_TAIL
 
   const target = available.find((b) => b.TrafficVolume >= desiredTv)
-  if (!target) return noChange
+  if (!target) return hold('no_auction')
 
   // Даже нужный вход дороже потолка → не лезем (потолок — предохранитель).
-  if (target.Bid > BID_CEILING_MICRO) return noChange
+  if (target.Bid > BID_CEILING_MICRO) return hold('ceiling')
 
   const targetBidMicro = Math.min(target.Bid, BID_CEILING_MICRO)
 
   // Микрошум: не дёргаем ставку из-за колебаний аукциона < 5%.
   if (input.currentBidMicro > 0) {
     const delta = Math.abs(targetBidMicro - input.currentBidMicro) / input.currentBidMicro
-    if (delta < BID_NOISE_RATIO) return noChange
+    if (delta < BID_NOISE_RATIO) return hold('noise')
   } else if (targetBidMicro === 0) {
-    return noChange
+    return hold('noise')
   }
 
   return { targetBidMicro, targetTv: target.TrafficVolume, changed: true }

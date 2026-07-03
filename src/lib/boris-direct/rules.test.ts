@@ -209,7 +209,12 @@ describe('recommendBid — бинарная шкала', () => {
       isCore: true,
       currentBidMicro: 100 * MICRO,
     })
-    expect(res).toEqual({ targetBidMicro: 100 * MICRO, targetTv: null, changed: false })
+    expect(res).toEqual({
+      targetBidMicro: 100 * MICRO,
+      targetTv: null,
+      changed: false,
+      holdReason: 'ceiling',
+    })
   })
 
   it('микрошум < 5% → не дёргаем ставку', () => {
