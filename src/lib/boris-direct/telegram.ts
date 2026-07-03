@@ -4,7 +4,8 @@
  *  1. sendToDirectChat — отправка в чат «Директ от Бориса» (TELEGRAM_DIRECT_CHAT_ID),
  *     мягкая деградация если env не задан (не роняем кроны).
  *  2. handleDirectChatMessage — grammy-мидлвара команд владельца («Борис, стоп» /
- *     «боевой» / «наблюдение» / «откати последнее» / «верни гейт» / «статус»).
+ *     «боевой» / «наблюдение» / «откати последнее» / «верни гейт» / «статус» /
+ *     «что ты понял»).
  *     Live-режим включается ТОЛЬКО этой явной командой владельца — код сам никогда.
  *     Всё, что не команда роли, уходит в next() — существующее поведение бота
  *     (обычный Борис) не трогаем.
@@ -30,6 +31,7 @@ import {
 } from './state'
 import { revertLastAction } from './rollback'
 import { decideProposal } from './proposals'
+import { getActiveLessonsReport } from './lessons'
 
 // ---------- Отправка в чат Директа ----------
 
@@ -177,6 +179,11 @@ export async function handleDirectChatMessage(
         reply = formatStatus(state)
         break
       }
+      case 'что ты понял':
+      case 'что понял':
+      case 'чему научился':
+        reply = await getActiveLessonsReport()
+        break
       default:
         // Не команда роли — пусть отвечает обычный Борис.
         return next()

@@ -13,6 +13,7 @@ const {
   mockSetAutoNegativesEnabled,
   mockRevertLastAction,
   mockDecideProposal,
+  mockGetActiveLessonsReport,
 } = vi.hoisted(() => {
   // Регистрация scope 'bdir' происходит ПРИ ИМПОРТЕ модуля — сохраняем handler
   // в замыкании, т.к. vi.clearAllMocks() в beforeEach стирает mock.calls.
@@ -34,6 +35,7 @@ const {
     mockSetAutoNegativesEnabled: vi.fn(),
     mockRevertLastAction: vi.fn(),
     mockDecideProposal: vi.fn(),
+    mockGetActiveLessonsReport: vi.fn(),
   }
 })
 
@@ -62,6 +64,9 @@ vi.mock('./rollback', () => ({
 }))
 vi.mock('./proposals', () => ({
   decideProposal: mockDecideProposal,
+}))
+vi.mock('./lessons', () => ({
+  getActiveLessonsReport: mockGetActiveLessonsReport,
 }))
 
 import { sendToDirectChat, isDirectChat, handleDirectChatMessage } from './telegram'
@@ -101,6 +106,7 @@ beforeEach(() => {
   mockSetDirectMode.mockResolvedValue(undefined)
   mockSetDirectFrozen.mockResolvedValue(undefined)
   mockSetAutoNegativesEnabled.mockResolvedValue(undefined)
+  mockGetActiveLessonsReport.mockResolvedValue('Мои уроки: пока пусто.')
 })
 
 describe('sendToDirectChat', () => {
@@ -240,6 +246,38 @@ describe('handleDirectChatMessage — команды владельца', () => 
     expect(text).toContain('наблюдение')
     expect(text).toContain('Стоп-кран')
     expect(text).toContain('Гейт')
+  })
+
+  it('«Борис, что ты понял» → ответ текстом getActiveLessonsReport', async () => {
+    mockGetActiveLessonsReport.mockResolvedValue('Вот что я понял по кампании: …')
+    const ctx = makeCtx(-100777, 'Борис, что ты понял')
+    const next = vi.fn()
+    await handleDirectChatMessage(asCtx(ctx), next)
+    expect(next).not.toHaveBeenCalled()
+    expect(mockGetActiveLessonsReport).toHaveBeenCalledOnce()
+    expect(ctx.reply).toHaveBeenCalledWith('Вот что я понял по кампании: …', {
+      parse_mode: 'HTML',
+    })
+  })
+
+  it('вариации «что понял» / «чему научился» — тоже команда уроков', async () => {
+    for (const text of ['боря что понял', 'Борис, чему научился']) {
+      const ctx = makeCtx(-100777, text)
+      const next = vi.fn()
+      await handleDirectChatMessage(asCtx(ctx), next)
+      expect(next).not.toHaveBeenCalled()
+      expect(ctx.reply).toHaveBeenCalledWith('Мои уроки: пока пусто.', { parse_mode: 'HTML' })
+    }
+    expect(mockGetActiveLessonsReport).toHaveBeenCalledTimes(2)
+  })
+
+  it('«Борис, что ты думаешь» — НЕ команда уроков → next()', async () => {
+    const ctx = makeCtx(-100777, 'Борис, что ты думаешь')
+    const next = vi.fn().mockResolvedValue(undefined)
+    await handleDirectChatMessage(asCtx(ctx), next)
+    expect(next).toHaveBeenCalledOnce()
+    expect(mockGetActiveLessonsReport).not.toHaveBeenCalled()
+    expect(ctx.reply).not.toHaveBeenCalled()
   })
 
   it('«Борис, привет» — не команда роли → next()', async () => {

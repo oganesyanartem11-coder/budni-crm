@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * (rules, anomalies, парсеры отчётов/атрибуции) работают настоящие.
  */
 
-const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLeads, mockGate, mockGetState, mockLlm } =
+const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLeads, mockGate, mockGetState, mockLlm, mockLessons, mockOutcomes } =
   vi.hoisted(() => ({
     mockPrisma: {
       borisDirectSnapshot: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
@@ -18,6 +18,7 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
         findFirst: vi.fn(),
       },
       borisDirectActionLog: { findFirst: vi.fn() },
+      borisDirectQueryDailyStat: { upsert: vi.fn() },
       landingLead: { count: vi.fn() },
     },
     mockDirect: {
@@ -34,6 +35,14 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
     },
     mockGetState: vi.fn(),
     mockLlm: vi.fn(),
+    mockLessons: {
+      deriveAndRefreshLessons: vi.fn(),
+    },
+    mockOutcomes: {
+      measureActionOutcomes: vi.fn(),
+      measureProposalOutcomes: vi.fn(),
+      generateCorrectionProposals: vi.fn(),
+    },
   }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
@@ -54,8 +63,10 @@ vi.mock('./write-gate', () => mockGate)
 vi.mock('./state', () => ({ getDirectRoleState: mockGetState }))
 vi.mock('./llm', () => ({ callBorisDirectLlm: mockLlm }))
 vi.mock('./prompts', () => ({ getBorisDirectSystemPrompt: () => 'SYS' }))
+vi.mock('./lessons', () => mockLessons)
+vi.mock('./outcomes', () => mockOutcomes)
 
-import { runCollectTick, runProcessTick, mskDay, yesterdayMsk } from './brain'
+import { runCollectTick, runProcessTick, mskDay, mskDayStartUtc, yesterdayMsk } from './brain'
 import { MICRO } from './config'
 
 // 2026-07-02 09:00 UTC → сегодня-МСК 2026-07-02, вчера-МСК 2026-07-01.
@@ -146,6 +157,7 @@ function setupProcessHappyPath() {
   })
   mockPrisma.borisDirectReportJob.updateMany.mockResolvedValue({ count: 2 })
   mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue(null) // прежних минусов нет
+  mockPrisma.borisDirectQueryDailyStat.upsert.mockResolvedValue({})
   mockGetLeads.mockResolvedValue([
     {
       id: 'lead1',
@@ -168,6 +180,11 @@ function setupProcessHappyPath() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // Память-опыт: нейтральные дефолты (модули lessons/outcomes мокнуты целиком).
+  mockOutcomes.measureActionOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
+  mockOutcomes.measureProposalOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
+  mockOutcomes.generateCorrectionProposals.mockResolvedValue({ created: 0 })
+  mockLessons.deriveAndRefreshLessons.mockResolvedValue({ created: 0, confirmed: 0, refuted: 0, staled: 0 })
 })
 
 describe('хелперы времени (МСК = UTC+3)', () => {
@@ -450,6 +467,127 @@ describe('runProcessTick', () => {
     expect(mockGate.applyNegativeKeywords).not.toHaveBeenCalled()
     expect(res.proposalDrafts).toHaveLength(1)
     expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
+    errorSpy.mockRestore()
+  })
+})
+
+describe('runProcessTick — память-опыт (персист статистики + хуки уроков/исходов)', () => {
+  // NOW (2026-07-02) — четверг по МСК; 22:00 UTC воскресенья 2026-07-05 —
+  // это уже 01:00 понедельника 2026-07-06 по МСК (проверяем именно МСК-границу).
+  const MONDAY_MSK_NOW = new Date('2026-07-05T22:00:00Z')
+
+  it('upsert BorisDirectQueryDailyStat по каждой строке отчёта, date = вчера-МСК', async () => {
+    setupProcessHappyPath()
+
+    await runProcessTick(NOW)
+
+    expect(mockPrisma.borisDirectQueryDailyStat.upsert).toHaveBeenCalledTimes(3)
+    const date = mskDayStartUtc(YESTERDAY)
+    expect(mockPrisma.borisDirectQueryDailyStat.upsert).toHaveBeenCalledWith({
+      where: { date_query_adGroupId: { date, query: 'доставка обедов в офис', adGroupId: '1' } },
+      update: { adGroupName: 'G1', impressions: 120, clicks: 10, costRub: 500, conversions: 2 },
+      create: {
+        date,
+        query: 'доставка обедов в офис',
+        adGroupId: '1',
+        adGroupName: 'G1',
+        impressions: 120,
+        clicks: 10,
+        costRub: 500,
+        conversions: 2,
+      },
+    })
+    // Conversions '--' в TSV → 0.
+    expect(mockPrisma.borisDirectQueryDailyStat.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { date_query_adGroupId: { date, query: 'корпоративное питание тендер', adGroupId: '2' } },
+        create: expect.objectContaining({ conversions: 0 }),
+      })
+    )
+  })
+
+  it('персист упал → тик всё равно done (console.error, не throw)', async () => {
+    setupProcessHappyPath()
+    mockPrisma.borisDirectQueryDailyStat.upsert.mockRejectedValue(new Error('db down'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    errorSpy.mockRestore()
+  })
+
+  it('done: замер исходов вызван, сумма measured в res.memory; не понедельник → уроки не трогаем', async () => {
+    setupProcessHappyPath()
+    mockOutcomes.measureActionOutcomes.mockResolvedValue({ measured: 2, worse: 1, unmeasurable: 0 })
+    mockOutcomes.measureProposalOutcomes.mockResolvedValue({ measured: 1, worse: 0, unmeasurable: 1 })
+
+    const res = await runProcessTick(NOW) // четверг по МСК
+
+    expect(res.status).toBe('done')
+    expect(mockOutcomes.measureActionOutcomes).toHaveBeenCalledTimes(1)
+    expect(mockOutcomes.measureProposalOutcomes).toHaveBeenCalledTimes(1)
+    expect(mockLessons.deriveAndRefreshLessons).not.toHaveBeenCalled()
+    expect(mockOutcomes.generateCorrectionProposals).not.toHaveBeenCalled()
+    expect(res.memory).toEqual({ outcomesMeasured: 3 })
+  })
+
+  it('quarantine: memory-хуки тоже вызваны (опыт копится и в карантине)', async () => {
+    setupProcessHappyPath()
+    // Всего 2 дня с данными → карантин по дням.
+    mockPrisma.borisDirectSnapshot.findMany.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'campaign') return [{ tickDate: new Date() }, { tickDate: new Date() }]
+      return []
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('quarantine')
+    expect(mockOutcomes.measureActionOutcomes).toHaveBeenCalledTimes(1)
+    expect(mockOutcomes.measureProposalOutcomes).toHaveBeenCalledTimes(1)
+    expect(res.memory).toEqual({ outcomesMeasured: 0 })
+  })
+
+  it('waiting_report: memory-хуки НЕ вызваны, memory отсутствует', async () => {
+    setState({ mode: 'LIVE' })
+    mockPrisma.borisDirectReportJob.findMany.mockResolvedValue([]) // PENDING нет
+    mockPrisma.borisDirectReportJob.findFirst.mockResolvedValue(null) // готовых отчётов нет
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('waiting_report')
+    expect(res.memory).toBeUndefined()
+    expect(mockOutcomes.measureActionOutcomes).not.toHaveBeenCalled()
+    expect(mockOutcomes.measureProposalOutcomes).not.toHaveBeenCalled()
+    expect(mockLessons.deriveAndRefreshLessons).not.toHaveBeenCalled()
+    expect(mockPrisma.borisDirectQueryDailyStat.upsert).not.toHaveBeenCalled()
+  })
+
+  it('понедельник по МСК → deriveAndRefreshLessons + generateCorrectionProposals, итог в memory.lessons', async () => {
+    setupProcessHappyPath()
+    mockLessons.deriveAndRefreshLessons.mockResolvedValue({ created: 2, confirmed: 1, refuted: 0, staled: 1 })
+
+    const res = await runProcessTick(MONDAY_MSK_NOW)
+
+    expect(res.status).toBe('done')
+    expect(mockLessons.deriveAndRefreshLessons).toHaveBeenCalledTimes(1)
+    expect(mockOutcomes.generateCorrectionProposals).toHaveBeenCalledTimes(1)
+    expect(res.memory).toEqual({
+      outcomesMeasured: 0,
+      lessons: { created: 2, confirmed: 1, refuted: 0, staled: 1 },
+    })
+  })
+
+  it('memory-хук упал → тик не падает, memory без его вклада', async () => {
+    setupProcessHappyPath()
+    mockOutcomes.measureActionOutcomes.mockRejectedValue(new Error('outcomes down'))
+    mockOutcomes.measureProposalOutcomes.mockResolvedValue({ measured: 4, worse: 0, unmeasurable: 0 })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    expect(res.memory).toEqual({ outcomesMeasured: 4 })
     errorSpy.mockRestore()
   })
 })

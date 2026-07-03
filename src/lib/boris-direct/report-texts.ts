@@ -15,6 +15,7 @@ import type { Anomaly } from './anomalies'
 import { callBorisDirectLlm } from './llm'
 import { getBorisDirectSystemPrompt } from './prompts'
 import { getDirectRoleState } from './state'
+import { getActiveLessonsForContext, formatLessonsBlock } from './lessons'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -88,6 +89,9 @@ export interface DailyReportInput {
   proposalsCreated: string[]
   anomalies: string[]
   observe: boolean
+  /** Готовая секция «ОПЫТ» (formatLessonsBlock). Пусто/undefined → секции нет;
+   * undefined в generateDailyReportText → уроки подтягиваются сами. */
+  lessonsBlock?: string
 }
 
 /** Детерминированный блок цифр дневного отчёта (вся арифметика уже сделана). */
@@ -103,7 +107,7 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
           .join('\n')
       : 'нет данных'
 
-  return [
+  const lines = [
     `Дневной отчёт за ${d.dateLabel}`,
     `Режим: ${input.observe ? 'наблюдение (в Директ не пишу)' : 'боевой'}`,
     `Карантин: ${d.quarantine ? 'да — не оптимизирую, наблюдаю' : 'нет'}`,
@@ -127,17 +131,35 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     formatBulletList(input.proposalsCreated, 'нет'),
     'АНОМАЛИИ (уже отправлены отдельными сообщениями):',
     formatBulletList(input.anomalies, 'нет'),
-  ].join('\n')
+  ]
+
+  // Секция «ОПЫТ» — только если блок уроков непустой (никаких пустых заголовков).
+  if (input.lessonsBlock && input.lessonsBlock.trim().length > 0) {
+    lines.push('', input.lessonsBlock)
+  }
+
+  return lines.join('\n')
 }
 
 /** Текст дневного отчёта: LLM пересказывает блок цифр, фолбэк — сырой блок. */
 export async function generateDailyReportText(input: DailyReportInput): Promise<string> {
+  // Секцию «ОПЫТ» подтягиваем сами, если вызывающий не передал готовый блок.
+  // Ошибка уроков не роняет отчёт — просто без секции.
+  let lessonsBlock = input.lessonsBlock
+  if (lessonsBlock === undefined) {
+    try {
+      lessonsBlock = formatLessonsBlock(await getActiveLessonsForContext())
+    } catch (err) {
+      console.error('[boris-direct/report-texts] уроки для дневного отчёта не получены', err)
+      lessonsBlock = ''
+    }
+  }
   return narrate({
     purpose: 'daily_report',
     critical: false,
     instruction:
-      'Перескажи владельцу дневной отчёт по этим данным. Коротко, HTML для Telegram, цифры НЕ менять и НЕ пересчитывать.',
-    dataBlock: buildDailyDataBlock(input),
+      'Перескажи владельцу дневной отчёт по этим данным. Коротко, HTML для Telegram, цифры НЕ менять и НЕ пересчитывать. Если в данных есть секция ОПЫТ — можешь сослаться на свои уроки, но не выдумывай новых.',
+    dataBlock: buildDailyDataBlock({ ...input, lessonsBlock }),
     fallbackHeader: '📊 Дневной отчёт (без обработки — LLM недоступен)',
   })
 }
@@ -148,6 +170,8 @@ export interface WeeklyReportExtras {
   llmSpendUsd: number
   llmCalls: number
   proposalsPending: number
+  /** Итог еженедельной дистилляции уроков (если она была на этой неделе). */
+  lessonsSummary?: { created: number; confirmed: number; refuted: number; staled: number }
 }
 
 /** Агрегат по запросу за период (суммы по дням, где запрос попал в топ). */
@@ -224,6 +248,12 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     'ХУДШИЕ ЗАПРОСЫ (расход без конверсий):',
     worst.length > 0 ? worst.join('\n') : 'нет',
     '',
+    // Итог дистилляции уроков — детерминированно, кодом (не LLM).
+    ...(extras.lessonsSummary
+      ? [
+          `Уроки за неделю: новых ${extras.lessonsSummary.created}, подтверждено ${extras.lessonsSummary.confirmed}, опровергнуто ${extras.lessonsSummary.refuted}, устарело ${extras.lessonsSummary.staled}`,
+        ]
+      : []),
     `Предложений без ответа владельца: ${extras.proposalsPending}`,
     `Стоимость аналитики за неделю (отдельные деньги, не рекламный бюджет): ~${extras.llmSpendUsd.toFixed(2)} $ / ${extras.llmCalls} обращений к LLM`,
   ].join('\n')

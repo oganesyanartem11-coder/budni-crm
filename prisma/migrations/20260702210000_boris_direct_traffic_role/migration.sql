@@ -10,6 +10,9 @@ CREATE TYPE "BorisDirectReportStatus" AS ENUM ('PENDING', 'READY', 'PROCESSED', 
 -- CreateEnum
 CREATE TYPE "BorisDirectProposalStatus" AS ENUM ('PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CANCELLED');
 
+-- CreateEnum
+CREATE TYPE "BorisDirectLessonStatus" AS ENUM ('ACTIVE', 'STALE', 'REFUTED');
+
 -- CreateTable
 CREATE TABLE "LandingLead" (
     "id" TEXT NOT NULL,
@@ -96,6 +99,9 @@ CREATE TABLE "BorisDirectProposal" (
     "cooldownUntil" TIMESTAMP(3),
     "tgMessageId" TEXT,
     "decidedAt" TIMESTAMP(3),
+    "outcomeVerdict" TEXT,
+    "outcomeMeasuredAt" TIMESTAMP(3),
+    "outcomeData" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BorisDirectProposal_pkey" PRIMARY KEY ("id")
@@ -129,6 +135,9 @@ CREATE TABLE "BorisDirectActionLog" (
     "applied" BOOLEAN NOT NULL,
     "revertedAt" TIMESTAMP(3),
     "revertOfId" TEXT,
+    "outcomeVerdict" TEXT,
+    "outcomeMeasuredAt" TIMESTAMP(3),
+    "outcomeData" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BorisDirectActionLog_pkey" PRIMARY KEY ("id")
@@ -151,6 +160,41 @@ CREATE TABLE "BorisDirectLlmLog" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BorisDirectLlmLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "BorisDirectQueryDailyStat" (
+    "id" TEXT NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL,
+    "query" TEXT NOT NULL,
+    "adGroupId" TEXT NOT NULL,
+    "adGroupName" TEXT NOT NULL,
+    "impressions" INTEGER NOT NULL DEFAULT 0,
+    "clicks" INTEGER NOT NULL DEFAULT 0,
+    "costRub" DECIMAL(12,2) NOT NULL DEFAULT 0,
+    "conversions" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "BorisDirectQueryDailyStat_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "BorisDirectLesson" (
+    "id" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "subjectType" TEXT NOT NULL,
+    "subjectId" TEXT,
+    "text" TEXT NOT NULL,
+    "evidence" JSONB NOT NULL,
+    "confidence" DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+    "status" "BorisDirectLessonStatus" NOT NULL DEFAULT 'ACTIVE',
+    "weeksConfirmed" INTEGER NOT NULL DEFAULT 0,
+    "lastConfirmedAt" TIMESTAMP(3),
+    "refutedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "BorisDirectLesson_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -199,8 +243,26 @@ CREATE INDEX "BorisDirectActionLog_action_createdAt_idx" ON "BorisDirectActionLo
 CREATE INDEX "BorisDirectActionLog_applied_revertedAt_idx" ON "BorisDirectActionLog"("applied", "revertedAt");
 
 -- CreateIndex
+CREATE INDEX "BorisDirectActionLog_applied_outcomeMeasuredAt_idx" ON "BorisDirectActionLog"("applied", "outcomeMeasuredAt");
+
+-- CreateIndex
 CREATE INDEX "BorisDirectLlmLog_createdAt_idx" ON "BorisDirectLlmLog"("createdAt");
 
 -- CreateIndex
 CREATE INDEX "BorisDirectLlmLog_purpose_createdAt_idx" ON "BorisDirectLlmLog"("purpose", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "BorisDirectQueryDailyStat_adGroupId_date_idx" ON "BorisDirectQueryDailyStat"("adGroupId", "date");
+
+-- CreateIndex
+CREATE INDEX "BorisDirectQueryDailyStat_date_idx" ON "BorisDirectQueryDailyStat"("date");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BorisDirectQueryDailyStat_date_query_adGroupId_key" ON "BorisDirectQueryDailyStat"("date", "query", "adGroupId");
+
+-- CreateIndex
+CREATE INDEX "BorisDirectLesson_status_kind_idx" ON "BorisDirectLesson"("status", "kind");
+
+-- CreateIndex
+CREATE INDEX "BorisDirectLesson_subjectType_subjectId_idx" ON "BorisDirectLesson"("subjectType", "subjectId");
 

@@ -115,3 +115,49 @@ export const LLM_CAP_WARN_RATIO = 0.8
 
 /** Целевая зона доставки: Москва + МО (для фильтра вне-зонных запросов). */
 export const TARGET_GEO_LABEL = 'Москва и МО'
+
+// ---------- Память-опыт: уроки (пороги меняет ТОЛЬКО владелец) ----------
+
+/** Сколько активных уроков максимум попадает в секцию «ОПЫТ» промпта. */
+export const LESSON_TOP_K = 8
+
+/** Жёсткий лимит секции «ОПЫТ» в символах — память не может раздуть промпт. */
+export const LESSON_BLOCK_MAX_CHARS = 1200
+
+/** Минимум кликов по субъекту за период наблюдения — иначе урок не рождается (шум). */
+export const LESSON_MIN_CLICKS = 20
+
+/** Недель подряд с сигналом, прежде чем урок создаётся (одна неделя — не повод). */
+export const LESSON_CONFIRM_WEEKS = 2
+
+/** Урок без подтверждения данными N недель подряд → STALE (выпадает из контекста). */
+export const LESSON_STALE_WEEKS = 4
+
+/** Группа «дешевле среднего»: цена заявки ≤ 70% средней по кампании. */
+export const LESSON_CHEAP_CPL_RATIO = 0.7
+
+/** Группа «дороже среднего»: цена заявки ≥ 150% средней (или тратит без заявок). */
+export const LESSON_EXPENSIVE_CPL_RATIO = 1.5
+
+// ---------- Память-опыт: исходы действий ----------
+
+/** Окно «до/после» для измерения исхода действия/предложения, дней. */
+export const OUTCOME_WINDOW_DAYS = 7
+
+/** Меньше кликов в любом из окон — исход 'unmeasurable' (не притягиваем). */
+export const OUTCOME_MIN_CLICKS = 20
+
+/** Цена заявки после ≥ 130% от «до» → исход 'worse'. */
+export const OUTCOME_WORSE_RATIO = 1.3
+
+/** Цена заявки после ≤ 80% от «до» → исход 'improved'. Между порогами — 'neutral'. */
+export const OUTCOME_IMPROVED_RATIO = 0.8
+
+/**
+ * Авто-предложения коррекции по плохим исходам (откат ставки, снятие минуса).
+ * ВЫКЛЮЧЕНО по умолчанию — включает владелец env-переменной
+ * BORIS_DIRECT_AUTO_CORRECTION=true по накоплении данных. Код заложен.
+ */
+export function isAutoCorrectionEnabled(): boolean {
+  return process.env.BORIS_DIRECT_AUTO_CORRECTION === 'true'
+}

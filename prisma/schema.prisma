@@ -1637,21 +1637,26 @@ enum BorisDirectProposalStatus {
 }
 
 model BorisDirectProposal {
-  id            String                    @id @default(cuid())
-  type          String // 'minus_words' | 'budget' | 'keyword_remove' | 'strategy' | ...
-  topicKey      String // ключ темы для cooldown/дедупа (напр. 'budget_daily')
-  payload       Json // детали (список фраз, суммы в микроединицах и т.п.)
-  argument      String                    @db.Text
-  question      String?                   @db.Text
-  status        BorisDirectProposalStatus @default(PENDING)
+  id                String                    @id @default(cuid())
+  type              String // 'minus_words' | 'budget' | 'keyword_remove' | 'strategy' | ...
+  topicKey          String // ключ темы для cooldown/дедупа (напр. 'budget_daily')
+  payload           Json // детали (список фраз, суммы в микроединицах и т.п.)
+  argument          String                    @db.Text
+  question          String?                   @db.Text
+  status            BorisDirectProposalStatus @default(PENDING)
   // Метрика-триггер и её значение на момент предложения — чтобы после отказа
   // вернуться к теме, только если значение сдвинулось на порог из конфига.
-  triggerMetric String?
-  triggerValue  Decimal?                  @db.Decimal(14, 4)
-  cooldownUntil DateTime?
-  tgMessageId   String?
-  decidedAt     DateTime?
-  createdAt     DateTime                  @default(now())
+  triggerMetric     String?
+  triggerValue      Decimal?                  @db.Decimal(14, 4)
+  cooldownUntil     DateTime?
+  tgMessageId       String?
+  decidedAt         DateTime?
+  // Память-опыт: исход принятого предложения по данным «до/после»
+  // (окно OUTCOME_WINDOW_DAYS). Меряет outcomes.ts, не человек.
+  outcomeVerdict    String? // 'improved' | 'neutral' | 'worse' | 'unmeasurable'
+  outcomeMeasuredAt DateTime?
+  outcomeData       Json?
+  createdAt         DateTime                  @default(now())
 
   @@index([status, createdAt])
   @@index([topicKey, cooldownUntil])
@@ -1677,22 +1682,27 @@ model BorisDirectMinusVerdict {
 
 // Лог каждого пишущего действия (или «сделал бы» в observe) + откат.
 model BorisDirectActionLog {
-  id         String          @id @default(cuid())
-  action     String // 'keywordbids.set' | 'campaigns.update.negatives' | 'keywords.suspend' | ...
-  targetType String // 'keyword' | 'campaign' | 'adgroup'
-  targetId   String?
-  before     Json?
-  after      Json?
-  reason     String          @db.Text
-  mode       BorisDirectMode // режим на момент действия
-  applied    Boolean // false в observe = «сделал бы», запрос в Директ НЕ ушёл
-  revertedAt DateTime?
-  revertOfId String? // id записи, которую откатили этой записью
-  createdAt  DateTime        @default(now())
+  id                String          @id @default(cuid())
+  action            String // 'keywordbids.set' | 'campaigns.update.negatives' | 'keywords.suspend' | ...
+  targetType        String // 'keyword' | 'campaign' | 'adgroup'
+  targetId          String?
+  before            Json?
+  after             Json?
+  reason            String          @db.Text
+  mode              BorisDirectMode // режим на момент действия
+  applied           Boolean // false в observe = «сделал бы», запрос в Директ НЕ ушёл
+  revertedAt        DateTime?
+  revertOfId        String? // id записи, которую откатили этой записью
+  // Память-опыт: исход действия по данным «до/после» (окно OUTCOME_WINDOW_DAYS).
+  outcomeVerdict    String? // 'improved' | 'neutral' | 'worse' | 'unmeasurable'
+  outcomeMeasuredAt DateTime?
+  outcomeData       Json?
+  createdAt         DateTime        @default(now())
 
   @@index([createdAt])
   @@index([action, createdAt])
   @@index([applied, revertedAt])
+  @@index([applied, outcomeMeasuredAt])
 }
 
 // Учёт стоимости LLM роли «трафик» (отдельно от рекламного бюджета!).
@@ -1714,4 +1724,54 @@ model BorisDirectLlmLog {
 
   @@index([createdAt])
   @@index([purpose, createdAt])
+}
+
+// Память-опыт Бориса-Директа (утверждённый разбор 2026-07-03).
+// Нормализованная строка поискового отчёта по дням — история экономики
+// фраз/групп во времени. Пишется process-тиком из уже распарсенного TSV.
+model BorisDirectQueryDailyStat {
+  id          String   @id @default(cuid())
+  date        DateTime // МСК-день данных
+  query       String // поисковый запрос (Query из отчёта)
+  adGroupId   String
+  adGroupName String
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  costRub     Decimal  @default(0) @db.Decimal(12, 2)
+  conversions Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([date, query, adGroupId])
+  @@index([adGroupId, date])
+  @@index([date])
+}
+
+// Урок — дистиллированный вывод из данных с доказательствами и сроком
+// годности. Выводится КОДОМ по правилам (пороги в config), перепроверяется
+// по понедельникам: подтверждён → lastConfirmedAt; данные развернулись →
+// REFUTED; не подтверждается LESSON_STALE_WEEKS недель → STALE.
+// В промпт попадают только ACTIVE (жёсткий топ-K + лимит символов).
+enum BorisDirectLessonStatus {
+  ACTIVE
+  STALE
+  REFUTED
+}
+
+model BorisDirectLesson {
+  id              String                  @id @default(cuid())
+  kind            String // 'group_economics' | 'minus_effect' | 'bid_effect' | 'caution'
+  subjectType     String // 'campaign' | 'adgroup' | 'query' | 'action'
+  subjectId       String? // id группы / текст запроса / id записи лога
+  text            String                  @db.Text // одна строка для промпта, цифры внутри
+  evidence        Json // цифры-доказательства на момент вывода/подтверждения
+  confidence      Float                   @default(0.5)
+  status          BorisDirectLessonStatus @default(ACTIVE)
+  weeksConfirmed  Int                     @default(0)
+  lastConfirmedAt DateTime?
+  refutedAt       DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([status, kind])
+  @@index([subjectType, subjectId])
 }

@@ -1,15 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { DailyReportData } from './brain'
 
-const { mockCallLlm, mockGetState, mockGetPrompt } = vi.hoisted(() => ({
-  mockCallLlm: vi.fn(),
-  mockGetState: vi.fn(),
-  mockGetPrompt: vi.fn(),
-}))
+const { mockCallLlm, mockGetState, mockGetPrompt, mockGetLessons, mockFormatLessonsBlock } =
+  vi.hoisted(() => ({
+    mockCallLlm: vi.fn(),
+    mockGetState: vi.fn(),
+    mockGetPrompt: vi.fn(),
+    mockGetLessons: vi.fn(),
+    mockFormatLessonsBlock: vi.fn(),
+  }))
 
 vi.mock('./llm', () => ({ callBorisDirectLlm: mockCallLlm }))
 vi.mock('./state', () => ({ getDirectRoleState: mockGetState }))
 vi.mock('./prompts', () => ({ getBorisDirectSystemPrompt: mockGetPrompt }))
+vi.mock('./lessons', () => ({
+  getActiveLessonsForContext: mockGetLessons,
+  formatLessonsBlock: mockFormatLessonsBlock,
+}))
 
 import {
   buildDailyDataBlock,
@@ -27,6 +34,14 @@ beforeEach(() => {
   mockGetState.mockResolvedValue({ mode: 'OBSERVE', frozen: false, autoNegativesEnabled: false })
   mockGetPrompt.mockReturnValue('SYSTEM_PROMPT')
   mockCallLlm.mockResolvedValue({ text: 'ТЕКСТ ОТ LLM', model: 'opus', costUsd: 0.1, downgraded: false })
+  // Дефолт: уроков нет; formatLessonsBlock повторяет контракт соседнего модуля
+  // ('' если пусто, иначе секция «ОПЫТ»).
+  mockGetLessons.mockResolvedValue([])
+  mockFormatLessonsBlock.mockImplementation((lessons: Array<{ text: string }>) =>
+    lessons.length === 0
+      ? ''
+      : ['ОПЫТ (мои проверенные уроки):', ...lessons.map((l) => `- ${l.text}`)].join('\n')
+  )
 })
 
 const day = (over: Partial<DailyReportData> = {}): DailyReportData => ({
@@ -110,6 +125,22 @@ describe('buildDailyDataBlock — числа форматирует код', () 
   })
 })
 
+describe('buildDailyDataBlock — секция ОПЫТ', () => {
+  const LESSONS_BLOCK = 'ОПЫТ (мои проверенные уроки):\n- фразы с «недорого» не конвертят'
+
+  it('lessonsBlock непустой → отдельная секция в конце блока', () => {
+    const block = buildDailyDataBlock(dailyInput({ lessonsBlock: LESSONS_BLOCK }))
+    expect(block.endsWith(`\n\n${LESSONS_BLOCK}`)).toBe(true)
+  })
+
+  it('без lessonsBlock / пустой → секции нет, никаких пустых заголовков', () => {
+    const without = buildDailyDataBlock(dailyInput())
+    expect(without).not.toContain('ОПЫТ')
+    expect(buildDailyDataBlock(dailyInput({ lessonsBlock: '' }))).toBe(without)
+    expect(buildDailyDataBlock(dailyInput({ lessonsBlock: '   ' }))).toBe(without)
+  })
+})
+
 describe('generateDailyReportText', () => {
   it('heavy, critical=false, mode из state, цифры в userText, ответ LLM как есть', async () => {
     const text = await generateDailyReportText(dailyInput())
@@ -138,6 +169,58 @@ describe('generateDailyReportText', () => {
   })
 })
 
+describe('generateDailyReportText — секция ОПЫТ', () => {
+  it('lessonsBlock не передан → сам подтягивает уроки, секция в userText + инструкция про ОПЫТ', async () => {
+    mockGetLessons.mockResolvedValue([
+      { id: 'l1', kind: 'query_pattern', text: 'фразы с «недорого» не конвертят' },
+    ])
+
+    await generateDailyReportText(dailyInput())
+
+    expect(mockGetLessons).toHaveBeenCalledTimes(1)
+    const call = mockCallLlm.mock.calls[0][0]
+    expect(call.userText).toContain('ОПЫТ (мои проверенные уроки):')
+    expect(call.userText).toContain('- фразы с «недорого» не конвертят')
+    expect(call.userText).toContain('не выдумывай новых')
+  })
+
+  it('lessonsBlock передан → getActiveLessonsForContext НЕ зовём, блок уходит как есть', async () => {
+    await generateDailyReportText(
+      dailyInput({ lessonsBlock: 'ОПЫТ (мои проверенные уроки):\n- готовый урок' })
+    )
+    expect(mockGetLessons).not.toHaveBeenCalled()
+    expect(mockCallLlm.mock.calls[0][0].userText).toContain('- готовый урок')
+  })
+
+  it('уроков нет → секции ОПЫТ в userText нет (пустых заголовков не шлём)', async () => {
+    await generateDailyReportText(dailyInput())
+    expect(mockGetLessons).toHaveBeenCalledTimes(1)
+    expect(mockCallLlm.mock.calls[0][0].userText).not.toContain('ОПЫТ (мои проверенные уроки)')
+  })
+
+  it('LLM упал → фолбэк-блок включает секцию ОПЫТ как есть', async () => {
+    mockCallLlm.mockRejectedValue(new Error('down'))
+    mockGetLessons.mockResolvedValue([{ id: 'l1', kind: 'query_pattern', text: 'урок про минуса' }])
+
+    const text = await generateDailyReportText(dailyInput())
+
+    expect(text).toContain('LLM недоступен')
+    expect(text).toContain('ОПЫТ (мои проверенные уроки):')
+    expect(text).toContain('- урок про минуса')
+  })
+
+  it('getActiveLessonsForContext упал → отчёт уходит без секции ОПЫТ, не падаем', async () => {
+    mockGetLessons.mockRejectedValue(new Error('db down'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const text = await generateDailyReportText(dailyInput())
+
+    expect(text).toBe('ТЕКСТ ОТ LLM')
+    expect(mockCallLlm.mock.calls[0][0].userText).not.toContain('ОПЫТ (мои проверенные уроки)')
+    errorSpy.mockRestore()
+  })
+})
+
 describe('buildWeeklyDataBlock — агрегация кодом', () => {
   const days = [
     day({ dateLabel: '2026-06-29', spendRub: 1000, clicks: 20, impressions: 500, leadsTotal: 2, leadsFromDirect: 1, topQueries: [{ query: 'пустой запрос', clicks: 5, costRub: 300, conversions: 0 }] }),
@@ -162,6 +245,21 @@ describe('buildWeeklyDataBlock — агрегация кодом', () => {
     const block = buildWeeklyDataBlock([], { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
     expect(block).toContain('данных за неделю нет')
     expect(block).toContain('Средняя цена заявки: нет данных')
+  })
+
+  it('lessonsSummary передан → строка «Уроки за неделю» добавлена кодом', () => {
+    const block = buildWeeklyDataBlock([day()], {
+      llmSpendUsd: 0,
+      llmCalls: 0,
+      proposalsPending: 0,
+      lessonsSummary: { created: 2, confirmed: 1, refuted: 0, staled: 3 },
+    })
+    expect(block).toContain('Уроки за неделю: новых 2, подтверждено 1, опровергнуто 0, устарело 3')
+  })
+
+  it('без lessonsSummary строки про уроки нет', () => {
+    const block = buildWeeklyDataBlock([day()], { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
+    expect(block).not.toContain('Уроки за неделю')
   })
 })
 

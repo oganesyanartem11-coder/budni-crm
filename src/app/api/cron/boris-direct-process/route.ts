@@ -167,6 +167,8 @@ async function handler(request: Request) {
     status: result.status,
     applied: acceptedApplied.length,
     proposals: proposalsCreated.length,
+    // Счётчики памяти-опыта — аддитивно, существующие поля не меняем.
+    ...(result.memory ? { memory: result.memory } : {}),
   })
 }
 

@@ -46,6 +46,12 @@ import {
 } from './rules'
 import { applyBidChanges, applyNegativeKeywords, type BidChange } from './write-gate'
 import { getDirectRoleState } from './state'
+import { deriveAndRefreshLessons } from './lessons'
+import {
+  measureActionOutcomes,
+  measureProposalOutcomes,
+  generateCorrectionProposals,
+} from './outcomes'
 import { callBorisDirectLlm } from './llm'
 import { getBorisDirectSystemPrompt } from './prompts'
 
@@ -69,6 +75,11 @@ export function mskDayStartUtc(day: string): Date {
 export function yesterdayMsk(now: Date = new Date()): { dateFrom: string; dateTo: string } {
   const day = mskDay(new Date(now.getTime() - DAY_MS))
   return { dateFrom: day, dateTo: day }
+}
+
+/** Понедельник по МСК — день еженедельной дистилляции уроков. */
+function isMondayMsk(now: Date): boolean {
+  return new Date(now.getTime() + MSK_OFFSET_MS).getUTCDay() === 1
 }
 
 // ---------- Снапшоты ----------
@@ -313,6 +324,11 @@ export interface ProcessResult {
   verdicts: MinusVerdictDraft[]
   reportData: DailyReportData | null
   anomalies: Anomaly[]
+  /** Итоги памяти-хуков (только для done/quarantine; waiting_report их не запускает). */
+  memory?: {
+    outcomesMeasured: number
+    lessons?: { created: number; confirmed: number; refuted: number; staled: number }
+  }
 }
 
 /** Число из ячейки TSV Директа: '--', пустота, мусор → 0. */
@@ -390,6 +406,43 @@ async function findReadyJob(reportType: string, day: string) {
   })
 }
 
+/**
+ * Память-хуки после полного тика (пути done/quarantine, НЕ waiting_report):
+ * замер исходов действий и предложений — каждый день; по понедельникам МСК —
+ * дистилляция уроков + коррекционные предложения (сами no-op при выключенном
+ * флаге). Каждый вызов в try/catch — память никогда не роняет тик.
+ */
+async function runMemoryHooks(now: Date): Promise<NonNullable<ProcessResult['memory']>> {
+  let outcomesMeasured = 0
+  try {
+    outcomesMeasured += (await measureActionOutcomes(now)).measured
+  } catch (err) {
+    console.error('[boris-direct/brain] memory: measureActionOutcomes упал', err)
+  }
+  try {
+    outcomesMeasured += (await measureProposalOutcomes(now)).measured
+  } catch (err) {
+    console.error('[boris-direct/brain] memory: measureProposalOutcomes упал', err)
+  }
+
+  const memory: NonNullable<ProcessResult['memory']> = { outcomesMeasured }
+
+  if (isMondayMsk(now)) {
+    try {
+      memory.lessons = await deriveAndRefreshLessons(now)
+    } catch (err) {
+      console.error('[boris-direct/brain] memory: deriveAndRefreshLessons упал', err)
+    }
+    try {
+      await generateCorrectionProposals(now)
+    } catch (err) {
+      console.error('[boris-direct/brain] memory: generateCorrectionProposals упал', err)
+    }
+  }
+
+  return memory
+}
+
 export async function runProcessTick(now: Date = new Date()): Promise<ProcessResult> {
   const anomalies: Anomaly[] = []
   const appliedSummaries: string[] = []
@@ -459,6 +512,38 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   const clicks = cpRows.reduce((acc, r) => acc + tsvNumber(r.Clicks), 0)
   const impressions = cpRows.reduce((acc, r) => acc + tsvNumber(r.Impressions), 0)
   const ctr = impressions > 0 ? (clicks / impressions) * 100 : null
+
+  // Построчная статистика запросов → BorisDirectQueryDailyStat (сырьё для
+  // памяти-опыта: из неё считаются уроки и замер исходов). date — вчера-МСК,
+  // тем же способом, что и у снапшотов. Ошибка персиста НЕ роняет тик.
+  try {
+    for (const row of rows) {
+      await prisma.borisDirectQueryDailyStat.upsert({
+        where: {
+          date_query_adGroupId: { date: dayStart, query: row.query, adGroupId: row.adGroupId },
+        },
+        update: {
+          adGroupName: row.adGroupName,
+          impressions: row.impressions,
+          clicks: row.clicks,
+          costRub: row.costRub,
+          conversions: row.conversions,
+        },
+        create: {
+          date: dayStart,
+          query: row.query,
+          adGroupId: row.adGroupId,
+          adGroupName: row.adGroupName,
+          impressions: row.impressions,
+          clicks: row.clicks,
+          costRub: row.costRub,
+          conversions: row.conversions,
+        },
+      })
+    }
+  } catch (err) {
+    console.error('[boris-direct/brain] персист BorisDirectQueryDailyStat упал — день не сохранён', err)
+  }
 
   try {
     // Итоги дня — для аномалий на следующих тиках «сбор».
@@ -530,7 +615,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
 
   if (quarantine) {
     // В карантине НЕ оптимизируем: только честный отчёт «наблюдаю».
+    // Память при этом копится — исходы и уроки меряем и здесь.
     await markProcessed()
+    const memory = await runMemoryHooks(now)
     return {
       status: 'quarantine',
       appliedSummaries,
@@ -539,6 +626,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       verdicts,
       reportData,
       anomalies,
+      memory,
     }
   }
 
@@ -748,6 +836,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     pushBlockError('финализация отчётов', err)
   }
 
+  // 9. Память-опыт: замер исходов; по понедельникам МСК — уроки.
+  const memory = await runMemoryHooks(now)
+
   return {
     status: 'done',
     appliedSummaries,
@@ -756,5 +847,6 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     verdicts,
     reportData,
     anomalies,
+    memory,
   }
 }
