@@ -250,6 +250,106 @@ export interface KeywordBidRecord {
   }
 }
 
+// ---------- Разведочные чтения (сессия «Прозрение»): корректировки, группы,
+// расписание, внешние правки. ТОЛЬКО чтение — write по ним НЕ добавляем. ----------
+
+/** Корректировка ставки из bidmodifiers.get (значения вложены по типу). */
+export interface BidModifierRecord {
+  Id: number
+  CampaignId: number | null
+  AdGroupId: number | null
+  Level: string
+  Type: string
+  MobileAdjustment?: { BidModifier?: number; OperatingSystemType?: string }
+  DesktopAdjustment?: { BidModifier?: number }
+  DemographicsAdjustment?: { Age?: string; Gender?: string; BidModifier?: number }
+  RegionalAdjustment?: { RegionId?: number; BidModifier?: number }
+  RetargetingAdjustment?: { RetargetingConditionId?: number; BidModifier?: number }
+}
+
+/**
+ * Корректировки ставок боевой кампании (bidmodifiers.get) — устройства,
+ * демография, гео, аудитории. Levels ОБЯЗАТЕЛЕН (подтверждено кабинетом:
+ * без него код 8000). ТОЛЬКО чтение.
+ */
+export async function getBidModifiers(): Promise<BidModifierRecord[]> {
+  const result = await directCall<{ BidModifiers?: BidModifierRecord[] }>('bidmodifiers', 'get', {
+    SelectionCriteria: { CampaignIds: [DIRECT_CAMPAIGN_ID], Levels: ['CAMPAIGN', 'AD_GROUP'] },
+    FieldNames: ['Id', 'CampaignId', 'AdGroupId', 'Type', 'Level'],
+    MobileAdjustmentFieldNames: ['BidModifier', 'OperatingSystemType'],
+    DesktopAdjustmentFieldNames: ['BidModifier'],
+    DemographicsAdjustmentFieldNames: ['Age', 'Gender', 'BidModifier'],
+    RegionalAdjustmentFieldNames: ['RegionId', 'BidModifier'],
+    RetargetingAdjustmentFieldNames: ['RetargetingConditionId', 'BidModifier'],
+  })
+  return result?.BidModifiers ?? []
+}
+
+/** Группа объявлений из adgroups.get (NegativeKeywords уровня группы). */
+export interface AdGroupRecord {
+  Id: number
+  Name: string
+  CampaignId: number
+  Status: string
+  Type: string
+  RegionIds?: number[]
+  NegativeKeywords?: { Items: string[] } | null
+}
+
+/**
+ * Группы боевой кампании (adgroups.get) — структура + групповые минус-фразы.
+ * Нужно для диагноза GROUP_MINUS_GAP и точной чистки. ТОЛЬКО чтение.
+ */
+export async function getAdGroups(): Promise<AdGroupRecord[]> {
+  const result = await directCall<{ AdGroups?: AdGroupRecord[] }>('adgroups', 'get', {
+    SelectionCriteria: { CampaignIds: [DIRECT_CAMPAIGN_ID] },
+    FieldNames: ['Id', 'Name', 'CampaignId', 'Status', 'Type', 'NegativeKeywords', 'RegionIds'],
+  })
+  return result?.AdGroups ?? []
+}
+
+/** Расписание показов из campaigns.get (TimeTargeting). */
+export interface TimeTargeting {
+  Schedule?: { Items?: string[] }
+  ConsiderWorkingWeekends?: string
+  HolidaysSchedule?: unknown
+}
+
+/** Полные настройки кампании: расписание + живой список минус-фраз кампании. */
+export interface CampaignSettings {
+  Id: number
+  Name: string
+  TimeZone?: string
+  StartDate?: string
+  TimeTargeting?: TimeTargeting
+  NegativeKeywords?: { Items: string[] } | null
+  Statistics?: { Clicks?: number; Impressions?: number }
+}
+
+/**
+ * Расширенные настройки кампании (campaigns.get с полным набором полей).
+ * В ОТЛИЧИЕ от getCampaignState (горячий путь) читает TimeTargeting и живой
+ * NegativeKeywords — для диагнозов SCHEDULE_WASTE и GROUP_MINUS_GAP.
+ * Имена полей выверены по кабинету (ContextLimit невалиден — исключён).
+ * ТОЛЬКО чтение.
+ */
+export async function getCampaignSettings(): Promise<CampaignSettings> {
+  const result = await directCall<{ Campaigns?: CampaignSettings[] }>('campaigns', 'get', {
+    SelectionCriteria: { Ids: [DIRECT_CAMPAIGN_ID] },
+    FieldNames: ['Id', 'Name', 'TimeZone', 'StartDate', 'TimeTargeting', 'NegativeKeywords', 'Statistics'],
+  })
+  const campaign = result?.Campaigns?.[0]
+  if (!campaign) {
+    throw new Error(`[direct] campaigns.get(settings): кампания ${DIRECT_CAMPAIGN_ID} не найдена`)
+  }
+  return campaign
+}
+
+// changes.check (детект внешних правок владельца) — СОЗНАТЕЛЬНО НЕ добавлен:
+// точная структура запроса/ответа не выверена боевой пробой, а инвариант
+// запрещает угадывать незнакомую структуру API. Остаётся 🔴 в TOOLS_GAP до
+// подтверждённого read-зонда (не блокирует ни один из 4 диагнозов сессии).
+
 /** Ставки и аукцион по ключам боевой кампании (keywordbids.get, с пагинацией). */
 export async function getKeywordBids(): Promise<KeywordBidRecord[]> {
   const all: KeywordBidRecord[] = []

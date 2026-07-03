@@ -20,10 +20,15 @@ import {
   getKeywords,
   getKeywordBids,
   getAds,
+  getBidModifiers,
+  getAdGroups,
+  getCampaignSettings,
   type CampaignState,
   type KeywordRecord,
   type KeywordBidRecord,
   type AdRecord,
+  type BidModifierRecord,
+  type CampaignSettings,
 } from './direct-client'
 import {
   buildSearchQueryReportBody,
@@ -31,7 +36,23 @@ import {
   pollReport,
   parseReportTsv,
 } from './reports'
-import { getGoalStatsByDay } from './metrika-client'
+import {
+  getGoalStatsByDay,
+  getGoalStatsByDevice,
+  getGoalStatsByDemographics,
+  getGoalStatsByHour,
+} from './metrika-client'
+import {
+  diagnoseDeviceSkew,
+  diagnoseScheduleWaste,
+  diagnoseAudienceWaste,
+  diagnoseGroupMinusGap,
+  normalizeDevice,
+  adjustedDeviceTypes,
+  buildDemoSegments,
+  isWeekend,
+  type DeviceRow,
+} from './diagnostics'
 import {
   getLeadsForPeriod,
   splitLeadsByOrigin,
@@ -195,6 +216,43 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
     await saveSnapshot(tickYesterday, 'metrika_goal', goalStats)
   } catch (err) {
     pushError('metrika.goal_by_day', err)
+  }
+
+  // 2b. РАЗВЕДОЧНЫЕ СНАПШОТЫ (сессия «Прозрение») — питают глубокую диагностику
+  // тика «обработка»: корректировки, группы, расписание + оконные срезы Метрики
+  // (устройства/демография/час). Каждый блок независим — сбой одного не роняет
+  // тик и не мешает остальным. ТОЛЬКО чтение.
+  const DIAG_WINDOW_DAYS = 30
+  const windowFrom = mskDay(new Date(now.getTime() - DIAG_WINDOW_DAYS * DAY_MS))
+  try {
+    await saveSnapshot(tickToday, 'bidmodifiers', await getBidModifiers())
+  } catch (err) {
+    pushError('bidmodifiers.get', err)
+  }
+  try {
+    await saveSnapshot(tickToday, 'adgroups', await getAdGroups())
+  } catch (err) {
+    pushError('adgroups.get', err)
+  }
+  try {
+    await saveSnapshot(tickToday, 'campaign_settings', await getCampaignSettings())
+  } catch (err) {
+    pushError('campaigns.get(settings)', err)
+  }
+  try {
+    await saveSnapshot(tickToday, 'metrika_device', await getGoalStatsByDevice(windowFrom, yesterday))
+  } catch (err) {
+    pushError('metrika.device', err)
+  }
+  try {
+    await saveSnapshot(tickToday, 'metrika_demo', await getGoalStatsByDemographics(windowFrom, yesterday))
+  } catch (err) {
+    pushError('metrika.demographics', err)
+  }
+  try {
+    await saveSnapshot(tickToday, 'metrika_hour', await getGoalStatsByHour(windowFrom, yesterday))
+  } catch (err) {
+    pushError('metrika.hour', err)
   }
 
   // 3. Заказ двух отчётов за вчера. reportName уникален (метка времени) —
@@ -1049,6 +1107,121 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     }
   } catch (err) {
     pushBlockError('ставки', err)
+  }
+
+  // 7.5 ГЛУБОКАЯ ДИАГНОСТИКА (сессия «Прозрение»): расписание / устройства /
+  // демография / групповые минуса. ТОЛЬКО эмиссия диагноза (DecisionRecord) +
+  // ПРЕДЛОЖЕНИЕ владельцу с цифрами. Действий Бориса НЕ меняет, write-набор НЕ
+  // расширяет — применение новых типов правок только после пробы на тестовой
+  // кампании и «да» владельца (Борис так и пишет в предложении). Все диагнозы
+  // объёмно-гейтованы (config): на молодой/тонкой кампании молчат.
+  try {
+    const DIAG_WINDOW = 30
+    const windowStart = new Date(dayStart.getTime() - (DIAG_WINDOW - 1) * DAY_MS)
+    // Оконное сырьё по запросам (расход/конверсии/группы) — для расписания и
+    // групповых минусов. Пусто (молодая кампания) → диагнозы просто молчат.
+    const windowStats = await prisma.borisDirectQueryDailyStat.findMany({
+      where: { date: { gte: windowStart, lte: dayStart } },
+    })
+    const settings = await latestSnapshotPayload<CampaignSettings>('campaign_settings')
+    const bidmods = (await latestSnapshotPayload<BidModifierRecord[]>('bidmodifiers')) ?? []
+
+    // (а) SCHEDULE_WASTE — будни/выходные по расходу и заявкам.
+    const weekendDays = new Set<string>()
+    let weekendSpend = 0
+    let weekendConv = 0
+    let weekdayConv = 0
+    for (const s of windowStats) {
+      const day = mskDay(s.date)
+      const costRub = Number(s.costRub) // costRub — Prisma Decimal
+      if (isWeekend(day)) {
+        weekendSpend += costRub
+        weekendConv += s.conversions
+        if (costRub > 0) weekendDays.add(day)
+      } else {
+        weekdayConv += s.conversions
+      }
+    }
+    const schedule = diagnoseScheduleWaste({
+      weekendSpendRub: weekendSpend,
+      weekendConversions: weekendConv,
+      weekendDays: weekendDays.size,
+      weekdayConversions: weekdayConv,
+      hasSchedule: !!settings?.TimeTargeting,
+    })
+    if (schedule) {
+      decisions.push(schedule.decision)
+      proposalDrafts.push(schedule.proposal)
+    }
+
+    // (б) DEVICE_SKEW — срез Метрики по устройствам + текущие корректировки.
+    // costRub — оценка (доля визитов × расход окна): Метрика даёт визиты, не ₽.
+    const deviceStats =
+      (await latestSnapshotPayload<
+        Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>
+      >('metrika_device')) ?? []
+    if (deviceStats.length > 0) {
+      const windowSpend = (await loadDailyTotals(dayStart, DIAG_WINDOW)).reduce(
+        (a, t) => a + t.spendRub,
+        0
+      )
+      const totalVisits = deviceStats.reduce((a, d) => a + d.visits, 0)
+      const deviceRows: DeviceRow[] = deviceStats.map((d) => ({
+        device: normalizeDevice(d.device),
+        clicks: d.visits,
+        conversions: d.goalReaches,
+        costRub: totalVisits > 0 ? windowSpend * (d.visits / totalVisits) : 0,
+        costEstimated: true,
+      }))
+      const skew = diagnoseDeviceSkew(deviceRows, adjustedDeviceTypes(bidmods))
+      if (skew) {
+        decisions.push(skew.decision)
+        proposalDrafts.push(skew.proposal)
+      }
+    }
+
+    // (в) AUDIENCE_WASTE — срез Метрики по демографии (порог высокий: B2B).
+    const demoStats =
+      (await latestSnapshotPayload<
+        Array<{ gender: string; age: string; visits: number; goalReaches: number }>
+      >('metrika_demo')) ?? []
+    if (demoStats.length > 0) {
+      const overallConv = demoStats.reduce((a, d) => a + d.goalReaches, 0)
+      const audience = diagnoseAudienceWaste(buildDemoSegments(demoStats), overallConv, new Set())
+      if (audience) {
+        decisions.push(audience.decision)
+        proposalDrafts.push(audience.proposal)
+      }
+    }
+
+    // (г) GROUP_MINUS_GAP — минуса кампании vs конвертящие запросы групп.
+    const campaignNegatives = settings?.NegativeKeywords?.Items ?? []
+    if (campaignNegatives.length > 0 && windowStats.length > 0) {
+      const byQuery = new Map<
+        string,
+        { query: string; adGroupId: string; adGroupName?: string; clicks: number; conversions: number }
+      >()
+      for (const s of windowStats) {
+        const key = `${s.adGroupId} ${s.query}`
+        const acc = byQuery.get(key) ?? {
+          query: s.query,
+          adGroupId: s.adGroupId,
+          adGroupName: s.adGroupName ?? undefined,
+          clicks: 0,
+          conversions: 0,
+        }
+        acc.clicks += s.clicks
+        acc.conversions += s.conversions
+        byQuery.set(key, acc)
+      }
+      const converting = [...byQuery.values()].filter((q) => q.conversions > 0)
+      for (const gap of diagnoseGroupMinusGap(campaignNegatives, converting)) {
+        decisions.push(gap.decision)
+        proposalDrafts.push(gap.proposal)
+      }
+    }
+  } catch (err) {
+    pushBlockError('глубокая диагностика', err)
   }
 
   // 8. Финал: отчёты помечаем обработанными.

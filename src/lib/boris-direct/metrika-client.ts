@@ -174,6 +174,74 @@ export async function getGoalStatsByLandingPage(
   }))
 }
 
+// ---------- Разведочные срезы (сессия «Прозрение»): устройства/демография/
+// час — питают диагнозы DEVICE_SKEW / AUDIENCE_WASTE / SCHEDULE_WASTE.
+// Изолируем рекламный трафик (Директ) фильтром ym:s:lastTrafficSource=='ad'. ----------
+
+/** Только рекламный трафик — чтобы срез был про Директ, а не про весь сайт. */
+const AD_TRAFFIC_FILTER = "ym:s:lastTrafficSource=='ad'"
+
+/** Заявки/визиты/отказы по типу устройства (desktop/mobile/tablet). */
+export async function getGoalStatsByDevice(
+  dateFrom: string,
+  dateTo: string
+): Promise<Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>> {
+  const resp = await metrikaStat({
+    dimensions: 'ym:s:deviceCategory',
+    metrics: `ym:s:visits,${GOAL_REACHES_METRIC},ym:s:bounceRate`,
+    date1: dateFrom,
+    date2: dateTo,
+    filters: AD_TRAFFIC_FILTER,
+  })
+  return resp.data.map((row) => ({
+    device: row.dimensions[0]?.name ?? '',
+    visits: row.metrics[0] ?? 0,
+    goalReaches: row.metrics[1] ?? 0,
+    bounceRate: row.metrics[2] ?? 0,
+  }))
+}
+
+/** Заявки/визиты по полу И возрасту — сырьё для AUDIENCE_WASTE. */
+export async function getGoalStatsByDemographics(
+  dateFrom: string,
+  dateTo: string
+): Promise<Array<{ gender: string; age: string; visits: number; goalReaches: number }>> {
+  const resp = await metrikaStat({
+    dimensions: 'ym:s:gender,ym:s:ageInterval',
+    metrics: `ym:s:visits,${GOAL_REACHES_METRIC}`,
+    date1: dateFrom,
+    date2: dateTo,
+    filters: AD_TRAFFIC_FILTER,
+    limit: '100',
+  })
+  return resp.data.map((row) => ({
+    gender: row.dimensions[0]?.name ?? '',
+    age: row.dimensions[1]?.name ?? '',
+    visits: row.metrics[0] ?? 0,
+    goalReaches: row.metrics[1] ?? 0,
+  }))
+}
+
+/** Заявки/визиты по часу суток (0..23) — вторичный сигнал мёртвых часов. */
+export async function getGoalStatsByHour(
+  dateFrom: string,
+  dateTo: string
+): Promise<Array<{ hour: string; visits: number; goalReaches: number }>> {
+  const resp = await metrikaStat({
+    dimensions: 'ym:s:hour',
+    metrics: `ym:s:visits,${GOAL_REACHES_METRIC}`,
+    date1: dateFrom,
+    date2: dateTo,
+    filters: AD_TRAFFIC_FILTER,
+    limit: '48',
+  })
+  return resp.data.map((row) => ({
+    hour: row.dimensions[0]?.name ?? '',
+    visits: row.metrics[0] ?? 0,
+    goalReaches: row.metrics[1] ?? 0,
+  }))
+}
+
 // ---------- Офлайн-конверсии (задел — активируем, когда пойдут сделки) ----------
 
 /** Строка офлайн-конверсии: идентификатор клика/визита + цель + момент. */

@@ -92,6 +92,37 @@ export function buildCampaignPerformanceReportBody(
   }
 }
 
+/**
+ * Тело отчёта расхода по УСТРОЙСТВАМ (сессия «Прозрение»): точный источник
+ * денег для DEVICE_SKEW (Метрика даёт визиты, а тут — Cost/Clicks/Conversions
+ * по desktop/mobile/tablet). Поле `Device` выверено боевой пробой кабинета.
+ * Те же правила, что у остальных тел: даты внутри SelectionCriteria, Goals
+ * строкой. Транспорт добавлен; в дневной цикл пока НЕ подключён (диагноз
+ * DEVICE_SKEW сейчас питается срезом Метрики) — доступен для точечного расчёта.
+ */
+export function buildDeviceReportBody(
+  dateFrom: string,
+  dateTo: string,
+  reportName: string
+): unknown {
+  return {
+    params: {
+      SelectionCriteria: {
+        DateFrom: dateFrom,
+        DateTo: dateTo,
+        Filter: campaignFilter(),
+      },
+      Goals: [String(METRIKA_GOAL_ID)],
+      FieldNames: ['Device', 'Impressions', 'Clicks', 'Cost', 'Conversions'],
+      ReportName: reportName,
+      ReportType: 'CUSTOM_REPORT',
+      DateRangeType: 'CUSTOM_DATE',
+      Format: 'TSV',
+      IncludeVAT: 'YES',
+    },
+  }
+}
+
 export type ReportPollResult =
   | { status: 'ready'; tsv: string }
   | { status: 'pending'; retryInSec: number }

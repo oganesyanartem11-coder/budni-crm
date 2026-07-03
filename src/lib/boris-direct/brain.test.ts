@@ -18,7 +18,7 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
         findFirst: vi.fn(),
       },
       borisDirectActionLog: { findFirst: vi.fn() },
-      borisDirectQueryDailyStat: { upsert: vi.fn() },
+      borisDirectQueryDailyStat: { upsert: vi.fn(), findMany: vi.fn() },
       landingLead: { count: vi.fn() },
     },
     mockDirect: {
@@ -26,6 +26,9 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
       getKeywords: vi.fn(),
       getKeywordBids: vi.fn(),
       getAds: vi.fn(),
+      getBidModifiers: vi.fn(),
+      getAdGroups: vi.fn(),
+      getCampaignSettings: vi.fn(),
     },
     mockPollReport: vi.fn(),
     mockGetGoalStatsByDay: vi.fn(),
@@ -55,7 +58,12 @@ vi.mock('./reports', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./reports')>()
   return { ...actual, pollReport: mockPollReport }
 })
-vi.mock('./metrika-client', () => ({ getGoalStatsByDay: mockGetGoalStatsByDay }))
+vi.mock('./metrika-client', () => ({
+  getGoalStatsByDay: mockGetGoalStatsByDay,
+  getGoalStatsByDevice: async () => [],
+  getGoalStatsByDemographics: async () => [],
+  getGoalStatsByHour: async () => [],
+}))
 vi.mock('./attribution', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./attribution')>()
   return { ...actual, getLeadsForPeriod: mockGetLeads }
@@ -183,6 +191,17 @@ beforeEach(() => {
   vi.clearAllMocks()
   // Фаза 0: чтение объявлений — нейтральный дефолт (нет REJECTED).
   mockDirect.getAds.mockResolvedValue([])
+  // Разведочные чтения (сессия «Прозрение») — по умолчанию нейтральны:
+  // корректировок/групп нет, расписание задано → глубокая диагностика молчит.
+  mockDirect.getBidModifiers.mockResolvedValue([])
+  mockDirect.getAdGroups.mockResolvedValue([])
+  mockDirect.getCampaignSettings.mockResolvedValue({
+    Id: 711897777,
+    Name: 'test',
+    TimeTargeting: { Schedule: { Items: [] } },
+    NegativeKeywords: { Items: [] },
+  })
+  mockPrisma.borisDirectQueryDailyStat.findMany.mockResolvedValue([])
   // Память-опыт: нейтральные дефолты (модули lessons/outcomes мокнуты целиком).
   mockOutcomes.measureActionOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
   mockOutcomes.measureProposalOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
@@ -223,10 +242,14 @@ describe('runCollectTick', () => {
 
     const res = await runCollectTick(NOW)
 
-    // Пять снапшотов: campaign/keywords/keywordbids/ads (сегодня, ads — фаза 0
-    // полигона) + metrika_goal (вчера).
+    // Снапшоты: campaign/keywords/keywordbids/ads (сегодня, ads — фаза 0
+    // полигона) + metrika_goal (вчера) + разведочные (сессия «Прозрение»):
+    // корректировки/группы/расписание + оконные срезы Метрики.
     const kinds = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data.kind)
-    expect(kinds).toEqual(['campaign', 'keywords', 'keywordbids', 'ads', 'metrika_goal'])
+    expect(kinds).toEqual([
+      'campaign', 'keywords', 'keywordbids', 'ads', 'metrika_goal',
+      'bidmodifiers', 'adgroups', 'campaign_settings', 'metrika_device', 'metrika_demo', 'metrika_hour',
+    ])
 
     // Два отчёта с уникальными именами за вчера.
     expect(res.requestedReports).toHaveLength(2)

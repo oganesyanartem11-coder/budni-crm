@@ -69,6 +69,14 @@ export function formatProposalSummary(type: string, payload: unknown): string {
     }
     case 'lift_minus_gate':
       return 'Снять гейт спорных минусов'
+    case 'device_skew':
+      return `Корректировка по устройству: ${typeof p.device === 'string' ? p.device : ''} (слив без заявок)`.trim()
+    case 'schedule_waste':
+      return 'Расписание показов (расход в мёртвое время)'
+    case 'audience_waste':
+      return `Корректировка по демографии: ${typeof p.segment === 'string' ? p.segment : ''}`.trim()
+    case 'group_minus_gap':
+      return `Перенос минуса на уровень групп: ${typeof p.negative === 'string' ? `«${p.negative}»` : ''}`.trim()
     default:
       return type
   }

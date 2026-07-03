@@ -102,6 +102,32 @@ export const LEARNING_GATE_ACCURACY = 0.99
 export const DATA_MISMATCH_RATIO = 2
 export const DATA_MISMATCH_MIN_COUNT = 3
 
+// ---------- Глубокая диагностика (сессия «Прозрение»): пороги ЭМИССИИ ----------
+// Только гейты выпуска диагноза/предложения — действий Бориса НЕ меняют,
+// write-набор НЕ расширяют. Применение новых типов правок (расписание,
+// корректировки, групповые минуса) — только после пробы на ТЕСТОВОЙ кампании.
+
+/** DEVICE_SKEW: неконвертящее устройство должно набрать ≥N кликов, иначе шум. */
+export const DEVICE_SKEW_MIN_CLICKS = 20
+
+/** DEVICE_SKEW: считаем устройство неконвертящим при 0 заявок на нём. */
+export const DEVICE_SKEW_ZERO_CONV = 0
+
+/** SCHEDULE_WASTE: расход по выходным за окно ≥N ₽, иначе не поднимаем тему. */
+export const SCHEDULE_MIN_WEEKEND_SPEND_RUB = 300
+
+/** SCHEDULE_WASTE: наблюдать ≥N выходных дней с расходом, иначе рано судить. */
+export const SCHEDULE_MIN_WEEKEND_DAYS = 2
+
+/** AUDIENCE_WASTE: сегмент пол/возраст должен набрать ≥N визитов (B2B ЛПР размазаны). */
+export const AUDIENCE_MIN_VISITS = 40
+
+/** GROUP_MINUS_GAP: минус кампании каннибалит, если задетый запрос конвертил ≥N заявок. */
+export const GROUP_MINUS_GAP_MIN_CONV = 1
+
+/** GROUP_MINUS_GAP: и набрал ≥N кликов — иначе шум на единичном показе. */
+export const GROUP_MINUS_GAP_MIN_CLICKS = 5
+
 // ---------- Circuit breaker (защита от бага, не гейт) ----------
 
 /** Аномально много правок ставок за один тик → не применять, писать владельцу. */
