@@ -3,61 +3,116 @@
     "id": "strategies-1",
     "claim": "Директ даёт две модели управления ставками: ручную (рекламодатель сам назначает ставку под каждое условие показа и может ограничить бюджет) и автоматические стратегии (система сама правит ставки под заданную цель — CPC, конверсии или долю рекламных расходов).",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy", "title": "Стратегии показов" },
-    "tags": ["strategies", "manual", "autostrategy"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy",
+      "title": "Стратегии показов"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "strategies",
+      "manual",
+      "autostrategy"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "strategies-2",
     "claim": "Три перформанс-автостратегии: «Максимум кликов» (цель — клики, задаёшь целевой CPC или недельный бюджет), «Максимум конверсий» (цель — конверсии, задаёшь целевую цену конверсии или недельный бюджет) и «Максимум прибыли» (бета, оптимизация рентабельности).",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy", "title": "Стратегии показов" },
-    "tags": ["strategies", "autostrategy", "conversions"],
-    "appliesTo": ["autostrategy"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy",
+      "title": "Стратегии показов"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "strategies",
+      "autostrategy",
+      "conversions"
+    ],
+    "appliesTo": [
+      "autostrategy"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "strategies-3",
     "claim": "У автостратегий есть встроенные предохранители расхода: дневной расход не превышает примерно 35% недельного бюджета, а ставка сама по себе не поднимается выше 10% недельного бюджета без ручных корректировок.",
     "type": "LIMIT",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy", "title": "Стратегии показов" },
-    "tags": ["strategies", "autostrategy", "budget"],
-    "appliesTo": ["autostrategy"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy",
+      "title": "Стратегии показов"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "strategies",
+      "autostrategy",
+      "budget"
+    ],
+    "appliesTo": [
+      "autostrategy"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "strategies-4",
     "claim": "Яндекс рекомендует переходить на автостратегии: они вносят корректировки в кампанию гораздо чаще, чем это можно делать вручную.",
     "type": "RECOMMENDATION",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy", "title": "Стратегии показов" },
-    "tags": ["strategies", "autostrategy"],
-    "appliesTo": ["autostrategy"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy",
+      "title": "Стратегии показов"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "strategies",
+      "autostrategy"
+    ],
+    "appliesTo": [
+      "autostrategy"
+    ],
     "confidence": "HIGH",
     "projectStance": "CONFLICTS",
     "conflictNote": "У нас сознательно РУЧНОЕ управление ставками на поиске (пофразный экономбиддинг, потолок 400 ₽, ставки минимально достаточные). Автостратегию не включаем без явного решения владельца — она передаёт ставки алгоритму и обычно наращивает расход ради объёма.",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "strategies-5",
     "claim": "При ручном управлении ставками рекламодатель сам назначает ставку под каждое условие показа и может ограничить недельный/дневной бюджет — полный контроль над ценой клика.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy", "title": "Максимум кликов с ручными ставками" },
-    "tags": ["strategies", "manual", "bids"],
-    "appliesTo": ["manual", "search"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
+      "title": "Максимум кликов с ручными ставками"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "strategies",
+      "manual",
+      "bids"
+    ],
+    "appliesTo": [
+      "manual",
+      "search"
+    ],
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

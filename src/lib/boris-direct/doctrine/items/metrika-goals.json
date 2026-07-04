@@ -3,48 +3,193 @@
     "id": "metrika-goals-1",
     "claim": "Метрика привязывается к кампании через поле «Счётчики Метрики» в настройках; система сама показывает счётчики, установленные на сайте. Для новых кампаний номер счётчика можно задать по умолчанию в настройках пользователя.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
-    "tags": ["metrika", "counter", "setup"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/metrika",
+      "title": "Яндекс Метрика: оценка эффективности продвижения"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "counter",
+      "setup"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-goals-2",
     "claim": "Директ автоматически добавляет к ссылкам объявлений метку yclid с уникальным номером клика (например ?yclid=123456), чтобы Метрика связала клик с визитом. Yclid — резервный способ атрибуции, если привязанный счётчик не смог сопоставить клик и визит.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
-    "tags": ["metrika", "yclid", "tracking", "attribution"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/metrika",
+      "title": "Яндекс Метрика: оценка эффективности продвижения"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "yclid",
+      "tracking",
+      "attribution"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-goals-3",
     "claim": "Цели Метрики — это важные действия посетителя (например, отправка формы заявки); конверсия — визит, в котором цель достигнута. На цели Директ опирается при оптимизации: конверсионные стратегии максимизируют число достижений цели.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
-    "tags": ["metrika", "goals", "conversions"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/metrika",
+      "title": "Яндекс Метрика: оценка эффективности продвижения"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "goals",
+      "conversions"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-goals-4",
     "claim": "Параметры URL (метки в ссылке) — переменные, которые добавляют в ссылку на сайт, чтобы системы веб-аналитики получали дополнительную информацию о переходах. Автоматическая разметка Директа (yclid) — частный случай такой разметки.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/url-tags", "title": "Параметры URL" },
-    "tags": ["metrika", "url-tags", "tracking"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/url-tags",
+      "title": "Параметры URL"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "url-tags",
+      "tracking"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "MEDIUM",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-5",
+    "claim": "Простые цели Метрики по типам: посещение страниц (по URL), клик по номеру телефона (tel:), клик по email (mailto:), отправка формы (<form>). Плюс автоцели, которые Метрика создаёт сама: клик по кнопке (a/div/input/button), скачивание файла, добавление в корзину, покупка.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/nastrojka-prostyh-celej",
+      "title": "Настройка простых целей (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "цели",
+      "простые-цели",
+      "автоцели",
+      "конверсии"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-6",
+    "claim": "Цели нужно создать ДО запуска рекламы: Метрика не собирает статистику по цели задним числом (ретроспективно данных нет). Если цель «Заявка» появилась позже старта кампании, по прошлым визитам конверсий не будет.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/nastrojka-prostyh-celej",
+      "title": "Настройка простых целей (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "цели",
+      "заявка",
+      "требование",
+      "ретроспектива"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-7",
+    "claim": "Составная цель — воронка: максимум 5 шагов, в каждом до 10 условий (URL или JS-события). Все шаги пользователь проходит за ОДИН визит в строгом порядке; кнопка браузера «назад» сбрасывает прогресс. Условия внутри шага объединяют оператором ИЛИ (засчитывается любое).",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/nastrojka-slozhnyh-celej",
+      "title": "Настройка сложных (составных) целей (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "составные-цели",
+      "воронка",
+      "шаги",
+      "лимит"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-8",
+    "claim": "Ограничения составных целей: они НЕ отслеживают офлайн-конверсии и звонки, а стоимость конверсии единая на все субцели — разнести цену по шагам нельзя. Для передачи заявка→сделка с суммой нужен отдельный механизм офлайн-конверсий, а не составная цель.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/nastrojka-slozhnyh-celej",
+      "title": "Настройка сложных (составных) целей (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "составные-цели",
+      "офлайн-конверсии",
+      "звонки",
+      "ограничения"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

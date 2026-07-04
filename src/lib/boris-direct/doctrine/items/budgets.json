@@ -3,60 +3,115 @@
     "id": "budgets-1",
     "claim": "Расход ограничивают на трёх уровнях: недельный бюджет (в автостратегиях), дневной бюджет отдельной кампании (при ручном управлении) и средний дневной бюджет на общем счёте (сразу на все кампании).",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/day-budget", "title": "Дневной бюджет" },
-    "tags": ["budget", "daily-budget", "weekly-budget"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/day-budget",
+      "title": "Дневной бюджет"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "budget",
+      "daily-budget",
+      "weekly-budget"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "budgets-2",
     "claim": "Дневной расход может превышать заданный средний дневной бюджет, но не более чем на 30%: Директ перераспределяет деньги между днями недели (недоизрасходованное в спокойные дни тратит в активные), удерживая среднее за неделю.",
     "type": "LIMIT",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/day-budget", "title": "Дневной бюджет" },
-    "tags": ["budget", "daily-budget", "overspend"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/day-budget",
+      "title": "Дневной бюджет"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "budget",
+      "daily-budget",
+      "overspend"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "budgets-3",
     "claim": "Минимальный средний дневной бюджет — 300 ₽.",
     "type": "LIMIT",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/day-budget", "title": "Дневной бюджет" },
-    "tags": ["budget", "daily-budget", "limits"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/day-budget",
+      "title": "Дневной бюджет"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "budget",
+      "daily-budget",
+      "limits"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "budgets-4",
     "claim": "Дневной бюджет считается по московскому времени независимо от часового пояса кампании.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/day-budget", "title": "Дневной бюджет" },
-    "tags": ["budget", "daily-budget", "timezone"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/day-budget",
+      "title": "Дневной бюджет"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "budget",
+      "daily-budget",
+      "timezone"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "budgets-5",
     "claim": "Строгий контроль внутри одного дня даёт «распределённый»/недельный формат ограничения расхода, но при перераспределении дневная трата может отклоняться от номинала вверх (до +30%) или вниз в зависимости от активности дня.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/budgets-in-strategies", "title": "Настройка бюджета в стратегиях" },
-    "tags": ["budget", "weekly-budget", "distribution"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/budgets-in-strategies",
+      "title": "Настройка бюджета в стратегиях"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "budget",
+      "weekly-budget",
+      "distribution"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "MEDIUM",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

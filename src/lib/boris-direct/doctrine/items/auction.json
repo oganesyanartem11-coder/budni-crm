@@ -7,6 +7,7 @@
       "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
       "title": "Как работает аукцион в Директе"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "price",
@@ -20,7 +21,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-2",
@@ -30,6 +32,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "price",
@@ -41,7 +44,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-3",
@@ -51,6 +55,7 @@
       "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
       "title": "Как работает аукцион в Директе"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "ranking",
@@ -63,7 +68,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-4",
@@ -73,6 +79,7 @@
       "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
       "title": "Как работает аукцион в Директе"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "ranking",
@@ -84,7 +91,8 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-5",
@@ -94,6 +102,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "traffic-volume",
@@ -105,7 +114,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-6",
@@ -115,6 +125,7 @@
       "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
       "title": "Максимум кликов с ручными ставками"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "traffic-volume",
@@ -128,7 +139,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-7",
@@ -138,6 +150,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "price",
       "ctr",
@@ -149,7 +162,8 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-8",
@@ -159,6 +173,7 @@
       "url": "https://yandex.ru/support/direct/ru/technologies-and-services/compete",
       "title": "Неконкуренция объявлений"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "price",
@@ -171,7 +186,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-9",
@@ -181,6 +197,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "quality",
@@ -193,7 +210,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-10",
@@ -203,6 +221,7 @@
       "url": "https://yandex.ru/support/direct/ru/general/positions",
       "title": "Места для продвижения в результатах поиска"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "auction",
       "ranking",
@@ -215,7 +234,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "auction-yard-1",
@@ -225,6 +245,7 @@
       "url": "https://yard.yandex.ru/courses/direct-prodvinutyy/aukcion",
       "title": "Виды аукционов в Яндекс Директе и их механика (Ярд)"
     },
+    "sourceTier": "YARD",
     "tags": [
       "auction",
       "vcg",
@@ -237,6 +258,7 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

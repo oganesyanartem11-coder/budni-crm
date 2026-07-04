@@ -6,12 +6,14 @@ const base = {
   claim: 'Списываемая цена в поиске считается по правилам VCG-аукциона, а не равна ставке.',
   type: 'MECHANIC' as const,
   source: { url: 'https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction', title: 'Как работает аукцион' },
+  sourceTier: 'OFFICIAL_HELP' as const,
   tags: ['auction', 'price'],
   appliesTo: ['search' as const],
   confidence: 'HIGH' as const,
   projectStance: 'NEUTRAL' as const,
   status: 'ACTIVE' as const,
   addedAt: '2026-07-04',
+  verifiedAt: '2026-07-04',
 }
 
 describe('DoctrineCardSchema', () => {
@@ -61,5 +63,20 @@ describe('DoctrineCardSchema', () => {
   it('неизвестный type/appliesTo — ошибка', () => {
     expect(DoctrineCardSchema.safeParse({ ...base, type: 'FACT' }).success).toBe(false)
     expect(DoctrineCardSchema.safeParse({ ...base, appliesTo: ['tv'] }).success).toBe(false)
+  })
+
+  it('без sourceTier — ошибка (обязательное поле)', () => {
+    const { sourceTier: _omit, ...noTier } = base
+    expect(DoctrineCardSchema.safeParse(noTier).success).toBe(false)
+    expect(DoctrineCardSchema.safeParse({ ...base, sourceTier: 'BLOG' }).success).toBe(false)
+  })
+
+  it('без verifiedAt — ошибка (обязательное поле)', () => {
+    const { verifiedAt: _omit, ...noVerified } = base
+    expect(DoctrineCardSchema.safeParse(noVerified).success).toBe(false)
+  })
+
+  it('sourceTier YARD валиден', () => {
+    expect(DoctrineCardSchema.safeParse({ ...base, sourceTier: 'YARD' }).success).toBe(true)
   })
 })

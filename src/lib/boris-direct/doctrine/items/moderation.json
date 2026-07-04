@@ -3,48 +3,93 @@
     "id": "moderation-1",
     "claim": "Модерация проверяет тексты, ключевые фразы и ссылки; обычно проходит за несколько часов, но при отправке более 100 объявлений из одной кампании занимает дольше — материалы лучше слать пачками.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation", "title": "Вопросы и ответы по модерации" },
-    "tags": ["moderation", "status", "timing"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation",
+      "title": "Вопросы и ответы по модерации"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "moderation",
+      "status",
+      "timing"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "moderation-2",
     "claim": "Часть объявлений получает автоматическое одобрение и начинает показываться почти сразу после создания/изменения, но в течение примерно трёх дней проходит повторную проверку модератором и может быть отклонена уже после старта показов.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation", "title": "Вопросы и ответы по модерации" },
-    "tags": ["moderation", "status", "auto-approval"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation",
+      "title": "Вопросы и ответы по модерации"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "moderation",
+      "status",
+      "auto-approval"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "moderation-3",
     "claim": "Пока новая версия объявления проходит модерацию, показывается СТАРЫЙ вариант (со старыми ключами, ставками и корректировками); после одобрения новая версия автоматически заменяет старую.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation", "title": "Вопросы и ответы по модерации" },
-    "tags": ["moderation", "status", "versioning"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation",
+      "title": "Вопросы и ответы по модерации"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "moderation",
+      "status",
+      "versioning"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "moderation-4",
     "claim": "Если объявление отклонено и его показ был остановлен, статус — «Модератор отклонил объявление», старая версия не показывается. Нужно исправить причину и переотправить объявление на модерацию.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation", "title": "Вопросы и ответы по модерации" },
-    "tags": ["moderation", "status", "rejected", "resubmit"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/moderation",
+      "title": "Вопросы и ответы по модерации"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "moderation",
+      "status",
+      "rejected",
+      "resubmit"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

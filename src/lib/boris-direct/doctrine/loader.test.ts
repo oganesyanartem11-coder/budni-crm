@@ -14,6 +14,7 @@ function card(over: Partial<DoctrineCard>): DoctrineCard {
     claim: over.claim ?? 'claim',
     type: over.type ?? 'MECHANIC',
     source: over.source ?? { url: 'https://yandex.ru/support/direct/ru/x', title: 't' },
+    sourceTier: over.sourceTier ?? 'OFFICIAL_HELP',
     tags: over.tags ?? ['auction'],
     appliesTo: over.appliesTo ?? ['search'],
     confidence: over.confidence ?? 'HIGH',
@@ -21,6 +22,7 @@ function card(over: Partial<DoctrineCard>): DoctrineCard {
     conflictNote: over.conflictNote,
     status: over.status ?? 'ACTIVE',
     addedAt: over.addedAt ?? '2026-07-04',
+    verifiedAt: over.verifiedAt ?? '2026-07-04',
     refutedBy: over.refutedBy,
   }
 }
@@ -42,6 +44,22 @@ describe('selectDoctrine — отбор и приоритеты', () => {
       card({ id: 'high', type: 'MECHANIC', confidence: 'HIGH' }),
     ]
     expect(selectDoctrine(cards, []).map((c) => c.id)).toEqual(['high', 'med'])
+  })
+
+  it('тай-брейк по доверию: OFFICIAL_HELP > YARD при равном типе (ШАГ 3)', () => {
+    // Две противоречащие MECHANIC-карточки одной темы: официальная Справка
+    // должна попасть в выборку РАНЬШЕ Ярда.
+    const cards = [
+      card({ id: 'yard', type: 'MECHANIC', sourceTier: 'YARD', tags: ['auction'] }),
+      card({ id: 'help', type: 'MECHANIC', sourceTier: 'OFFICIAL_HELP', tags: ['auction'] }),
+    ]
+    expect(selectDoctrine(cards, ['auction']).map((c) => c.id)).toEqual(['help', 'yard'])
+    // Тип важнее доверия: MECHANIC(YARD) всё равно раньше RECOMMENDATION(OFFICIAL_HELP).
+    const mixed = [
+      card({ id: 'rec-help', type: 'RECOMMENDATION', sourceTier: 'OFFICIAL_HELP' }),
+      card({ id: 'mech-yard', type: 'MECHANIC', sourceTier: 'YARD' }),
+    ]
+    expect(selectDoctrine(mixed, []).map((c) => c.id)).toEqual(['mech-yard', 'rec-help'])
   })
 
   it('фильтр по тегам (пересечение); пустой tags = все', () => {

@@ -16,8 +16,16 @@ export const DOCTRINE_CONFIDENCE = ['HIGH', 'MEDIUM'] as const
 export const DOCTRINE_STANCE = ['ALIGNED', 'NEUTRAL', 'CONFLICTS'] as const
 export const DOCTRINE_STATUS = ['ACTIVE', 'REFUTED_BY_EXPERIENCE', 'STALE'] as const
 
+/**
+ * Уровень доверия источника. OFFICIAL_HELP (справка yandex.ru/support) —
+ * первоисточник; YARD (обучающая платформа Ярд) — вторичный, полезный, но при
+ * ПРОТИВОРЕЧИИ механики уступает Справке (тай-брейк в loader); OTHER — прочее.
+ */
+export const DOCTRINE_SOURCE_TIER = ['OFFICIAL_HELP', 'YARD', 'OTHER'] as const
+
 export type DoctrineType = (typeof DOCTRINE_TYPES)[number]
 export type DoctrineStatus = (typeof DOCTRINE_STATUS)[number]
+export type DoctrineSourceTier = (typeof DOCTRINE_SOURCE_TIER)[number]
 
 /** Максимум длины claim — карточка это ТЕЗИС, а не абзац (и защита от копипаста). */
 export const DOCTRINE_CLAIM_MAX = 400
@@ -40,6 +48,8 @@ export const DoctrineCardSchema = z
     claim: z.string().min(1).max(DOCTRINE_CLAIM_MAX),
     type: z.enum(DOCTRINE_TYPES),
     source: DoctrineSourceSchema,
+    /** Уровень доверия источника (обязателен): OFFICIAL_HELP | YARD | OTHER. */
+    sourceTier: z.enum(DOCTRINE_SOURCE_TIER),
     tags: z.array(z.string().min(1)).min(1),
     appliesTo: z.array(z.enum(DOCTRINE_APPLIES_TO)).min(1),
     confidence: z.enum(DOCTRINE_CONFIDENCE),
@@ -49,6 +59,8 @@ export const DoctrineCardSchema = z
     status: z.enum(DOCTRINE_STATUS),
     /** ISO-дата добавления. */
     addedAt: z.string().min(1),
+    /** ISO-дата фактической проверки/грунтовки страницы-источника (обязательна). */
+    verifiedAt: z.string().min(1),
     refutedBy: RefutedBySchema.optional(),
   })
   // CONFLICTS без conflictNote — ошибка (ШАГ 7).

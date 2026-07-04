@@ -7,6 +7,7 @@
       "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
       "title": "Как работает аукцион в Директе"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -19,7 +20,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-2",
@@ -29,6 +31,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -42,7 +45,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-3",
@@ -52,6 +56,7 @@
       "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
       "title": "Как работает аукцион в Директе"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -65,7 +70,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-4",
@@ -75,6 +81,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -89,7 +96,8 @@
     "confidence": "MEDIUM",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-5",
@@ -99,6 +107,7 @@
       "url": "https://yandex.ru/support/direct/troubleshooting/bidding.html?lang=ru",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -111,7 +120,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-6",
@@ -121,6 +131,7 @@
       "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
       "title": "Объем трафика и ставки"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -134,16 +145,18 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-7",
-    "claim": "В ручной стратегии Яндекс советует подбирать ставку по KPI бизнеса, а не гнаться за объёмом трафика или позицией показа. Ориентиры для расчёта: ставка = CPA × CR; ставка = средний чек × CR × ДРР; ставка = средний чек × CR / (ROI + 1).",
+    "claim": "В ручной стратегии Яндекс советует подбирать ставку по KPI бизнеса, а не гнаться за объёмом трафика или позицией показа. Ориентиры для расчёта: ставка = CPA × CR; ставка = средний чек × CR × ДРР; ставка = средний чек × CR / (ROI + 1). Правило воронки (Ярд): чем ниже метрика (заявка/заказ/продажа) — тем ценнее; оптимизировать по CPL/CPO/ДРР, а не по объёму.",
     "type": "RECOMMENDATION",
     "source": {
       "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
       "title": "Максимум кликов с ручными ставками"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -158,7 +171,8 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-8",
@@ -168,6 +182,7 @@
       "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
       "title": "Максимум кликов с ручными ставками"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -182,7 +197,8 @@
     "projectStance": "CONFLICTS",
     "conflictNote": "Наше правило — ставки минимально достаточные, бюджет не раздуваем, потолок 400 ₽; north star — максимум заявок на рубль, а не максимум трафика. Совет ставить максимальную рентабельную цену ради объёма противоречит минимально достаточным ставкам.",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "traffic-volume-9",
@@ -192,6 +208,7 @@
       "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
       "title": "Максимум кликов с ручными ставками"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "bids",
       "traffic-volume",
@@ -206,6 +223,7 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

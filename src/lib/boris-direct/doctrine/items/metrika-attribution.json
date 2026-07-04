@@ -3,72 +3,240 @@
     "id": "metrika-attribution-1",
     "claim": "Директ предлагает несколько моделей атрибуции: автоматическую (машинное обучение — дефолт для перфоманс/мастер/товарных кампаний), «Первый переход кросс-девайс» (источник — первый переход за 180 дней), «Последний переход» и «Последний значимый переход кросс-девайс». Автоматическая учитывает время, устройства и интересы и рекомендуется для обучения конверсионных стратегий.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/attribution-model", "title": "Модели атрибуции" },
-    "tags": ["metrika", "attribution", "model"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/attribution-model",
+      "title": "Модели атрибуции"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "attribution",
+      "model"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-attribution-2",
     "claim": "Устаревшие не-кросс-девайс модели атрибуции («Первый переход», «Последний значимый переход», «Последний переход из Директа») отключены — остались кросс-девайс версии, учитывающие переходы со всех устройств посетителя на пути к конверсии.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/attribution-model", "title": "Модели атрибуции" },
-    "tags": ["metrika", "attribution", "cross-device"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/attribution-model",
+      "title": "Модели атрибуции"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "attribution",
+      "cross-device"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-attribution-3",
     "claim": "Офлайн-конверсии — это конверсии из CRM, не отслеживаемые на сайте (покупка в офлайне после онлайн-просмотра, оплата/подтверждение по телефону). Их загрузка даёт полный анализ окупаемости и уточняет оптимизацию стратегий большим объёмом данных о целевой аудитории.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/offline-conversions", "title": "Офлайн-конверсии" },
-    "tags": ["metrika", "offline-conversions", "conversions"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/offline-conversions",
+      "title": "Офлайн-конверсии"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "offline-conversions",
+      "conversions"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-attribution-4",
-    "claim": "Офлайн-конверсии загружают тремя способами: через Центр конверсий (файл по FTP/SFTP, ссылке HTTP/HTTPS или из Google Sheets), интеграцией CRM (коннекторы из Маркетплейса Метрики) или через API.",
+    "claim": "Офлайн-конверсии загружают тремя способами: через Центр конверсий (файл по FTP/SFTP, ссылке HTTP/HTTPS или из Google Sheets), интеграцией CRM (коннекторы из Маркетплейса Метрики) или через API. Самый популярный способ — Центр конверсий Директа; онлайн-таблицы и файлы по ссылке — самые простые.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/offline-conversions", "title": "Офлайн-конверсии" },
-    "tags": ["metrika", "offline-conversions", "upload"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/offline-conversions",
+      "title": "Офлайн-конверсии"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "offline-conversions",
+      "upload"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-attribution-5",
     "claim": "Точность привязки офлайн-конверсий зависит от переданных идентификаторов: ClientID + телефон/email — максимум; только ClientID — хорошо; только контакты без ClientID — средне (около 50% от максимума). ClientID стоит собирать по всем онлайн-заказам (getClientID).",
     "type": "LIMIT",
-    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/offline-conversions", "title": "Офлайн-конверсии" },
-    "tags": ["metrika", "offline-conversions", "attribution", "identifiers"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/offline-conversions",
+      "title": "Офлайн-конверсии"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "offline-conversions",
+      "attribution",
+      "identifiers"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "metrika-attribution-6",
     "claim": "Автоматическая метка yclid — резервная привязка клика к визиту на случай, когда счётчик не смог напрямую связать переход из Директа с визитом в Метрике; подстраховывает атрибуцию заявок в небольшой доле «потерянных» случаев.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
-    "tags": ["metrika", "yclid", "attribution"],
-    "appliesTo": ["all"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/metrika",
+      "title": "Яндекс Метрика: оценка эффективности продвижения"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "metrika",
+      "yclid",
+      "attribution"
+    ],
+    "appliesTo": [
+      "all"
+    ],
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-attribution-7",
+    "claim": "Загруженные в Метрику офлайн-конверсии автоматически создают две цели: «CRM: заказ создан» (статус IN_PROGRESS) и «CRM: заказ оплачен» (статус PAID). Эти цели доступны в отчётах, сегментах и для оптимизации — именно так офлайн-заказ из CRM становится целью Метрики, на которую можно опираться в кампании.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/offline-konversii",
+      "title": "Офлайн-конверсии в Яндекс Метрике — ЯРД"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "офлайн-конверсии",
+      "цели",
+      "метрика",
+      "CRM",
+      "передача-как-цель"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-attribution-8",
+    "claim": "Окна обработки офлайн-конверсий: событие привязывается к визиту ретроспективно в пределах 21 дня (визит не старше 21 дня до конверсии), а статус сделки можно догружать/обновлять до 90 дней. Если сделка закрывается позже 21 дня после визита, атрибуция к клику может не сработать.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/direct-bazovyy/offline-konversii",
+      "title": "Офлайн-конверсии в Яндекс Директе — ЯРД"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "офлайн-конверсии",
+      "лимиты",
+      "атрибуция",
+      "сроки",
+      "21-дней",
+      "90-дней"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-attribution-9",
+    "claim": "Для загрузки офлайн-конверсии обязательны: дата-время события (поле create_date_time), статус (IN_PROGRESS или PAID) и хотя бы один идентификатор клиента (ClientID, email или телефон, допускается MD5-хеш). Без даты-времени и идентификатора конверсия не загрузится.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/offline-konversii",
+      "title": "Офлайн-конверсии в Яндекс Метрике — ЯРД"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "офлайн-конверсии",
+      "требования",
+      "формат",
+      "create_date_time",
+      "статус"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-attribution-10",
+    "claim": "Advanced Matching помогает не терять сопоставление пользователей при ограничениях cookies (ITP, Safari, отказ от сторонних cookies): рекламодатель передаёт дополнительные идентификаторы пользователя, что усиливает сцепку данных. Настраивается автоматически или вручную; для Safari есть отдельные возможности.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/kontekst-so-zvezdochkoy-4/advanced-matching",
+      "title": "Advanced Matching — Контекст со звёздочкой 4, ЯРД"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "advanced-matching",
+      "cookies",
+      "сопоставление",
+      "ITP",
+      "safari"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "MEDIUM",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]
