@@ -204,6 +204,28 @@ describe('getKeywords', () => {
     expect(sentBody(0).params.Page).toEqual({ Limit: 10000, Offset: 0 })
     expect(sentBody(1).params.Page).toEqual({ Limit: 10000, Offset: 10000 })
   })
+
+  it('FieldNames только из валидного перечня keywords.get (регресс на код 8000)', async () => {
+    // Валидные поля keywords.get — ДОСЛОВНО из ответа API (ошибка 8000 сама
+    // перечисляет допустимые значения). StatusClarification в списке НЕТ:
+    // это поле ads.get / campaigns.get; для keywords.get оно даёт код 8000
+    // ("Элемент массива FieldNames содержит неверное значение перечисления").
+    const VALID_KEYWORDS_FIELDS = new Set([
+      'Id', 'Keyword', 'State', 'Status', 'AdGroupId', 'CampaignId', 'Bid',
+      'AutotargetingSearchBidIsAuto', 'ContextBid', 'StrategyPriority',
+      'UserParam1', 'UserParam2', 'Productivity', 'StatisticsSearch',
+      'StatisticsNetwork', 'ServingStatus', 'AutotargetingCategories',
+      'AutotargetingBrandOptions',
+    ])
+    fetchMock.mockResolvedValue(jsonResponse({ result: { Keywords: [] } }))
+
+    await getKeywords()
+
+    const fields = sentBody(0).params.FieldNames as string[]
+    expect(fields).not.toContain('StatusClarification')
+    for (const f of fields) expect(VALID_KEYWORDS_FIELDS.has(f)).toBe(true)
+    expect(fields).toEqual(['Id', 'Keyword', 'AdGroupId', 'State', 'Status', 'Bid'])
+  })
 })
 
 describe('getKeywordBids', () => {

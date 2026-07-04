@@ -141,6 +141,36 @@ describe('buildDailyDataBlock — секция ОПЫТ', () => {
   })
 })
 
+describe('buildDailyDataBlock — консистентность аномалий (ссылка на утренние алёрты)', () => {
+  it('были алёрты сегодня, тексты не переданы → сводка ССЫЛАЕТСЯ, а не пишет «нет»', () => {
+    const block = buildDailyDataBlock(dailyInput({ anomalies: [], anomaliesFiredToday: 2 }))
+    expect(block).toContain('утром было 2 алерта')
+    // В секции аномалий НЕ должно стоять «нет» вместо ссылки (это и был баг).
+    expect(block).not.toContain('сообщениями):\nнет')
+  })
+
+  it('алёртов сегодня не было (0 / не передано) → «нет», прежнее поведение', () => {
+    expect(buildDailyDataBlock(dailyInput({ anomalies: [], anomaliesFiredToday: 0 }))).toContain(
+      'сообщениями):\nнет'
+    )
+    expect(buildDailyDataBlock(dailyInput({ anomalies: [] }))).toContain('сообщениями):\nнет')
+  })
+
+  it('переданы ТЕКСТЫ аномалий → перечисляем их (текст важнее счётчика)', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({ anomalies: ['ADD_METRICA_TAG=NO'], anomaliesFiredToday: 5 })
+    )
+    expect(block).toContain('- ADD_METRICA_TAG=NO')
+    expect(block).not.toContain('утром было')
+  })
+
+  it('русская форма числа: 1 алерт / 2 алерта / 5 алертов', () => {
+    expect(buildDailyDataBlock(dailyInput({ anomaliesFiredToday: 1 })).endsWith('утром было 1 алерт')).toBe(true)
+    expect(buildDailyDataBlock(dailyInput({ anomaliesFiredToday: 2 })).endsWith('утром было 2 алерта')).toBe(true)
+    expect(buildDailyDataBlock(dailyInput({ anomaliesFiredToday: 5 })).endsWith('утром было 5 алертов')).toBe(true)
+  })
+})
+
 describe('generateDailyReportText', () => {
   it('heavy, critical=false, mode из state, цифры в userText, ответ LLM как есть', async () => {
     const text = await generateDailyReportText(dailyInput())
