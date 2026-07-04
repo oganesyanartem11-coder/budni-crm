@@ -11,6 +11,17 @@ describe('доктрина: реальные карточки (ШАГ 7)', () =>
     expect(bad).toEqual([])
   })
 
+  it('у каждой карточки заполнены sourceTier и verifiedAt (бэкфилл ШАГ 1)', () => {
+    for (const c of getAllDoctrineCards()) {
+      expect(['OFFICIAL_HELP', 'YARD', 'OTHER']).toContain(c.sourceTier)
+      expect(c.verifiedAt.length).toBeGreaterThan(0)
+    }
+    // В базе есть карточки обоих источников (Справка + Ярд).
+    const tiers = new Set(getAllDoctrineCards().map((c) => c.sourceTier))
+    expect(tiers.has('OFFICIAL_HELP')).toBe(true)
+    expect(tiers.has('YARD')).toBe(true)
+  })
+
   it('id уникальны', () => {
     const ids = getAllDoctrineCards().map((c) => c.id)
     expect(new Set(ids).size).toBe(ids.length)

@@ -5,11 +5,25 @@
 // умолчанию (только под includeConflicts). REFUTED_BY_EXPERIENCE и STALE
 // исключены ВСЕГДА (в промпты не попадают — ШАГ 7).
 
-import { DoctrineCardSchema, type DoctrineCard, type DoctrineType } from './schema'
+import {
+  DoctrineCardSchema,
+  type DoctrineCard,
+  type DoctrineType,
+  type DoctrineSourceTier,
+} from './schema'
 import { RAW_DOCTRINE } from './items'
 
 /** Приоритет типов при отборе (меньше = важнее). */
 const TYPE_PRIORITY: Record<DoctrineType, number> = { MECHANIC: 0, LIMIT: 1, RECOMMENDATION: 2 }
+
+/**
+ * Тай-брейк по ДОВЕРИЮ ИСТОЧНИКА (ШАГ 3): официальная Справка приоритетнее Ярда.
+ * Если по одной MECHANIC-теме карточки OFFICIAL_HELP и YARD противоречат —
+ * в выборку раньше попадёт OFFICIAL_HELP (первоисточник «перевешивает» вторичный).
+ * Это ТАЙ-БРЕЙК ОТБОРА для промптов, а НЕ изменение порогов/предохранителей —
+ * на код-решения доктрина по-прежнему не влияет.
+ */
+const TIER_PRIORITY: Record<DoctrineSourceTier, number> = { OFFICIAL_HELP: 0, YARD: 1, OTHER: 2 }
 
 /**
  * Валидирует все карточки один раз при загрузке модуля. Битая карточка
@@ -80,6 +94,8 @@ export function selectDoctrine(
     .sort(
       (a, b) =>
         TYPE_PRIORITY[a.type] - TYPE_PRIORITY[b.type] ||
+        // Тай-брейк по доверию источника: OFFICIAL_HELP > YARD > OTHER.
+        TIER_PRIORITY[a.sourceTier] - TIER_PRIORITY[b.sourceTier] ||
         (a.confidence === b.confidence ? 0 : a.confidence === 'HIGH' ? -1 : 1)
     )
 
