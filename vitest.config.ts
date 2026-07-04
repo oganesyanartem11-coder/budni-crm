@@ -9,7 +9,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // sim/**/*.test.ts — быстрые юнит-тесты полигона Бориса-Директа (без сети).
+    // Тяжёлая матрица полигона живёт в *.simtest.ts и сюда НЕ входит —
+    // запускается отдельным конфигом sim/vitest.config.ts (npm run sim:*).
+    include: ['src/**/*.test.ts', 'sim/**/*.test.ts'],
     exclude: ['node_modules/**', 'e2e/**', '.next/**', 'dist/**'],
   },
 })

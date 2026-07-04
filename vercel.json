@@ -29,6 +29,12 @@
     { "path": "/api/cron/boris-9am-summary", "schedule": "0 6 * * *" },
     { "path": "/api/cron/boris-self-analysis", "schedule": "0 7 * * 5" },
     { "path": "/api/cron/boris-team-evening-digest", "schedule": "0 17 * * 1-4" },
-    { "path": "/api/cron/boris-team-friday", "schedule": "0 16 * * 5" }
+    { "path": "/api/cron/boris-team-friday", "schedule": "0 16 * * 5" },
+    { "path": "/api/cron/boris-direct-collect", "schedule": "10 3 * * *" },
+    { "path": "/api/cron/boris-direct-process", "schedule": "0,20,40 4-5 * * *" },
+    { "path": "/api/cron/boris-direct-daily-report", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/boris-direct-weekly-report", "schedule": "20 6 * * 1" },
+    { "path": "/api/cron/boris-direct-monthly-report", "schedule": "40 6 1 * *" },
+    { "path": "/api/cron/boris-direct-watch", "schedule": "0 9,12,15 * * *" }
   ]
 }
