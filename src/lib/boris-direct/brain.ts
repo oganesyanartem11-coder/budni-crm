@@ -72,6 +72,7 @@ import {
   TV_TAIL,
 } from './config'
 import { detectAnomalies, type Anomaly } from './anomalies'
+import { classifyQueryGeo, isGeoMinusReason } from './geo'
 import {
   isInQuarantine,
   pickDataDrivenMinusCandidates,
@@ -885,7 +886,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         try {
           const system =
             getBorisDirectSystemPrompt({ mode: state.mode, frozen: state.frozen }) +
-            `\n\nЗАДАЧА КЛАССИФИКАТОРА: для каждого кандидата в минус-фразы реши, СТРУКТУРНЫЙ ли это мусор для нашего бизнеса (доставка обедов на коллективы, Москва и МО): чужое кафе/бренд/навигация к конкуренту, запросы вне Москвы и МО, запросы не про доставку обедов на коллектив (вакансии, рецепты, розница на одного). Верни СТРОГО JSON-массив без пояснений и без markdown: [{"candidate": string, "structural": boolean, "confident": boolean, "reason": string}]. confident=true только если сомнений нет.`
+            `\n\nЗАДАЧА КЛАССИФИКАТОРА: для каждого кандидата в минус-фразы реши, СТРУКТУРНЫЙ ли это мусор для нашего бизнеса (доставка обедов на коллективы). Мусор: чужое кафе/бренд/навигация к конкуренту; запросы не про доставку обедов на коллектив (вакансии, рецепты, розница на одного); запросы ДРУГИХ регионов. ГЕО: зона доставки — Москва и ВСЯ Московская область (регионы 213+1). Города МО (например Электросталь, Балашиха, Химки, Подольск, Мытищи, Королёв) — ЦЕЛЕВЫЕ, это НЕ мусор. Мусор по гео — только запросы про регионы ВНЕ Москвы и МО (например Благовещенск, Элиста, Санкт-Петербург, Екатеринбург). Верни СТРОГО JSON-массив без пояснений и без markdown: [{"candidate": string, "structural": boolean, "confident": boolean, "reason": string}]. confident=true только если сомнений нет.`
           const llmResult = await callBorisDirectLlm({
             purpose: 'minus_classify',
             tier: 'light',
@@ -927,20 +928,31 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       const autonomousCodes = new Set<ReasonCode>()
       for (const phrase of prepared.accepted) {
         const cls = verdictByCandidate.get(phrase)
-        if (cls && cls.structural && cls.confident) {
+        // ГЕО-суждение (зона доставки = Москва+МО, регионы 213+1):
+        //  • out_of_zone (Благовещенск/Элиста/другой регион) → структурный мусор
+        //    ДЕТЕРМИНИРОВАННО, не ждём уверенности LLM;
+        //  • in_zone (города МО: Электросталь и т.п.) — ЦЕЛЕВЫЕ: гео-мотивный
+        //    LLM-минус на них перехватываем и уводим владельцу (не авто-режем цель).
+        const geoZone = classifyQueryGeo(phrase)
+        const geoTrash = geoZone === 'out_of_zone'
+        const geoProtected =
+          geoZone === 'in_zone' && !!cls?.structural && isGeoMinusReason(cls.reason)
+
+        if (!geoProtected && (geoTrash || (cls && cls.structural && cls.confident))) {
           autonomous.push(phrase)
-          verdicts.push({ candidate: phrase, verdict: 'minus', reason: cls.reason || 'структурный мусор' })
-          // ЭМИССИЯ: автономный минус из LLM-классификатора (structural+confident).
+          const reason = geoTrash ? 'вне зоны доставки (не Москва/МО)' : cls?.reason || 'структурный мусор'
+          verdicts.push({ candidate: phrase, verdict: 'minus', reason })
+          // ЭМИССИЯ: автономный минус — структурный мусор (LLM-уверенный ИЛИ вне-гео).
           autonomousCodes.add('STRUCTURAL_TRASH')
           decisions.push({
             type: 'minus',
             targetType: 'query',
             targetId: phrase,
-            summary: cls.reason || 'структурный мусор',
+            summary: reason,
             reasonCode: 'STRUCTURAL_TRASH',
             factors: statFactors(phrase),
           })
-        } else if (state.autoNegativesEnabled) {
+        } else if (!geoProtected && state.autoNegativesEnabled) {
           // Гейт спорных минусов снят обучением — спорные тоже в автономию.
           autonomous.push(phrase)
           verdicts.push({
@@ -962,15 +974,19 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           disputed.push(phrase)
           verdicts.push({
             candidate: phrase,
-            verdict: cls?.structural ? 'minus' : 'keep',
-            reason: cls?.reason || 'классификатор не дал уверенного вердикта — решает владелец',
+            verdict: geoProtected ? 'keep' : cls?.structural ? 'minus' : 'keep',
+            reason: geoProtected
+              ? `город МО — целевой, гео-минус на решение владельца${cls?.reason ? ` (${cls.reason})` : ''}`
+              : cls?.reason || 'классификатор не дал уверенного вердикта — решает владелец',
           })
-          // ЭМИССИЯ: спорный кандидат уходит предложением владельцу.
+          // ЭМИССИЯ: спорный кандидат (в т.ч. защита целевого города МО) — владельцу.
           decisions.push({
             type: 'proposal',
             targetType: 'query',
             targetId: phrase,
-            summary: 'спорный минус — предложение владельцу',
+            summary: geoProtected
+              ? 'гео-минус целевого города МО — на решение владельца'
+              : 'спорный минус — предложение владельцу',
             reasonCode: 'DISPUTED_MINUS',
             factors: statFactors(phrase),
           })
@@ -1052,7 +1068,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       const windowStartBids = new Date(dayStart.getTime() - (PHRASE_ECON_WINDOW_DAYS - 1) * DAY_MS)
       const headStat = new Map<string, { clicks: number; leads: number }>()
       const addHead = (adGroupId: string, query: string, clicks: number, leads: number) => {
-        const key = `${adGroupId} ${normQueryKey(query)}`
+        const key = `${adGroupId}\0${normQueryKey(query)}`
         const acc = headStat.get(key) ?? { clicks: 0, leads: 0 }
         acc.clicks += clicks
         acc.leads += leads
@@ -1077,7 +1093,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         const groupId = String(bid.AdGroupId)
         const currentBidMicro = bid.Search?.Bid ?? 0
         // Головная экономика ЭТОЙ фразы (её собственный запрос).
-        const head = headStat.get(`${groupId} ${keyTextById.get(bid.KeywordId) ?? ''}`) ?? {
+        const head = headStat.get(`${groupId}\0${keyTextById.get(bid.KeywordId) ?? ''}`) ?? {
           clicks: 0,
           leads: 0,
         }
@@ -1275,7 +1291,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         { query: string; adGroupId: string; adGroupName?: string; clicks: number; conversions: number }
       >()
       for (const s of windowStats) {
-        const key = `${s.adGroupId} ${s.query}`
+        const key = `${s.adGroupId}\0${s.query}`
         const acc = byQuery.get(key) ?? {
           query: s.query,
           adGroupId: s.adGroupId,
