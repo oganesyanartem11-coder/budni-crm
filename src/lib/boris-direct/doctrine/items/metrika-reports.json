@@ -1,0 +1,102 @@
+[
+  {
+    "id": "metrika-reports-1",
+    "claim": "ClientID — идентификатор, который Метрика присваивает каждому посетителю автоматически, анонимно и случайно. По нему склеиваются визиты одного человека; это основа отчёта «Посетители и клиенты» и связки с CRM для сквозной аналитики.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/posetiteli-klienty-metrika",
+      "title": "Отчёт «Посетители и клиенты» (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "clientid",
+      "идентификатор",
+      "склейка-визитов",
+      "crm"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-reports-2",
+    "claim": "Отчёт «Посетители и клиенты»: посетители — все, кто заходил; клиенты — посетители со связанными данными из CRM (для сквозной аналитики). Отчёт показывает путь клиента (последовательность источников), достижение цели и взаимодействия ПОСЛЕ цели, историю визитов в хронологии.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/posetiteli-klienty-metrika",
+      "title": "Отчёт «Посетители и клиенты» (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "посетители",
+      "клиенты",
+      "путь-клиента",
+      "crm"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-reports-3",
+    "claim": "Отчёты по источникам: «Источники, сводка» — все источники трафика с визитами, посетителями и конверсиями по каждому; «Источники, расходы и ROI» — сопоставляет расходы и доходность (ROI), но требует предварительной передачи данных о расходах в Метрику.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/otchyoty-po-istochnikam-metrika",
+      "title": "Отчёты по источникам (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "отчёты",
+      "источники",
+      "roi",
+      "расходы"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-reports-4",
+    "claim": "Отчёты «Директ» в Метрике (4 вида): Директ-сводка (объём и качество привлечённого трафика), Директ-площадки (анализ площадок размещения — контроль РСЯ), Директ-расходы (расходы + визиты) и Директ-эксперименты (тест вариантов объявлений).",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/metrika-yandex/otchyoty-po-istochnikam-metrika",
+      "title": "Отчёты по источникам (Яндекс Метрика)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "метрика",
+      "директ",
+      "отчёты",
+      "площадки",
+      "рся"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  }
+]

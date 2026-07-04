@@ -15,6 +15,9 @@ import budgets from './budgets.json'
 import moderation from './moderation.json'
 import metrikaGoals from './metrika-goals.json'
 import metrikaAttribution from './metrika-attribution.json'
+import metrikaReports from './metrika-reports.json'
+import unitEconomics from './unit-economics.json'
+import antifraud from './antifraud.json'
 
 /** Сырые карточки из всех тематических файлов (валидация — в loader). */
 export const RAW_DOCTRINE: unknown[] = [
@@ -30,4 +33,7 @@ export const RAW_DOCTRINE: unknown[] = [
   ...moderation,
   ...metrikaGoals,
   ...metrikaAttribution,
+  ...metrikaReports,
+  ...unitEconomics,
+  ...antifraud,
 ]

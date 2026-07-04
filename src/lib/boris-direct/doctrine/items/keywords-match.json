@@ -7,6 +7,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
       "title": "Символы и операторы | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "match-operators",
@@ -20,7 +21,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-2",
@@ -30,6 +32,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
       "title": "Символы и операторы | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "match-operators",
@@ -43,7 +46,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-3",
@@ -53,6 +57,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
       "title": "Символы и операторы | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "match-operators",
@@ -66,7 +71,8 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-4",
@@ -76,6 +82,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
       "title": "Символы и операторы | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "match-operators",
@@ -89,7 +96,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-5",
@@ -99,6 +107,7 @@
       "url": "https://yandex.ru/adv/edu/materials/operatory-sootvetstviya-v-direct",
       "title": "Операторы соответствия в Директе: что это такое и как ими пользоваться"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "match-operators",
@@ -111,7 +120,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-6",
@@ -121,6 +131,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/keywords",
       "title": "Ключевые фразы | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "targeting",
@@ -132,7 +143,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-7",
@@ -142,6 +154,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/keywords",
       "title": "Ключевые фразы | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "targeting",
@@ -154,7 +167,8 @@
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-8",
@@ -164,6 +178,7 @@
       "url": "https://yandex.ru/support/direct/ru/keywords/wordstat",
       "title": "Сервис подбора слов | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "targeting",
@@ -176,7 +191,8 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-9",
@@ -186,6 +202,7 @@
       "url": "https://yandex.ru/support/direct/ru/statistics/search-queries",
       "title": "Отчет «Поисковые запросы» | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "targeting",
@@ -198,7 +215,8 @@
     "confidence": "HIGH",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "keywords-match-10",
@@ -208,6 +226,7 @@
       "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
       "title": "Автотаргетинг | Яндекс Директ"
     },
+    "sourceTier": "OFFICIAL_HELP",
     "tags": [
       "keywords",
       "targeting",
@@ -222,6 +241,7 @@
     "projectStance": "CONFLICTS",
     "conflictNote": "Наша кампания — ручные ставки и узкий подбор по фразам с активной минусовкой, north star — заявки, а не охват. Обязательность автотаргетинга и позиция Яндекса «не сужайте, иначе упадут охваты» противоречат принципу отсекать объём показов без конверсий и не раздувать показы/бюджет.",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]

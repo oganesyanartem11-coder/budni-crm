@@ -1,0 +1,103 @@
+[
+  {
+    "id": "unit-economics-1",
+    "claim": "Юнит-экономика считает прибыль на один бизнес-юнит (товар или клиент). Прибыль на юнит = средний чек − (CPC ÷ CR1 ÷ CR2) − переменные затраты, где CR1 — конверсия в лид, CR2 — конверсия в выкуп. Маржинальная прибыль = прибыль на юнит × число продаж; минус постоянные затраты = общая прибыль. Реклама выгодна, только если связка CPC и конверсий даёт положительный юнит.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/direct-bazovyy/yunit-ehkonomika",
+      "title": "Юнит-экономика — Директ. Базовый (Яндекс ЯРД)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "юнит-экономика",
+      "CPC",
+      "конверсия",
+      "прибыль",
+      "средний-чек"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "unit-economics-2",
+    "claim": "Стоимостные метрики Директа считаются как расход, делённый на действие: CPA = расход ÷ конверсии, CPL = расход ÷ лиды, CPO = расход ÷ заказы, CPS = расход ÷ продажи, CAC = расход ÷ привлечённые клиенты. Это «цена целевого действия»: чем ниже — тем эффективнее потраченный рубль. Для оценки нашей кампании ориентир — CPL/CPO (стоимость заявки/сделки), а не CPC.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/direct-bazovyy/pokazateli-ehffektivnosti",
+      "title": "Показатели эффективности — Директ. Базовый (Яндекс ЯРД)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "CPA",
+      "CPL",
+      "CPO",
+      "CPS",
+      "CAC",
+      "стоимость-конверсии"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "unit-economics-3",
+    "claim": "Метрики окупаемости рекламы: ДРР = расход ÷ доход × 100% (доля рекламных расходов, чем ниже — тем лучше); ROAS = доход ÷ расход × 100%; ROMI = (доход − расход) ÷ расход × 100% (окупаемость вложений в продвижение); ROI = (весь доход − весь расход) ÷ весь расход × 100%. ДРР и ROMI считаются от дохода, поэтому требуют передачи выручки/суммы сделок в Метрику.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/direct-bazovyy/pokazateli-ehffektivnosti",
+      "title": "Показатели эффективности — Директ. Базовый (Яндекс ЯРД)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "ДРР",
+      "ROMI",
+      "ROAS",
+      "ROI",
+      "окупаемость",
+      "доход"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "unit-economics-4",
+    "claim": "AOV (средний чек) = выручка ÷ заказы. LTV — совокупная выручка с одного клиента за всё время сотрудничества. LTV раскрывает ценность юнита «клиент» с повторными покупками: окупаемость рекламы корректно оценивать по всей выручке клиента, а не только по первой сделке. Работает лишь при передаче реальных доходов/сделок из CRM.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/direct-bazovyy/pokazateli-ehffektivnosti",
+      "title": "Показатели эффективности — Директ. Базовый (Яндекс ЯРД)"
+    },
+    "sourceTier": "YARD",
+    "tags": [
+      "LTV",
+      "AOV",
+      "средний-чек",
+      "выручка"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "MEDIUM",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
+  }
+]

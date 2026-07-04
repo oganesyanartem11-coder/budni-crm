@@ -3,60 +3,117 @@
     "id": "autotargeting-1",
     "claim": "Автотаргетинг показывает объявления БЕЗ ключевых фраз: алгоритм в реальном времени анализирует заголовки и текст объявления и посадочную страницу и сопоставляет их с запросами и интересами пользователей (учитывая синонимы, словоформы, минус-фразы).",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting", "title": "Автотаргетинг" },
-    "tags": ["autotargeting", "targeting", "mechanics"],
-    "appliesTo": ["search"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
+      "title": "Автотаргетинг"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "autotargeting",
+      "targeting",
+      "mechanics"
+    ],
+    "appliesTo": [
+      "search"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "autotargeting-2",
     "claim": "Пять категорий запросов автотаргетинга: целевые (точное совпадение с предложением), узкие (объявление шире запроса), широкие (общий запрос по категории), альтернативные (заменяющий товар) и сопутствующие (дополняющий товар). Категории включаются/выключаются на уровне группы.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting", "title": "Автотаргетинг" },
-    "tags": ["autotargeting", "targeting", "categories"],
-    "appliesTo": ["search"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
+      "title": "Автотаргетинг"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "autotargeting",
+      "targeting",
+      "categories"
+    ],
+    "appliesTo": [
+      "search"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "autotargeting-3",
     "claim": "Автотаргетинг управляется минус-фразами, выбором категорий запросов и бренд-фильтрами (свой бренд / бренды конкурентов / без брендов); ставка задаётся отдельно от ключевых фраз.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting", "title": "Автотаргетинг" },
-    "tags": ["autotargeting", "targeting", "negative-keywords", "control"],
-    "appliesTo": ["search"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
+      "title": "Автотаргетинг"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "autotargeting",
+      "targeting",
+      "negative-keywords",
+      "control"
+    ],
+    "appliesTo": [
+      "search"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "autotargeting-4",
     "claim": "Автотаргетинг работает параллельно ключевым фразам в равном приоритете, а его статистика ведётся отдельно от статистики ключей.",
     "type": "MECHANIC",
-    "source": { "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting", "title": "Автотаргетинг" },
-    "tags": ["autotargeting", "targeting", "reporting"],
-    "appliesTo": ["search"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
+      "title": "Автотаргетинг"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "autotargeting",
+      "targeting",
+      "reporting"
+    ],
+    "appliesTo": [
+      "search"
+    ],
     "confidence": "HIGH",
     "projectStance": "NEUTRAL",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   },
   {
     "id": "autotargeting-5",
     "claim": "Широкие, альтернативные и сопутствующие категории автотаргетинга по своей природе приводят более далёкий от прямого спроса трафик — без жёстких минус-фраз и контроля категорий это риск нецелевого расхода.",
     "type": "RECOMMENDATION",
-    "source": { "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting", "title": "Автотаргетинг" },
-    "tags": ["autotargeting", "targeting", "categories", "risk"],
-    "appliesTo": ["search"],
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
+      "title": "Автотаргетинг"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "autotargeting",
+      "targeting",
+      "categories",
+      "risk"
+    ],
+    "appliesTo": [
+      "search"
+    ],
     "confidence": "MEDIUM",
     "projectStance": "ALIGNED",
     "status": "ACTIVE",
-    "addedAt": "2026-07-04"
+    "addedAt": "2026-07-04",
+    "verifiedAt": "2026-07-04"
   }
 ]
