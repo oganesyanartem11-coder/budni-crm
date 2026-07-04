@@ -229,3 +229,35 @@ export async function markRanToday(label: string, payload: Prisma.InputJsonValue
       /* лог не должен ронять cron */
     })
 }
+
+/**
+ * Сумма счётчика `payload.anomalies` по указанным cron-меткам за СЕГОДНЯ (МСК).
+ * На каждую метку берём ПОСЛЕДНЮЮ запись дня — принудительные повторы
+ * (?force=true) плодят строки, иначе счёт бы двоился. Ошибка чтения → 0
+ * (статистика не должна ронять отчёт).
+ *
+ * Нужна дневной сводке Бориса-Директа: если утром/днём уже улетали алёрты,
+ * вечерняя сводка ссылается на них, а не пишет «аномалий нет».
+ */
+export async function getTodayCronAnomalyCount(
+  labels: string[],
+  now: Date = new Date()
+): Promise<number> {
+  const todayUtc = mskMidnightUtc(now, 0)
+  let total = 0
+  for (const label of labels) {
+    try {
+      const latest = await prisma.activityLog.findFirst({
+        where: { action: 'BOT_CRON_SUMMARY', entityId: label, createdAt: { gte: todayUtc } },
+        orderBy: { createdAt: 'desc' },
+        select: { payload: true },
+      })
+      const payload = (latest?.payload ?? null) as { anomalies?: unknown } | null
+      const n = typeof payload?.anomalies === 'number' ? payload.anomalies : 0
+      if (Number.isFinite(n) && n > 0) total += n
+    } catch {
+      /* чтение статистики не должно ронять отчёт */
+    }
+  }
+  return total
+}

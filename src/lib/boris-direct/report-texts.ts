@@ -89,9 +89,37 @@ export interface DailyReportInput {
   proposalsCreated: string[]
   anomalies: string[]
   observe: boolean
+  /**
+   * Сколько алёртов Борис УЖЕ отправил за сегодня отдельными сообщениями
+   * (collect/process). Тексты в дневной сводке не дублируем, но если алёрты
+   * БЫЛИ (>0), сводка на них ССЫЛАЕТСЯ («утром было N …»), а НЕ пишет
+   * «аномалий нет» — иначе вечерняя сводка противоречит утренним алёртам.
+   */
+  anomaliesFiredToday?: number
   /** Готовая секция «ОПЫТ» (formatLessonsBlock). Пусто/undefined → секции нет;
    * undefined в generateDailyReportText → уроки подтягиваются сами. */
   lessonsBlock?: string
+}
+
+/** Русская форма слова «алерт» по числу: 1 алерт, 2 алерта, 5 алертов. */
+function pluralAlert(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'алерт'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'алерта'
+  return 'алертов'
+}
+
+/**
+ * Секция аномалий дневной сводки. Тексты уже ушли ОТДЕЛЬНЫМИ сообщениями из
+ * collect/process — в сводке ссылка, а не дубль. Если за сегодня были алёрты
+ * (anomaliesFiredToday>0), сводка на них СОШЛЁТСЯ, а не напишет «нет».
+ */
+function anomaliesSection(input: DailyReportInput): string {
+  if (input.anomalies.length > 0) return formatBulletList(input.anomalies, 'нет')
+  const n = input.anomaliesFiredToday ?? 0
+  if (n > 0) return `утром было ${n} ${pluralAlert(n)}`
+  return 'нет'
 }
 
 /** Детерминированный блок цифр дневного отчёта (вся арифметика уже сделана). */
@@ -130,7 +158,7 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     'ПРЕДЛОЖЕНИЯ ВЛАДЕЛЬЦУ:',
     formatBulletList(input.proposalsCreated, 'нет'),
     'АНОМАЛИИ (уже отправлены отдельными сообщениями):',
-    formatBulletList(input.anomalies, 'нет'),
+    anomaliesSection(input),
   ]
 
   // Секция «ОПЫТ» — только если блок уроков непустой (никаких пустых заголовков).

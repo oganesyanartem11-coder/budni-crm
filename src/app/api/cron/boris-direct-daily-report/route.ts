@@ -10,7 +10,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
-import { alreadyRanToday, markRanToday } from '@/lib/bot/daily-summary'
+import { alreadyRanToday, markRanToday, getTodayCronAnomalyCount } from '@/lib/bot/daily-summary'
 import { yesterdayMsk, mskDayStartUtc, type DailyReportData } from '@/lib/boris-direct/brain'
 import { getDirectRoleState } from '@/lib/boris-direct/state'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
@@ -56,6 +56,13 @@ async function handler(request: Request) {
   const payload = snap.payload as unknown as DailyResultPayload
   const state = await getDirectRoleState()
 
+  // Сколько алёртов Борис уже отправил СЕГОДНЯ (collect/process) — чтобы сводка
+  // сослалась на них, а не написала «аномалий нет» в день, когда были алёрты.
+  const anomaliesFiredToday = await getTodayCronAnomalyCount(
+    ['boris-direct-collect', 'boris-direct-process'],
+    now
+  )
+
   const input: DailyReportInput = {
     data: {
       dateLabel: payload.dateLabel ?? yesterday,
@@ -72,8 +79,11 @@ async function handler(request: Request) {
     appliedSummaries: payload.appliedSummaries ?? [],
     wouldDoSummaries: payload.wouldDoSummaries ?? [],
     proposalsCreated: payload.proposalsCreated ?? [],
-    // Аномалии уже ушли немедленно из collect/process — в отчёте не дублируем.
+    // Тексты аномалий уже ушли отдельными сообщениями из collect/process — тут
+    // не дублируем, но ССЫЛАЕМСЯ на них счётчиком (иначе вечерняя сводка
+    // противоречила бы утренним алёртам: писала «нет», хотя они были).
     anomalies: [],
+    anomaliesFiredToday,
     observe: state.mode === 'OBSERVE',
   }
 
