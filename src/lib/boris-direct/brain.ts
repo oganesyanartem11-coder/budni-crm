@@ -74,6 +74,11 @@ import {
 import { detectAnomalies, type Anomaly } from './anomalies'
 import { classifyQueryGeo, isGeoMinusReason } from './geo'
 import {
+  isProtectedConverter,
+  filterOutProtectedConverters,
+  CONVERTER_PROTECT_WINDOW_DAYS,
+} from './economics'
+import {
   isInQuarantine,
   pickDataDrivenMinusCandidates,
   prepareMinusCandidates,
@@ -89,6 +94,7 @@ import {
 } from './outcomes'
 import { callBorisDirectLlm } from './llm'
 import { getBorisDirectSystemPrompt } from './prompts'
+import { getDoctrineBlock } from './doctrine'
 
 // ---------- Время: МСК = UTC+3 ----------
 
@@ -828,6 +834,29 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
 
   const state = await getDirectRoleState()
 
+  // ЭКОНОМИЧЕСКАЯ КОНСТИТУЦИЯ (ШАГ 6): защита конвертеров по окну 30 дней.
+  // Фраза с ≥1 заявкой за 30д — НЕ кандидат на минус/понижение с мотивом
+  // «дорого» (только наблюдаем/кормим). Считаем один раз, используем в §6
+  // (минус) и §7 (ставки). Ключи: по (группа+запрос) и по тексту запроса.
+  const conv30dByGroupQuery = new Map<string, number>()
+  const conv30dByQueryText = new Map<string, number>()
+  try {
+    const convWindowStart = new Date(
+      dayStart.getTime() - (CONVERTER_PROTECT_WINDOW_DAYS - 1) * DAY_MS
+    )
+    const stats30 = await prisma.borisDirectQueryDailyStat.findMany({
+      where: { date: { gte: convWindowStart, lte: dayStart } },
+    })
+    for (const s of stats30) {
+      const nq = normQueryKey(s.query)
+      const gk = `${s.adGroupId}\0${nq}`
+      conv30dByGroupQuery.set(gk, (conv30dByGroupQuery.get(gk) ?? 0) + s.conversions)
+      conv30dByQueryText.set(nq, (conv30dByQueryText.get(nq) ?? 0) + s.conversions)
+    }
+  } catch (err) {
+    console.error('[boris-direct/brain] окно защиты конвертеров (30д) недоступно', err)
+  }
+
   // 6. МИНУСА: data-driven кандидаты → механика/ядро/дедуп → LLM-классификатор
   // структурного мусора → автономно ИЛИ предложение владельцу.
   //
@@ -867,7 +896,24 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     } catch (err) {
       console.error('[boris-direct/brain] окно минусовки недоступно — вчерашний отчёт', err)
     }
-    const candidates = pickDataDrivenMinusCandidates(minusRows)
+    const candidatesRaw = pickDataDrivenMinusCandidates(minusRows)
+    // ЭКОНОМИЧЕСКАЯ КОНСТИТУЦИЯ (ШАГ 6a): защищённые конвертеры (≥1 заявка за
+    // 30д) НЕ минусуем, даже если в узком окне минуса заявок 0 — только
+    // наблюдаем. Отсекаем ТОЛЬКО объём-без-конверсий (цена клика — не критерий).
+    const { kept: candidates, protectedConverters } = filterOutProtectedConverters(
+      candidatesRaw,
+      (q) => conv30dByQueryText.get(normQueryKey(q)) ?? 0
+    )
+    if (protectedConverters.length > 0) {
+      decisions.push({
+        type: 'hold',
+        targetType: 'query',
+        targetId: protectedConverters.slice(0, 20).join(', '),
+        summary: `защита конвертеров: ${protectedConverters.length} фраз с заявками за 30д — не минусую, наблюдаю`,
+        reasonCode: 'PROVEN_CONVERTER_VOLUME',
+        factors: { protectedCount: protectedConverters.length },
+      })
+    }
     if (candidates.length > 0) {
       const keywordsSnap = (await latestSnapshotPayload<KeywordRecord[]>('keywords')) ?? []
       const coreKeywords = keywordsSnap.map((k) => k.Keyword)
@@ -884,9 +930,17 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       let classified: ClassifiedCandidate[] = []
       if (prepared.accepted.length > 0) {
         try {
+          // Справочная доктрина (механика минус-фраз/операторов/автотаргетинга) —
+          // справка, НЕ приказ (преамбула внутри блока). Помогает классификатору
+          // не путать механику; на код-пороги не влияет.
+          const minusDoctrine = getDoctrineBlock(
+            ['negative-keywords', 'match-operators', 'keywords', 'autotargeting'],
+            { maxItems: 6, maxTokens: 700 }
+          )
           const system =
             getBorisDirectSystemPrompt({ mode: state.mode, frozen: state.frozen }) +
-            `\n\nЗАДАЧА КЛАССИФИКАТОРА: для каждого кандидата в минус-фразы реши, СТРУКТУРНЫЙ ли это мусор для нашего бизнеса (доставка обедов на коллективы). Мусор: чужое кафе/бренд/навигация к конкуренту; запросы не про доставку обедов на коллектив (вакансии, рецепты, розница на одного); запросы ДРУГИХ регионов. ГЕО: зона доставки — Москва и ВСЯ Московская область (регионы 213+1). Города МО (например Электросталь, Балашиха, Химки, Подольск, Мытищи, Королёв) — ЦЕЛЕВЫЕ, это НЕ мусор. Мусор по гео — только запросы про регионы ВНЕ Москвы и МО (например Благовещенск, Элиста, Санкт-Петербург, Екатеринбург). Верни СТРОГО JSON-массив без пояснений и без markdown: [{"candidate": string, "structural": boolean, "confident": boolean, "reason": string}]. confident=true только если сомнений нет.`
+            `\n\nЗАДАЧА КЛАССИФИКАТОРА: для каждого кандидата в минус-фразы реши, СТРУКТУРНЫЙ ли это мусор для нашего бизнеса (доставка обедов на коллективы). Мусор: чужое кафе/бренд/навигация к конкуренту; запросы не про доставку обедов на коллектив (вакансии, рецепты, розница на одного); запросы ДРУГИХ регионов. ГЕО: зона доставки — Москва и ВСЯ Московская область (регионы 213+1). Города МО (например Электросталь, Балашиха, Химки, Подольск, Мытищи, Королёв) — ЦЕЛЕВЫЕ, это НЕ мусор. Мусор по гео — только запросы про регионы ВНЕ Москвы и МО (например Благовещенск, Элиста, Санкт-Петербург, Екатеринбург). Верни СТРОГО JSON-массив без пояснений и без markdown: [{"candidate": string, "structural": boolean, "confident": boolean, "reason": string}]. confident=true только если сомнений нет.` +
+            (minusDoctrine ? `\n\n${minusDoctrine}` : '')
           const llmResult = await callBorisDirectLlm({
             purpose: 'minus_classify',
             tier: 'light',
@@ -1116,7 +1170,13 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // Cut 2 (спуск сильных конвертеров к минимуму) ОТКЛОНЁН витком 5: давал
         // +2 economics, но −9 discipline / −12 anomalies (болтанка вокруг порога
         // заявок = «пила»). Чистый спуск требует bounce-lock — в бэклог.
-        const converter = head.leads > 0
+        // ЭКОНОМИЧЕСКАЯ КОНСТИТУЦИЯ (ШАГ 6a): конвертера за 30д НЕ понижаем в
+        // минимум как «горелку» (заявка ценнее экономии на клике). Головная
+        // экономика 14д ИЛИ ≥1 заявка за 30д → трактуем как конвертера (нижний
+        // блок, «кормим»), а не хвост.
+        const conv30d =
+          conv30dByGroupQuery.get(`${groupId}\0${keyTextById.get(bid.KeywordId) ?? ''}`) ?? 0
+        const converter = head.leads > 0 || isProtectedConverter(conv30d)
         const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
         const phraseCode: ReasonCode = converter ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
         const rec = recommendBid({ auctionBids, desiredTv, currentBidMicro })
