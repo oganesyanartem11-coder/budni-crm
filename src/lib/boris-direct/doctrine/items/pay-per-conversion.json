@@ -1,0 +1,63 @@
+[
+  {
+    "id": "pay-per-conversion-1",
+    "claim": "Для стратегии «Максимум конверсий» (в т.ч. с оплатой за конверсии) обязателен счётчик Метрики с настроенными целями, установленный на сайте — без корректно работающей Метрики стратегия не запускается.",
+    "type": "LIMIT",
+    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/average-cpa", "title": "Максимум конверсий" },
+    "tags": ["pay-per-conversion", "autostrategy", "requirements", "metrika"],
+    "appliesTo": ["autostrategy"],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "pay-per-conversion-2",
+    "claim": "Порог для корректной работы стратегии «Максимум конверсий»: счётчик должен фиксировать не меньше ~10 конверсий по выбранной цели в неделю (для продвижения мобильных приложений — около 70 в неделю).",
+    "type": "LIMIT",
+    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/average-cpa", "title": "Максимум конверсий" },
+    "tags": ["pay-per-conversion", "autostrategy", "requirements", "conversions"],
+    "appliesTo": ["autostrategy"],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "pay-per-conversion-3",
+    "claim": "После запуска конверсионной стратегии нужен период обучения 7–14 дней — раньше делать выводы об эффективности рано.",
+    "type": "MECHANIC",
+    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/average-cpa", "title": "Максимум конверсий" },
+    "tags": ["pay-per-conversion", "autostrategy", "learning"],
+    "appliesTo": ["autostrategy"],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "pay-per-conversion-4",
+    "claim": "Точность оптимизации конверсионной стратегии растёт с числом конверсий: при 25 — доверительный интервал ±20%, при 100 — ±10%, при 400 — ±5%, при 2500 — ±2%. На малых числах результат статистически неустойчив.",
+    "type": "LIMIT",
+    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/average-cpa", "title": "Максимум конверсий" },
+    "tags": ["pay-per-conversion", "autostrategy", "statistics"],
+    "appliesTo": ["autostrategy"],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "pay-per-conversion-5",
+    "claim": "Оплата за конверсии — переход на автостратегию, где алгоритм оптимизирует показы под целевое действие и платишь за целевые визиты. Требует стабильного потока конверсий по цели.",
+    "type": "RECOMMENDATION",
+    "source": { "url": "https://yandex.ru/support/direct/ru/strategies/average-cpa", "title": "Максимум конверсий" },
+    "tags": ["pay-per-conversion", "autostrategy", "conversions"],
+    "appliesTo": ["autostrategy"],
+    "confidence": "HIGH",
+    "projectStance": "CONFLICTS",
+    "conflictNote": "Наш инвариант — РУЧНОЕ управление и пофразный экономбиддинг на поиске. Переход на оплату за конверсии требует ≥10 конверсий/нед по цели «Заявка» (у молодой кампании столько нет) и передаёт ставки алгоритму — против «ставки минимально достаточные, потолок 400 ₽». Максимум — гипотеза владельцу, не действие Бориса.",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]

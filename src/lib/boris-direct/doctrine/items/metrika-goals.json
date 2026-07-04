@@ -1,0 +1,50 @@
+[
+  {
+    "id": "metrika-goals-1",
+    "claim": "Метрика привязывается к кампании через поле «Счётчики Метрики» в настройках; система сама показывает счётчики, установленные на сайте. Для новых кампаний номер счётчика можно задать по умолчанию в настройках пользователя.",
+    "type": "MECHANIC",
+    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
+    "tags": ["metrika", "counter", "setup"],
+    "appliesTo": ["all"],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-2",
+    "claim": "Директ автоматически добавляет к ссылкам объявлений метку yclid с уникальным номером клика (например ?yclid=123456), чтобы Метрика связала клик с визитом. Yclid — резервный способ атрибуции, если привязанный счётчик не смог сопоставить клик и визит.",
+    "type": "MECHANIC",
+    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
+    "tags": ["metrika", "yclid", "tracking", "attribution"],
+    "appliesTo": ["all"],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-3",
+    "claim": "Цели Метрики — это важные действия посетителя (например, отправка формы заявки); конверсия — визит, в котором цель достигнута. На цели Директ опирается при оптимизации: конверсионные стратегии максимизируют число достижений цели.",
+    "type": "MECHANIC",
+    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/metrika", "title": "Яндекс Метрика: оценка эффективности продвижения" },
+    "tags": ["metrika", "goals", "conversions"],
+    "appliesTo": ["all"],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "metrika-goals-4",
+    "claim": "Параметры URL (метки в ссылке) — переменные, которые добавляют в ссылку на сайт, чтобы системы веб-аналитики получали дополнительную информацию о переходах. Автоматическая разметка Директа (yclid) — частный случай такой разметки.",
+    "type": "MECHANIC",
+    "source": { "url": "https://yandex.ru/support/direct/ru/statistics/url-tags", "title": "Параметры URL" },
+    "tags": ["metrika", "url-tags", "tracking"],
+    "appliesTo": ["all"],
+    "confidence": "MEDIUM",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]

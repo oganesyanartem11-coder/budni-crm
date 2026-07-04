@@ -1,0 +1,242 @@
+[
+  {
+    "id": "auction-1",
+    "claim": "На поиске Яндекса и на поисковых площадках РСЯ списываемая цена клика считается по правилам VCG-аукциона; на тематических площадках РСЯ и во внешних сетях — по правилам GSP. В VCG цена привязана к конкуренции за дополнительный трафик между позициями, в GSP — к ставке ближайшего конкурента снизу.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
+      "title": "Как работает аукцион в Директе"
+    },
+    "tags": [
+      "auction",
+      "price",
+      "vcg",
+      "gsp"
+    ],
+    "appliesTo": [
+      "search",
+      "rsya"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-2",
+    "claim": "Стоимость клика не фиксирована: она определяется торгами (аукционом) при каждом показе. Списываемая цена (то, что реально спишется за клик) — результат аукциона, она не равна назначенной ставке и динамически меняется от показа к показу.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "auction",
+      "price",
+      "bid"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-3",
+    "claim": "В отборе объявления ранжируются по комбинации ставки за клик, коэффициента качества и прогноза CTR для конкретного показа. В блок попадает объявление с лучшим сочетанием этих трёх показателей, а не просто с максимальной ставкой.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
+      "title": "Как работает аукцион в Директе"
+    },
+    "tags": [
+      "auction",
+      "ranking",
+      "ctr",
+      "quality"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-4",
+    "claim": "Если у объявлений совпадают ставка и коэффициент качества, выше в блоке встанет объявление с бОльшим прогнозом CTR. То есть более кликабельное/релевантное объявление занимает позицию повыше без повышения ставки.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
+      "title": "Как работает аукцион в Директе"
+    },
+    "tags": [
+      "auction",
+      "ranking",
+      "ctr"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-5",
+    "claim": "Объём трафика — величина, пропорциональная кликабельности места показа. В премиум-блоке из 4 мест объёмы: 1-е — 100, 2-е — 85, 3-е — 75, 4-е — 65 единиц. Для особо кликабельных мест (например, расширенный формат) объём может превышать 100.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "auction",
+      "traffic-volume",
+      "ranking"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-6",
+    "claim": "При ручных ставках на поиске от ставки зависит объём трафика: чем выше объём, тем больше кликов можно получить. Объём рассчитывается из показателей вашего объявления, объявлений конкурентов и коэффициентов качества.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
+      "title": "Максимум кликов с ручными ставками"
+    },
+    "tags": [
+      "auction",
+      "traffic-volume",
+      "bid",
+      "manual"
+    ],
+    "appliesTo": [
+      "search",
+      "manual"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-7",
+    "claim": "На поиске есть минимальная цена входа: при ставке ниже минимума объявление показывается только в РСЯ и на странице «Все объявления», но не в поисковой выдаче. Минимальная цена повышается при плохой истории размещения сайта (низкий совокупный CTR).",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "price",
+      "ctr",
+      "min-cpc"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-8",
+    "claim": "Несколько объявлений одного рекламодателя не конкурируют между собой в аукционе — в отбор выходит только одно (оптимальное) объявление. Не конкурируют объявления в одной кампании или ведущие на один домен/зеркала, даже в разных аккаунтах. Списываемая цена зависит лишь от победителя и объявлений других бизнесов.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/technologies-and-services/compete",
+      "title": "Неконкуренция объявлений"
+    },
+    "tags": [
+      "auction",
+      "price",
+      "compete"
+    ],
+    "appliesTo": [
+      "search",
+      "rsya"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-9",
+    "claim": "Коэффициент качества — оценка релевантности предложения интересу пользователя (соответствие объявления и посадочной страницы запросу); он участвует в ранжировании и влияет на списываемую цену. При этом общий «показатель качества аккаунта» напрямую на прогнозируемые ставки не влияет.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "auction",
+      "quality",
+      "ranking",
+      "price"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-10",
+    "claim": "Места в выдаче делятся на блоки: премиум-показы (спецразмещение) над результатами поиска дают больше всего кликов; остальные показы — в середине/внизу. Объявления отбираются отдельно для каждого блока по ставке, коэффициенту качества и прогнозу CTR.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/general/positions",
+      "title": "Места для продвижения в результатах поиска"
+    },
+    "tags": [
+      "auction",
+      "ranking",
+      "positions",
+      "ctr"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "auction-yard-1",
+    "claim": "Урок Ярда «Виды аукционов в Директе»: VCG-аукцион устроен так, что бизнесам невыгодно «напирать» ставками, чтобы задрать цену конкурентам выше — переплата за верхние позиции ложится и на самого агрессора, поэтому гонка ставок экономически не окупается.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yard.yandex.ru/courses/direct-prodvinutyy/aukcion",
+      "title": "Виды аукционов в Яндекс Директе и их механика (Ярд)"
+    },
+    "tags": [
+      "auction",
+      "vcg",
+      "price",
+      "yard"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]

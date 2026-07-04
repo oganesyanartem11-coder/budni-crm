@@ -13,7 +13,9 @@
 import type { DailyReportData } from './brain'
 import type { Anomaly } from './anomalies'
 import { callBorisDirectLlm } from './llm'
+import { formatCplWithValue } from './economics'
 import { getBorisDirectSystemPrompt } from './prompts'
+import { getDoctrineBlock, getRefutedCards, renderKnowledgeExperienceConflicts } from './doctrine'
 import { getDirectRoleState } from './state'
 import { getActiveLessonsForContext, formatLessonsBlock } from './lessons'
 
@@ -58,14 +60,25 @@ async function narrate(opts: {
   instruction: string
   dataBlock: string
   fallbackHeader: string
+  /** Теги справочной доктрины для секции промпта (разбор). Пусто → без доктрины. */
+  doctrineTags?: string[]
 }): Promise<string> {
   try {
     const state = await getDirectRoleState()
+    // Справочная доктрина — справка Яндекса, НЕ приказ (преамбула внутри блока).
+    // Влияет только на текст/суждение, цифры считает код. Ошибка загрузки не
+    // роняет отчёт (getDoctrineBlock всегда возвращает строку).
+    const doctrine = opts.doctrineTags?.length
+      ? getDoctrineBlock(opts.doctrineTags, { maxItems: 8, maxTokens: 900 })
+      : ''
+    const system =
+      getBorisDirectSystemPrompt({ mode: state.mode, frozen: false }) +
+      (doctrine ? `\n\n${doctrine}` : '')
     const result = await callBorisDirectLlm({
       purpose: opts.purpose,
       tier: 'heavy',
       critical: opts.critical,
-      system: getBorisDirectSystemPrompt({ mode: state.mode, frozen: false }),
+      system,
       userText: `${opts.instruction}\n\n${opts.dataBlock}`,
     })
     const text = result.text.trim()
@@ -146,7 +159,7 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     `- Клики: ${formatCount(d.clicks)}`,
     `- CTR: ${formatCtr(d.ctr)}`,
     `- Заявок всего: ${d.leadsTotal}, из Директа: ${d.leadsFromDirect}`,
-    `- Цена заявки: ${formatRub(d.costPerLeadRub)}`,
+    `- Цена заявки: ${formatCplWithValue(d.costPerLeadRub)}`,
     '',
     'ТОП-ЗАПРОСЫ:',
     topQueries,
@@ -257,6 +270,9 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     .slice(0, 3)
     .map(([query, s]) => `- «${query}»: 0 конверсий, ${s.clicks} кликов, ${Math.round(s.costRub)} ₽`)
 
+  // Мост опыт↔доктрина (ШАГ 5): где справка Яндекса опровергнута опытом кампании.
+  const konfliktyZnanieOpyt = renderKnowledgeExperienceConflicts(getRefutedCards())
+
   return [
     `Недельный отчёт (дней с данными: ${sorted.length})`,
     '',
@@ -266,7 +282,7 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     `- Клики: ${formatCount(clicks)}`,
     `- CTR: ${formatCtr(ctr)}`,
     `- Заявок всего: ${leadsTotal}, из Директа: ${leadsFromDirect}`,
-    `- Средняя цена заявки: ${formatRub(costPerLead)}`,
+    `- Средняя цена заявки: ${formatCplWithValue(costPerLead)}`,
     '',
     'ДИНАМИКА ПО ДНЯМ:',
     dayLines.length > 0 ? dayLines.join('\n') : 'данных за неделю нет',
@@ -282,6 +298,7 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
           `Уроки за неделю: новых ${extras.lessonsSummary.created}, подтверждено ${extras.lessonsSummary.confirmed}, опровергнуто ${extras.lessonsSummary.refuted}, устарело ${extras.lessonsSummary.staled}`,
         ]
       : []),
+    ...(konfliktyZnanieOpyt.length > 0 ? ['', ...konfliktyZnanieOpyt] : []),
     `Предложений без ответа владельца: ${extras.proposalsPending}`,
     `Стоимость аналитики за неделю (отдельные деньги, не рекламный бюджет): ~${extras.llmSpendUsd.toFixed(2)} $ / ${extras.llmCalls} обращений к LLM`,
   ].join('\n')
@@ -299,6 +316,7 @@ export async function generateWeeklyReportText(
       'Перескажи владельцу недельный отчёт по этим данным: итоги, динамика по дням, лучшие и худшие запросы. Коротко, HTML для Telegram, цифры НЕ менять и НЕ пересчитывать.',
     dataBlock: buildWeeklyDataBlock(days, extras),
     fallbackHeader: '📊 Недельный отчёт (без обработки — LLM недоступен)',
+    doctrineTags: ['strategies', 'auction', 'traffic-volume', 'budget', 'conversions', 'ctr', 'quality'],
   })
 }
 
@@ -356,7 +374,7 @@ export function buildMonthlyDataBlock(
     `- Клики: ${formatCount(clicks)}`,
     `- CTR: ${formatCtr(ctr)}`,
     `- Заявок всего: ${leadsTotal}, из Директа: ${leadsFromDirect}`,
-    `- Средняя цена заявки: ${formatRub(costPerLead)}`,
+    `- Средняя цена заявки: ${formatCplWithValue(costPerLead)}`,
     '',
     'ДИНАМИКА ЦЕНЫ ЗАЯВКИ ПО НЕДЕЛЯМ:',
     weekLines.length > 0 ? weekLines.join('\n') : 'данных за месяц нет',
@@ -379,6 +397,7 @@ export async function generateMonthlyReportText(
       'Перескажи владельцу итог месяца по этим данным: результат, динамика цены заявки по неделям, главный вывод. Коротко, HTML для Telegram, цифры НЕ менять и НЕ пересчитывать. Про стоимость аналитики (LLM) НЕ пиши — эту строку добавит код.',
     dataBlock: buildMonthlyDataBlock(days, extras),
     fallbackHeader: '📊 Месячный отчёт (без обработки — LLM недоступен)',
+    doctrineTags: ['strategies', 'auction', 'budget', 'conversions', 'pay-per-conversion'],
   })
   return (
     `${text}\n\n💰 На аналитику потрачено ~${extras.llmSpendUsd.toFixed(2)} $ / ` +

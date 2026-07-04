@@ -162,6 +162,21 @@ export function getLlmMonthlyCapUsd(): number {
 /** При какой доле потолка предупреждать владельца и пересаживать рутину на LIGHT. */
 export const LLM_CAP_WARN_RATIO = 0.8
 
+// ---------- Экономическая конституция: ценность заявки ----------
+
+/**
+ * Ценность одной заявки, ₽ (env BORIS_DIRECT_LEAD_VALUE_RUB, дефолт 20000 —
+ * синхронно с PriorityGoals Value кампании). Пока цена заявки < ценности —
+ * заявка выгодна; дорогой клик у КОНВЕРТЕРА не повод его резать (защита
+ * конвертеров живёт в economics.ts). Влияет только на суждение и тексты
+ * сводок, НЕ на код-предохранители/пороги.
+ */
+export function getLeadValueRub(): number {
+  const raw = process.env.BORIS_DIRECT_LEAD_VALUE_RUB
+  const parsed = raw ? Number(raw) : NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 20000
+}
+
 // ---------- Гео ----------
 
 /** Целевая зона доставки: Москва + МО (для фильтра вне-зонных запросов). */

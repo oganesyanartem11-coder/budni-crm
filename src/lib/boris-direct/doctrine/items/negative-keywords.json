@@ -1,0 +1,168 @@
+[
+  {
+    "id": "negative-keywords-1",
+    "claim": "Минус-слова задаются на уровне ключевой фразы (через оператор «-») и убирают показ, если в запросе есть это слово. Минус-фразы задаются на уровне группы или кампании и блокируют показ, когда в запросе присутствуют ВСЕ слова минус-фразы. Это два разных инструмента с разной зоной действия.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/negative-keywords",
+      "title": "Минус-слова и минус-фразы | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "mechanics"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-2",
+    "claim": "Минус-слова ключевой фразы, минус-фразы группы и минус-фразы кампании не заменяют друг друга, а применяются все вместе. Показа не будет ни по одному из перечисленных минусов — уровни минусовки складываются кумулятивно.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/negative-keywords",
+      "title": "Минус-слова и минус-фразы | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "mechanics"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-3",
+    "claim": "Лимит на длину одной минус-фразы — не более 7 слов.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/moderation/technical-restrictions",
+      "title": "Технические ограничения | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "limits"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-4",
+    "claim": "Символьные лимиты списка минус-фраз (без учёта пробелов): на уровне группы объявлений — 4096 символов, на уровне кампании — 20 000 символов.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/moderation/technical-restrictions",
+      "title": "Технические ограничения | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "limits"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-5",
+    "claim": "В Библиотеке минус-фраз можно создать до 30 наборов, каждый набор — до 4096 символов без учёта пробелов. К одной группе (и к кампании) можно привязать до 3 наборов минус-фраз.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/negative-keywords-library",
+      "title": "Библиотека минус-фраз | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "limits",
+      "library"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-6",
+    "claim": "Наборы минус-фраз из Библиотеки не заменяют, а дополняют минус-фразы, заданные в группе, и наравне с ними влияют на показы. Изменения в наборе автоматически применяются ко всем привязанным группам; удалить набор можно, только если он нигде не используется.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/negative-keywords-library",
+      "title": "Библиотека минус-фраз | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "library",
+      "mechanics"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-7",
+    "claim": "Операторы уточнения соответствия: «!» фиксирует форму слова (число, падеж, время), «+» фиксирует служебные (стоп-)слова, кавычки «\"\"» фиксируют количество слов (точная фраза без добавок), «[]» фиксируют порядок слов, а «()» с «|» группируют альтернативы в сложных запросах.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
+      "title": "Символы и операторы | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "operators",
+      "syntax"
+    ],
+    "appliesTo": [
+      "search",
+      "rsya"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "negative-keywords-8",
+    "claim": "В минус-фразах поддерживаются операторы соответствия: кавычки «\"\"» (точная фраза и её словоформы), квадратные скобки «[]» (порядок слов), «!» (точная форма слова) и «+» (обязательное служебное слово). Это позволяет минусовать прицельно, не отсекая лишний трафик.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/negative-keywords",
+      "title": "Минус-слова и минус-фразы | Яндекс Директ"
+    },
+    "tags": [
+      "negative-keywords",
+      "operators",
+      "syntax"
+    ],
+    "appliesTo": [
+      "search",
+      "rsya"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]
