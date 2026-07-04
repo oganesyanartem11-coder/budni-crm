@@ -1015,6 +1015,110 @@ function t24(rng: Rng): ScenarioConfig {
   })
 }
 
+/**
+ * T25. Внутри-групповой раскол (Цикл 2.0 — ключевой тест пофразного биддинга).
+ * В ОДНОЙ группе G1 живут доказанные конвертеры И «горелки» (клики есть,
+ * заявок нет). Групповое усреднение видит группу конвертящей и тащит горелки в
+ * дорогой TV75 — прямой слив бюджета (механизм потери M1). Пофразный биддинг
+ * судит КАЖДУЮ фразу по её собственной экономике: конвертеры → вход в нижний
+ * блок, горелки → минимум. Все фразы — G1 (индексы 0..8), один живой запрос.
+ */
+function t25(rng: Rng): ScenarioConfig {
+  const cpcByTv = makeCpcByTv(rng)
+  const conv = [0, 1] // гарантированные конвертеры G1-ядра
+  const burners = [5, 6, 7, 8] // «горелки»: объём кликов есть, CR≈0 → заявок нет
+  const over: Record<number, Partial<PhraseSpec>> = {}
+  for (const pi of conv) {
+    over[pi] = {
+      trueCr: round4(clamp(jitter(rng, 0.07, 0.1), 0.06, 0.08)),
+      demandPerDay: clamp(jitterInt(rng, 80, 0.15), 60, 100),
+    }
+  }
+  for (const pi of burners) {
+    over[pi] = {
+      trueCr: round4(clamp(jitter(rng, 0.001, 0.5), 0.0003, 0.002)),
+      demandPerDay: clamp(jitterInt(rng, 80, 0.15), 60, 100), // объём кликов, чтобы созреть в «горелку»
+    }
+  }
+  const phrases = makePhraseSet(rng, [0, 1, 2, 3, 4, 5, 6, 7, 8], over)
+  const queries = [makeTargetQuery(rng, TARGET_QUERY_VARIATIONS[1], [keywordIdOf(0)], { share: 0.05 })]
+  const ads = makeAds(rng)
+  const causeCodes: Record<string, ReasonCode> = {}
+  for (const pi of conv) causeCodes[`keyword:${keywordIdOf(pi)}`] = 'PROVEN_CONVERTER_VOLUME'
+  for (const pi of burners) causeCodes[`keyword:${keywordIdOf(pi)}`] = 'TAIL_MIN_TV'
+  return finish({
+    id: 'T25',
+    name: 'Внутри-групповой раскол',
+    set: 'tuning',
+    days: 21,
+    phrases,
+    queries,
+    ads,
+    cpcByTv,
+    expectations: {
+      causeCodes,
+      anomalies: [],
+      notes:
+        'В ОДНОЙ группе G1 — доказанные конвертеры (1001,1002, CR≈0.07) И «горелки» (1006–1009, ' +
+        'клики есть, CR≈0). Групповое усреднение видит группу конвертящей и тащит горелки в дорогой ' +
+        'TV75 — прямой слив (M1). Урок пофразного экономбиддинга: конвертеры → вход в нижний блок ' +
+        '(PROVEN_CONVERTER_VOLUME), горелки → минимум (TAIL_MIN_TV); ставка по КАЖДОЙ фразе из её ' +
+        'собственной цены заявки, а не по корзине группы.',
+    },
+  })
+}
+
+/**
+ * T26. Инверсия CTR↔CR: «горелка» с ВЫСОКИМ CTR (кликают, но не заявки) и
+ * конвертер с НИЗКИМ CTR (кликают мало, но заявки идут). Прямая атака на старую
+ * CTR-эвристику ядра (M2): она бы промоутила кликабельную-беззаявочную фразу и
+ * морила тихого конвертера. Пофразный ЛИД-сигнал не обманывается кликами.
+ */
+function t26(rng: Rng): ScenarioConfig {
+  const cpcByTv = makeCpcByTv(rng)
+  const highCtr = { 15: 0.06, 65: 0.1, 75: 0.13, 85: 0.15, 100: 0.17 }
+  const lowCtr = { 15: 0.01, 65: 0.02, 75: 0.03, 85: 0.04, 100: 0.05 }
+  const clickyBurner = 6 // высокий CTR, CR≈0
+  const quietConverter = 2 // низкий CTR, высокий CR
+  const over: Record<number, Partial<PhraseSpec>> = {
+    [clickyBurner]: {
+      trueCtrByTv: { ...highCtr },
+      trueCr: round4(clamp(jitter(rng, 0.001, 0.5), 0.0003, 0.002)),
+      demandPerDay: clamp(jitterInt(rng, 80, 0.15), 60, 100),
+    },
+    [quietConverter]: {
+      trueCtrByTv: { ...lowCtr },
+      trueCr: round4(clamp(jitter(rng, 0.08, 0.1), 0.07, 0.09)),
+      demandPerDay: clamp(jitterInt(rng, 90, 0.15), 70, 110),
+    },
+  }
+  const phrases = makePhraseSet(rng, [0, 1, 2, 3, 4, 5, 6, 7, 8], over)
+  const queries = [makeTargetQuery(rng, TARGET_QUERY_VARIATIONS[1], [keywordIdOf(0)], { share: 0.05 })]
+  const ads = makeAds(rng)
+  return finish({
+    id: 'T26',
+    name: 'Инверсия CTR и CR',
+    set: 'tuning',
+    days: 21,
+    phrases,
+    queries,
+    ads,
+    cpcByTv,
+    expectations: {
+      causeCodes: {
+        [`keyword:${keywordIdOf(clickyBurner)}`]: 'TAIL_MIN_TV',
+        [`keyword:${keywordIdOf(quietConverter)}`]: 'PROVEN_CONVERTER_VOLUME',
+      },
+      anomalies: [],
+      notes:
+        'Горелка 1007 кликабельна (высокий CTR), но CR≈0 — денег не приносит; конвертер 1003 тихий ' +
+        '(низкий CTR), но CR≈0.08 — заявки идут. Старая CTR-эвристика ядра промоутила бы 1007 и морила ' +
+        '1003. Урок: экономику решает ЛИД-сигнал фразы (TAIL_MIN_TV горелке, PROVEN_CONVERTER_VOLUME ' +
+        'конвертеру), а не кликабельность.',
+    },
+  })
+}
+
 // ============================================================
 // HOLDOUT: H01–H06
 // ============================================================
@@ -1239,6 +1343,7 @@ export function buildCatalog(baseSeed: number): ScenarioConfig[] {
   const builders: Array<(rng: Rng) => ScenarioConfig> = [
     t01, t02, t03, t04, t05, t06, t07, t08, t09, t10, t11, t12,
     t13, t14, t15, t16, t17, t18, t19, t20, t21, t22, t23, t24,
+    t25, t26,
     h01, h02, h03, h04, h05, h06,
   ]
   return builders.map((build, ordinal) => build(mulberry32(scenarioSeed(baseSeed, ordinal))))

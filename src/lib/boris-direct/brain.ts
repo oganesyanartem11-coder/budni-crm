@@ -1060,8 +1060,12 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           continue
         }
         // Пофразная классификация → целевой уровень + код природы фразы.
+        // Конвертер → вход в нижний блок (дешевле TV75), горелка → минимум.
+        // Cut 2 (спуск сильных конвертеров к минимуму) ОТКЛОНЁН витком 5: давал
+        // +2 economics, но −9 discipline / −12 anomalies (болтанка вокруг порога
+        // заявок = «пила»). Чистый спуск требует bounce-lock — в бэклог.
         const converter = head.leads > 0
-        const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL // конвертер→вход, горелка→минимум
+        const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
         const phraseCode: ReasonCode = converter ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
         const rec = recommendBid({ auctionBids, desiredTv, currentBidMicro })
         if (rec.changed) {

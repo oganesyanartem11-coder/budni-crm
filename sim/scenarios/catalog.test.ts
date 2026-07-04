@@ -42,20 +42,21 @@ describe('состав каталога', () => {
     expect(catalog.length).toBeGreaterThan(0)
   })
 
-  it('24 tuning + 6 holdout = 30 сценариев', () => {
+  it('26 tuning + 6 holdout = 32 сценария', () => {
     const tuning = catalog.filter((s) => s.set === 'tuning')
     const holdout = catalog.filter((s) => s.set === 'holdout')
-    expect(tuning.length).toBe(24)
+    // Цикл 2.0: +T25 (внутри-групповой раскол) +T26 (инверсия CTR/CR) под пофразный биддинг.
+    expect(tuning.length).toBe(26)
     expect(holdout.length).toBe(6)
-    expect(catalog.length).toBe(30)
+    expect(catalog.length).toBe(32)
     // Требования задания: tuning ≥ 20, holdout ≥ 5.
     expect(tuning.length).toBeGreaterThanOrEqual(20)
     expect(holdout.length).toBeGreaterThanOrEqual(5)
   })
 
-  it('ожидаемые id присутствуют (T01–T24, H01–H06)', () => {
+  it('ожидаемые id присутствуют (T01–T26, H01–H06)', () => {
     const ids = new Set(catalog.map((s) => s.id))
-    for (let i = 1; i <= 24; i++) expect(ids.has(`T${String(i).padStart(2, '0')}`)).toBe(true)
+    for (let i = 1; i <= 26; i++) expect(ids.has(`T${String(i).padStart(2, '0')}`)).toBe(true)
     for (let i = 1; i <= 6; i++) expect(ids.has(`H0${i}`)).toBe(true)
   })
 

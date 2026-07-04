@@ -21,7 +21,7 @@ import { assertNoNegativesOnNoise } from '../score/metamorphic'
 import { computeOracleVerdicts } from '../oracle/oracle'
 import type { ScenarioScore } from '../types'
 
-const SEEDS = [1, 2, 3]
+const SEEDS = [1, 2, 3, 4, 5]
 
 describe('Холостой замер Бориса (baseline)', () => {
   it(
