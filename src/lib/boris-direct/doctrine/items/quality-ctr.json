@@ -1,0 +1,202 @@
+[
+  {
+    "id": "quality-ctr-1",
+    "claim": "В поиске объявления отбираются отдельно для каждого блока и ранжируются по сочетанию трёх факторов: ставка за клик, коэффициент качества и прогноз CTR для конкретного показа. В блок попадает объявление с лучшим сочетанием показателей, а средняя цена клика определяется по правилам VCG-аукциона.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/general/positions",
+      "title": "Места для продвижения в результатах поиска | Яндекс Директ"
+    },
+    "tags": [
+      "ctr",
+      "quality",
+      "ranking",
+      "search"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-2",
+    "claim": "Прогноз CTR используется для расчёта ставки и оценивает кликабельность ещё до накопления собственной статистики. Он опирается на накопленную статистику показов и кликов по ключевой фразе, наличие слов из поискового запроса в тексте объявления и поведение пользователей в регионе показа.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки | Яндекс Директ"
+    },
+    "tags": [
+      "ctr",
+      "quality",
+      "forecast",
+      "search"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-3",
+    "claim": "Коэффициент качества — оценка релевантности предложения интересу пользователя: система сравнивает объявление и целевую страницу с запросом и анализирует поведение пользователя после клика. Низкий коэффициент качества снижает шансы объявления на показ.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки | Яндекс Директ"
+    },
+    "tags": [
+      "quality",
+      "relevance",
+      "landing"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-4",
+    "claim": "Объём трафика — величина, прямо пропорциональная кликабельности места показа объявления. В премиум-блоке поиска первое место получает объём 100, а следующие места — 85, 75 и 65 соответственно.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки | Яндекс Директ"
+    },
+    "tags": [
+      "traffic-volume",
+      "positions",
+      "search",
+      "limit"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-5",
+    "claim": "Статус «Мало показов» присваивается группе с очень низким трафиком: при текущих настройках она показывается крайне редко или не показывается вообще и фактически не участвует в аукционе. Статус обновляется несколько раз в сутки, и система снимает его сама, если пользователи начнут чаще искать хотя бы одно ключевое слово группы.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/adv/news/malo-pokazov-novyy-status-dlya-grupp-obyavleniy-v-direkte",
+      "title": "«Мало показов» — анонс нового статуса для групп объявлений в Директе — Новости Яндекс Рекламы"
+    },
+    "tags": [
+      "quarantine",
+      "shows",
+      "learning",
+      "search"
+    ],
+    "appliesTo": [
+      "search",
+      "rsya"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-6",
+    "claim": "Чтобы вывести группу из статуса «Мало показов», Яндекс советует объединять низкочастотные фразы в одну группу, смягчать операторы соответствия и повышать ставку — особенно для сетей, чтобы выигрывать больше торгов. Менять настройки при этом не обязательно.",
+    "type": "RECOMMENDATION",
+    "source": {
+      "url": "https://yandex.ru/adv/news/malo-pokazov-novyy-status-dlya-grupp-obyavleniy-v-direkte",
+      "title": "«Мало показов» — анонс нового статуса для групп объявлений в Директе — Новости Яндекс Рекламы"
+    },
+    "tags": [
+      "quarantine",
+      "shows",
+      "bids",
+      "rsya"
+    ],
+    "appliesTo": [
+      "search",
+      "rsya"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "CONFLICTS",
+    "conflictNote": "Совет «повышать ставку» ради выхода из «Мало показов» противоречит правилу минимально достаточных ставок и запрету раздувать бюджет ради объёма; часть «особенно для сетей» противоречит выключенной РСЯ. Допустимо только объединение конвертеров/смягчение операторов, но не рост ставки ради объёма показов без конверсий.",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-7",
+    "claim": "Для стабильного обучения конверсионной стратегии «Максимум конверсий» нужно не менее 10 конверсий в неделю (для мобильных приложений — 70). На старте стратегия собирает статистику, результат рекомендуют оценивать через 7–14 дней; при малом объёме конверсий разброс цены конверсии никак не ограничивается.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/average-cpa",
+      "title": "Максимум конверсий | Яндекс Директ"
+    },
+    "tags": [
+      "learning",
+      "autostrategy",
+      "conversions",
+      "quarantine"
+    ],
+    "appliesTo": [
+      "autostrategy"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-8",
+    "claim": "Автостратегии обучаются в большинстве случаев несколько недель. Обучение перезапускается при смене типа стратегии, целевого действия, модели оплаты, места показа, ограничения расхода или при приостановке дольше 7 дней; после перезапуска нужно время на новый прогноз, а частые изменения затрудняют прогнозирование.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/select-strategy",
+      "title": "Стратегии показов | Яндекс Директ"
+    },
+    "tags": [
+      "learning",
+      "autostrategy",
+      "restart",
+      "quarantine"
+    ],
+    "appliesTo": [
+      "autostrategy"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "quality-ctr-9",
+    "claim": "У новой кампании показов мало из-за: нехватки средств на счёте, низкого соотношения бюджета к ставкам, ставок ниже минимальной цены клика, низкого коэффициента качества или прогноза CTR, а также незавершённой либо непройденной модерации. Изменения и модерация активизируются с задержкой до 180 минут (после остановки — до 60).",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/shows",
+      "title": "Показ объявлений | Яндекс Директ"
+    },
+    "tags": [
+      "shows",
+      "quarantine",
+      "moderation",
+      "quality"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]

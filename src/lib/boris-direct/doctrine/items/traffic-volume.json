@@ -1,0 +1,211 @@
+[
+  {
+    "id": "traffic-volume-1",
+    "claim": "Объём трафика — величина, прямо пропорциональная кликабельности места показа. В блоке премиум-показов (4 места) шкала: 1-е место = 100 ед., 2-е = 85, 3-е = 75, 4-е = 65. Для расширенных форматов значение может быть выше 100. Больше объём трафика — больше потенциальных кликов.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
+      "title": "Как работает аукцион в Директе"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "premium"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-2",
+    "claim": "Прогноз объёма трафика зависит от показателей вашего объявления и конкурентов: ставок, коэффициентов качества и прогнозов CTR на каждый показ. Учитываются также дизайн объявления, число мест в блоке и позиция на странице поиска. Конкуренция считается по всем выбранным регионам показа.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "ctr",
+      "quality"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-3",
+    "claim": "VCG-аукцион: каждый дополнительный объём трафика оплачивается по ставке ближайшего конкурента на эту позицию, а основной трафик не дорожает при подъёме на более заметные места. Пример Яндекса (ставки 10/7/5/3/2 ₽): базовые 65 ед. — по 2 ₽, +10 ед. — по 3 ₽, +10 ед. — по 5 ₽, верхние 15 ед. — по 7 ₽.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/technologies-and-services/vcg-auction",
+      "title": "Как работает аукцион в Директе"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "vcg",
+      "charged-price"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-4",
+    "claim": "Списываемая цена — средняя цена за клик за соответствующий объём трафика; она динамически меняется, но при ручных ставках без повышающих корректировок не превышает заданную ставку. Превысить ставку списываемая цена может при повышающих корректировках или прогнозе высокой вероятности конверсии (автостратегии/оплата за конверсии).",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "charged-price"
+    ],
+    "appliesTo": [
+      "search",
+      "manual",
+      "autostrategy"
+    ],
+    "confidence": "MEDIUM",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-5",
+    "claim": "Есть минимальная цена клика на поиске: если ставка ниже неё, объявление не попадает в основные поисковые блоки и показывается только в РСЯ и на странице «Все объявления». Минимальная цена может повышаться при плохой истории сайта в Директе, например при низком совокупном CTR.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/troubleshooting/bidding.html?lang=ru",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "min-cpc"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-6",
+    "claim": "Яндекс: больший объём трафика достигается не только повышением ставки, но и улучшением эффективности продвижения — релевантности объявления запросу, качества и посадочной страницы, что поднимает прогноз CTR и коэффициент качества.",
+    "type": "RECOMMENDATION",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "ctr",
+      "quality"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-7",
+    "claim": "В ручной стратегии Яндекс советует подбирать ставку по KPI бизнеса, а не гнаться за объёмом трафика или позицией показа. Ориентиры для расчёта: ставка = CPA × CR; ставка = средний чек × CR × ДРР; ставка = средний чек × CR / (ROI + 1).",
+    "type": "RECOMMENDATION",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
+      "title": "Максимум кликов с ручными ставками"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "manual",
+      "kpi"
+    ],
+    "appliesTo": [
+      "search",
+      "manual"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-8",
+    "claim": "Яндекс определяет «оптимальную ставку» как максимальную рентабельную цену клика, которую вы готовы платить, чтобы получить как можно больше трафика. Такая формулировка подталкивает ставить по верхней границе рентабельности ради объёма.",
+    "type": "RECOMMENDATION",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
+      "title": "Максимум кликов с ручными ставками"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "manual"
+    ],
+    "appliesTo": [
+      "search",
+      "manual"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "CONFLICTS",
+    "conflictNote": "Наше правило — ставки минимально достаточные, бюджет не раздуваем, потолок 400 ₽; north star — максимум заявок на рубль, а не максимум трафика. Совет ставить максимальную рентабельную цену ради объёма противоречит минимально достаточным ставкам.",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-9",
+    "claim": "Средний объём трафика и списываемые цены отслеживаются в Мастере отчётов: метрики «Ср. объём трафика», «Ср. ставка за клик», «Клики», «Расход» (группировка по объявлению/фразе). В настройках кампании можно включить уведомления об изменениях объёма трафика.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/strategies/manual-strategy",
+      "title": "Максимум кликов с ручными ставками"
+    },
+    "tags": [
+      "bids",
+      "traffic-volume",
+      "auction",
+      "reporting",
+      "manual"
+    ],
+    "appliesTo": [
+      "search",
+      "manual"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]

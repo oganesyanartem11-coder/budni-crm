@@ -1,0 +1,227 @@
+[
+  {
+    "id": "keywords-match-1",
+    "claim": "Оператор «!» перед словом фиксирует его словоформу — число, падеж и время. Объявление не показывается по запросам, где слово стоит в другой форме. Пример: «!москву» не даёт показ по «москве». Помогает отсечь показы по нецелевых словоформах.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
+      "title": "Символы и операторы | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "match-operators",
+      "targeting",
+      "word-form",
+      "exclamation"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-2",
+    "claim": "Оператор «+» фиксирует стоп-слова (предлоги, союзы, местоимения), которые Директ по умолчанию игнорирует при подборе. С ним запрос обязан содержать это служебное слово. Пример: «+на дому» не совпадёт с «по дому».",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
+      "title": "Символы и операторы | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "match-operators",
+      "targeting",
+      "stop-words",
+      "plus"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-3",
+    "claim": "Кавычки фиксируют количество слов: показ только по запросам ровно из слов внутри кавычек, без добавочных слов; порядок и словоформы при этом НЕ фиксируются. Пример: «купить машину» покажется по «машину купить», но не по «купить подержанную машину».",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
+      "title": "Символы и операторы | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "match-operators",
+      "targeting",
+      "phrase-match",
+      "quotes"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-4",
+    "claim": "Квадратные скобки фиксируют порядок слов между ними; словоформы и стоп-слова внутри учитываются, но не фиксируются. Пример: [из москвы в уфу] не покажется по «из уфы в москву». Полезно там, где порядок меняет смысл (направления, «цена за …»).",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/symbols-and-operators",
+      "title": "Символы и операторы | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "match-operators",
+      "targeting",
+      "word-order",
+      "brackets"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-5",
+    "claim": "Без операторов работает широкое соответствие: показ по разным словоформам, вложенным запросам, изменённому порядку слов и синонимам (напр. «в платье белом» → «белое платье»). Операторы требуют аккуратности; квадратные и круглые скобки нельзя использовать в одной фразе одновременно.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/adv/edu/materials/operatory-sootvetstviya-v-direct",
+      "title": "Операторы соответствия в Директе: что это такое и как ими пользоваться"
+    },
+    "tags": [
+      "keywords",
+      "match-operators",
+      "targeting",
+      "broad-match"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-6",
+    "claim": "Технические лимиты ключевой фразы: не более 7 слов и до 4096 символов (с учётом минус-слов, пробелов и операторов); не более 200 фраз в одной группе объявлений. Допустимы буквы ряда алфавитов, кавычки, «-», «+», «!», пробел и операторы Директа.",
+    "type": "LIMIT",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/keywords",
+      "title": "Ключевые фразы | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "targeting",
+      "limits"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-7",
+    "claim": "На поиске показ идёт не только по пословному соответствию (запрос содержит фразу целиком), но и по семантическому: опечатки, синонимы, более конкретные слова, переформулировки. Пример: «туры на марс» покажется по «горящие туры на марс», но не по «туры на луну». Стоп-слова учитываются автоматически.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/keywords",
+      "title": "Ключевые фразы | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "targeting",
+      "semantic-match",
+      "search-queries"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-8",
+    "claim": "Wordstat показывает число показов по запросу в месяц, динамику и различия по регионам, а также похожие запросы. Яндекс советует конкретизировать слишком широкие фразы («ремонт квартир» вместо «ремонт») и добавлять минус-слова, чтобы отсечь нерелевантный трафик.",
+    "type": "RECOMMENDATION",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/keywords/wordstat",
+      "title": "Сервис подбора слов | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "targeting",
+      "wordstat",
+      "negative-keywords"
+    ],
+    "appliesTo": [
+      "all"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-9",
+    "claim": "Отчёт «Поисковые запросы» показывает реальные запросы, вызвавшие показы, за последние 180 дней, с типом соответствия (пословное/семантическое) и категорией (целевые/альтернативные/сопутствующие). Нерелевантные запросы можно добавить в минус-фразы, релевантные — в ключевые фразы группы.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/statistics/search-queries",
+      "title": "Отчет «Поисковые запросы» | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "targeting",
+      "search-queries",
+      "negative-keywords"
+    ],
+    "appliesTo": [
+      "search"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "ALIGNED",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  },
+  {
+    "id": "keywords-match-10",
+    "claim": "Автотаргетинг показывает объявления без ключевых фраз, подбирая запросы по тексту объявления и посадочной, и работает наравне с фразами. В Единой перфоманс-кампании на поиске он обязателен, показы по «целевым» запросам отключить нельзя. Яндекс предупреждает: любое сужение (в т.ч. отключение категорий) снижает охваты.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/impression-criteria/autotargeting",
+      "title": "Автотаргетинг | Яндекс Директ"
+    },
+    "tags": [
+      "keywords",
+      "targeting",
+      "autotargeting",
+      "match-operators"
+    ],
+    "appliesTo": [
+      "search",
+      "autostrategy"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "CONFLICTS",
+    "conflictNote": "Наша кампания — ручные ставки и узкий подбор по фразам с активной минусовкой, north star — заявки, а не охват. Обязательность автотаргетинга и позиция Яндекса «не сужайте, иначе упадут охваты» противоречат принципу отсекать объём показов без конверсий и не раздувать показы/бюджет.",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-04"
+  }
+]
