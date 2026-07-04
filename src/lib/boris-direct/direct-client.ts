@@ -161,7 +161,6 @@ export interface KeywordRecord {
   AdGroupId: number
   State: string
   Status: string
-  StatusClarification?: string
   Bid?: number
 }
 
@@ -175,7 +174,9 @@ async function getKeywordsRaw(): Promise<KeywordRecord[]> {
       'get',
       {
         SelectionCriteria: { CampaignIds: [DIRECT_CAMPAIGN_ID] },
-        FieldNames: ['Id', 'Keyword', 'AdGroupId', 'State', 'Status', 'StatusClarification', 'Bid'],
+        // FieldNames — только валидные поля keywords.get. StatusClarification
+        // ЗДЕСЬ невалиден (это поле ads.get/campaigns.get) → код 8000; убран.
+        FieldNames: ['Id', 'Keyword', 'AdGroupId', 'State', 'Status', 'Bid'],
         Page: { Limit: PAGE_LIMIT, Offset: offset },
       }
     )
