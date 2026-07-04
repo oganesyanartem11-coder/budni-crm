@@ -829,8 +829,44 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
 
   // 6. МИНУСА: data-driven кандидаты → механика/ядро/дедуп → LLM-классификатор
   // структурного мусора → автономно ИЛИ предложение владельцу.
+  //
+  // ОКНО (виток 6): кандидаты берём по НАКОПЛЕННЫМ за окно показам, а не за один
+  // вчерашний день. Низкообъёмный, но стабильный мусор (10 показов/день ×
+  // 21 день = 210) виден в СУММЕ, но не пробивает дневной порог 30 — раньше
+  // Борис его не резал и оракул фиксировал слив. Fallback на вчерашний отчёт,
+  // если истории окна нет (молодая кампания).
   try {
-    const candidates = pickDataDrivenMinusCandidates(rows)
+    let minusRows: QueryStatRow[] = rows
+    try {
+      const windowStartMinus = new Date(dayStart.getTime() - (PHRASE_ECON_WINDOW_DAYS - 1) * DAY_MS)
+      const ws = await prisma.borisDirectQueryDailyStat.findMany({
+        where: { date: { gte: windowStartMinus, lte: dayStart } },
+      })
+      if (ws.length > 0) {
+        // Агрегат по ТЕКСТУ запроса (минус — кампейн-левел, группа не важна).
+        const agg = new Map<string, QueryStatRow>()
+        for (const s of ws) {
+          const cur = agg.get(s.query) ?? {
+            query: s.query,
+            adGroupName: s.adGroupName ?? '',
+            adGroupId: s.adGroupId,
+            impressions: 0,
+            clicks: 0,
+            costRub: 0,
+            conversions: 0,
+          }
+          cur.impressions += s.impressions
+          cur.clicks += s.clicks
+          cur.costRub += Number(s.costRub)
+          cur.conversions += s.conversions
+          agg.set(s.query, cur)
+        }
+        minusRows = [...agg.values()]
+      }
+    } catch (err) {
+      console.error('[boris-direct/brain] окно минусовки недоступно — вчерашний отчёт', err)
+    }
+    const candidates = pickDataDrivenMinusCandidates(minusRows)
     if (candidates.length > 0) {
       const keywordsSnap = (await latestSnapshotPayload<KeywordRecord[]>('keywords')) ?? []
       const coreKeywords = keywordsSnap.map((k) => k.Keyword)
@@ -841,7 +877,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       // не ошибка, операция применяется).
       const prepared = prepareMinusCandidates(candidates, { coreKeywords, existingMinus: [] })
 
-      const statByQuery = new Map(rows.map((r) => [r.query, r]))
+      const statByQuery = new Map(minusRows.map((r) => [r.query, r]))
 
       // LLM (light) — ТОЛЬКО суждение «структурный мусор или нет», никаких чисел.
       let classified: ClassifiedCandidate[] = []

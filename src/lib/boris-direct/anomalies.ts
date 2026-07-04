@@ -19,6 +19,16 @@ const IMPRESSIONS_DROP_RATIO = 0.2
 /** Обрыв показов меряем только при осмысленном среднем (≥50 показов/день). */
 const IMPRESSIONS_MIN_AVG = 50
 
+/**
+ * Ноль заявок тревожит ТОЛЬКО при СОЛИДНОМ недавнем потоке (≥2 заявки/день в
+ * среднем за 7 дней). Было ≥1 — но на низкообъёмном B2B (1–2 заявки/день) с
+ * лагом конверсии единичный нулевой будний день ПОСЛЕ выходных — норма, не
+ * поломка формы. Порог 2 отсекает лаг-эхо низкого объёма, оставляя реальные
+ * обвалы (была устойчивая ≥2/день — вдруг ноль). [Цикл 2.0, виток 7:
+ * было≥1 → стало≥2, на утверждение владельца.]
+ */
+const LEADS_ZERO_MIN_AVG = 2
+
 /** Катастрофа: расход сегодня пробил дневной бюджет с запасом ×1.5. */
 const CATASTROPHE_BUDGET_FACTOR = 1.5
 
@@ -93,7 +103,7 @@ export function detectAnomalies(input: AnomalyInput): Anomaly[] {
     !input.yesterdayIsWeekend &&
     input.leadsYesterday === 0 &&
     input.avgLeads7d != null &&
-    input.avgLeads7d >= 1
+    input.avgLeads7d >= LEADS_ZERO_MIN_AVG
   ) {
     anomalies.push({
       severity: 'warn',

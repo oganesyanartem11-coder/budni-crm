@@ -59,9 +59,14 @@ describe('detectAnomalies', () => {
     expect(detectAnomalies(makeInput({ addMetricaTag: null }))).toEqual([])
   })
 
-  it('заявки упали в ноль после того как были (avg7d ≥ 1) → warn', () => {
-    const res = detectAnomalies(makeInput({ leadsYesterday: 0, avgLeads7d: 1.5 }))
+  it('заявки упали в ноль при СОЛИДНОМ потоке (avg7d ≥ 2) → warn', () => {
+    const res = detectAnomalies(makeInput({ leadsYesterday: 0, avgLeads7d: 2.5 }))
     expect(res).toContainEqual(expect.objectContaining({ severity: 'warn', kind: 'leads_zero' }))
+  })
+
+  it('ноль заявок при низком потоке (avg7d 1.5 < 2) → НЕ тревога (лаг-эхо низкого объёма)', () => {
+    const res = detectAnomalies(makeInput({ leadsYesterday: 0, avgLeads7d: 1.5 }))
+    expect(res.find((a) => a.kind === 'leads_zero')).toBeUndefined()
   })
 
   it('ВЫХОДНОЙ: ноль заявок и обрыв показов НЕ аномалия (B2B-сезонность)', () => {
