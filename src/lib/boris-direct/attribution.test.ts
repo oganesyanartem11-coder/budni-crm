@@ -36,6 +36,7 @@ function makeLead(overrides: Partial<LeadForAttribution> = {}): LeadForAttributi
     utmTerm: null,
     source: null,
     phoneDigits: null,
+    name: null,
     ...overrides,
   }
 }
@@ -160,6 +161,29 @@ describe('toQueryStatRow', () => {
     expect(row.impressions).toBe(0)
     expect(row.clicks).toBe(0)
     expect(row.costRub).toBe(0)
+  })
+
+  it('ШАГ 5: конверсии из суффиксной колонки Conversions_<goalId>_LSCCD (Goals в отчёте)', () => {
+    // Реальный формат прода: голой Conversions НЕТ, есть суффиксная колонка цели.
+    const row = toQueryStatRow({
+      Query: 'бизнес ланч доставка москва',
+      AdGroupName: 'G1',
+      AdGroupId: '5769314414',
+      Impressions: '2',
+      Clicks: '1',
+      Cost: '603.65',
+      Conversions_575665118_LSCCD: '1',
+    })
+    expect(row.conversions).toBe(1)
+  })
+
+  it('ШАГ 5: суффиксная колонка цели приоритетнее голой Conversions', () => {
+    const row = toQueryStatRow({
+      Query: 'q',
+      Conversions: '0',
+      Conversions_575665118_LSCCD: '3',
+    })
+    expect(row.conversions).toBe(3)
   })
 })
 

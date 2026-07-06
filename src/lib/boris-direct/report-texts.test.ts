@@ -329,6 +329,44 @@ describe('buildWeeklyDataBlock — агрегация кодом', () => {
     expect(block).toContain('Средняя цена заявки: нет данных')
   })
 
+  it('ШАГ 4: leadCounts → три счётчика + различия + оговорка о слепой БД + явный период', () => {
+    const block = buildWeeklyDataBlock(days, {
+      llmSpendUsd: 0,
+      llmCalls: 0,
+      proposalsPending: 0,
+      period: { from: '2026-06-30', to: '2026-07-05' },
+      leadCounts: { directAttrib: 3, metrika: 6, delivered: 1, deliveredBlindBefore: '2026-07-04' },
+    })
+    expect(block).toContain('период 30.06–05.07')
+    expect(block).toContain('Директ-атрибуция (клик→цель, отчёт Директа): 3')
+    expect(block).toContain('Метрика (достижения цели 575665118): 6')
+    expect(block).toContain('Доставлено (в чат/БД LandingLead): 1')
+    expect(block).toContain('Различия:') // 6>1 и 6>3 → строка о различиях
+    expect(block).toContain('БД LandingLead слепа до 04.07')
+    // старой одиночной строки быть не должно, когда есть три счётчика
+    expect(block).not.toContain('Заявок всего:')
+  })
+
+  it('ШАГ 3а: конвертер в «худших» — только с оговоркой «КОНВЕРТЕР»', () => {
+    const withConverter = [
+      day({
+        dateLabel: '2026-07-03',
+        spendRub: 1276,
+        clicks: 1,
+        impressions: 7,
+        topQueries: [
+          { query: 'корпоративное питание с доставкой москва', clicks: 1, costRub: 1276, conversions: 0 },
+        ],
+      }),
+    ]
+    const block = buildWeeklyDataBlock(withConverter, { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
+    // фраза с 0 конверсий и большим расходом попала бы в «худшие», но она конвертер:
+    expect(block).toContain('корпоративное питание с доставкой москва')
+    expect(block).toContain('КОНВЕРТЕР (защищён, не режем)')
+    // и она же перечислена в секции «под защитой»
+    expect(block).toContain('КОНВЕРТЕРЫ ПОД ЗАЩИТОЙ')
+  })
+
   it('lessonsSummary передан → строка «Уроки за неделю» добавлена кодом', () => {
     const block = buildWeeklyDataBlock([day()], {
       llmSpendUsd: 0,

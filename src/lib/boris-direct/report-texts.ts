@@ -15,6 +15,7 @@ import type { Anomaly } from './anomalies'
 import { BID_CEILING_MICRO, MICRO } from './config'
 import { callBorisDirectLlm } from './llm'
 import { formatCplWithValue } from './economics'
+import { isRegisteredConverter, converterLessonsForContext } from './converters'
 import { getBorisDirectSystemPrompt } from './prompts'
 import { getDoctrineBlock, getRefutedCards, renderKnowledgeExperienceConflicts } from './doctrine'
 import { getDirectRoleState } from './state'
@@ -165,7 +166,10 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
                   ? ' — алгоритмическая надбавка (дорого, но конвертит)'
                   : ' — алгоритмическая надбавка (наблюдаю, не баг данных)'
                 : ''
-            return `- «${q.query}»: ${q.clicks} кликов, ${Math.round(q.costRub)} ₽, конверсий ${q.conversions}${surcharge}`
+            // ШАГ 3а: подтверждённый конвертер — с оговоркой (даже в «дорогих»),
+            // чтобы Борис не трактовал его как кандидата на рез с мотивом «дорого».
+            const converterMark = isRegisteredConverter(q.query) ? ' [КОНВЕРТЕР — защищён]' : ''
+            return `- «${q.query}»: ${q.clicks} кликов, ${Math.round(q.costRub)} ₽, конверсий ${q.conversions}${surcharge}${converterMark}`
           })
           .join('\n')
       : 'нет данных'
@@ -243,6 +247,51 @@ export interface WeeklyReportExtras {
   proposalsPending: number
   /** Итог еженедельной дистилляции уроков (если она была на этой неделе). */
   lessonsSummary?: { created: number; confirmed: number; refuted: number; staled: number }
+  /** ШАГ 4: явный период отчёта (МСК 'YYYY-MM-DD'). Пусто → период не печатаем. */
+  period?: { from: string; to: string }
+  /**
+   * ШАГ 4б: три независимых счётчика заявок (правда о заявках недели):
+   * - directAttrib — Директ-атрибуция (клик→цель, суффиксная колонка отчёта);
+   * - metrika — достижения цели 575665118 (Метрика);
+   * - delivered — доставлено (LandingLead/чат), с оговоркой о слепоте БД.
+   * Пусто → печатаем прежнюю одну строку «Заявок всего…» (обратная совместимость).
+   */
+  leadCounts?: {
+    directAttrib: number
+    metrika: number
+    delivered: number
+    /** Дата, до которой БД LandingLead была слепа (persist не существовал), МСК. */
+    deliveredBlindBefore?: string
+  }
+}
+
+/** 'YYYY-MM-DD' → 'DD.MM'. */
+function ddmm(dateMsk: string): string {
+  return `${dateMsk.slice(8, 10)}.${dateMsk.slice(5, 7)}`
+}
+
+/**
+ * ШАГ 4б: три строки заявок + полстроки о различиях. Возвращает массив строк
+ * (пусто → блок не рендерит, вызывающий печатает прежнюю одиночную строку).
+ */
+function leadCountsLines(lc: NonNullable<WeeklyReportExtras['leadCounts']>): string[] {
+  const lines = [
+    'ЗАЯВКИ ЗА НЕДЕЛЮ (три счётчика — считаны кодом):',
+    `- Директ-атрибуция (клик→цель, отчёт Директа): ${lc.directAttrib}`,
+    `- Метрика (достижения цели 575665118): ${lc.metrika}`,
+    `- Доставлено (в чат/БД LandingLead): ${lc.delivered}`,
+  ]
+  // Полстроки о различиях: почему счётчики не сходятся.
+  const diffs: string[] = []
+  if (lc.metrika > lc.delivered) diffs.push('Метрика > Доставлено — часть достижений могла быть фантомами до фикса фронта либо потеряна фронтом')
+  if (lc.metrika > lc.directAttrib) diffs.push('Метрика > Директ-атрибуции — атрибуция требует yclid (лиды без тега/no-yclid в неё не попадают)')
+  if (diffs.length) lines.push(`Различия: ${diffs.join('; ')}.`)
+  if (lc.deliveredBlindBefore) {
+    lines.push(
+      `Оговорка: БД LandingLead слепа до ${ddmm(lc.deliveredBlindBefore)} (persist добавлен ${ddmm(lc.deliveredBlindBefore)}) — «Доставлено» за неделю опирается на подтверждённый список владельца, не на пустую БД.`
+    )
+  }
+  return lines
 }
 
 /** Агрегат по запросу за период (суммы по дням, где запрос попал в топ). */
@@ -298,20 +347,38 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     .filter(([, s]) => s.conversions === 0)
     .sort((a, b) => b[1].costRub - a[1].costRub)
     .slice(0, 3)
-    .map(([query, s]) => `- «${query}»: 0 конверсий, ${s.clicks} кликов, ${Math.round(s.costRub)} ₽`)
+    .map(([query, s]) => {
+      // ШАГ 3а: подтверждённый конвертер в «худших» — ТОЛЬКО с оговоркой.
+      const mark = isRegisteredConverter(query) ? ' — КОНВЕРТЕР (защищён, не режем)' : ''
+      return `- «${query}»: 0 конверсий, ${s.clicks} кликов, ${Math.round(s.costRub)} ₽${mark}`
+    })
 
   // Мост опыт↔доктрина (ШАГ 5): где справка Яндекса опровергнута опытом кампании.
   const konfliktyZnanieOpyt = renderKnowledgeExperienceConflicts(getRefutedCards())
 
+  // ШАГ 4б: если переданы три счётчика — печатаем их (правда о заявках);
+  // иначе прежняя одна строка (обратная совместимость с sim/тестами).
+  const leadsSection = extras.leadCounts
+    ? leadCountsLines(extras.leadCounts)
+    : [`- Заявок всего: ${leadsTotal}, из Директа: ${leadsFromDirect}`]
+
+  // ШАГ 3а: подтверждённые конвертеры под защитой — surface в отчёт (память).
+  const converterLines = converterLessonsForContext().map((l) => `- ${l.text}`)
+
+  // ШАГ 4а: явный период в шапке (если передан).
+  const header = extras.period
+    ? `Недельный отчёт — период ${ddmm(extras.period.from)}–${ddmm(extras.period.to)} (дней с данными: ${sorted.length})`
+    : `Недельный отчёт (дней с данными: ${sorted.length})`
+
   return [
-    `Недельный отчёт (дней с данными: ${sorted.length})`,
+    header,
     '',
     'ИТОГИ НЕДЕЛИ (посчитаны кодом):',
     `- Расход: ${formatRub(spendRub)}`,
     `- Показы: ${formatCount(impressions)}`,
     `- Клики: ${formatCount(clicks)}`,
     `- CTR: ${formatCtr(ctr)}`,
-    `- Заявок всего: ${leadsTotal}, из Директа: ${leadsFromDirect}`,
+    ...leadsSection,
     `- Средняя цена заявки: ${formatCplWithValue(costPerLead)}`,
     '',
     'ДИНАМИКА ПО ДНЯМ:',
@@ -321,6 +388,9 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     best.length > 0 ? best.join('\n') : 'нет',
     'ХУДШИЕ ЗАПРОСЫ (расход без конверсий):',
     worst.length > 0 ? worst.join('\n') : 'нет',
+    '',
+    'КОНВЕРТЕРЫ ПОД ЗАЩИТОЙ (не минусовать/не выключать/не понижать «дорого»):',
+    converterLines.length > 0 ? converterLines.join('\n') : 'нет',
     '',
     // Итог дистилляции уроков — детерминированно, кодом (не LLM).
     ...(extras.lessonsSummary

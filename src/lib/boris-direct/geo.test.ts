@@ -39,6 +39,25 @@ describe('classifyQueryGeo — зона доставки Москва+МО (213+
     expect(classifyQueryGeo('доставка обедов из москвы в питер')).toBe('unknown')
   })
 
+  it('ШАГ 6: города, которые эвристика пропускала на неделе 1 → out_of_zone', () => {
+    // Реальные запросы недели с расходом, ранее классифицированные как unknown.
+    expect(classifyQueryGeo('улан уде доставка обедов')).toBe('out_of_zone') // typo «уде»
+    expect(classifyQueryGeo('доставка обедов улан-удэ')).toBe('out_of_zone')
+    expect(classifyQueryGeo('обед с доставкой саранск')).toBe('out_of_zone')
+    expect(classifyQueryGeo('кропоткин заказать обед')).toBe('out_of_zone')
+    expect(classifyQueryGeo('доставка обедов уралан')).toBe('out_of_zone')
+    // Ещё несколько из системного пополнения.
+    expect(classifyQueryGeo('обеды пятигорск')).toBe('out_of_zone')
+    expect(classifyQueryGeo('доставка обедов старый оскол')).toBe('out_of_zone') // многословный
+  })
+
+  it('ШАГ 6: метро «Кропоткинская» (Москва) НЕ ловится токеном «кропоткин»', () => {
+    // Целевой московский запрос у метро Кропоткинская — другой токен, не режем.
+    expect(classifyQueryGeo('обеды у метро кропоткинская москва')).toBe('in_zone')
+    // Без сигнала Москвы «кропоткинская» сама по себе не делает out_of_zone.
+    expect(classifyQueryGeo('обеды кропоткинская')).toBe('unknown')
+  })
+
   it('токен-матч не ловит ложные подстроки (томск ≠ омск)', () => {
     // «томск» — вне зоны, но НЕ из-за подстроки «омск»: проверяем что омск-токен
     // не всплывает ложно на других словах.
