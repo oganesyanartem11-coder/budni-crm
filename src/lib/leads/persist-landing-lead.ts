@@ -66,20 +66,32 @@ export function mapLeadBody(body: unknown): Prisma.LandingLeadCreateInput | null
 }
 
 /**
- * Записывает лид в БД. Никогда не кидает: невалидное тело — молча return,
- * ошибка create — console.error без переброса (Telegram-путь не страдает).
+ * Итог записи лида — аддитивно, чтобы роут мог поднять алёрт при сбое и
+ * сослаться на id записи. НЕ часть клиентского контракта (роут отвечает как
+ * раньше). 'skipped' — тело невалидно (не должно случаться: роут валидирует
+ * phone раньше).
  */
-export async function persistLandingLead(body: unknown): Promise<void> {
+export type PersistLeadResult =
+  | { status: 'created'; id: string }
+  | { status: 'failed'; error: string }
+  | { status: 'skipped' }
+
+/**
+ * Записывает лид в БД. Никогда не кидает: невалидное тело → {skipped},
+ * ошибка create → {failed} (console.error без переброса, Telegram-путь не
+ * страдает), успех → {created, id}.
+ */
+export async function persistLandingLead(body: unknown): Promise<PersistLeadResult> {
   const data = mapLeadBody(body)
-  if (!data) return
+  if (!data) return { status: 'skipped' }
 
   try {
-    await prisma.landingLead.create({ data })
+    const created = await prisma.landingLead.create({ data, select: { id: true } })
+    return { status: 'created', id: created.id }
   } catch (err) {
     // Без секретов и без переброса: запись в БД — best effort.
-    console.error(
-      '[leads/intake] persist failed:',
-      err instanceof Error ? err.message : err
-    )
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[leads/intake] persist failed:', message)
+    return { status: 'failed', error: message }
   }
 }

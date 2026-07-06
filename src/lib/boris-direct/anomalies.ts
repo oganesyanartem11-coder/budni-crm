@@ -134,6 +134,35 @@ export function detectAnomalies(input: AnomalyInput): Anomaly[] {
 }
 
 /**
+ * ШАГ 3: чувствительная сверка «конверсии Метрики (цель) vs заявки в БД»,
+ * порог 1. Общий гейт DATA_MISMATCH (MIN_COUNT=3) прячет потерю ОДНОЙ заявки;
+ * здесь ловим именно её: конверсия(и) по цели есть, а записей в БД меньше =
+ * вероятная ПОТЕРЯ лида (persist упал / заявка не дошла). Возвращает
+ * critical-аномалию или null. Прочие сверки/пороги не трогает.
+ *
+ * Направление одно — metrikaGoal > leadsTotal: конверсия без записи. Обратное
+ * (в БД больше, чем целей) — обычно adblock/тест/лаг Метрики, не потеря; его
+ * ловит существующий DATA_MISMATCH ≥2×, здесь не шумим.
+ */
+export function detectLeadReconcileLoss(input: {
+  reportConv: number
+  metrikaGoal: number
+  leadsTotal: number
+}): Anomaly | null {
+  if (input.metrikaGoal > input.leadsTotal) {
+    return {
+      severity: 'critical',
+      kind: 'lead_reconcile_loss',
+      text:
+        `[СВЕРКА] конверсий по цели есть ${input.metrikaGoal}, а заявок в БД ${input.leadsTotal} — ` +
+        `возможна потеря заявки. Директ ${input.reportConv} / Метрика ${input.metrikaGoal} / БД ${input.leadsTotal}. ` +
+        `Проверьте чат «Заявки Будни» и логи intake.`,
+    }
+  }
+  return null
+}
+
+/**
  * Катастрофа: неуправляемый расход — потрачено сегодня больше дневного
  * бюджета ×1.5, бюджетный предохранитель Директа прорван (баг/сбой).
  * Крайняя мера: suspendCampaignEmergency + написать владельцу (делает

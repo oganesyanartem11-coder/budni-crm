@@ -225,5 +225,32 @@
     "status": "ACTIVE",
     "addedAt": "2026-07-04",
     "verifiedAt": "2026-07-04"
+  },
+  {
+    "id": "traffic-volume-10",
+    "claim": "Списываемая цена клика может превышать назначенную ставку — в Справке есть раздел «Списывается цена, превышающая ставку»: ставка автоматически повышается при прогнозе высокой вероятности конверсии (автостратегии), плюс её поднимают повышающие корректировки. Это штатная алгоритмическая надбавка Директа, не баг данных и не пробой потолка назначаемых ставок.",
+    "type": "MECHANIC",
+    "source": {
+      "url": "https://yandex.ru/support/direct/ru/troubleshooting/bidding",
+      "title": "Объем трафика и ставки"
+    },
+    "sourceTier": "OFFICIAL_HELP",
+    "tags": [
+      "bids",
+      "auction",
+      "charged-price",
+      "autostrategy",
+      "surcharge"
+    ],
+    "appliesTo": [
+      "search",
+      "autostrategy",
+      "manual"
+    ],
+    "confidence": "HIGH",
+    "projectStance": "NEUTRAL",
+    "status": "ACTIVE",
+    "addedAt": "2026-07-06",
+    "verifiedAt": "2026-07-06"
   }
 ]

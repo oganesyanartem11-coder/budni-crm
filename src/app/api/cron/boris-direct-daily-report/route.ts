@@ -14,6 +14,7 @@ import { alreadyRanToday, markRanToday, getTodayCronAnomalyCount } from '@/lib/b
 import { yesterdayMsk, mskDayStartUtc, type DailyReportData } from '@/lib/boris-direct/brain'
 import { getDirectRoleState } from '@/lib/boris-direct/state'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
+import { countDedupDropsToday } from '@/lib/leads/dedup'
 import {
   generateDailyReportText,
   type DailyReportInput,
@@ -63,6 +64,9 @@ async function handler(request: Request) {
     now
   )
 
+  // ШАГ 2: сколько дублей-ретраев заявок отсеял приёмник сегодня (для строки в сводке).
+  const dedupDroppedToday = await countDedupDropsToday(now)
+
   const input: DailyReportInput = {
     data: {
       dateLabel: payload.dateLabel ?? yesterday,
@@ -84,6 +88,7 @@ async function handler(request: Request) {
     // противоречила бы утренним алёртам: писала «нет», хотя они были).
     anomalies: [],
     anomaliesFiredToday,
+    dedupDroppedToday,
     observe: state.mode === 'OBSERVE',
   }
 

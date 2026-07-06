@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest'
 
 /** Детекция аномалий — чистые функции, проверяем каждую ветку. */
 
-import { detectAnomalies, isCatastrophe, type AnomalyInput } from './anomalies'
+import {
+  detectAnomalies,
+  detectLeadReconcileLoss,
+  isCatastrophe,
+  type AnomalyInput,
+} from './anomalies'
 
 /** Спокойный день: ни одна проверка не срабатывает. */
 function makeInput(overrides: Partial<AnomalyInput> = {}): AnomalyInput {
@@ -113,6 +118,30 @@ describe('detectAnomalies', () => {
       makeInput({ addMetricaTag: 'NO', rejectedAdsCount: 1, apiErrors: ['x'] })
     )
     expect(res.map((a) => a.kind).sort()).toEqual(['api_errors', 'metrica_tag_off', 'rejected'])
+  })
+})
+
+describe('detectLeadReconcileLoss — сверка конверсий vs заявки, порог 1', () => {
+  it('1 конверсия / 0 в БД → critical-аномалия (порог 1, не глушится)', () => {
+    const a = detectLeadReconcileLoss({ reportConv: 0, metrikaGoal: 1, leadsTotal: 0 })
+    expect(a?.severity).toBe('critical')
+    expect(a?.kind).toBe('lead_reconcile_loss')
+    expect(a?.text).toContain('Метрика 1')
+    expect(a?.text).toContain('БД 0')
+    expect(a?.text).toContain('[СВЕРКА]')
+  })
+
+  it('конверсий больше, чем заявок (2 vs 1) → аномалия', () => {
+    expect(detectLeadReconcileLoss({ reportConv: 2, metrikaGoal: 2, leadsTotal: 1 })).not.toBeNull()
+  })
+
+  it('сходится (равно) → null', () => {
+    expect(detectLeadReconcileLoss({ reportConv: 1, metrikaGoal: 1, leadsTotal: 1 })).toBeNull()
+    expect(detectLeadReconcileLoss({ reportConv: 0, metrikaGoal: 0, leadsTotal: 0 })).toBeNull()
+  })
+
+  it('заявок больше, чем конверсий (adblock/тест) → null, не шумим', () => {
+    expect(detectLeadReconcileLoss({ reportConv: 0, metrikaGoal: 1, leadsTotal: 3 })).toBeNull()
   })
 })
 
