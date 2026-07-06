@@ -5,6 +5,7 @@
 // сверяем по yclid/UTM-меткам и utm_term против отчёта по поисковым запросам.
 
 import { prisma } from '@/lib/db/prisma'
+import { METRIKA_GOAL_ID } from './config'
 
 // ---------- Лиды за период ----------
 
@@ -21,6 +22,8 @@ export interface LeadForAttribution {
   utmTerm: string | null
   source: string | null
   phoneDigits: string | null
+  /** Имя — ТОЛЬКО для тест-фильтра (isTestLead), в отчёты/репо не выносим. */
+  name: string | null
 }
 
 /** Лиды за период по createdAt, старые первыми. */
@@ -38,6 +41,7 @@ export async function getLeadsForPeriod(from: Date, to: Date): Promise<LeadForAt
       utmTerm: true,
       source: true,
       phoneDigits: true,
+      name: true,
     },
     orderBy: { createdAt: 'asc' },
   })
@@ -109,8 +113,41 @@ function tsvNumber(raw: string | undefined): number {
 }
 
 /**
+ * Конверсии из строки отчёта Директа.
+ *
+ * КЛЮЧЕВОЕ (ШАГ 5): когда в запросе отчёта задан `Goals`, Директ НЕ отдаёт
+ * колонку `Conversions`, а именует её `Conversions_<goalId>_<модель>` — напр.
+ * `Conversions_575665118_LSCCD` (LSCCD = last significant click, cross-device,
+ * модель AUTO). Код, читавший голую `Conversions`, всегда получал 0 — из-за
+ * этого «конверсий 0 за все дни» было АРТЕФАКТОМ, а не правдой.
+ *
+ * Читаем в порядке приоритета: колонка нашей цели → любая `Conversions_*`
+ * (другая модель/цель) → голая `Conversions` (фейки sim/тестов эмитят её).
+ */
+export function readReportConversions(raw: Record<string, string>): number {
+  const goalPrefix = `Conversions_${METRIKA_GOAL_ID}`
+  let goalSum = 0
+  let goalMatched = false
+  let anySum = 0
+  let anyMatched = false
+  for (const [key, value] of Object.entries(raw)) {
+    if (key.startsWith(goalPrefix)) {
+      goalSum += tsvNumber(value)
+      goalMatched = true
+    } else if (key.startsWith('Conversions_')) {
+      anySum += tsvNumber(value)
+      anyMatched = true
+    }
+  }
+  if (goalMatched) return goalSum
+  if (anyMatched) return anySum
+  return tsvNumber(raw.Conversions)
+}
+
+/**
  * Строка TSV-отчёта Директа (поля Query, AdGroupName, AdGroupId, Impressions,
- * Clicks, Cost, Conversions) → QueryStatRow. Conversions '--' означает 0.
+ * Clicks, Cost, Conversions[_goalId]) → QueryStatRow. Конверсии читаем
+ * suffix-aware (см. readReportConversions); '--'/пусто означает 0.
  */
 export function toQueryStatRow(raw: Record<string, string>): QueryStatRow {
   return {
@@ -120,7 +157,7 @@ export function toQueryStatRow(raw: Record<string, string>): QueryStatRow {
     impressions: tsvNumber(raw.Impressions),
     clicks: tsvNumber(raw.Clicks),
     costRub: tsvNumber(raw.Cost),
-    conversions: tsvNumber(raw.Conversions),
+    conversions: readReportConversions(raw),
   }
 }
 

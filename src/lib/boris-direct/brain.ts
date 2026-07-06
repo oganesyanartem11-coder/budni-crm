@@ -78,6 +78,9 @@ import {
   filterOutProtectedConverters,
   CONVERTER_PROTECT_WINDOW_DAYS,
 } from './economics'
+import { isRegisteredConverter } from './converters'
+import { filterOutTestLeads } from './test-markers'
+import { phantomWeight } from './phantom'
 import {
   isInQuarantine,
   pickDataDrivenMinusCandidates,
@@ -711,7 +714,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   let leadsFromDirect = 0
   let costPerLeadRub: number | null = null
   try {
-    const leads = await getLeadsForPeriod(dayStart, dayEnd)
+    // ШАГ 3в: тестовые заявки (маркеры test-markers) вне счёта и конвертер-логики.
+    const leads = filterOutTestLeads(await getLeadsForPeriod(dayStart, dayEnd))
     const split = splitLeadsByOrigin(leads)
     leadsTotal = leads.length
     leadsFromDirect = split.fromDirect.length
@@ -785,7 +789,12 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       dayStart
     )
     if (metrikaGoalDay) {
-      const metrikaGoalYesterday = metrikaGoalDay.reduce((acc, g) => acc + (g.goalReaches ?? 0), 0)
+      const rawReaches = metrikaGoalDay.reduce((acc, g) => acc + (g.goalReaches ?? 0), 0)
+      // ШАГ 3б (фантом-правило): достижения ДО фикса фронта (b669b35, 05.07)
+      // могли сработать на неуспешной отправке. Для этой сверки вес 0 (день
+      // целиком под подозрением), чтобы пре-фикс-фантомы не давали ложный
+      // [СВЕРКА]. Дни ≥ фикса весят 1 → штатная работа/полигон не меняются.
+      const metrikaGoalYesterday = phantomWeight(yesterday) * rawReaches
       const reconcileLoss = detectLeadReconcileLoss({
         reportConv,
         metrikaGoal: metrikaGoalYesterday,
@@ -942,7 +951,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     // наблюдаем. Отсекаем ТОЛЬКО объём-без-конверсий (цена клика — не критерий).
     const { kept: candidates, protectedConverters } = filterOutProtectedConverters(
       candidatesRaw,
-      (q) => conv30dByQueryText.get(normQueryKey(q)) ?? 0
+      // ШАГ 3а: подтверждённый владельцем конвертер защищён независимо от 30д-статистики
+      // (историческая статистика была занижена багом суффиксной колонки конверсий).
+      (q) => Math.max(conv30dByQueryText.get(normQueryKey(q)) ?? 0, isRegisteredConverter(q) ? 1 : 0)
     )
     if (protectedConverters.length > 0) {
       decisions.push({
@@ -1216,7 +1227,12 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // блок, «кормим»), а не хвост.
         const conv30d =
           conv30dByGroupQuery.get(`${groupId}\0${keyTextById.get(bid.KeywordId) ?? ''}`) ?? 0
-        const converter = head.leads > 0 || isProtectedConverter(conv30d)
+        // ШАГ 3а: подтверждённый конвертер держим как конвертера (нижний блок), даже
+        // если 30д-статистика занижена (баг суффиксной колонки конверсий до фикса).
+        const converter =
+          head.leads > 0 ||
+          isProtectedConverter(conv30d) ||
+          isRegisteredConverter(keyTextById.get(bid.KeywordId))
         const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
         const phraseCode: ReasonCode = converter ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
         const rec = recommendBid({ auctionBids, desiredTv, currentBidMicro })
