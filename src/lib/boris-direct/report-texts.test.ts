@@ -91,6 +91,55 @@ describe('buildDailyDataBlock — числа форматирует код', () 
     expect(block).toContain('Заявок всего: 5, из Директа: 3')
     expect(block).toContain('Цена заявки: 834 ₽')
     expect(block).toContain('«обеды в офис»: 10 кликов, 501 ₽, конверсий 2')
+    // обычный CPC (50 ₽) — без пометки надбавки
+    expect(block).not.toContain('алгоритмическая надбавка')
+  })
+
+  // ШАГ 2: счётчик отсеянных дублей-ретраев заявок в дневной сводке.
+  it('dedupDroppedToday > 0 → строка про отсеянные дубли', () => {
+    const block = buildDailyDataBlock(dailyInput({ dedupDroppedToday: 3 }))
+    expect(block).toContain('Дублей-ретраев заявок отсеяно за сегодня: 3')
+  })
+
+  it('dedupDroppedToday 0/undefined → строки нет (не сорим нулями)', () => {
+    expect(buildDailyDataBlock(dailyInput({ dedupDroppedToday: 0 }))).not.toContain(
+      'Дублей-ретраев'
+    )
+    expect(buildDailyDataBlock(dailyInput())).not.toContain('Дублей-ретраев')
+  })
+
+  // ШАГ 4: списание выше потолка назначаемых ставок (400 ₽) → пометка надбавки.
+  it('CPC выше потолка + конверсия → «алгоритмическая надбавка (дорого, но конвертит)»', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({
+        data: day({
+          topQueries: [{ query: 'кейтеринг', clicks: 1, costRub: 1275.98, conversions: 1 }],
+        }),
+      })
+    )
+    expect(block).toContain('алгоритмическая надбавка (дорого, но конвертит)')
+  })
+
+  it('CPC выше потолка без конверсии → «алгоритмическая надбавка (наблюдаю, не баг данных)»', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({
+        data: day({
+          topQueries: [{ query: 'кейтеринг', clicks: 2, costRub: 1200, conversions: 0 }],
+        }),
+      })
+    )
+    expect(block).toContain('алгоритмическая надбавка (наблюдаю, не баг данных)')
+  })
+
+  it('CPC на потолке/ниже (≤400 ₽) → без пометки надбавки', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({
+        data: day({
+          topQueries: [{ query: 'обеды', clicks: 10, costRub: 4000, conversions: 1 }],
+        }),
+      })
+    )
+    expect(block).not.toContain('алгоритмическая надбавка')
   })
 
   it('null → «нет данных», пустой топ → «нет данных»', () => {
@@ -180,7 +229,10 @@ describe('generateDailyReportText', () => {
     expect(call.purpose).toBe('daily_report')
     expect(call.tier).toBe('heavy')
     expect(call.critical).toBe(false)
-    expect(call.system).toBe('SYSTEM_PROMPT')
+    // ШАГ 4: в дневной пересказ теперь подмешана справочная доктрина (в т.ч. про
+    // алгоритмическую надбавку), поэтому system = базовый промпт + блок доктрины.
+    expect(call.system).toContain('SYSTEM_PROMPT')
+    expect(call.system).toContain('ДОКТРИНА')
     expect(call.userText).toContain('НЕ менять')
     expect(call.userText).toContain('Расход: 2500 ₽')
   })

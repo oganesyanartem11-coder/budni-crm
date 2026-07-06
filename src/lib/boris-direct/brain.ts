@@ -71,7 +71,7 @@ import {
   TV_LOWER_BLOCK_ENTRY,
   TV_TAIL,
 } from './config'
-import { detectAnomalies, type Anomaly } from './anomalies'
+import { detectAnomalies, detectLeadReconcileLoss, type Anomaly } from './anomalies'
 import { classifyQueryGeo, isGeoMinusReason } from './geo'
 import {
   isProtectedConverter,
@@ -156,6 +156,16 @@ async function latestSnapshotPayload<T>(kind: string): Promise<T | null> {
   const snap = await prisma.borisDirectSnapshot.findFirst({
     where: { kind },
     orderBy: [{ tickDate: 'desc' }, { createdAt: 'desc' }],
+  })
+  return snap ? (snap.payload as unknown as T) : null
+}
+
+/** Payload снапшота kind, ПРИВЯЗАННЫЙ к конкретному МСК-дню (tickDate). null — нет
+ * записи за этот день (напр. Метрика в тот день не отдалась) → сверку не делаем. */
+async function snapshotPayloadForDay<T>(kind: string, tickDate: Date): Promise<T | null> {
+  const snap = await prisma.borisDirectSnapshot.findFirst({
+    where: { kind, tickDate },
+    orderBy: { createdAt: 'desc' },
   })
   return snap ? (snap.payload as unknown as T) : null
 }
@@ -584,6 +594,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   const emitAnomalyAlerts = () => {
     for (const anomaly of anomalies) {
       if (anomaly.kind === 'circuit_breaker') continue
+      // Сверка потери заявки — мониторинговый алёрт (уходит владельцу через тик),
+      // НЕ сигнал оптимизации кампании: в полигон-решения не эмитим, чтобы не
+      // трогать sim-базлайн.
+      if (anomaly.kind === 'lead_reconcile_loss') continue
       decisions.push({
         type: 'alert',
         targetType: 'campaign',
@@ -752,6 +766,32 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         reasonCode: 'DATA_MISMATCH',
         factors: { reportConv, metrikaGoal, leadsTotal },
       })
+    }
+
+    // ШАГ 3: общий гейт DATA_MISMATCH (MIN_COUNT=3) прячет потерю ОДНОЙ заявки.
+    // Чувствительная сверка «конверсии Метрики (цель 575665118) vs заявки в БД»,
+    // порог 1. Эмитим АНОМАЛИЮ — она дойдёт до владельца через тик (в отличие от
+    // decision, который в чат не идёт). Прочие пороги не трогаем.
+    //
+    // Метрику берём ПРИВЯЗАННОЙ к тому же дню, что и заявки (dayStart): иначе,
+    // если вчера Метрика не отдалась, latestSnapshotPayload вернул бы ПРОТУХШИЙ
+    // снапшот другого дня и дал бы ложный [СВЕРКА]. Нет снапшота за день → не сверяем.
+    // ОГРАНИЧЕНИЕ: goalReaches и заявки в БД имеют разные слепые зоны (adblock
+    // занижает цели, сбой persist занижает записи), поэтому одиночная потеря может
+    // быть замаскирована одиночным adblock-лидом. Основной сигнал одиночной потери —
+    // алёрт [INTAKE] в реальном времени при сбое persist; эта сверка — доп. бэкстоп.
+    const metrikaGoalDay = await snapshotPayloadForDay<Array<{ goalReaches?: number }>>(
+      'metrika_goal',
+      dayStart
+    )
+    if (metrikaGoalDay) {
+      const metrikaGoalYesterday = metrikaGoalDay.reduce((acc, g) => acc + (g.goalReaches ?? 0), 0)
+      const reconcileLoss = detectLeadReconcileLoss({
+        reportConv,
+        metrikaGoal: metrikaGoalYesterday,
+        leadsTotal,
+      })
+      if (reconcileLoss) anomalies.push(reconcileLoss)
     }
   } catch (err) {
     pushBlockError('сверка источников', err)

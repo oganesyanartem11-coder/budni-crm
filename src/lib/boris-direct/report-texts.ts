@@ -12,6 +12,7 @@
 
 import type { DailyReportData } from './brain'
 import type { Anomaly } from './anomalies'
+import { BID_CEILING_MICRO, MICRO } from './config'
 import { callBorisDirectLlm } from './llm'
 import { formatCplWithValue } from './economics'
 import { getBorisDirectSystemPrompt } from './prompts'
@@ -20,6 +21,16 @@ import { getDirectRoleState } from './state'
 import { getActiveLessonsForContext, formatLessonsBlock } from './lessons'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Потолок НАЗНАЧАЕМЫХ ставок в рублях (из инварианта write-gate, config).
+ * Средняя цена клика ВЫШЕ него = списание заведомо превысило любую возможную
+ * назначенную ставку → гарантированно алгоритмическая надбавка Директа, а не
+ * баг данных и не пробой потолка (потолок ограничивает назначаемую ставку, не
+ * списываемую цену; см. доктрину «charged-price»). Меньшие надбавки — под
+ * потолком — трактует LLM по доктрине, здесь помечаем только явные.
+ */
+const ASSIGNED_BID_CEILING_RUB = BID_CEILING_MICRO / MICRO
 
 // ---------- Форматирование чисел (только код, LLM цифры не трогает) ----------
 
@@ -109,6 +120,9 @@ export interface DailyReportInput {
    * «аномалий нет» — иначе вечерняя сводка противоречит утренним алёртам.
    */
   anomaliesFiredToday?: number
+  /** ШАГ 2: сколько дублей-ретраев заявок отсеял приёмник за сегодня (МСК).
+   * >0 → строка в сводке, чтобы владелец видел частоту ретраев фронта. */
+  dedupDroppedToday?: number
   /** Готовая секция «ОПЫТ» (formatLessonsBlock). Пусто/undefined → секции нет;
    * undefined в generateDailyReportText → уроки подтягиваются сами. */
   lessonsBlock?: string
@@ -141,10 +155,18 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
   const topQueries =
     d.topQueries.length > 0
       ? d.topQueries
-          .map(
-            (q) =>
-              `- «${q.query}»: ${q.clicks} кликов, ${Math.round(q.costRub)} ₽, конверсий ${q.conversions}`
-          )
+          .map((q) => {
+            const avgCpcRub = q.clicks > 0 ? q.costRub / q.clicks : 0
+            // ШАГ 4: списание выше потолка назначаемых ставок = алгоритмическая
+            // надбавка (наблюдение, НЕ баг данных). Дала конверсию — «дорого, но конвертит».
+            const surcharge =
+              avgCpcRub > ASSIGNED_BID_CEILING_RUB
+                ? q.conversions > 0
+                  ? ' — алгоритмическая надбавка (дорого, но конвертит)'
+                  : ' — алгоритмическая надбавка (наблюдаю, не баг данных)'
+                : ''
+            return `- «${q.query}»: ${q.clicks} кликов, ${Math.round(q.costRub)} ₽, конверсий ${q.conversions}${surcharge}`
+          })
           .join('\n')
       : 'нет данных'
 
@@ -174,6 +196,11 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     anomaliesSection(input),
   ]
 
+  // ШАГ 2: частота ретраев фронта — сколько дублей заявок приёмник отсеял сегодня.
+  if (input.dedupDroppedToday && input.dedupDroppedToday > 0) {
+    lines.push(`Дублей-ретраев заявок отсеяно за сегодня: ${input.dedupDroppedToday}`)
+  }
+
   // Секция «ОПЫТ» — только если блок уроков непустой (никаких пустых заголовков).
   if (input.lessonsBlock && input.lessonsBlock.trim().length > 0) {
     lines.push('', input.lessonsBlock)
@@ -199,9 +226,12 @@ export async function generateDailyReportText(input: DailyReportInput): Promise<
     purpose: 'daily_report',
     critical: false,
     instruction:
-      'Перескажи владельцу дневной отчёт по этим данным. Коротко, HTML для Telegram, цифры НЕ менять и НЕ пересчитывать. Если в данных есть секция ОПЫТ — можешь сослаться на свои уроки, но не выдумывай новых.',
+      'Перескажи владельцу дневной отчёт по этим данным. Коротко, HTML для Telegram, цифры НЕ менять и НЕ пересчитывать. Если в данных есть секция ОПЫТ — можешь сослаться на свои уроки, но не выдумывай новых. Если у запроса помечена «алгоритмическая надбавка» — это штатная механика Директа (списание выше ставки при высокой вероятности конверсии), а НЕ баг данных и НЕ пробой потолка; тон — наблюдение.',
     dataBlock: buildDailyDataBlock({ ...input, lessonsBlock }),
     fallbackHeader: '📊 Дневной отчёт (без обработки — LLM недоступен)',
+    // ШАГ 4: доктрина про списываемую цену/надбавку — чтобы Борис в пересказе
+    // трактовал дорогие клики как надбавку-наблюдение, а не как поломку данных.
+    doctrineTags: ['charged-price', 'auction', 'traffic-volume', 'conversions', 'strategies'],
   })
 }
 

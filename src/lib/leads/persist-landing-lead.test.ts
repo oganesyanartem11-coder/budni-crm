@@ -129,14 +129,15 @@ describe('mapLeadBody', () => {
 })
 
 describe('persistLandingLead', () => {
-  it('вызывает prisma.landingLead.create с замапленными данными', async () => {
+  it('вызывает prisma.landingLead.create с замапленными данными → {created, id}', async () => {
     mockPrisma.landingLead.create.mockResolvedValue({ id: 'l1' })
-    await persistLandingLead({
+    const res = await persistLandingLead({
       phone: '+79000000000',
       form_type: 'quiz',
       utm: { utm_source: 'yandex', medium: 'cpc' },
       click_ids: { yclid: 'y-777' },
     })
+    expect(res).toEqual({ status: 'created', id: 'l1' })
     expect(mockPrisma.landingLead.create).toHaveBeenCalledTimes(1)
     expect(mockPrisma.landingLead.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -146,22 +147,25 @@ describe('persistLandingLead', () => {
         utmMedium: 'cpc',
         yclid: 'y-777',
       }),
+      select: { id: true },
     })
   })
 
-  it('невалидное тело → create НЕ вызывается, не кидает', async () => {
-    await expect(persistLandingLead({ name: 'без телефона' })).resolves.toBeUndefined()
+  it('невалидное тело → create НЕ вызывается, {skipped}', async () => {
+    await expect(persistLandingLead({ name: 'без телефона' })).resolves.toEqual({
+      status: 'skipped',
+    })
     expect(mockPrisma.landingLead.create).not.toHaveBeenCalled()
   })
 
-  it('ошибка create НЕ пробрасывается, логируется console.error', async () => {
+  it('ошибка create НЕ пробрасывается, {failed, error} + console.error', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     mockPrisma.landingLead.create.mockRejectedValue(new Error('db down'))
-    await expect(persistLandingLead({ phone: '1' })).resolves.toBeUndefined()
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[leads/intake] persist failed:',
-      'db down'
-    )
+    await expect(persistLandingLead({ phone: '1' })).resolves.toEqual({
+      status: 'failed',
+      error: 'db down',
+    })
+    expect(errorSpy).toHaveBeenCalledWith('[leads/intake] persist failed:', 'db down')
     errorSpy.mockRestore()
   })
 })
