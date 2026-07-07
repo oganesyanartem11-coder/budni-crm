@@ -27,6 +27,50 @@ export function isInQuarantine(input: { daysOfData: number; totalClicks: number 
   return input.daysOfData < QUARANTINE_DAYS || input.totalClicks < QUARANTINE_MIN_CLICKS
 }
 
+const AGE_DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Возраст кампании в ЦЕЛЫХ МСК-днях: (сегодня − StartDate). Обе даты — 'YYYY-MM-DD'.
+ * Exclusive-разница: StartDate 2026-06-30 и сегодня 2026-07-07 → 7. Считается от
+ * реальной даты старта кампании (campaigns.get StartDate), а НЕ от числа
+ * собственных снапшот-тиков Бориса.
+ */
+export function campaignAgeDays(startDate: string, todayMsk: string): number {
+  const start = new Date(`${startDate}T00:00:00+03:00`).getTime()
+  const today = new Date(`${todayMsk}T00:00:00+03:00`).getTime()
+  return Math.floor((today - start) / AGE_DAY_MS)
+}
+
+/**
+ * Решение карантина по РЕАЛЬНЫМ входам: возраст от StartDate + кумулятив кликов
+ * из Reports API (НЕ число снапшот-тиков и НЕ сумма локальных daily_totals).
+ * Пороги и isInQuarantine НЕ меняются — здесь только вычисление двух аргументов
+ * и защита. FAIL-SAFE: нет StartDate ИЛИ кумулятив недоступен (null/NaN) →
+ * карантин (безопасная сторона: блокируем оптимизацию). Гейт НИКОГДА не снимает
+ * карантин по ошибке/пустому ответу.
+ */
+export function decideQuarantine(input: {
+  startDate?: string | null
+  todayMsk: string
+  cumulativeClicks: number | null
+}): { quarantine: boolean; factors: Record<string, number | string> } {
+  if (!input.startDate) {
+    return { quarantine: true, factors: { note: 'нет StartDate — карантин из осторожности' } }
+  }
+  if (input.cumulativeClicks == null || !Number.isFinite(input.cumulativeClicks)) {
+    return {
+      quarantine: true,
+      factors: { note: 'кумулятив кликов недоступен — карантин из осторожности', startDate: input.startDate },
+    }
+  }
+  const daysOfData = campaignAgeDays(input.startDate, input.todayMsk)
+  const totalClicks = input.cumulativeClicks
+  return {
+    quarantine: isInQuarantine({ daysOfData, totalClicks }),
+    factors: { daysOfData, totalClicks, startDate: input.startDate },
+  }
+}
+
 // ---------- Нормализация слов ----------
 
 /** Нормализация слова: lower, ё→е, trim. Для сравнений/дедупа, не для API. */

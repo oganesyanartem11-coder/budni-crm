@@ -82,7 +82,7 @@ import { isRegisteredConverter } from './converters'
 import { filterOutTestLeads } from './test-markers'
 import { phantomWeight } from './phantom'
 import {
-  isInQuarantine,
+  decideQuarantine,
   pickDataDrivenMinusCandidates,
   prepareMinusCandidates,
   recommendBid,
@@ -186,6 +186,55 @@ async function loadDailyTotals(endInclusive: Date, days: number): Promise<DailyT
     if (totals?.date) byDay.set(totals.date, totals)
   }
   return [...byDay.values()]
+}
+
+/**
+ * Истинный КУМУЛЯТИВ кликов кампании из Reports API за [startDate … dateTo]
+ * — для карантинного гейта. ОТДЕЛЬНЫЙ от суточного отчёта фетч: суточный
+ * пайплайн (buildCampaignPerformanceReportBody(yesterday, yesterday)) не трогаем.
+ * Read-only: один report-job поллится эфемерно, БЕЗ записи BorisDirectReportJob.
+ *
+ * Возвращает null при ЛЮБОЙ невозможности назвать число (нет StartDate / отчёт
+ * failed / всё ещё pending после лимита попыток / пустой TSV) — вызывающий
+ * трактует null как карантин (fail-safe). Никогда не возвращает 0 «по-тихому»
+ * из-за недоступности: 0 — только если отчёт реально пришёл с нулём кликов.
+ */
+async function fetchCumulativeCampaignClicks(
+  startDate: string | null,
+  dateTo: string
+): Promise<number | null> {
+  if (!startDate) return null
+  const compact = `${startDate.replace(/-/g, '')}_${dateTo.replace(/-/g, '')}`
+  const reportName = `bd_cum_${compact}_${Date.now()}`
+  // ТОТ ЖЕ body переиспользуется при поллинге (стабильный ReportName) — требование
+  // Reports API: повторный POST того же отчёта отдаёт его же, 200 когда готов.
+  const body = buildCampaignPerformanceReportBody(startDate, dateTo, reportName)
+  const MAX_ATTEMPTS = 5
+  const MAX_WAIT_SEC = 10
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let poll
+    try {
+      poll = await pollReport(body)
+    } catch (err) {
+      console.error('[boris-direct/brain] карантин: кумулятив-отчёт — сеть упала', err)
+      return null
+    }
+    if (poll.status === 'ready') {
+      const rows = parseReportTsv(poll.tsv)
+      if (rows.length === 0) return null // пусто → не подтвердили кумулятив
+      return rows.reduce((acc, r) => acc + tsvNumber(r.Clicks), 0)
+    }
+    if (poll.status === 'failed') {
+      console.error(`[boris-direct/brain] карантин: кумулятив-отчёт failed — ${poll.error}`)
+      return null
+    }
+    // pending → ждём (retryIn, но не дольше MAX_WAIT_SEC) и повторяем ТОТ ЖЕ POST
+    if (attempt < MAX_ATTEMPTS) {
+      const waitSec = Math.min(poll.retryInSec, MAX_WAIT_SEC)
+      await new Promise((resolve) => setTimeout(resolve, waitSec * 1000))
+    }
+  }
+  return null // всё ещё pending после лимита → карантин из осторожности
 }
 
 // ---------- Тик «сбор» ----------
@@ -806,21 +855,22 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     pushBlockError('сверка источников', err)
   }
 
-  // 5. Карантин: дней с данными = дни со снапшотом кампании; клики — сумма
-  // по дневным итогам (включая только что записанный вчерашний день).
+  // 5. Карантин на РЕАЛЬНЫХ входах: возраст = (МСК-сегодня − StartDate кампании),
+  // клики = истинный кумулятив из Reports (StartDate → вчера). НЕ число снапшот-
+  // тиков и НЕ Σ локальных daily_totals — иначе гейт слеп к дням до старта сбора.
+  // StartDate берём из campaign_settings-снапшота (пишется каждый тик — нового
+  // вызова БД/API под это не нужно). FAIL-SAFE в decideQuarantine: нет StartDate
+  // или кумулятив не получен → карантин.
   let quarantine = false
   // Цифры, на которые опёрся карантин, — для машинной записи (эмиссия).
   let quarantineFactors: Record<string, number | string> = {}
   try {
-    const campaignDays = await prisma.borisDirectSnapshot.findMany({
-      where: { kind: 'campaign' },
-      select: { tickDate: true },
-      distinct: ['tickDate'],
-    })
-    const allTotals = await loadDailyTotals(dayStart, 30)
-    const totalClicks = allTotals.reduce((acc, t) => acc + t.clicks, 0)
-    quarantineFactors = { daysOfData: campaignDays.length, totalClicks }
-    quarantine = isInQuarantine({ daysOfData: campaignDays.length, totalClicks })
+    const settings = await latestSnapshotPayload<CampaignSettings>('campaign_settings')
+    const startDate = settings?.StartDate ?? null
+    const cumulativeClicks = await fetchCumulativeCampaignClicks(startDate, yesterday)
+    const decided = decideQuarantine({ startDate, todayMsk: mskDay(now), cumulativeClicks })
+    quarantine = decided.quarantine
+    quarantineFactors = decided.factors
   } catch (err) {
     pushBlockError('карантин', err)
     quarantine = true // не смогли посчитать → безопаснее не оптимизировать

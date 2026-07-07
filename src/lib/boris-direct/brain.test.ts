@@ -95,6 +95,14 @@ const CP_TSV = [
   '2026-07-01\t2\tG2\t130\t5\t3.8\t190\t38\t0',
 ].join('\n')
 
+// Кумулятивный отчёт кампании (StartDate → вчера) для карантинного гейта:
+// Σ Clicks = 37 ≥ 30 → по кликам карантин пройден.
+const CUM_TSV = [
+  'Date\tAdGroupId\tAdGroupName\tImpressions\tClicks\tCtr\tCost\tAvgCpc\tConversions',
+  '2026-06-30\t1\tG1\t500\t20\t4.0\t2500\t125\t2',
+  '2026-07-01\t2\tG2\t400\t17\t4.3\t1900\t112\t1',
+].join('\n')
+
 const AUCTION = [
   { TrafficVolume: 100, Bid: 900 * MICRO, Price: 850 * MICRO },
   { TrafficVolume: 85, Bid: 700 * MICRO, Price: 650 * MICRO },
@@ -162,8 +170,23 @@ function setupProcessHappyPath() {
   mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
     if (args.where.kind === 'keywords') return { payload: KEYWORDS_PAYLOAD }
     if (args.where.kind === 'keywordbids') return { payload: BIDS_PAYLOAD }
+    // Карантинный гейт: StartDate 2026-06-25 → возраст к NOW (02.07) = 7 ≥ 5 дней.
+    if (args.where.kind === 'campaign_settings') {
+      return {
+        payload: {
+          Id: 711897777,
+          Name: 'Будни — Поиск — Волна 1',
+          StartDate: '2026-06-25',
+          TimeTargeting: { Schedule: { Items: [] } },
+          NegativeKeywords: { Items: [] },
+          Statistics: { Clicks: 37, Impressions: 900 },
+        },
+      }
+    }
     return null
   })
+  // Кумулятив кликов из Reports для гейта: отчёт готов, Σ Clicks = 37.
+  mockPollReport.mockResolvedValue({ status: 'ready', tsv: CUM_TSV })
   mockPrisma.borisDirectReportJob.updateMany.mockResolvedValue({ count: 2 })
   mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue(null) // прежних минусов нет
   mockPrisma.borisDirectQueryDailyStat.upsert.mockResolvedValue({})
@@ -341,10 +364,13 @@ describe('runProcessTick', () => {
 
   it('карантин: только отчёт, никакой оптимизации', async () => {
     setupProcessHappyPath()
-    // Всего 2 дня с данными → карантин по дням.
-    mockPrisma.borisDirectSnapshot.findMany.mockImplementation(async (args: { where: { kind: string } }) => {
-      if (args.where.kind === 'campaign') return [{ tickDate: new Date() }, { tickDate: new Date() }]
-      return []
+    // StartDate 2026-06-30 → возраст к NOW (02.07) = 2 < 5 дней → карантин по дням
+    // (кумулятив кликов 37 сам по себе порог прошёл бы — ветка дней держит).
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'campaign_settings') {
+        return { payload: { Id: 711897777, Name: 'test', StartDate: '2026-06-30' } }
+      }
+      return null
     })
 
     const res = await runProcessTick(NOW)
@@ -563,10 +589,12 @@ describe('runProcessTick — память-опыт (персист статис�
 
   it('quarantine: memory-хуки тоже вызваны (опыт копится и в карантине)', async () => {
     setupProcessHappyPath()
-    // Всего 2 дня с данными → карантин по дням.
-    mockPrisma.borisDirectSnapshot.findMany.mockImplementation(async (args: { where: { kind: string } }) => {
-      if (args.where.kind === 'campaign') return [{ tickDate: new Date() }, { tickDate: new Date() }]
-      return []
+    // StartDate 2026-06-30 → возраст к NOW (02.07) = 2 < 5 дней → карантин по дням.
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'campaign_settings') {
+        return { payload: { Id: 711897777, Name: 'test', StartDate: '2026-06-30' } }
+      }
+      return null
     })
 
     const res = await runProcessTick(NOW)
