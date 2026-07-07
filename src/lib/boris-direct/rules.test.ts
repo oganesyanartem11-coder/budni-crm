@@ -7,6 +7,8 @@ import { describe, it, expect } from 'vitest'
 
 import {
   isInQuarantine,
+  campaignAgeDays,
+  decideQuarantine,
   normalizeWord,
   validateMinusPhrase,
   intersectsCore,
@@ -50,6 +52,46 @@ describe('isInQuarantine', () => {
 
   it('дней и кликов достаточно → не карантин', () => {
     expect(isInQuarantine({ daysOfData: QUARANTINE_DAYS, totalClicks: QUARANTINE_MIN_CLICKS })).toBe(false)
+  })
+})
+
+describe('campaignAgeDays', () => {
+  it('StartDate 2026-06-30, сегодня 2026-07-07 → 7 (exclusive)', () => {
+    expect(campaignAgeDays('2026-06-30', '2026-07-07')).toBe(7)
+  })
+
+  it('старт = сегодня → 0', () => {
+    expect(campaignAgeDays('2026-07-07', '2026-07-07')).toBe(0)
+  })
+})
+
+describe('decideQuarantine (реальные входы гейта)', () => {
+  it('StartDate 30.06, сегодня 07.07 (7 дней), кумулятив 37 → НЕ карантин', () => {
+    const r = decideQuarantine({ startDate: '2026-06-30', todayMsk: '2026-07-07', cumulativeClicks: 37 })
+    expect(r.quarantine).toBe(false)
+    expect(r.factors).toMatchObject({ daysOfData: 7, totalClicks: 37 })
+  })
+
+  it('StartDate сегодня−2 (2<5 дней), кумулятив 50 → карантин (ветка дней)', () => {
+    const r = decideQuarantine({ startDate: '2026-07-05', todayMsk: '2026-07-07', cumulativeClicks: 50 })
+    expect(r.quarantine).toBe(true)
+    expect(r.factors).toMatchObject({ daysOfData: 2, totalClicks: 50 })
+  })
+
+  it('StartDate сегодня−6 (6≥5 дней), кумулятив 20<30 → карантин (ветка кликов)', () => {
+    const r = decideQuarantine({ startDate: '2026-07-01', todayMsk: '2026-07-07', cumulativeClicks: 20 })
+    expect(r.quarantine).toBe(true)
+    expect(r.factors).toMatchObject({ daysOfData: 6, totalClicks: 20 })
+  })
+
+  it('нет StartDate → карантин (fail-safe)', () => {
+    const r = decideQuarantine({ startDate: null, todayMsk: '2026-07-07', cumulativeClicks: 100 })
+    expect(r.quarantine).toBe(true)
+  })
+
+  it('кумулятив недоступен (null) → карантин (fail-safe)', () => {
+    const r = decideQuarantine({ startDate: '2026-06-30', todayMsk: '2026-07-07', cumulativeClicks: null })
+    expect(r.quarantine).toBe(true)
   })
 })
 
