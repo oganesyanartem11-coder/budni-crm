@@ -524,3 +524,56 @@ export function extractWriteIssues(result: unknown): WriteIssues {
   }
   return issues
 }
+
+/** Поэлементный вердикт write-ответа для гейта: сколько элементов и какие провалились. */
+export interface WriteOutcome {
+  /** Число поэлементных результатов (длина SetResults/UpdateResults/SuspendResults…). */
+  total: number
+  /**
+   * Индексы ПРОВАЛИВШИХСЯ элементов (в порядке ответа = порядке отправки).
+   * Код 10140 (дубль, Яндекс схлопывает сам) провалом НЕ считается.
+   */
+  failedIndices: number[]
+  errors: string[]
+  warnings: string[]
+}
+
+/**
+ * Поэлементный разбор write-ответа для write-gate: в отличие от extractWriteIssues
+ * (плоские списки для скриптов) отдаёт СТРУКТУРУ — total и индексы провалившихся
+ * элементов. Из неё гейт решает: провал ВСЕХ элементов → applied=false без
+ * фантомного after; провал ЧАСТИ → after только по применённым.
+ *
+ * Элементом считается каждая запись в любом массиве-значении верхнего уровня
+ * ответа (SetResults/UpdateResults/SuspendResults). Индексация сквозная в порядке
+ * обхода — для наших write-методов массив всегда один и его порядок совпадает
+ * с порядком отправленных элементов. Код 10140 (дубль) понижается до warning:
+ * операция по факту применена, элемент проваленным не помечается.
+ */
+export function classifyWriteResult(result: unknown): WriteOutcome {
+  const outcome: WriteOutcome = { total: 0, failedIndices: [], errors: [], warnings: [] }
+  if (!result || typeof result !== 'object') return outcome
+
+  let index = 0
+  for (const value of Object.values(result as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue
+    for (const item of value as WriteResultItem[]) {
+      const idx = index++
+      let elementFailed = false
+      for (const err of item?.Errors ?? []) {
+        if (err.Code === DUPLICATE_KEYWORD_CODE) {
+          outcome.warnings.push(formatIssue(err))
+        } else {
+          outcome.errors.push(formatIssue(err))
+          elementFailed = true
+        }
+      }
+      for (const warn of item?.Warnings ?? []) {
+        outcome.warnings.push(formatIssue(warn))
+      }
+      if (elementFailed) outcome.failedIndices.push(idx)
+    }
+  }
+  outcome.total = index
+  return outcome
+}

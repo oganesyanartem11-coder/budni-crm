@@ -20,13 +20,27 @@ import {
   suspendCampaign,
   updateDailyBudget,
   getCampaignSettings,
+  classifyWriteResult,
 } from './direct-client'
 import { BID_CEILING_MICRO, DIRECT_CAMPAIGN_ID, MICRO } from './config'
-import { checkCircuitBreaker, prepareMinusCandidates, isSuspiciousNegativesShrink } from './rules'
+import {
+  checkCircuitBreaker,
+  prepareMinusCandidates,
+  isSuspiciousNegativesShrink,
+  normalizePhrase,
+} from './rules'
 
 export interface GateResult {
   applied: boolean
   logId: string
+  /**
+   * A (зрячесть write-тракта): поэлементные ошибки write-ответа ДОСЛОВНО (с кодами).
+   * Заполнен и при полном провале (applied=false), и при частичном (applied=true).
+   * Пусто/undefined = write прошёл чисто. Вызывающий по нему шлёт владельцу аномалию.
+   */
+  writeErrors?: string[]
+  /** Часть элементов не применилась (applied=true, но не все) — after отражает только успешные. */
+  partial?: boolean
 }
 
 /** unknown → Json для Prisma (undefined остаётся undefined — поле не пишем). */
@@ -47,13 +61,29 @@ export interface ExecuteDirectWriteOptions {
   emergency?: boolean
   /** id записи лога, которую откатывает этот write (проставляет rollback). */
   revertOfId?: string
+  /**
+   * A (частичный успех): пересчёт before/after по индексам ПРОВАЛИВШИХСЯ элементов
+   * (порядок ответа = порядок отправки). Нужен для многоэлементных write'ов
+   * (ставки/остановка ключей), чтобы в лог легли ТОЛЬКО реально применённые.
+   * Без него частичный успех логируется с исходным after + пометкой в reason.
+   */
+  reconcilePartial?: (failedIndices: number[]) => { before?: unknown; after?: unknown }
 }
 
 /**
  * Пропускает пишущий запрос через гейт режима и логирует результат.
  *
- * Ошибка perform → запись applied=false с ' | ERROR: ...' в reason,
- * исключение пробрасывается вызывающему.
+ * A (ЗРЯЧЕСТЬ WRITE-ТРАКТА). executeDirectWrite — ЕДИНСТВЕННЫЙ вызыватель
+ * perform() (каждый write физически проходит здесь), поэтому поэлементный разбор
+ * ответа стоит ИМЕННО тут: ни один нынешний и будущий write не может его миновать.
+ * Директ может вернуть HTTP 200 с поэлементными Errors[] — тогда «успех» ложный.
+ * classifyWriteResult раскладывает ответ на применённые/провалившиеся элементы:
+ *  - исключение perform → applied=false, ' | ERROR: ...', after НЕ фиксируем (не фантом);
+ *  - ВСЕ элементы с ошибкой → applied=false, ' | WRITE FAILED: ...', after НЕ фиксируем,
+ *    writeErrors заполнен (вызывающий шлёт владельцу critical-аномалию);
+ *  - ЧАСТЬ элементов с ошибкой → applied=true, но before/after только по применённым
+ *    (reconcilePartial), в reason список отказов, writeErrors заполнен;
+ *  - только warnings (10140 «дубль», 10161 и т.п.) → applied=true, warnings в reason.
  */
 export async function executeDirectWrite(opts: ExecuteDirectWriteOptions): Promise<GateResult> {
   const state = await getDirectRoleState()
@@ -64,34 +94,93 @@ export async function executeDirectWrite(opts: ExecuteDirectWriteOptions): Promi
     action: opts.action,
     targetType: opts.targetType,
     targetId: opts.targetId,
-    before: toJson(opts.before),
-    after: toJson(opts.after),
     mode: state.mode,
     revertOfId: opts.revertOfId,
   }
 
   if (!canApply) {
-    // «Сделал бы»: applied=false + mode в записи говорят сами за себя.
+    // «Сделал бы»: applied=false + mode в записи говорят сами за себя. after —
+    // гипотетический (write не состоялся), но это НЕ фантом: applied=false честно
+    // говорит «не применено» — лог показывает, что бы Борис сделал в LIVE.
     const log = await prisma.borisDirectActionLog.create({
-      data: { ...base, reason: opts.reason, applied: false },
+      data: {
+        ...base,
+        before: toJson(opts.before),
+        after: toJson(opts.after),
+        reason: opts.reason,
+        applied: false,
+      },
     })
     return { applied: false, logId: log.id }
   }
 
+  let result: unknown
   try {
-    await opts.perform()
+    result = await opts.perform()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // Исключение = запрос не прошёл целиком → after НЕ фиксируем (иначе фантом:
+    // откат/замер исходов читали бы after изменения, которого не случилось).
     await prisma.borisDirectActionLog.create({
-      data: { ...base, reason: `${opts.reason} | ERROR: ${message}`, applied: false },
+      data: {
+        ...base,
+        before: toJson(opts.before),
+        reason: `${opts.reason} | ERROR: ${message}`,
+        applied: false,
+      },
     })
     throw err
   }
 
+  // A: поэлементный разбор ответа — обойти нельзя (единственный вызыватель perform()).
+  const outcome = classifyWriteResult(result)
+  const allFailed = outcome.total > 0 && outcome.failedIndices.length === outcome.total
+  const partial = !allFailed && outcome.failedIndices.length > 0
+
+  if (allFailed) {
+    // Ни один элемент не применился → applied=false, БЕЗ фантомного after.
+    const log = await prisma.borisDirectActionLog.create({
+      data: {
+        ...base,
+        before: toJson(opts.before),
+        reason: `${opts.reason} | WRITE FAILED: ${outcome.errors.join('; ')}`,
+        applied: false,
+      },
+    })
+    return { applied: false, logId: log.id, writeErrors: outcome.errors }
+  }
+
+  // Успех — полный или частичный. При частичном пересчитываем before/after так,
+  // чтобы в лог легли ТОЛЬКО реально применённые элементы (не фантом на провалах).
+  let logBefore = opts.before
+  let logAfter = opts.after
+  if (partial && opts.reconcilePartial) {
+    const rec = opts.reconcilePartial(outcome.failedIndices)
+    if (rec.before !== undefined) logBefore = rec.before
+    if (rec.after !== undefined) logAfter = rec.after
+  }
+
+  const suffix = partial
+    ? ` | ЧАСТИЧНО: не применено ${outcome.failedIndices.length} из ${outcome.total} — ${outcome.errors.join('; ')}`
+    : outcome.warnings.length > 0
+      ? ` | warnings: ${outcome.warnings.join('; ')}`
+      : ''
+
   const log = await prisma.borisDirectActionLog.create({
-    data: { ...base, reason: opts.reason, applied: true },
+    data: {
+      ...base,
+      before: toJson(logBefore),
+      after: toJson(logAfter),
+      reason: `${opts.reason}${suffix}`,
+      applied: true,
+    },
   })
-  return { applied: true, logId: log.id }
+  return {
+    applied: true,
+    logId: log.id,
+    writeErrors: partial ? outcome.errors : undefined,
+    partial: partial || undefined,
+  }
 }
 
 // ---------- Ставки ----------
@@ -163,6 +252,13 @@ export async function applyBidChanges(
     revertOfId,
     perform: () =>
       setKeywordBids(safe.map((c) => ({ keywordId: c.keywordId, searchBidMicro: c.toMicro }))),
+    // Частичный успех: SetResults идут в порядке отправки → индекс провала == индекс
+    // в before/after. В лог кладём только реально применённые ставки.
+    reconcilePartial: (failedIndices) => {
+      const failed = new Set(failedIndices)
+      const keep = <T>(arr: T[]): T[] => arr.filter((_, i) => !failed.has(i))
+      return { before: keep(before), after: keep(after) }
+    },
   })
 
   return { ...result, clamped, breakerTripped: false }
@@ -226,8 +322,16 @@ export interface AddNegativesResult {
   abortReason?: string
   /** Сколько НЕТТО-новых фраз добавлено (0 = все уже в списке или отмена → записи не было). */
   added: number
+  /** НЕТТО-новые фразы (для честного счётчика в сообщении владельцу — D). */
+  addedPhrases: string[]
   /** Контрольное чтение после ПРИМЕНЁННОГО write: счётчик кабинета != размеру объединения. */
   verifyMismatch?: boolean
+  /**
+   * A: поэлементные ошибки write минус-списка ДОСЛОВНО. Заполнен = campaigns.update
+   * вернул Errors (HTTP 200) → applied=false, но это НЕ OBSERVE и НЕ aborted:
+   * вызывающий обязан отличить «сделал бы» от «пытался и провалился» и написать владельцу.
+   */
+  writeErrors?: string[]
 }
 
 /**
@@ -272,6 +376,7 @@ export async function addNegativeKeywords(
       logId: null,
       aborted: true,
       added: 0,
+      addedPhrases: [],
       abortReason:
         'живой минус-список кабинета не прочитан (campaigns.get упал или поле NegativeKeywords отсутствует) — минусовку отменил, список кабинета не трогаю',
     }
@@ -296,6 +401,7 @@ export async function addNegativeKeywords(
       logId: null,
       aborted: true,
       added: 0,
+      addedPhrases: [],
       abortReason: `живой минус-список подозрительно усох: сейчас ${live.length}, в снапшоте было ${snapshotCount} — минусовку отменил, список кабинета не трогаю`,
     }
   }
@@ -304,12 +410,26 @@ export async function addNegativeKeywords(
   const prepared = prepareMinusCandidates(phrasesToAdd, { coreKeywords: [], existingMinus: live })
   if (prepared.accepted.length === 0) {
     // Всё уже в кабинете (или отсеяно механикой) — писать нечего, кабинет не трогаем.
-    return { applied: false, logId: null, aborted: false, added: 0 }
+    return { applied: false, logId: null, aborted: false, added: 0, addedPhrases: [] }
   }
 
   // 3. ОБЪЕДИНЕНИЕ живого списка и новых фраз — единственный список в кабинет.
   const merged = [...live, ...prepared.accepted]
   const gate = await applyNegativeKeywords(merged, live, reason)
+
+  // A: write мог вернуть HTTP 200 с поэлементными Errors → applied=false, но это
+  // НЕ OBSERVE (writeErrors заполнен). Контрольное чтение и «успех» не имеют смысла —
+  // отдаём как провал write, вызывающий отличит его от «сделал бы» по writeErrors.
+  if (gate.writeErrors?.length) {
+    return {
+      applied: false,
+      logId: gate.logId,
+      aborted: false,
+      added: prepared.accepted.length,
+      addedPhrases: prepared.accepted,
+      writeErrors: gate.writeErrors,
+    }
+  }
 
   // 4. Контрольное чтение после ПРИМЕНЁННОГО write. Проверяем ГЛАВНЫЙ инвариант
   // фикса: кабинет НЕ усох ниже живой базы (мы слали live ∪ new, значит фраз
@@ -333,8 +453,131 @@ export async function addNegativeKeywords(
     logId: gate.logId,
     aborted: false,
     added: prepared.accepted.length,
+    addedPhrases: prepared.accepted,
     verifyMismatch,
   }
+}
+
+export interface RemoveNegativesResult {
+  applied: boolean
+  logId: string | null
+  /** Fail-safe: живой список не прочитан / подозрительно усох → откат отменён, кабинет не тронут. */
+  aborted: boolean
+  abortReason?: string
+  /** Сколько фраз реально удалено из живого списка (0 = их там уже не было — НЕ ошибка). */
+  removed: number
+  /** Контрольное чтение после ПРИМЕНЁННОГО write: кабинет ниже ожидаемого (потеря сверх удалённого). */
+  verifyMismatch?: boolean
+  /** A: поэлементные ошибки write ДОСЛОВНО (write не прошёл). */
+  writeErrors?: string[]
+}
+
+/**
+ * B (БЕЗОПАСНЫЙ ОТКАТ ДОБАВЛЕНИЯ МИНУСОВ). Симметрична addNegativeKeywords:
+ * УДАЛЯЕТ из ЖИВОГО списка ровно заданные фразы, сохраняя ВСЁ остальное — включая
+ * ручные правки владельца, сделанные ПОСЛЕ откатываемого действия. Так откат больше
+ * не заливает старый before целиком (это и был баг B — снос ручных правок).
+ *
+ * FAIL-SAFE (дефолт при сомнении — бездействие):
+ *  - живой список не прочитался (campaigns.get упал/пусто) → отмена, aborted;
+ *  - живой список подозрительно усох против снапшота → отмена, aborted (иначе
+ *    set-exact-ом залили бы КОРРУПТНО-МАЛЫЙ список и добили бы кабинет).
+ *
+ * Часть удаляемых фраз в живом списке уже нет (владелец удалил вручную) — не ошибка,
+ * тихо пропускаем. Ни одной не нашлось → removed=0, кабинет не трогаем.
+ * Сопоставление по нормализации (normalizePhrase) — как дедуп в prepareMinusCandidates.
+ * Write идёт через executeDirectWrite → зрячесть ШАГА 1 (writeErrors). Контрольное
+ * чтение для УДАЛЕНИЯ: ждём newList.length; кабинет НИЖЕ = потеря сверх удалённого.
+ */
+export async function removeNegativeKeywords(
+  phrasesToRemove: string[],
+  reason: string,
+  revertOfId?: string
+): Promise<RemoveNegativesResult> {
+  // 1. СВЕЖИЙ живой список ИЗ КАБИНЕТА.
+  let live: string[] | null = null
+  try {
+    const settings = await getCampaignSettings()
+    live = settings.NegativeKeywords?.Items ?? null
+  } catch (err) {
+    console.error('[boris-direct/write-gate] removeNegativeKeywords: живой минус-список не прочитан', err)
+    live = null
+  }
+  // FAIL-SAFE 1: чтения нет → НЕ пишем (иначе set-exact затрёт кабинет).
+  if (live === null) {
+    return {
+      applied: false,
+      logId: null,
+      aborted: true,
+      removed: 0,
+      abortReason:
+        'живой минус-список кабинета не прочитан (campaigns.get упал или поле NegativeKeywords отсутствует) — откат отменил, список кабинета не трогаю',
+    }
+  }
+
+  // FAIL-SAFE 2: живой список подозрительно усох → не добиваем остаток set-exact-ом.
+  let snapshotCount: number | null = null
+  try {
+    const snap = await prisma.borisDirectSnapshot.findFirst({
+      where: { kind: 'campaign_settings' },
+      orderBy: [{ tickDate: 'desc' }, { createdAt: 'desc' }],
+    })
+    const payload = snap?.payload as { NegativeKeywords?: { Items?: string[] } } | undefined
+    snapshotCount = payload?.NegativeKeywords?.Items?.length ?? null
+  } catch (err) {
+    console.error('[boris-direct/write-gate] removeNegativeKeywords: снапшот campaign_settings недоступен', err)
+    snapshotCount = null
+  }
+  if (isSuspiciousNegativesShrink(live.length, snapshotCount)) {
+    return {
+      applied: false,
+      logId: null,
+      aborted: true,
+      removed: 0,
+      abortReason: `живой минус-список подозрительно усох: сейчас ${live.length}, в снапшоте было ${snapshotCount} — откат отменил, список кабинета не трогаю`,
+    }
+  }
+
+  // 2. Живой список МИНУС заданные фразы (сопоставление по нормализации).
+  const removeKeys = new Set(phrasesToRemove.map(normalizePhrase))
+  const newList = live.filter((phrase) => !removeKeys.has(normalizePhrase(phrase)))
+  const removed = live.length - newList.length
+  if (removed === 0) {
+    // Удаляемых фраз в живом списке уже нет — состояние уже как надо, писать нечего.
+    return { applied: false, logId: null, aborted: false, removed: 0 }
+  }
+
+  // 3. set-exact редуцированного списка — ЗДЕСЬ он корректен (осознанно короче).
+  const gate = await applyNegativeKeywords(newList, live, reason, revertOfId)
+
+  // A: write вернул поэлементные Errors → не прошёл; отдаём как провал write.
+  if (gate.writeErrors?.length) {
+    return {
+      applied: false,
+      logId: gate.logId,
+      aborted: false,
+      removed,
+      writeErrors: gate.writeErrors,
+    }
+  }
+
+  // 4. Контрольное чтение для УДАЛЕНИЯ: ждём ровно newList.length (мы удалили
+  // distinct-фразы из уже-дедуплированного живого списка). Кабинет НИЖЕ = потеряли
+  // больше, чем собирались. Допуск на нормализацию Яндекса не нужен: новых фраз не
+  // добавляли, схлопывать нечего.
+  let verifyMismatch = false
+  if (gate.applied) {
+    try {
+      const after = await getCampaignSettings()
+      const cabinetCount = after.NegativeKeywords?.Items?.length ?? -1
+      if (cabinetCount < newList.length) verifyMismatch = true
+    } catch (err) {
+      console.error('[boris-direct/write-gate] removeNegativeKeywords: контрольное чтение упало', err)
+      verifyMismatch = true
+    }
+  }
+
+  return { applied: gate.applied, logId: gate.logId, aborted: false, removed, verifyMismatch }
 }
 
 // ---------- Остановки ----------

@@ -35,7 +35,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockGetAccepted.mockResolvedValue([])
   mockMarkApplied.mockResolvedValue(undefined)
-  mockAddNegatives.mockResolvedValue({ applied: true, logId: 'log1', aborted: false, added: 2 })
+  mockAddNegatives.mockResolvedValue({
+    applied: true,
+    logId: 'log1',
+    aborted: false,
+    added: 2,
+    addedPhrases: ['чужое кафе', 'вакансии повар'],
+  })
   mockApplyBudget.mockResolvedValue({ applied: true, logId: 'log2' })
   mockPrepare.mockImplementation((phrases: string[]) => ({ accepted: phrases, rejected: [] }))
 })
@@ -71,7 +77,13 @@ describe('applyAcceptedProposals', () => {
 
     it('OBSERVE (gate applied=false) → ВСЁ РАВНО markProposalApplied, отражено в skipped', async () => {
       mockGetAccepted.mockResolvedValue([proposal()])
-      mockAddNegatives.mockResolvedValue({ applied: false, logId: 'log1', aborted: false, added: 2 })
+      mockAddNegatives.mockResolvedValue({
+        applied: false,
+        logId: 'log1',
+        aborted: false,
+        added: 2,
+        addedPhrases: ['чужое кафе', 'вакансии повар'],
+      })
       const result = await applyAcceptedProposals()
 
       expect(mockMarkApplied).toHaveBeenCalledWith('p1')
@@ -99,6 +111,44 @@ describe('applyAcceptedProposals', () => {
       expect(result.skipped[0]).toContain('fail-safe')
     })
 
+    it('A: write минусов провалился (writeErrors) → НЕ markProposalApplied (повтор), алёрт владельцу', async () => {
+      mockGetAccepted.mockResolvedValue([proposal()])
+      mockAddNegatives.mockResolvedValue({
+        applied: false,
+        logId: 'log1',
+        aborted: false,
+        added: 2,
+        addedPhrases: ['чужое кафе', 'вакансии повар'],
+        writeErrors: ['8000: Некорректная минус-фраза'],
+      })
+      const result = await applyAcceptedProposals()
+
+      // Провал write ≠ OBSERVE: не помечаем применённым (повторим на след. тике).
+      expect(mockMarkApplied).not.toHaveBeenCalledWith('p1')
+      expect(result.applied).toEqual([])
+      expect(result.alerts).toHaveLength(1)
+      expect(result.alerts[0]).toContain('8000')
+      expect(result.skipped[0]).toContain('write')
+    })
+
+    it('D: счётчик и список — НЕТТО-новые (gate.added/addedPhrases), а не число принятых механикой', async () => {
+      mockGetAccepted.mockResolvedValue([proposal()])
+      mockPrepare.mockReturnValue({ accepted: ['чужое кафе', 'вакансии повар'], rejected: [] })
+      // Живой кабинет уже содержит «чужое кафе» → нетто-новая только одна.
+      mockAddNegatives.mockResolvedValue({
+        applied: true,
+        logId: 'log1',
+        aborted: false,
+        added: 1,
+        addedPhrases: ['вакансии повар'],
+      })
+      const result = await applyAcceptedProposals()
+
+      expect(result.applied[0]).toContain('минус-фразы (1)')
+      expect(result.applied[0]).toContain('вакансии повар')
+      expect(result.applied[0]).not.toContain('чужое кафе')
+    })
+
     it('verifyMismatch: применили, но контрольное чтение не сошлось → алёрт владельцу', async () => {
       mockGetAccepted.mockResolvedValue([proposal()])
       mockAddNegatives.mockResolvedValue({
@@ -106,6 +156,7 @@ describe('applyAcceptedProposals', () => {
         logId: 'log1',
         aborted: false,
         added: 2,
+        addedPhrases: ['чужое кафе', 'вакансии повар'],
         verifyMismatch: true,
       })
       const result = await applyAcceptedProposals()
@@ -185,6 +236,10 @@ describe('applyAcceptedProposals', () => {
     expect(result.applied).toEqual(['дневной бюджет: 3000 ₽'])
     expect(result.skipped).toHaveLength(1)
     expect(result.skipped[0]).toContain('ошибка применения')
+    // C: тихого отказа быть не должно — владельцу уходит алёрт с причиной.
+    expect(result.alerts).toHaveLength(1)
+    expect(result.alerts[0]).toContain('p1')
+    expect(result.alerts[0]).toContain('Директ лёг')
     expect(errorSpy).toHaveBeenCalled()
     errorSpy.mockRestore()
   })

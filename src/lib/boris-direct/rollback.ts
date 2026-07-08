@@ -11,7 +11,8 @@
  */
 
 import { prisma } from '@/lib/db/prisma'
-import { applyBidChanges, applyNegativeKeywords } from './write-gate'
+import { applyBidChanges, removeNegativeKeywords } from './write-gate'
+import { normalizePhrase } from './rules'
 
 export interface RevertResult {
   ok: boolean
@@ -95,6 +96,15 @@ export async function revertLastAction(): Promise<RevertResult> {
     if (gate.breakerTripped) {
       return { ok: false, message: 'Circuit breaker не пропустил откат ставок — пачка вне паттерна, нужен ручной разбор.' }
     }
+    // A: write отката видим — поэлементные ошибки Директа не проглатываем.
+    if (gate.writeErrors?.length) {
+      return {
+        ok: gate.applied ? true : false,
+        message: gate.applied
+          ? `Откатил ставки частично: ${gate.writeErrors.join('; ')}. Проверь ставки в кабинете.`
+          : `Откат ставок не применился в Директе (ошибки API): ${gate.writeErrors.join('; ')}.`,
+      }
+    }
     if (!gate.applied) {
       return { ok: false, message: 'Откат ставок не применён: режим наблюдения или стоп-кран. Записал как «сделал бы».' }
     }
@@ -106,14 +116,38 @@ export async function revertLastAction(): Promise<RevertResult> {
     return { ok: true, message: `Откатил ставки по ${changes.length} фразам к прежним значениям.` }
   }
 
-  // campaigns.update.negatives: вернуть прежний полный список минус-фраз.
+  // campaigns.update.negatives (B): УДАЛИТЬ из ЖИВОГО списка ровно то, что действие
+  // добавило (added = after − before), сохранив ручные правки владельца. Прежний
+  // подход «залить before целиком» стирал эти правки — это и был баг B.
   const beforeList = asStringList(last.before)
   const afterList = asStringList(last.after)
   if (!beforeList || !afterList) {
     return { ok: false, message: 'В записи лога нет корректных before/after — откатить минус-фразы не могу.' }
   }
 
-  const gate = await applyNegativeKeywords(beforeList, afterList, REVERT_REASON, last.id)
+  const beforeKeys = new Set(beforeList.map(normalizePhrase))
+  const added = afterList.filter((phrase) => !beforeKeys.has(normalizePhrase(phrase)))
+  if (added.length === 0) {
+    return { ok: false, message: 'Это действие ничего не добавляло в минус-список — откатывать нечего.' }
+  }
+
+  const gate = await removeNegativeKeywords(added, REVERT_REASON, last.id)
+  if (gate.aborted) {
+    // Fail-safe: живой список не прочитан / подозрительно усох — кабинет не тронут.
+    return { ok: false, message: `Откат минусов отменил (fail-safe): ${gate.abortReason}. Живой список кабинета не тронул.` }
+  }
+  if (gate.writeErrors?.length) {
+    return { ok: false, message: `Откат минусов не применился в Директе (ошибки API): ${gate.writeErrors.join('; ')}.` }
+  }
+  if (gate.removed === 0) {
+    // Добавленных фраз в живом списке уже нет (владелец удалил вручную) — состояние
+    // уже достигнуто. Помечаем действие откаченным, кабинет не трогаем.
+    await prisma.borisDirectActionLog.update({
+      where: { id: last.id },
+      data: { revertedAt: new Date() },
+    })
+    return { ok: true, message: 'Добавленных этим действием фраз в живом списке уже нет — пометил откаченным, кабинет не трогаю.' }
+  }
   if (!gate.applied) {
     return { ok: false, message: 'Откат минус-фраз не применён: режим наблюдения или стоп-кран. Записал как «сделал бы».' }
   }
@@ -122,5 +156,11 @@ export async function revertLastAction(): Promise<RevertResult> {
     where: { id: last.id },
     data: { revertedAt: new Date() },
   })
-  return { ok: true, message: `Вернул прежний список минус-фраз (${beforeList.length} шт.).` }
+  const warn = gate.verifyMismatch
+    ? ' ⚠️ Контрольное чтение кабинета не сошлось — проверь список минус-фраз вручную.'
+    : ''
+  return {
+    ok: true,
+    message: `Убрал ${gate.removed} добавленных этим действием фраз из живого списка (ручные правки владельца сохранены).${warn}`,
+  }
 }

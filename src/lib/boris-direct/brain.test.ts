@@ -547,6 +547,73 @@ describe('runProcessTick', () => {
     )
   })
 
+  it('A: write минусов провалился (writeErrors) → critical-аномалия, минус НЕ в applied', async () => {
+    setupProcessHappyPath()
+    mockGate.addNegativeKeywords.mockResolvedValue({
+      applied: false,
+      logId: 'n1',
+      aborted: false,
+      added: 1,
+      addedPhrases: ['чужое кафе вакансии'],
+      writeErrors: ['8000: Некорректная минус-фраза'],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.anomalies).toContainEqual(
+      expect.objectContaining({ severity: 'critical', kind: 'negatives_write_fail' })
+    )
+    // Провалившийся write НЕ считаем ни applied, ни «сделал бы».
+    expect(res.appliedSummaries).toEqual(
+      expect.not.arrayContaining([expect.stringContaining('минус')])
+    )
+    expect(res.wouldDoSummaries).toEqual(
+      expect.not.arrayContaining([expect.stringContaining('минус')])
+    )
+  })
+
+  it('A: write ставок провалился целиком (writeErrors, applied=false) → critical-аномалия, ставки НЕ в applied', async () => {
+    setupProcessHappyPath()
+    mockGate.applyBidChanges.mockResolvedValue({
+      applied: false,
+      logId: 'b1',
+      clamped: 0,
+      breakerTripped: false,
+      writeErrors: ['5005: Неверный параметр'],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.anomalies).toContainEqual(
+      expect.objectContaining({ severity: 'critical', kind: 'bids_write_fail' })
+    )
+    expect(res.appliedSummaries).toEqual(
+      expect.not.arrayContaining([expect.stringContaining('ставки')])
+    )
+  })
+
+  it('A: ставки применены ЧАСТИЧНО (partial+writeErrors, applied=true) → аномалия, но применённое считаем', async () => {
+    setupProcessHappyPath()
+    mockGate.applyBidChanges.mockResolvedValue({
+      applied: true,
+      logId: 'b1',
+      clamped: 0,
+      breakerTripped: false,
+      partial: true,
+      writeErrors: ['5005: Неверный параметр'],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.anomalies).toContainEqual(
+      expect.objectContaining({ kind: 'bids_partial_fail' })
+    )
+    // Часть ставок реально применилась → она в applied (с пометкой «частично»).
+    expect(res.appliedSummaries).toEqual(
+      expect.arrayContaining([expect.stringContaining('ставки')])
+    )
+  })
+
   it('ошибка одного блока не роняет тик: минусовка упала → ставки всё равно отработали', async () => {
     setupProcessHappyPath()
     mockLlm.mockRejectedValue(new Error('Anthropic 529'))
