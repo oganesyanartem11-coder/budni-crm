@@ -26,6 +26,7 @@ import {
   suspendCampaign,
   updateDailyBudget,
   extractWriteIssues,
+  classifyWriteResult,
   type CampaignState,
 } from './direct-client'
 import { DIRECT_CAMPAIGN_ID, MICRO } from './config'
@@ -341,5 +342,74 @@ describe('extractWriteIssues', () => {
   it('пустой/чужой результат → пустые списки', () => {
     expect(extractWriteIssues(undefined)).toEqual({ errors: [], warnings: [] })
     expect(extractWriteIssues({ AddResults: [{}] })).toEqual({ errors: [], warnings: [] })
+  })
+})
+
+describe('classifyWriteResult — поэлементный разбор для гейта (зрячесть write-тракта)', () => {
+  it('чистый ответ: total по числу элементов, провалов нет', () => {
+    const out = classifyWriteResult({ SetResults: [{ KeywordId: 1 }, { KeywordId: 2 }] })
+    expect(out.total).toBe(2)
+    expect(out.failedIndices).toEqual([])
+    expect(out.errors).toEqual([])
+    expect(out.warnings).toEqual([])
+  })
+
+  it('ВСЕ элементы с ошибкой → failedIndices == все индексы, ошибки дословно с кодами', () => {
+    const out = classifyWriteResult({
+      SetResults: [
+        { Errors: [{ Code: 5005, Message: 'Неверный параметр', Details: 'SearchBid' }] },
+        { Errors: [{ Code: 8000, Message: 'Неверное поле' }] },
+      ],
+    })
+    expect(out.total).toBe(2)
+    expect(out.failedIndices).toEqual([0, 1])
+    expect(out.errors).toEqual(['5005: Неверный параметр — SearchBid', '8000: Неверное поле'])
+  })
+
+  it('ЧАСТЬ элементов с ошибкой → failedIndices только по битым (порядок = порядок отправки)', () => {
+    const out = classifyWriteResult({
+      SetResults: [
+        { KeywordId: 1 },
+        { Errors: [{ Code: 5005, Message: 'Неверный параметр' }] },
+        { KeywordId: 3 },
+      ],
+    })
+    expect(out.total).toBe(3)
+    expect(out.failedIndices).toEqual([1])
+    expect(out.errors).toEqual(['5005: Неверный параметр'])
+  })
+
+  it('код 10140 (дубль) — warning, НЕ помечает элемент проваленным', () => {
+    const out = classifyWriteResult({
+      UpdateResults: [{ Errors: [{ Code: 10140, Message: 'Дублирующаяся фраза' }] }],
+    })
+    expect(out.total).toBe(1)
+    expect(out.failedIndices).toEqual([])
+    expect(out.errors).toEqual([])
+    expect(out.warnings).toEqual(['10140: Дублирующаяся фраза'])
+  })
+
+  it('Warnings штатно собираются, элемент проваленным не считается', () => {
+    const out = classifyWriteResult({
+      UpdateResults: [{ Warnings: [{ Code: 10161, Message: 'Ставка скорректирована' }] }],
+    })
+    expect(out.total).toBe(1)
+    expect(out.failedIndices).toEqual([])
+    expect(out.warnings).toEqual(['10161: Ставка скорректирована'])
+  })
+
+  it('нет поэлементного массива (пусто/чужое) → total 0, провалов нет', () => {
+    expect(classifyWriteResult(undefined)).toEqual({
+      total: 0,
+      failedIndices: [],
+      errors: [],
+      warnings: [],
+    })
+    expect(classifyWriteResult({ ok: true })).toEqual({
+      total: 0,
+      failedIndices: [],
+      errors: [],
+      warnings: [],
+    })
   })
 })

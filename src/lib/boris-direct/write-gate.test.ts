@@ -24,13 +24,19 @@ const { mockPrisma, mockGetState, mockDirect } = vi.hoisted(() => ({
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('./state', () => ({ getDirectRoleState: mockGetState }))
-vi.mock('./direct-client', () => mockDirect)
+// Транспорты мокаем, но classifyWriteResult — чистый разбор ответа — берём НАСТОЯЩИЙ
+// (гейт обязан по-настоящему видеть поэлементные ошибки, а не мок).
+vi.mock('./direct-client', async (importActual) => {
+  const actual = await importActual<typeof import('./direct-client')>()
+  return { ...mockDirect, classifyWriteResult: actual.classifyWriteResult }
+})
 
 import {
   executeDirectWrite,
   applyBidChanges,
   applyNegativeKeywords,
   addNegativeKeywords,
+  removeNegativeKeywords,
   suspendKeywordsGated,
   suspendCampaignEmergency,
   applyDailyBudget,
@@ -163,6 +169,88 @@ describe('executeDirectWrite — гейт режима', () => {
     })
     expect(mockPrisma.borisDirectActionLog.create.mock.calls[0][0].data.revertOfId).toBe('orig-1')
   })
+
+  it('A: ВСЕ элементы с ошибкой (HTTP 200) → applied=false, БЕЗ фантомного after, writeErrors дословно', async () => {
+    setState({ mode: 'LIVE' })
+    const perform = vi.fn().mockResolvedValue({
+      SetResults: [{ Errors: [{ Code: 5005, Message: 'Неверный параметр', Details: 'SearchBid' }] }],
+    })
+
+    const res = await executeDirectWrite({
+      action: 'keywordbids.set',
+      targetType: 'keyword',
+      before: [{ keywordId: 1, bidMicro: 100 }],
+      after: [{ keywordId: 1, bidMicro: 150 }],
+      reason: 'тест',
+      perform,
+    })
+
+    expect(res.applied).toBe(false)
+    expect(res.writeErrors).toEqual(['5005: Неверный параметр — SearchBid'])
+    const logged = mockPrisma.borisDirectActionLog.create.mock.calls[0][0].data
+    expect(logged.applied).toBe(false)
+    expect(logged.reason).toContain('WRITE FAILED')
+    expect(logged.reason).toContain('5005')
+    // Фантома НЕТ: after не фиксируем при полностью провалившемся write.
+    expect(logged.after).toBeUndefined()
+  })
+
+  it('A: только warnings (10161) → applied=true, warnings в reason, writeErrors нет', async () => {
+    setState({ mode: 'LIVE' })
+    const perform = vi.fn().mockResolvedValue({
+      UpdateResults: [{ Warnings: [{ Code: 10161, Message: 'Ставка скорректирована' }] }],
+    })
+
+    const res = await executeDirectWrite({
+      action: 'campaigns.update.daily_budget',
+      targetType: 'campaign',
+      reason: 'тест',
+      perform,
+    })
+
+    expect(res.applied).toBe(true)
+    expect(res.writeErrors).toBeUndefined()
+    const logged = mockPrisma.borisDirectActionLog.create.mock.calls[0][0].data
+    expect(logged.applied).toBe(true)
+    expect(logged.reason).toContain('warnings')
+    expect(logged.reason).toContain('10161')
+  })
+
+  it('A: код 10140 в Errors — дубль, не провал: applied=true (write состоялся)', async () => {
+    setState({ mode: 'LIVE' })
+    const perform = vi.fn().mockResolvedValue({
+      UpdateResults: [{ Errors: [{ Code: 10140, Message: 'Дублирующаяся фраза' }] }],
+    })
+
+    const res = await executeDirectWrite({
+      action: 'campaigns.update.negatives',
+      targetType: 'campaign',
+      reason: 'тест',
+      perform,
+    })
+
+    expect(res.applied).toBe(true)
+    expect(res.writeErrors).toBeUndefined()
+  })
+
+  it('A: исключение perform → applied=false, ERROR в reason, after НЕ фиксируем (не фантом)', async () => {
+    setState({ mode: 'LIVE' })
+    const perform = vi.fn().mockRejectedValue(new Error('code=500 direct down'))
+
+    await expect(
+      executeDirectWrite({
+        action: 'keywordbids.set',
+        targetType: 'keyword',
+        after: [{ keywordId: 1, bidMicro: 150 }],
+        reason: 'тест',
+        perform,
+      })
+    ).rejects.toThrow('direct down')
+
+    const logged = mockPrisma.borisDirectActionLog.create.mock.calls[0][0].data
+    expect(logged.applied).toBe(false)
+    expect(logged.after).toBeUndefined()
+  })
 })
 
 describe('applyBidChanges', () => {
@@ -217,6 +305,31 @@ describe('applyBidChanges', () => {
     const logged = mockPrisma.borisDirectActionLog.create.mock.calls[0][0].data
     expect(logged.before).toEqual([{ keywordId: 7, bidMicro: 100 * MICRO }])
     expect(logged.after).toEqual([{ keywordId: 7, bidMicro: 150 * MICRO }])
+  })
+
+  it('A: частичный успех (2-я фраза с ошибкой) → before/after ТОЛЬКО по применённой, partial+writeErrors', async () => {
+    setState({ mode: 'LIVE' })
+    // Порядок SetResults == порядок отправки: 0 — ок, 1 — ошибка.
+    mockDirect.setKeywordBids.mockResolvedValue({
+      SetResults: [{ KeywordId: 11 }, { Errors: [{ Code: 5005, Message: 'Неверный параметр' }] }],
+    })
+
+    const res = await applyBidChanges(
+      [
+        { keywordId: 11, fromMicro: 100 * MICRO, toMicro: 150 * MICRO },
+        { keywordId: 22, fromMicro: 100 * MICRO, toMicro: 150 * MICRO },
+      ],
+      'тест'
+    )
+
+    expect(res.applied).toBe(true)
+    expect(res.partial).toBe(true)
+    expect(res.writeErrors).toEqual(['5005: Неверный параметр'])
+    const logged = mockPrisma.borisDirectActionLog.create.mock.calls[0][0].data
+    // Фразу-провал (22) в before/after НЕ фиксируем — только реально применённую (11).
+    expect(logged.before).toEqual([{ keywordId: 11, bidMicro: 100 * MICRO }])
+    expect(logged.after).toEqual([{ keywordId: 11, bidMicro: 150 * MICRO }])
+    expect(logged.reason).toContain('ЧАСТИЧНО')
   })
 })
 
@@ -372,6 +485,136 @@ describe('addNegativeKeywords — единая точка мержа с ЖИВЫ
     expect(res.aborted).toBe(false)
     expect(res.applied).toBe(false)
     expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+  })
+
+  it('A: write минусов провалился целиком (Errors по всем) → writeErrors проброшен, applied=false, НЕ aborted', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings.mockResolvedValueOnce(settingsWith(['аренда']))
+    mockDirect.updateCampaignNegatives.mockResolvedValue({
+      UpdateResults: [{ Errors: [{ Code: 8000, Message: 'Некорректная минус-фраза' }] }],
+    })
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.applied).toBe(false)
+    expect(res.aborted).toBe(false)
+    expect(res.writeErrors).toEqual(['8000: Некорректная минус-фраза'])
+    // Контрольного чтения после провала нет.
+    expect(mockDirect.getCampaignSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('D: addedPhrases — нетто-новые против живого списка (для честного счётчика)', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии']))
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'опт']))
+
+    // «вакансии» уже в кабинете → нетто-новая только «опт».
+    const res = await addNegativeKeywords(['вакансии', 'опт'], 'минусовка')
+
+    expect(res.added).toBe(1)
+    expect(res.addedPhrases).toEqual(['опт'])
+  })
+})
+
+describe('removeNegativeKeywords — безопасный откат добавления минусов (B)', () => {
+  it('убирает заданные фразы из СВЕЖЕГО живого списка, остальное (ручные правки) сохраняет; revertOfId в лог', async () => {
+    setState({ mode: 'LIVE' })
+    // Живой список = старые + добавленное действием («опт») + РУЧНАЯ правка владельца («ручное»).
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'опт', 'ручное']))
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'ручное']))
+
+    const res = await removeNegativeKeywords(['опт'], 'откат', 'orig-1')
+
+    expect(res.applied).toBe(true)
+    expect(res.removed).toBe(1)
+    // В кабинет ушёл живой список МИНУС «опт» — ручная правка «ручное» сохранена.
+    expect(mockDirect.updateCampaignNegatives).toHaveBeenCalledWith(['аренда', 'вакансии', 'ручное'])
+    const negLog = mockPrisma.borisDirectActionLog.create.mock.calls
+      .map((c) => c[0].data)
+      .find((d) => d.action === 'campaigns.update.negatives')
+    expect(negLog.revertOfId).toBe('orig-1')
+    // before лога = свежий живой список (для честности), after = список после удаления.
+    expect(negLog.before).toEqual(['аренда', 'вакансии', 'опт', 'ручное'])
+    expect(negLog.after).toEqual(['аренда', 'вакансии', 'ручное'])
+  })
+
+  it('часть удаляемых фраз в живом списке уже нет → спокойно убираем присутствующие', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'опт']))
+      .mockResolvedValueOnce(settingsWith(['аренда']))
+
+    const res = await removeNegativeKeywords(['опт', 'уже-удалённое-владельцем'], 'откат')
+
+    expect(res.removed).toBe(1)
+    expect(mockDirect.updateCampaignNegatives).toHaveBeenCalledWith(['аренда'])
+  })
+
+  it('удаляемых фраз в живом списке нет вовсе → removed=0, кабинет не трогаем, не aborted', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings.mockResolvedValue(settingsWith(['аренда', 'вакансии']))
+
+    const res = await removeNegativeKeywords(['опт'], 'откат')
+
+    expect(res.removed).toBe(0)
+    expect(res.applied).toBe(false)
+    expect(res.aborted).toBe(false)
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+  })
+
+  it('FAIL-SAFE: живой список не прочитан → откат ОТМЕНЁН (aborted), write не вызван', async () => {
+    setState({ mode: 'LIVE' })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockDirect.getCampaignSettings.mockRejectedValue(new Error('code=500 direct down'))
+
+    const res = await removeNegativeKeywords(['опт'], 'откат')
+
+    expect(res.aborted).toBe(true)
+    expect(res.applied).toBe(false)
+    expect(res.abortReason).toBeTruthy()
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+
+  it('FAIL-SAFE: живой список подозрительно усох против снапшота → откат отменён (не добиваем остаток set-exact-ом)', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings.mockResolvedValue(settingsWith(['осталась одна']))
+    mockPrisma.borisDirectSnapshot.findFirst.mockResolvedValue({
+      payload: { NegativeKeywords: { Items: Array.from({ length: 1178 }, (_, i) => `ф${i}`) } },
+    })
+
+    const res = await removeNegativeKeywords(['опт'], 'откат')
+
+    expect(res.aborted).toBe(true)
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+  })
+
+  it('контрольное чтение: кабинет ниже ожидаемого (потеря сверх удалённого) → verifyMismatch', async () => {
+    setState({ mode: 'LIVE' })
+    // live 3, удаляем 1 → ждём 2; кабинет вернул 1 → потеряли лишнее.
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'опт']))
+      .mockResolvedValueOnce(settingsWith(['аренда']))
+
+    const res = await removeNegativeKeywords(['опт'], 'откат')
+
+    expect(res.applied).toBe(true)
+    expect(res.verifyMismatch).toBe(true)
+  })
+
+  it('OBSERVE: читаем живой список, но write не идёт (applied=false), removed посчитан, контрольного чтения нет', async () => {
+    setState({ mode: 'OBSERVE' })
+    mockDirect.getCampaignSettings.mockResolvedValue(settingsWith(['аренда', 'опт']))
+
+    const res = await removeNegativeKeywords(['опт'], 'откат')
+
+    expect(res.applied).toBe(false)
+    expect(res.removed).toBe(1)
+    expect(res.aborted).toBe(false)
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+    expect(mockDirect.getCampaignSettings).toHaveBeenCalledTimes(1)
   })
 })
 

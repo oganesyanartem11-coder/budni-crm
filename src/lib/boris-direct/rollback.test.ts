@@ -11,7 +11,7 @@ const { mockPrisma, mockGate } = vi.hoisted(() => ({
   },
   mockGate: {
     applyBidChanges: vi.fn(),
-    applyNegativeKeywords: vi.fn(),
+    removeNegativeKeywords: vi.fn(),
   },
 }))
 
@@ -30,7 +30,12 @@ beforeEach(() => {
     clamped: 0,
     breakerTripped: false,
   })
-  mockGate.applyNegativeKeywords.mockResolvedValue({ applied: true, logId: 'revert-log' })
+  mockGate.removeNegativeKeywords.mockResolvedValue({
+    applied: true,
+    logId: 'revert-log',
+    aborted: false,
+    removed: 1,
+  })
 })
 
 describe('revertLastAction', () => {
@@ -69,7 +74,7 @@ describe('revertLastAction', () => {
     })
   })
 
-  it('campaigns.update.negatives → applyNegativeKeywords(before, after) + revertedAt', async () => {
+  it('B: campaigns.update.negatives → removeNegativeKeywords(added = after − before) из ЖИВОГО списка + revertedAt', async () => {
     mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
       id: 'orig-2',
       action: 'campaigns.update.negatives',
@@ -80,9 +85,9 @@ describe('revertLastAction', () => {
     const res = await revertLastAction()
 
     expect(res.ok).toBe(true)
-    expect(mockGate.applyNegativeKeywords).toHaveBeenCalledWith(
-      ['старый'],
-      ['старый', 'новый'],
+    // Удаляем ровно ДОБАВЛЕННОЕ действием («новый»), а не заливаем before целиком.
+    expect(mockGate.removeNegativeKeywords).toHaveBeenCalledWith(
+      ['новый'],
       'откат по команде владельца',
       'orig-2'
     )
@@ -90,6 +95,74 @@ describe('revertLastAction', () => {
       where: { id: 'orig-2' },
       data: { revertedAt: expect.any(Date) },
     })
+  })
+
+  it('B: fail-safe отката (removeNegativeKeywords aborted) → ok=false, revertedAt НЕ ставим', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
+      id: 'orig-6',
+      action: 'campaigns.update.negatives',
+      before: ['старый'],
+      after: ['старый', 'новый'],
+    })
+    mockGate.removeNegativeKeywords.mockResolvedValue({
+      applied: false,
+      logId: null,
+      aborted: true,
+      abortReason: 'живой минус-список кабинета не прочитан',
+      removed: 0,
+    })
+
+    const res = await revertLastAction()
+
+    expect(res.ok).toBe(false)
+    expect(res.message).toContain('не прочитан')
+    expect(mockPrisma.borisDirectActionLog.update).not.toHaveBeenCalled()
+  })
+
+  it('B: добавленных фраз в живом списке уже нет (removed=0) → ok=true, действие помечаем откаченным', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
+      id: 'orig-7',
+      action: 'campaigns.update.negatives',
+      before: ['старый'],
+      after: ['старый', 'новый'],
+    })
+    mockGate.removeNegativeKeywords.mockResolvedValue({
+      applied: false,
+      logId: null,
+      aborted: false,
+      removed: 0,
+    })
+
+    const res = await revertLastAction()
+
+    expect(res.ok).toBe(true)
+    expect(res.message).toContain('уже')
+    expect(mockPrisma.borisDirectActionLog.update).toHaveBeenCalledWith({
+      where: { id: 'orig-7' },
+      data: { revertedAt: expect.any(Date) },
+    })
+  })
+
+  it('B/A: write отката минусов вернул ошибки API (writeErrors) → ok=false, revertedAt НЕ ставим', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
+      id: 'orig-8',
+      action: 'campaigns.update.negatives',
+      before: ['старый'],
+      after: ['старый', 'новый'],
+    })
+    mockGate.removeNegativeKeywords.mockResolvedValue({
+      applied: false,
+      logId: 'l',
+      aborted: false,
+      removed: 1,
+      writeErrors: ['8000: Некорректная минус-фраза'],
+    })
+
+    const res = await revertLastAction()
+
+    expect(res.ok).toBe(false)
+    expect(res.message).toContain('8000')
+    expect(mockPrisma.borisDirectActionLog.update).not.toHaveBeenCalled()
   })
 
   it.each(['keywords.suspend', 'campaigns.suspend'])(
@@ -102,23 +175,50 @@ describe('revertLastAction', () => {
       expect(res.ok).toBe(false)
       expect(res.message).toContain(action)
       expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
-      expect(mockGate.applyNegativeKeywords).not.toHaveBeenCalled()
+      expect(mockGate.removeNegativeKeywords).not.toHaveBeenCalled()
       expect(mockPrisma.borisDirectActionLog.update).not.toHaveBeenCalled()
     }
   )
 
-  it('гейт не применил откат (observe/стоп-кран) → ok=false, revertedAt НЕ ставим', async () => {
+  it('откат минусов не применён (observe/стоп-кран, applied=false, removed>0) → ok=false, revertedAt НЕ ставим', async () => {
     mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
       id: 'orig-3',
       action: 'campaigns.update.negatives',
-      before: [],
-      after: ['новый'],
+      before: ['старый'],
+      after: ['старый', 'новый'],
     })
-    mockGate.applyNegativeKeywords.mockResolvedValue({ applied: false, logId: 'l' })
+    mockGate.removeNegativeKeywords.mockResolvedValue({
+      applied: false,
+      logId: 'l',
+      aborted: false,
+      removed: 1,
+    })
 
     const res = await revertLastAction()
 
     expect(res.ok).toBe(false)
+    expect(mockPrisma.borisDirectActionLog.update).not.toHaveBeenCalled()
+  })
+
+  it('A: write отката СТАВОК вернул ошибки (writeErrors, applied=false) → ok=false с текстом ошибки, revertedAt НЕ ставим', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
+      id: 'orig-9',
+      action: 'keywordbids.set',
+      before: [{ keywordId: 1, bidMicro: 100 * MICRO }],
+      after: [{ keywordId: 1, bidMicro: 150 * MICRO }],
+    })
+    mockGate.applyBidChanges.mockResolvedValue({
+      applied: false,
+      logId: 'l',
+      clamped: 0,
+      breakerTripped: false,
+      writeErrors: ['5005: Неверный параметр'],
+    })
+
+    const res = await revertLastAction()
+
+    expect(res.ok).toBe(false)
+    expect(res.message).toContain('5005')
     expect(mockPrisma.borisDirectActionLog.update).not.toHaveBeenCalled()
   })
 

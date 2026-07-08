@@ -73,6 +73,19 @@ async function applyOne(
         skipped.push(`минус-фразы: fail-safe (${gate.abortReason}) — предложение ${proposal.id}, не помечаю применённым`)
         return
       }
+      if (gate.writeErrors?.length) {
+        // A: campaigns.update вернул HTTP 200 с Errors → write НЕ прошёл. Это НЕ
+        // OBSERVE (не «сделал бы»): НЕ помечаем применённым (повтор на след. тике),
+        // владельцу — алёрт с кодами ошибок дословно.
+        alerts.push(
+          `⚠️ Принятые минусы (предложение ${proposal.id}) НЕ применились в Директе (ошибки API): ` +
+            `${gate.writeErrors.join('; ')}. Повторю на следующем тике.`
+        )
+        skipped.push(
+          `минус-фразы: write-ошибка Директа (${gate.writeErrors.join('; ')}) — предложение ${proposal.id}, не помечаю применённым`
+        )
+        return
+      }
       // В OBSERVE applied=false — всё равно помечаем: лог «сделал бы» остался,
       // повторно применять при смене режима будем уже по новым данным.
       await markProposalApplied(proposal.id)
@@ -81,7 +94,9 @@ async function applyOne(
           `⚠️ Минусы предложения ${proposal.id} применил, но контрольное чтение кабинета не сошлось — проверь список минус-фраз вручную.`
         )
       }
-      const label = `минус-фразы (${prepared.accepted.length}): ${prepared.accepted.join(', ')}`
+      // D: счётчик и список — НЕТТО-новые против живого кабинета (gate.added/addedPhrases),
+      // а не число прошедших механику принятых (иначе завышает: часть уже в кабинете).
+      const label = `минус-фразы (${gate.added}): ${gate.addedPhrases.join(', ')}`
       if (gate.applied) applied.push(label)
       else if (gate.added === 0)
         skipped.push(`минус-фразы: все кандидаты уже в списке кабинета (предложение ${proposal.id})`)
@@ -138,12 +153,19 @@ export async function applyAcceptedProposals(): Promise<ApplyAcceptedResult> {
     try {
       await applyOne(proposal, applied, skipped, alerts)
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       console.error(
         `[boris-direct/apply-accepted] предложение ${proposal.id} (${proposal.type}) не применилось`,
         err
       )
       skipped.push(
         `${proposal.type}: ошибка применения, попробую на следующем тике (предложение ${proposal.id})`
+      )
+      // C: тихого отказа применения принятого быть не должно — владельцу алёрт
+      // (что и почему не применилось). Предложение НЕ помечено applied (throw
+      // случился до markProposalApplied) → повтор на следующем тике.
+      alerts.push(
+        `⚠️ Принятое предложение ${proposal.id} (${proposal.type}) НЕ применилось из-за ошибки: ${message}. Повторю на следующем тике.`
       )
     }
   }

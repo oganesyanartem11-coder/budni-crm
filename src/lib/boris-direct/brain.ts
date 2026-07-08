@@ -1153,6 +1153,15 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             kind: 'negatives_failsafe',
             text: `Автономная минусовка ОТМЕНЕНА (fail-safe): ${gate.abortReason}. Живой список кабинета не тронут.`,
           })
+        } else if (gate.writeErrors?.length) {
+          // A: campaigns.update вернул HTTP 200 с Errors → write НЕ прошёл. Не молчим
+          // (иначе фантом «применено»): критическая аномалия с кодами ошибок дословно,
+          // в applied/«сделал бы» НЕ пишем.
+          anomalies.push({
+            severity: 'critical',
+            kind: 'negatives_write_fail',
+            text: `Автономная минусовка НЕ применилась в Директе (ошибки API): ${gate.writeErrors.join('; ')}. Список кабинета не тронут.`,
+          })
         } else {
           if (gate.verifyMismatch) {
             anomalies.push({
@@ -1347,6 +1356,19 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             reasonCode: 'CIRCUIT_BREAKER',
             factors: { changes: changes.length },
           })
+        } else if (gate.writeErrors?.length) {
+          // A: keywordbids.set вернул поэлементные Errors. Частичный успех
+          // (applied=true) — часть ставок реально применилась, считаем её; полный
+          // провал (applied=false) — ничего не применилось. В обоих случаях аномалия.
+          const summary = `ставки: ${changes.length} фраз к целевым позициям шкалы`
+          anomalies.push({
+            severity: 'critical',
+            kind: gate.partial ? 'bids_partial_fail' : 'bids_write_fail',
+            text: gate.partial
+              ? `Ставки применены ЧАСТИЧНО, часть фраз с ошибкой: ${gate.writeErrors.join('; ')}. Проверь ставки в кабинете.`
+              : `Ставки НЕ применились в Директе (ошибки API): ${gate.writeErrors.join('; ')}.`,
+          })
+          if (gate.applied) appliedSummaries.push(`${summary} (частично)`)
         } else {
           const summary = `ставки: ${changes.length} фраз к целевым позициям шкалы`
           if (gate.applied) appliedSummaries.push(summary)

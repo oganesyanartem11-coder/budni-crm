@@ -31,6 +31,7 @@ import type {
   KeywordBidRecord,
   KeywordRecord,
   WriteIssues,
+  WriteOutcome,
 } from '../../src/lib/boris-direct/direct-client'
 
 // Паритет экспортов типов с реальным модулем (type-only — в runtime стирается).
@@ -42,6 +43,7 @@ export type {
   KeywordBidRecord,
   KeywordRecord,
   WriteIssues,
+  WriteOutcome,
   BidModifierRecord,
   AdGroupRecord,
   TimeTargeting,
@@ -335,4 +337,38 @@ export function extractWriteIssues(result: unknown): WriteIssues {
     }
   }
   return issues
+}
+
+/**
+ * Поэлементный разбор write-ответа — честный дубль реального classifyWriteResult
+ * (write-gate зовёт его на КАЖДЫЙ write; фейк обязан его экспортировать, иначе
+ * симуляция падает). Все write-фейки выше возвращают чистые SetResults/
+ * UpdateResults/SuspendResults без Errors → total>0, провалов нет → applied=true.
+ */
+export function classifyWriteResult(result: unknown): WriteOutcome {
+  const outcome: WriteOutcome = { total: 0, failedIndices: [], errors: [], warnings: [] }
+  if (!result || typeof result !== 'object') return outcome
+
+  let index = 0
+  for (const value of Object.values(result as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue
+    for (const item of value as WriteResultItem[]) {
+      const idx = index++
+      let elementFailed = false
+      for (const err of item?.Errors ?? []) {
+        if (err.Code === DUPLICATE_KEYWORD_CODE) {
+          outcome.warnings.push(formatIssue(err))
+        } else {
+          outcome.errors.push(formatIssue(err))
+          elementFailed = true
+        }
+      }
+      for (const warn of item?.Warnings ?? []) {
+        outcome.warnings.push(formatIssue(warn))
+      }
+      if (elementFailed) outcome.failedIndices.push(idx)
+    }
+  }
+  outcome.total = index
+  return outcome
 }

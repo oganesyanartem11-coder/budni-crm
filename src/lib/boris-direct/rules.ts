@@ -90,8 +90,8 @@ function tokenize(phrase: string): string[] {
     .filter((token) => token.length > 0)
 }
 
-/** Нормализованный вид всей фразы — ключ дедупа. */
-function normalizePhrase(phrase: string): string {
+/** Нормализованный вид всей фразы — ключ дедупа (и сопоставления при удалении). */
+export function normalizePhrase(phrase: string): string {
   return tokenize(phrase).join(' ')
 }
 
