@@ -191,6 +191,35 @@ export function pickDataDrivenMinusCandidates(rows: QueryStatRow[]): string[] {
     .filter((query) => query.trim().length > 0)
 }
 
+// ---------- Fail-safe минус-списка: защита от катастрофического усыхания ----------
+// При записи NegativeKeywords список ЗАМЕЩАЕТ текущий целиком. Если живой список,
+// прочитанный из кабинета перед записью, вдруг оказался много меньше того, что мы
+// видели в последнем снапшоте, — это признак того, что список уже кто-то снёс.
+// В этом случае писать НЕЛЬЗЯ (добьём остаток): дефолт при сомнении — бездействие.
+
+/** База, ниже которой не судим об усыхании (молодая кампания с малым списком). */
+const NEGATIVES_SHRINK_MIN_BASELINE = 20
+/** Потеря больше половины списка против снапшота = подозрительно (норм. ручная чистка меньше). */
+const NEGATIVES_SHRINK_RATIO = 0.5
+
+/**
+ * Подозрительно ли усох живой минус-список против последнего снапшота.
+ * snapshotCount === null (снапшота нет) → не судим (false).
+ * Живой список УПАЛ В НОЛЬ, а в снапшоте были фразы → всегда подозрительно
+ * (минус-фразы сами не удаляются — это признак затирания/сбоя чтения), даже при
+ * малой базе. Иначе судим только при осмысленной базе (≥ MIN_BASELINE):
+ * suspicious, если живой список потерял больше половины.
+ */
+export function isSuspiciousNegativesShrink(
+  liveCount: number,
+  snapshotCount: number | null
+): boolean {
+  if (snapshotCount == null) return false
+  if (liveCount === 0 && snapshotCount > 0) return true
+  if (snapshotCount < NEGATIVES_SHRINK_MIN_BASELINE) return false
+  return liveCount < snapshotCount * NEGATIVES_SHRINK_RATIO
+}
+
 // ---------- Ставки: бинарная шкала ----------
 
 /** Премиум-блок (TV 85/100) — НИКОГДА: рубеж ×3-4 по цене, заявки те же. */

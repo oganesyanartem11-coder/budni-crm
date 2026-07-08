@@ -16,6 +16,7 @@ import {
   pickDataDrivenMinusCandidates,
   recommendBid,
   checkCircuitBreaker,
+  isSuspiciousNegativesShrink,
 } from './rules'
 import {
   QUARANTINE_DAYS,
@@ -311,5 +312,37 @@ describe('checkCircuitBreaker', () => {
 
   it('масса с нуля вверх → стоп (вне паттерна)', () => {
     expect(checkCircuitBreaker([{ fromMicro: 0, toMicro: 100 * MICRO }]).ok).toBe(false)
+  })
+})
+
+describe('isSuspiciousNegativesShrink — fail-safe усыхания минус-списка', () => {
+  it('нет снапшота (null) → не судим', () => {
+    expect(isSuspiciousNegativesShrink(0, null)).toBe(false)
+    expect(isSuspiciousNegativesShrink(5, null)).toBe(false)
+  })
+
+  it('живой список внезапно ПУСТ, а в снапшоте были фразы → подозрительно (минуса сами не удаляются)', () => {
+    expect(isSuspiciousNegativesShrink(0, 1178)).toBe(true)
+    expect(isSuspiciousNegativesShrink(0, 5)).toBe(true) // даже малый список: 0 из ненуля
+    expect(isSuspiciousNegativesShrink(0, 1)).toBe(true)
+  })
+
+  it('снапшот тоже 0 (молодая кампания без минусов) → не судим', () => {
+    expect(isSuspiciousNegativesShrink(0, 0)).toBe(false)
+  })
+
+  it('потеря больше половины при осмысленной базе (≥20) → подозрительно', () => {
+    expect(isSuspiciousNegativesShrink(500, 1178)).toBe(true) // 500 < 589
+    expect(isSuspiciousNegativesShrink(600, 1178)).toBe(false) // 600 > 589 — норм. ручная чистка
+  })
+
+  it('малый список (база < 20): частичная усушка НЕ судится (кроме падения в 0)', () => {
+    expect(isSuspiciousNegativesShrink(3, 10)).toBe(false) // 3 < 5, но база < 20 → не судим
+    expect(isSuspiciousNegativesShrink(1, 19)).toBe(false)
+  })
+
+  it('рост списка (живой ≥ снапшота) → не подозрительно', () => {
+    expect(isSuspiciousNegativesShrink(1179, 1178)).toBe(false)
+    expect(isSuspiciousNegativesShrink(1178, 1178)).toBe(false)
   })
 })

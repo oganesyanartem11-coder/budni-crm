@@ -35,7 +35,7 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
     mockGetLeads: vi.fn(),
     mockGate: {
       applyBidChanges: vi.fn(),
-      applyNegativeKeywords: vi.fn(),
+      addNegativeKeywords: vi.fn(),
     },
     mockGetState: vi.fn(),
     mockLlm: vi.fn(),
@@ -205,7 +205,7 @@ function setupProcessHappyPath() {
     },
   ])
   mockLlm.mockResolvedValue({ text: LLM_CLASSIFY_OK, model: 'haiku', costUsd: 0.001, downgraded: false })
-  mockGate.applyNegativeKeywords.mockResolvedValue({ applied: true, logId: 'n1' })
+  mockGate.addNegativeKeywords.mockResolvedValue({ applied: true, logId: 'n1', aborted: false, added: 1 })
   mockGate.applyBidChanges.mockResolvedValue({ applied: true, logId: 'b1', clamped: 0, breakerTripped: false })
   setState({ mode: 'LIVE' })
 }
@@ -342,7 +342,7 @@ describe('runProcessTick', () => {
       data: { attempts: 2 },
     })
     expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
-    expect(mockGate.applyNegativeKeywords).not.toHaveBeenCalled()
+    expect(mockGate.addNegativeKeywords).not.toHaveBeenCalled()
   })
 
   it('поллинг исчерпал лимит попыток → FAILED', async () => {
@@ -378,7 +378,7 @@ describe('runProcessTick', () => {
     expect(res.status).toBe('quarantine')
     expect(res.reportData).toMatchObject({ quarantine: true, dateLabel: YESTERDAY })
     expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
-    expect(mockGate.applyNegativeKeywords).not.toHaveBeenCalled()
+    expect(mockGate.addNegativeKeywords).not.toHaveBeenCalled()
     expect(mockLlm).not.toHaveBeenCalled()
     // Отчёты помечены обработанными.
     expect(mockPrisma.borisDirectReportJob.updateMany).toHaveBeenCalledWith(
@@ -393,12 +393,11 @@ describe('runProcessTick', () => {
 
     expect(res.status).toBe('done')
 
-    // МИНУСА: структурный+уверенный кандидат ушёл автономно (список ЗАМЕЩАЮЩИЙ:
-    // union прежнего применённого списка (пусто) и новых фраз).
-    expect(mockGate.applyNegativeKeywords).toHaveBeenCalledTimes(1)
-    expect(mockGate.applyNegativeKeywords).toHaveBeenCalledWith(
+    // МИНУСА: структурный+уверенный кандидат ушёл автономно через единую точку
+    // мержа (addNegativeKeywords сам объединяет с живым списком кабинета).
+    expect(mockGate.addNegativeKeywords).toHaveBeenCalledTimes(1)
+    expect(mockGate.addNegativeKeywords).toHaveBeenCalledWith(
       ['чужое кафе вакансии'],
-      [],
       expect.stringContaining('минусовка')
     )
 
@@ -455,7 +454,7 @@ describe('runProcessTick', () => {
   it('OBSERVE: гейт вернул applied=false → всё в «сделал бы», ничего в applied', async () => {
     setupProcessHappyPath()
     setState({ mode: 'OBSERVE' })
-    mockGate.applyNegativeKeywords.mockResolvedValue({ applied: false, logId: 'n1' })
+    mockGate.addNegativeKeywords.mockResolvedValue({ applied: false, logId: 'n1', aborted: false, added: 1 })
     mockGate.applyBidChanges.mockResolvedValue({ applied: false, logId: 'b1', clamped: 0, breakerTripped: false })
 
     const res = await runProcessTick(NOW)
@@ -464,7 +463,7 @@ describe('runProcessTick', () => {
     expect(res.appliedSummaries).toHaveLength(0)
     expect(res.wouldDoSummaries).toHaveLength(2)
     // Гейт всё равно вызывался (лог «сделал бы» пишет он сам).
-    expect(mockGate.applyNegativeKeywords).toHaveBeenCalledTimes(1)
+    expect(mockGate.addNegativeKeywords).toHaveBeenCalledTimes(1)
     expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
   })
 
@@ -474,7 +473,7 @@ describe('runProcessTick', () => {
 
     const res = await runProcessTick(NOW)
 
-    expect(mockGate.applyNegativeKeywords).not.toHaveBeenCalled()
+    expect(mockGate.addNegativeKeywords).not.toHaveBeenCalled()
     expect(res.proposalDrafts).toHaveLength(1)
     expect((res.proposalDrafts[0].payload as { phrases: string[] }).phrases).toEqual([
       'чужое кафе вакансии',
@@ -488,12 +487,50 @@ describe('runProcessTick', () => {
 
     const res = await runProcessTick(NOW)
 
-    expect(mockGate.applyNegativeKeywords).toHaveBeenCalledWith(
+    expect(mockGate.addNegativeKeywords).toHaveBeenCalledWith(
       ['чужое кафе вакансии', 'корпоративное питание тендер'],
-      [],
       expect.any(String)
     )
     expect(res.proposalDrafts).toHaveLength(0)
+  })
+
+  it('FAIL-SAFE автономной минусовки: addNegativeKeywords вернул aborted → critical-аномалия, минус не в applied', async () => {
+    setupProcessHappyPath()
+    mockGate.addNegativeKeywords.mockResolvedValue({
+      applied: false,
+      logId: null,
+      aborted: true,
+      abortReason: 'живой минус-список кабинета не прочитан',
+      added: 0,
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // Минус НЕ попал в applied (ставки — отдельный блок — отработали).
+    expect(res.appliedSummaries).toEqual(
+      expect.not.arrayContaining([expect.stringContaining('минус')])
+    )
+    expect(res.anomalies).toContainEqual(
+      expect.objectContaining({ severity: 'critical', kind: 'negatives_failsafe' })
+    )
+  })
+
+  it('verifyMismatch автономной минусовки: применили, но кабинет не сошёлся → critical-аномалия', async () => {
+    setupProcessHappyPath()
+    mockGate.addNegativeKeywords.mockResolvedValue({
+      applied: true,
+      logId: 'n1',
+      aborted: false,
+      added: 1,
+      verifyMismatch: true,
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.anomalies).toContainEqual(
+      expect.objectContaining({ kind: 'negatives_verify_mismatch' })
+    )
   })
 
   it('circuit breaker на ставках → critical-аномалия, не в applied', async () => {
@@ -519,7 +556,7 @@ describe('runProcessTick', () => {
     const res = await runProcessTick(NOW)
 
     expect(res.status).toBe('done')
-    expect(mockGate.applyNegativeKeywords).not.toHaveBeenCalled()
+    expect(mockGate.addNegativeKeywords).not.toHaveBeenCalled()
     expect(res.proposalDrafts).toHaveLength(1)
     expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
     errorSpy.mockRestore()
