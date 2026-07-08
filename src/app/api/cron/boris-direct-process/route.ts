@@ -122,10 +122,12 @@ async function handler(request: Request) {
   // --- Принятые владельцем предложения → применение. ---
   let acceptedApplied: string[] = []
   let acceptedSkipped: string[] = []
+  let acceptedAlerts: string[] = []
   try {
     const accepted = await applyAcceptedProposals()
     acceptedApplied = accepted.applied
     acceptedSkipped = accepted.skipped
+    acceptedAlerts = accepted.alerts
   } catch (err) {
     console.error(`[cron:${JOB_LABEL}] применение принятых предложений упало`, err)
   }
@@ -151,6 +153,11 @@ async function handler(request: Request) {
   // --- Аномалии тика — владельцу немедленно, не ждут дневного отчёта. ---
   for (const anomaly of result.anomalies) {
     await sendToDirectChat(formatAnomalyMessage(anomaly))
+  }
+
+  // --- Fail-safe/рассинхрон-алёрты применения принятых минусов — сразу владельцу. ---
+  for (const alert of acceptedAlerts) {
+    await sendToDirectChat(alert)
   }
 
   await markRanToday(JOB_LABEL, {

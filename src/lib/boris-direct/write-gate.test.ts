@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const { mockPrisma, mockGetState, mockDirect } = vi.hoisted(() => ({
   mockPrisma: {
     borisDirectActionLog: { create: vi.fn() },
+    borisDirectSnapshot: { findFirst: vi.fn() },
   },
   mockGetState: vi.fn(),
   mockDirect: {
@@ -17,6 +18,7 @@ const { mockPrisma, mockGetState, mockDirect } = vi.hoisted(() => ({
     suspendKeywords: vi.fn(),
     suspendCampaign: vi.fn(),
     updateDailyBudget: vi.fn(),
+    getCampaignSettings: vi.fn(),
   },
 }))
 
@@ -28,6 +30,7 @@ import {
   executeDirectWrite,
   applyBidChanges,
   applyNegativeKeywords,
+  addNegativeKeywords,
   suspendKeywordsGated,
   suspendCampaignEmergency,
   applyDailyBudget,
@@ -50,7 +53,14 @@ beforeEach(() => {
     ...(data as object),
   }))
   for (const fn of Object.values(mockDirect)) fn.mockResolvedValue({})
+  // Дефолт: снапшота нет → fail-safe усыхания не срабатывает.
+  mockPrisma.borisDirectSnapshot.findFirst.mockResolvedValue(null)
 })
+
+/** Ответ campaigns.get с заданным живым минус-списком. */
+function settingsWith(items: string[]) {
+  return { Id: 711897777, Name: 'test', NegativeKeywords: { Items: items } }
+}
 
 describe('executeDirectWrite — гейт режима', () => {
   it('OBSERVE: perform НЕ вызывается, лог applied=false («сделал бы»)', async () => {
@@ -235,6 +245,133 @@ describe('applyNegativeKeywords', () => {
     expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
     expect(mockDirect.restoreMetricaTag).not.toHaveBeenCalled()
     expect(mockPrisma.borisDirectActionLog.create).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('addNegativeKeywords — единая точка мержа с ЖИВЫМ списком кабинета', () => {
+  it('LIVE: живой список из N фраз + K новых → уходит ОБЪЕДИНЕНИЕ, before=живой список, тег страхуется', async () => {
+    setState({ mode: 'LIVE' })
+    // Первый campaigns.get — живой список (3 фразы); второй — контрольное чтение (4).
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'рецепт']))
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'рецепт', 'опт']))
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.applied).toBe(true)
+    expect(res.aborted).toBe(false)
+    expect(res.added).toBe(1)
+    expect(res.verifyMismatch).toBeFalsy()
+    // В кабинет ушёл ОБЪЕДИНЁННЫЙ список, а не голая новая фраза.
+    expect(mockDirect.updateCampaignNegatives).toHaveBeenCalledWith(['аренда', 'вакансии', 'рецепт', 'опт'])
+    // before лога = свежий живой список (для честного отката), after = объединение.
+    const negLog = mockPrisma.borisDirectActionLog.create.mock.calls
+      .map((c) => c[0].data)
+      .find((d) => d.action === 'campaigns.update.negatives')
+    expect(negLog.before).toEqual(['аренда', 'вакансии', 'рецепт'])
+    expect(negLog.after).toEqual(['аренда', 'вакансии', 'рецепт', 'опт'])
+    // ADD_METRICA_TAG страхуется после update.
+    expect(mockDirect.restoreMetricaTag).toHaveBeenCalledTimes(1)
+  })
+
+  it('дедуп против живого списка: фраза, уже стоящая в кабинете, не задваивается', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии']))
+      .mockResolvedValueOnce(settingsWith(['аренда', 'вакансии', 'рецепт']))
+
+    const res = await addNegativeKeywords(['вакансии', 'рецепт'], 'минусовка')
+
+    expect(res.added).toBe(1)
+    expect(mockDirect.updateCampaignNegatives).toHaveBeenCalledWith(['аренда', 'вакансии', 'рецепт'])
+  })
+
+  it('FAIL-SAFE: живой список не прочитался (campaigns.get упал) → write НЕ вызван, aborted', async () => {
+    setState({ mode: 'LIVE' })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockDirect.getCampaignSettings.mockRejectedValue(new Error('code=500 direct down'))
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.aborted).toBe(true)
+    expect(res.applied).toBe(false)
+    expect(res.abortReason).toBeTruthy()
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+    expect(mockPrisma.borisDirectActionLog.create).not.toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+
+  it('FAIL-SAFE: живой список подозрительно усох против снапшота → write НЕ вызван, aborted', async () => {
+    setState({ mode: 'LIVE' })
+    // Живой список внезапно 1 фраза, а в снапшоте было 1178 → катастрофа усыхания.
+    mockDirect.getCampaignSettings.mockResolvedValue(settingsWith(['осталась одна']))
+    mockPrisma.borisDirectSnapshot.findFirst.mockResolvedValue({
+      payload: { NegativeKeywords: { Items: Array.from({ length: 1178 }, (_, i) => `ф${i}`) } },
+    })
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.aborted).toBe(true)
+    expect(res.abortReason).toContain('усох')
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+  })
+
+  it('OBSERVE: читаем живой список, лог «сделал бы» с before=живой/after=объединение, транспорт не тронут', async () => {
+    setState({ mode: 'OBSERVE' })
+    mockDirect.getCampaignSettings.mockResolvedValue(settingsWith(['аренда', 'вакансии']))
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.applied).toBe(false)
+    expect(res.aborted).toBe(false)
+    expect(res.added).toBe(1)
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
+    const negLog = mockPrisma.borisDirectActionLog.create.mock.calls
+      .map((c) => c[0].data)
+      .find((d) => d.action === 'campaigns.update.negatives')
+    expect(negLog.before).toEqual(['аренда', 'вакансии'])
+    expect(negLog.after).toEqual(['аренда', 'вакансии', 'опт'])
+    // В OBSERVE контрольного чтения нет → getCampaignSettings звали один раз.
+    expect(mockDirect.getCampaignSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('контрольное чтение: кабинет усох НИЖЕ живой базы → verifyMismatch (потеря базы)', async () => {
+    setState({ mode: 'LIVE' })
+    // Живая база 2 фразы; после write кабинет вернул 1 (< live.length) — часть базы потеряна.
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'рецепт']))
+      .mockResolvedValueOnce(settingsWith(['аренда']))
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.applied).toBe(true)
+    expect(res.verifyMismatch).toBe(true)
+  })
+
+  it('контрольное чтение: Яндекс схлопнул новую фразу (кабинет == живой базы, но < merged) → НЕ ложная тревога', async () => {
+    setState({ mode: 'LIVE' })
+    // База 2; отправили 3 (base+new); кабинет вернул 2 (== live.length) — новая схлопнута,
+    // но БАЗА цела → тревоги быть не должно.
+    mockDirect.getCampaignSettings
+      .mockResolvedValueOnce(settingsWith(['аренда', 'рецепт']))
+      .mockResolvedValueOnce(settingsWith(['аренда', 'рецепт']))
+
+    const res = await addNegativeKeywords(['опт'], 'минусовка')
+
+    expect(res.applied).toBe(true)
+    expect(res.verifyMismatch).toBeFalsy()
+  })
+
+  it('все фразы уже в кабинете → added=0, кабинет не трогаем, не aborted', async () => {
+    setState({ mode: 'LIVE' })
+    mockDirect.getCampaignSettings.mockResolvedValue(settingsWith(['аренда', 'вакансии']))
+
+    const res = await addNegativeKeywords(['аренда'], 'минусовка')
+
+    expect(res.added).toBe(0)
+    expect(res.aborted).toBe(false)
+    expect(res.applied).toBe(false)
+    expect(mockDirect.updateCampaignNegatives).not.toHaveBeenCalled()
   })
 })
 

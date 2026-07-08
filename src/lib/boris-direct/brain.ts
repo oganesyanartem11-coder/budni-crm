@@ -87,7 +87,7 @@ import {
   prepareMinusCandidates,
   recommendBid,
 } from './rules'
-import { applyBidChanges, applyNegativeKeywords, type BidChange } from './write-gate'
+import { applyBidChanges, addNegativeKeywords, type BidChange } from './write-gate'
 import { getDirectRoleState } from './state'
 import { deriveAndRefreshLessons } from './lessons'
 import {
@@ -561,20 +561,6 @@ function parseClassifierJson(text: string, candidates: string[]): ClassifiedCand
   }
 }
 
-/** Последний ПРИМЕНЁННЫЙ полный список минусов из лога действий (наш учёт:
- * живой список из campaigns.get не читаем — см. комментарий в minus-блоке). */
-async function getLastAppliedNegativesList(): Promise<string[]> {
-  const last = await prisma.borisDirectActionLog.findFirst({
-    where: { action: 'campaigns.update.negatives', applied: true },
-    orderBy: { createdAt: 'desc' },
-  })
-  const after = last?.after
-  if (Array.isArray(after) && after.every((item) => typeof item === 'string')) {
-    return after as string[]
-  }
-  return []
-}
-
 /** Последний готовый (READY/PROCESSED) отчёт нужного типа за день. */
 async function findReadyJob(reportType: string, day: string) {
   return prisma.borisDirectReportJob.findFirst({
@@ -1019,10 +1005,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       const keywordsSnap = (await latestSnapshotPayload<KeywordRecord[]>('keywords')) ?? []
       const coreKeywords = keywordsSnap.map((k) => k.Keyword)
 
-      // existingMinus пустой сознательно: живой список NegativeKeywords из
-      // campaigns.get не читаем (FieldNames транспорта не трогаем) — дедуп
-      // против живого списка делает сам Яндекс (10140 «дубль» = warning,
-      // не ошибка, операция применяется).
+      // existingMinus пустой ЗДЕСЬ сознательно: финальный дедуп против ЖИВОГО
+      // списка кабинета и мерж с ним делает единая точка addNegativeKeywords
+      // (свежий campaigns.get в момент применения) — тут только отбор кандидатов.
       const prepared = prepareMinusCandidates(candidates, { coreKeywords, existingMinus: [] })
 
       const statByQuery = new Map(minusRows.map((r) => [r.query, r]))
@@ -1149,27 +1134,36 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       }
 
       if (autonomous.length > 0) {
-        // campaigns.update ЗАМЕЩАЕТ список — шлём объединённый набор.
-        // Наш учёт «предыдущего полного списка» — after последнего применённого
-        // campaigns.update.negatives (живой список не читаем, см. выше).
-        const previousList = await getLastAppliedNegativesList()
-        const merged = [...previousList]
-        for (const phrase of autonomous) {
-          if (!merged.includes(phrase)) merged.push(phrase)
-        }
-        // Префикс машинного кода в reason — дубль записи в payload лога
-        // действий. Текст после скобок прежний.
+        // ЕДИНАЯ ТОЧКА: addNegativeKeywords сам читает СВЕЖИЙ живой список кабинета
+        // и шлёт ОБЪЕДИНЕНИЕ (живой + новые) — замещающий список строится поверх
+        // реального содержимого, а не из голых новых фраз (иначе кабинет затрётся).
+        // Fail-safe (нет чтения / подозрительное усыхание) → отмена + аномалия.
+        // Префикс машинного кода в reason — дубль записи в payload лога действий.
         const negativesCodePrefix = (['STRUCTURAL_TRASH', 'DATA_NO_CONV'] as const)
           .filter((code) => autonomousCodes.has(code))
           .join(',')
-        const gate = await applyNegativeKeywords(
-          merged,
-          previousList,
+        const gate = await addNegativeKeywords(
+          autonomous,
           `[${negativesCodePrefix}] минусовка: ${autonomous.length} структурных кандидатов (показы ≥ порога, конверсий 0): ${autonomous.join(', ')}`
         )
         const summary = `минус-фразы (${autonomous.length}): ${autonomous.join(', ')}`
-        if (gate.applied) appliedSummaries.push(summary)
-        else wouldDoSummaries.push(summary)
+        if (gate.aborted) {
+          anomalies.push({
+            severity: 'critical',
+            kind: 'negatives_failsafe',
+            text: `Автономная минусовка ОТМЕНЕНА (fail-safe): ${gate.abortReason}. Живой список кабинета не тронут.`,
+          })
+        } else {
+          if (gate.verifyMismatch) {
+            anomalies.push({
+              severity: 'critical',
+              kind: 'negatives_verify_mismatch',
+              text: 'Минус-фразы применены, но контрольное чтение кабинета не сошлось — проверь список минус-фраз вручную.',
+            })
+          }
+          if (gate.applied) appliedSummaries.push(summary)
+          else wouldDoSummaries.push(summary)
+        }
       }
 
       if (disputed.length > 0) {

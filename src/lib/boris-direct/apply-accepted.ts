@@ -13,7 +13,7 @@
 import type { BorisDirectProposal } from '@prisma/client'
 import { getAcceptedUnapplied, markProposalApplied } from './proposals'
 import { prepareMinusCandidates } from './rules'
-import { applyNegativeKeywords, applyDailyBudget } from './write-gate'
+import { addNegativeKeywords, applyDailyBudget } from './write-gate'
 import { MICRO } from './config'
 
 export interface ApplyAcceptedResult {
@@ -21,6 +21,8 @@ export interface ApplyAcceptedResult {
   applied: string[]
   /** Не применённые с причиной: OBSERVE/стоп-кран, ручное применение, ошибка. */
   skipped: string[]
+  /** Алёрты владельцу (fail-safe минусовки / рассинхрон кабинета) — шлёт крон в чат. */
+  alerts: string[]
 }
 
 function asRecord(payload: unknown): Record<string, unknown> {
@@ -33,7 +35,8 @@ function asRecord(payload: unknown): Record<string, unknown> {
 async function applyOne(
   proposal: BorisDirectProposal,
   applied: string[],
-  skipped: string[]
+  skipped: string[],
+  alerts: string[]
 ): Promise<void> {
   const payload = asRecord(proposal.payload)
 
@@ -53,16 +56,35 @@ async function applyOne(
         )
         return
       }
-      const gate = await applyNegativeKeywords(
+      // ЕДИНАЯ ТОЧКА: addNegativeKeywords мержит с ЖИВЫМ списком кабинета —
+      // замещающий список строится внутри поверх реального содержимого, а не
+      // из голых принятых фраз (иначе живой список кабинета был бы затёрт).
+      const gate = await addNegativeKeywords(
         prepared.accepted,
-        [],
         `принято владельцем: предложение ${proposal.id}`
       )
+      if (gate.aborted) {
+        // Fail-safe: живой список не прочитан / подозрительно усох — НЕ пометили
+        // применённым, повторим на следующем тике, когда чтение восстановится.
+        alerts.push(
+          `⚠️ Принятые минусы (предложение ${proposal.id}) НЕ применил: ${gate.abortReason}. ` +
+            `Список кабинета не тронут, повторю на следующем тике.`
+        )
+        skipped.push(`минус-фразы: fail-safe (${gate.abortReason}) — предложение ${proposal.id}, не помечаю применённым`)
+        return
+      }
       // В OBSERVE applied=false — всё равно помечаем: лог «сделал бы» остался,
       // повторно применять при смене режима будем уже по новым данным.
       await markProposalApplied(proposal.id)
+      if (gate.verifyMismatch) {
+        alerts.push(
+          `⚠️ Минусы предложения ${proposal.id} применил, но контрольное чтение кабинета не сошлось — проверь список минус-фраз вручную.`
+        )
+      }
       const label = `минус-фразы (${prepared.accepted.length}): ${prepared.accepted.join(', ')}`
       if (gate.applied) applied.push(label)
+      else if (gate.added === 0)
+        skipped.push(`минус-фразы: все кандидаты уже в списке кабинета (предложение ${proposal.id})`)
       else skipped.push(`${label} — не применено (наблюдение/стоп-кран), залогировано как «сделал бы»`)
       return
     }
@@ -109,11 +131,12 @@ async function applyOne(
 export async function applyAcceptedProposals(): Promise<ApplyAcceptedResult> {
   const applied: string[] = []
   const skipped: string[] = []
+  const alerts: string[] = []
 
   const proposals = await getAcceptedUnapplied()
   for (const proposal of proposals) {
     try {
-      await applyOne(proposal, applied, skipped)
+      await applyOne(proposal, applied, skipped, alerts)
     } catch (err) {
       console.error(
         `[boris-direct/apply-accepted] предложение ${proposal.id} (${proposal.type}) не применилось`,
@@ -125,5 +148,5 @@ export async function applyAcceptedProposals(): Promise<ApplyAcceptedResult> {
     }
   }
 
-  return { applied, skipped }
+  return { applied, skipped, alerts }
 }

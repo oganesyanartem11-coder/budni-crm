@@ -19,9 +19,10 @@ import {
   suspendKeywords,
   suspendCampaign,
   updateDailyBudget,
+  getCampaignSettings,
 } from './direct-client'
 import { BID_CEILING_MICRO, DIRECT_CAMPAIGN_ID, MICRO } from './config'
-import { checkCircuitBreaker } from './rules'
+import { checkCircuitBreaker, prepareMinusCandidates, isSuspiciousNegativesShrink } from './rules'
 
 export interface GateResult {
   applied: boolean
@@ -170,9 +171,16 @@ export async function applyBidChanges(
 // ---------- Минус-фразы ----------
 
 /**
- * Замена списка минус-фраз кампании через гейт. newFullList ЗАМЕЩАЕТ текущий
- * список целиком (семантика campaigns.update) — вызывающий обязан передать
- * объединённый набор; previousFullList уходит в before для отката.
+ * НИЗКОУРОВНЕВОЙ примитив «поставить ТОЧНЫЙ список минус-фраз». newFullList
+ * ЗАМЕЩАЕТ текущий список целиком (семантика campaigns.update); previousFullList
+ * уходит в before для отката.
+ *
+ * ВНИМАНИЕ: это SET-EXACT — он шлёт РОВНО то, что дали, и НЕ мержит с кабинетом.
+ * Для ДОБАВЛЕНИЯ минус-фраз (принятое предложение, автономная минусовка) НЕЛЬЗЯ
+ * звать его напрямую — иначе живой список кабинета будет затёрт. Используй
+ * addNegativeKeywords (единая точка мержа с живым списком). Прямой вызов
+ * допустим ТОЛЬКО для восстановления точного списка (rollback) и изнутри
+ * addNegativeKeywords.
  *
  * После применённого campaigns.update СРАЗУ возвращаем ADD_METRICA_TAG=YES:
  * тег слетает после любого апдейта TextCampaign. NegativeKeywords живёт на
@@ -207,6 +215,126 @@ export async function applyNegativeKeywords(
   }
 
   return result
+}
+
+export interface AddNegativesResult {
+  applied: boolean
+  logId: string | null
+  /** Fail-safe: живой список не прочитан / подозрительно усох → запись отменена, кабинет не тронут. */
+  aborted: boolean
+  /** Причина аборта (для аномалии владельцу) — заполнена только при aborted. */
+  abortReason?: string
+  /** Сколько НЕТТО-новых фраз добавлено (0 = все уже в списке или отмена → записи не было). */
+  added: number
+  /** Контрольное чтение после ПРИМЕНЁННОГО write: счётчик кабинета != размеру объединения. */
+  verifyMismatch?: boolean
+}
+
+/**
+ * ЕДИНАЯ ТОЧКА добавления минус-фраз. Что бы ни просили добавить, в кабинет
+ * уходит ОБЪЕДИНЕНИЕ живого списка (СВЕЖИЙ campaigns.get в момент применения —
+ * не из памяти/снапшота/лога) и новых фраз. Так ни один вызывающий не может
+ * физически затереть живой список кабинета: замещающий список всегда строится
+ * ЗДЕСЬ поверх реального содержимого кабинета.
+ *
+ * FAIL-SAFE (дефолт при сомнении — бездействие, НЕ запись):
+ *  - живой список не прочитался (ошибка/пусто) → отмена, aborted;
+ *  - живой список подозрительно усох против последнего campaign_settings-снапшота
+ *    (уже кто-то снёс) → отмена, aborted.
+ * В обоих случаях write НЕ выполняется, кабинет не трогается, вызывающий шлёт
+ * владельцу аномалию.
+ *
+ * Валидация фраз (механика Директа) и дедуп против живого списка —
+ * переиспользованный prepareMinusCandidates. before лога = свежий живой список
+ * (откат восстанавливает именно его). После применённого write — контрольное
+ * чтение: размер кабинета должен совпасть с размером объединения.
+ */
+export async function addNegativeKeywords(
+  phrasesToAdd: string[],
+  reason: string
+): Promise<AddNegativesResult> {
+  // 1. СВЕЖИЙ живой список ИЗ КАБИНЕТА (не память/снапшот/лог).
+  let live: string[] | null = null
+  try {
+    const settings = await getCampaignSettings()
+    live = settings.NegativeKeywords?.Items ?? null
+  } catch (err) {
+    console.error('[boris-direct/write-gate] addNegativeKeywords: живой минус-список не прочитан', err)
+    live = null
+  }
+  // FAIL-SAFE 1: чтение не удалось (campaigns.get упал ИЛИ поле NegativeKeywords
+  // отсутствует/null) → НЕ пишем, иначе затрём кабинет. Пустой массив (Items: [])
+  // сюда НЕ попадает — он допустим для молодой кампании; катастрофу «внезапно 0
+  // при непустом снапшоте» ловит FAIL-SAFE 2 (isSuspiciousNegativesShrink).
+  if (live === null) {
+    return {
+      applied: false,
+      logId: null,
+      aborted: true,
+      added: 0,
+      abortReason:
+        'живой минус-список кабинета не прочитан (campaigns.get упал или поле NegativeKeywords отсутствует) — минусовку отменил, список кабинета не трогаю',
+    }
+  }
+
+  // FAIL-SAFE 2: живой список подозрительно усох против последнего снапшота.
+  let snapshotCount: number | null = null
+  try {
+    const snap = await prisma.borisDirectSnapshot.findFirst({
+      where: { kind: 'campaign_settings' },
+      orderBy: [{ tickDate: 'desc' }, { createdAt: 'desc' }],
+    })
+    const payload = snap?.payload as { NegativeKeywords?: { Items?: string[] } } | undefined
+    snapshotCount = payload?.NegativeKeywords?.Items?.length ?? null
+  } catch (err) {
+    console.error('[boris-direct/write-gate] addNegativeKeywords: снапшот campaign_settings недоступен', err)
+    snapshotCount = null
+  }
+  if (isSuspiciousNegativesShrink(live.length, snapshotCount)) {
+    return {
+      applied: false,
+      logId: null,
+      aborted: true,
+      added: 0,
+      abortReason: `живой минус-список подозрительно усох: сейчас ${live.length}, в снапшоте было ${snapshotCount} — минусовку отменил, список кабинета не трогаю`,
+    }
+  }
+
+  // 2. Валидация (механика Директа) + дедуп против ЖИВОГО списка.
+  const prepared = prepareMinusCandidates(phrasesToAdd, { coreKeywords: [], existingMinus: live })
+  if (prepared.accepted.length === 0) {
+    // Всё уже в кабинете (или отсеяно механикой) — писать нечего, кабинет не трогаем.
+    return { applied: false, logId: null, aborted: false, added: 0 }
+  }
+
+  // 3. ОБЪЕДИНЕНИЕ живого списка и новых фраз — единственный список в кабинет.
+  const merged = [...live, ...prepared.accepted]
+  const gate = await applyNegativeKeywords(merged, live, reason)
+
+  // 4. Контрольное чтение после ПРИМЕНЁННОГО write. Проверяем ГЛАВНЫЙ инвариант
+  // фикса: кабинет НЕ усох ниже живой базы (мы слали live ∪ new, значит фраз
+  // должно быть НЕ МЕНЬШЕ live.length). Строгое «== merged.length» дало бы ложную
+  // тревогу, если Яндекс схлопнул новую фразу по своей нормализации (это не
+  // потеря базы). cabinetCount < live.length = реальная потеря → тревога.
+  let verifyMismatch = false
+  if (gate.applied) {
+    try {
+      const after = await getCampaignSettings()
+      const cabinetCount = after.NegativeKeywords?.Items?.length ?? -1
+      if (cabinetCount < live.length) verifyMismatch = true
+    } catch (err) {
+      console.error('[boris-direct/write-gate] addNegativeKeywords: контрольное чтение упало', err)
+      verifyMismatch = true
+    }
+  }
+
+  return {
+    applied: gate.applied,
+    logId: gate.logId,
+    aborted: false,
+    added: prepared.accepted.length,
+    verifyMismatch,
+  }
 }
 
 // ---------- Остановки ----------
