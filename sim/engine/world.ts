@@ -55,6 +55,8 @@ const FORM_REACH_TRASH = 0.05
 interface ImpressionRec {
   day: number
   query: string
+  /** Id ключа, породившего запрос (для CriterionId в SQ-отчёте — паритет с боем). */
+  keywordId: number
   adGroupId: string
   adGroupName: string
   impressions: number
@@ -212,14 +214,16 @@ function logImpressions(
   st: InternalState,
   day: number,
   query: string,
+  keywordId: number,
   adGroupId: string,
   adGroupName: string,
   impressions: number
 ): void {
   const key = impKey(day, adGroupId, query)
   const rec = st.impLog.get(key)
+  // keywordId фиксируем на ПЕРВОЙ записи (детерминизм при слиянии показов).
   if (rec) rec.impressions += impressions
-  else st.impLog.set(key, { day, query, adGroupId, adGroupName, impressions })
+  else st.impLog.set(key, { day, query, keywordId, adGroupId, adGroupName, impressions })
 }
 
 // ============================================================
@@ -244,6 +248,7 @@ function rebuildQueryRows(world: WorldState): ObservedQueryRow[] {
     rows.set(impKey(rec.day, rec.adGroupId, rec.query), {
       day: rec.day,
       query: rec.query,
+      keywordId: rec.keywordId,
       adGroupId: rec.adGroupId,
       adGroupName: rec.adGroupName,
       impressions: rec.impressions,
@@ -262,6 +267,7 @@ function rebuildQueryRows(world: WorldState): ObservedQueryRow[] {
       row = {
         day: c.day,
         query: c.query,
+        keywordId: c.keywordId,
         adGroupId: c.adGroupId,
         adGroupName: groupNameById.get(c.adGroupId) ?? c.adGroupId,
         impressions: 0,
@@ -434,7 +440,7 @@ function advanceDay(world: WorldState): DayObservables {
       // его показы ПРОПАДАЮТ (не перетекают в другие запросы)
       if (negativesMatch(world.negatives, row.query)) continue
 
-      logImpressions(st, day, row.query, phrase.adGroupId, phrase.adGroupName, row.imp)
+      logImpressions(st, day, row.query, phrase.keywordId, phrase.adGroupId, phrase.adGroupName, row.imp)
       impressionsToday += row.imp
 
       // Клики: биномиально от показов; CTR × качество текстов × атака конкурента (по ядру)
@@ -514,7 +520,7 @@ function advanceDay(world: WorldState): DayObservables {
       for (let i = 0; i < ev.clicksPerDay; i++) {
         const costRub = round2(cpcRub * randFloat(rng, 0.9, 1.1) * runawayMult)
         // Бот делает показ+клик по запросу = тексту фразы (CTR отчёта не ломаем)
-        logImpressions(st, day, phrase.text, phrase.adGroupId, phrase.adGroupName, 1)
+        logImpressions(st, day, phrase.text, kid, phrase.adGroupId, phrase.adGroupName, 1)
         impressionsToday += 1
         world.truthClicks.push({
           day,

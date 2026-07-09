@@ -83,10 +83,12 @@ const NOW = new Date('2026-07-02T09:00:00Z')
 const YESTERDAY = '2026-07-01'
 
 const SQ_TSV = [
-  'Query\tAdGroupName\tAdGroupId\tImpressions\tClicks\tCost\tConversions',
-  'доставка обедов в офис\tG1\t1\t120\t10\t500\t2',
-  'чужое кафе вакансии\tG2\t2\t80\t3\t100\t0',
-  'корпоративное питание тендер\tG2\t2\t50\t2\t90\t--',
+  'Query\tAdGroupName\tAdGroupId\tCriterionId\tImpressions\tClicks\tCost\tConversions',
+  // Запрос == текст ключа 11 (CriterionId 11) — конвертер группы 1.
+  'доставка обедов в офис\tG1\t1\t11\t120\t10\t500\t2',
+  // Запросы группы 2 сматчены на ключ 22 (broad) — минус-кандидаты, для биддинга тонкие.
+  'чужое кафе вакансии\tG2\t2\t22\t80\t3\t100\t0',
+  'корпоративное питание тендер\tG2\t2\t22\t50\t2\t90\t--',
 ].join('\n')
 
 const CP_TSV = [
@@ -113,6 +115,8 @@ const AUCTION = [
 
 const KEYWORDS_PAYLOAD = [
   { Id: 11, Keyword: 'доставка обедов в офис', AdGroupId: 1, State: 'ON', Status: 'ACCEPTED' },
+  // Ключ 22 — живой (broad), текст НЕ пересекает минус-кандидаты; для liveKeyIds.
+  { Id: 22, Keyword: 'доставка обедов область', AdGroupId: 2, State: 'ON', Status: 'ACCEPTED' },
 ]
 
 const BIDS_PAYLOAD = [
@@ -750,5 +754,116 @@ describe('runProcessTick — память-опыт (персист статис�
     expect(res.status).toBe('done')
     expect(res.memory).toEqual({ outcomesMeasured: 4 })
     errorSpy.mockRestore()
+  })
+})
+
+describe('пофразная экономика по CriterionId (MAJOR-2: агрегация по ключу, не по тексту)', () => {
+  const SQ_HEADER = 'Query\tAdGroupName\tAdGroupId\tCriterionId\tImpressions\tClicks\tCost\tConversions'
+  function sqTsv(
+    rows: Array<{ q: string; g: string; cid: string; clicks: number; conv: number | string; imp?: number }>
+  ): string {
+    return [
+      SQ_HEADER,
+      ...rows.map((r) => `${r.q}\tG\t${r.g}\t${r.cid}\t${r.imp ?? 10}\t${r.clicks}\t100\t${r.conv}`),
+    ].join('\n')
+  }
+  type Kw = { Id: number; Keyword: string; AdGroupId: number; State: string; Status: string }
+  type Bid = { KeywordId: number; AdGroupId: number; CampaignId: number; Search: { Bid: number; AuctionBids: typeof AUCTION } }
+  function setupEconomics(opts: { sq: string; keywords: Kw[]; bids: Bid[] }) {
+    setupProcessHappyPath()
+    mockPrisma.borisDirectReportJob.findFirst.mockImplementation(async (args: { where: { reportType: string } }) => {
+      if (args.where.reportType === 'SEARCH_QUERY_PERFORMANCE_REPORT') return { id: 'sq1', tsv: opts.sq }
+      if (args.where.reportType === 'CUSTOM_REPORT') return { id: 'cp1', tsv: CP_TSV }
+      return null
+    })
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'keywords') return { payload: opts.keywords }
+      if (args.where.kind === 'keywordbids') return { payload: opts.bids }
+      if (args.where.kind === 'campaign_settings') {
+        return {
+          payload: {
+            Id: 711897777, Name: 'x', StartDate: '2026-06-25',
+            TimeTargeting: { Schedule: { Items: [] } },
+            NegativeKeywords: { Items: [] }, Statistics: { Clicks: 37, Impressions: 900 },
+          },
+        }
+      }
+      return null
+    })
+  }
+  const bid = (keywordId: number, group: number, bidRub: number): Bid => ({
+    KeywordId: keywordId, AdGroupId: group, CampaignId: 711897777,
+    Search: { Bid: bidRub * MICRO, AuctionBids: AUCTION },
+  })
+  const kw = (Id: number, Keyword: string, g: number): Kw => ({ Id, Keyword, AdGroupId: g, State: 'ON', Status: 'ACCEPTED' })
+
+  it('(а) запрос ДЛИННЕЕ текста ключа → клики/заявки падают в head ЭТОГО ключа по CriterionId (фраза просыпается)', async () => {
+    setupEconomics({
+      sq: sqTsv([{ q: 'обеды в офис москва подешевле срочно', g: '1', cid: '100', clicks: 25, conv: 1 }]),
+      keywords: [kw(100, 'обеды', 1)],
+      bids: [bid(100, 1, 40)],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // Текст ключа 'обеды' ≠ запросу — по СТАРОЙ (текстовой) логике head пуст → тонкая → hold.
+    // По ID клики 25 + заявка 1 приписаны ключу 100 → КОНВЕРТЕР → подъём к TV65 (150 ₽).
+    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
+    expect(mockGate.applyBidChanges.mock.calls[0][0]).toEqual([
+      { keywordId: 100, fromMicro: 40 * MICRO, toMicro: 150 * MICRO },
+    ])
+  })
+
+  it('(б) АУДИТ: «горелка» по одной словоформе, но заявки через длинные варианты ТОГО ЖЕ ключа → НЕ режем в TV15', async () => {
+    setupEconomics({
+      sq: sqTsv([
+        { q: 'бизнес ланч', g: '1', cid: '200', clicks: 25, conv: 0 }, // точная словоформа: на вид «горелка»
+        { q: 'бизнес ланч доставка офис москва', g: '1', cid: '200', clicks: 6, conv: 1 }, // длинный вариант ТОГО ЖЕ ключа: заявка
+      ]),
+      keywords: [kw(200, 'бизнес ланч', 1)],
+      bids: [bid(200, 1, 40)],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // Агрегат по ID: 31 клик + 1 заявка → КОНВЕРТЕР → нижний блок TV65 (150 ₽),
+    // а НЕ «горелка → TV15 (50 ₽)». Это и есть опасный кейс (б) аудита.
+    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
+    const changes = mockGate.applyBidChanges.mock.calls[0][0] as Array<{ keywordId: number; toMicro: number }>
+    expect(changes[0].keywordId).toBe(200)
+    expect(changes[0].toMicro).toBe(150 * MICRO) // TV65, не 50 ₽ (TV15)
+  })
+
+  it('строки автотаргета / нежившие CriterionId в пофразный биддинг НЕ идут', async () => {
+    setupEconomics({
+      sq: sqTsv([
+        { q: 'что-то автотаргет', g: '1', cid: '---autotargeting', clicks: 50, conv: 3 }, // нечисловой ID → null
+        { q: 'орфан ключ', g: '1', cid: '999999', clicks: 50, conv: 3 }, // числовой, но НЕ живой ключ
+      ]),
+      keywords: [kw(100, 'обеды', 1)],
+      bids: [bid(100, 1, 40)],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // Ни автотаргет, ни орфан-ID не приписались живому ключу 100 → он тонкий → hold → правок нет.
+    expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
+  })
+
+  it('FAIL-SAFE: строка без CriterionId → в биддинг не идёт, ключ остаётся тонким (hold)', async () => {
+    setupEconomics({
+      sq: sqTsv([{ q: 'обеды в офис москва', g: '1', cid: '', clicks: 25, conv: 1 }]), // CriterionId пуст → null
+      keywords: [kw(100, 'обеды', 1)],
+      bids: [bid(100, 1, 40)],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // 25 кликов есть, но CriterionId пуст → не приписаны ключу 100 → тонкая → hold.
+    expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
   })
 })

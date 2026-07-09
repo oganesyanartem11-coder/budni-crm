@@ -46,6 +46,7 @@ function makeRow(overrides: Partial<QueryStatRow> = {}): QueryStatRow {
     query: 'доставка еды в офис',
     adGroupName: 'G1',
     adGroupId: '5769314414',
+    criterionId: null,
     impressions: 100,
     clicks: 10,
     costRub: 1500,
@@ -140,11 +141,33 @@ describe('toQueryStatRow', () => {
       query: 'обеды в офис москва',
       adGroupName: 'G2',
       adGroupId: '5769314415',
+      criterionId: null,
       impressions: 250,
       clicks: 12,
       costRub: 843.5,
       conversions: 2,
     })
+  })
+
+  it('CriterionId (id ключа) читается числом — для агрегации экономики по ключу', () => {
+    const row = toQueryStatRow({
+      Query: 'обеды в офис москва подешевле',
+      AdGroupId: '5769314415',
+      CriterionId: '57580142615',
+      Clicks: '3',
+      Conversions_575665118_LSCCD: '1',
+    })
+    // Запрос длиннее текста ключа (broad match) — но привязка к ключу по ID.
+    expect(row.criterionId).toBe(57580142615)
+    expect(row.query).toBe('обеды в офис москва подешевле')
+    expect(row.conversions).toBe(1)
+  })
+
+  it('CriterionId пустой / нечисловой (напр. автотаргет) → criterionId=null (в экономику не идёт)', () => {
+    expect(toQueryStatRow({ Query: 'q', CriterionId: '' }).criterionId).toBeNull()
+    expect(toQueryStatRow({ Query: 'q', CriterionId: '--' }).criterionId).toBeNull()
+    expect(toQueryStatRow({ Query: 'q' }).criterionId).toBeNull()
+    expect(toQueryStatRow({ Query: 'q', CriterionId: '---autotargeting' }).criterionId).toBeNull()
   })
 
   it("Conversions '--' → 0 (и пустые числовые ячейки тоже)", () => {

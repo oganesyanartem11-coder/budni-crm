@@ -206,6 +206,8 @@ export interface WorldState {
 export interface ObservedQueryRow {
   day: number
   query: string
+  /** Id ключа, породившего запрос (CriterionId в SQ-отчёте — паритет с боевым Директом). */
+  keywordId: number
   adGroupId: string
   adGroupName: string
   impressions: number
