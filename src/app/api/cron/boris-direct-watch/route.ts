@@ -21,10 +21,13 @@ import {
   getAddMetricaTagValue,
   type CampaignState,
 } from '@/lib/boris-direct/direct-client'
+import { buildTodaySpendReportBody, pollReport, parseReportTsv } from '@/lib/boris-direct/reports'
 import { mskDay, mskDayStartUtc } from '@/lib/boris-direct/brain'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
 import { formatAnomalyMessage } from '@/lib/boris-direct/report-texts'
-import type { Anomaly } from '@/lib/boris-direct/anomalies'
+import { classifyBudgetOveruse, type Anomaly } from '@/lib/boris-direct/anomalies'
+import { suspendCampaignEmergency } from '@/lib/boris-direct/write-gate'
+import { MICRO, CATASTROPHE_HARD_FACTOR } from '@/lib/boris-direct/config'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -65,7 +68,34 @@ function detectWatchProblems(campaign: CampaignState): Anomaly[] {
   return problems
 }
 
-async function handler(_request: Request) {
+/** Число из TSV-ячейки расхода: '--'/пусто/мусор → 0. */
+function tsvNum(raw: string | undefined): number {
+  const v = raw?.trim().replace(',', '.')
+  if (!v || v === '--') return 0
+  const n = Number(v)
+  return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * Интрадей-расход СЕГОДНЯ (₽) из Reports (DateRangeType=TODAY). Поллинг
+ * ограничен (отчёт мелкий — зонд подтвердил готовность за 1 поллинг). Не дозрел
+ * или ошибка → null: детектор — ДОПОЛНИТЕЛЬНАЯ сеть, при отсутствии данных НЕ
+ * действует (fail-safe = бездействие).
+ */
+async function fetchTodaySpendRub(now: Date): Promise<number | null> {
+  const body = buildTodaySpendReportBody(`bd_today_spend_${now.getTime()}`)
+  for (let i = 0; i < 5; i++) {
+    const res = await pollReport(body)
+    if (res.status === 'ready') {
+      return parseReportTsv(res.tsv).reduce((acc, r) => acc + tsvNum(r.Cost), 0)
+    }
+    if (res.status === 'failed') return null
+    await new Promise((r) => setTimeout(r, Math.min(res.retryInSec, 5) * 1000))
+  }
+  return null
+}
+
+export async function handler(_request: Request) {
   const now = new Date()
 
   let campaign: CampaignState
@@ -110,11 +140,83 @@ async function handler(_request: Request) {
     alerted += 1
   }
 
+  // --- Катастрофа расхода (интрадей): аварийная сеть сверх предохранителя Директа. ---
+  // Источник расхода — TODAY-отчёт; DailyBudget — из ЖИВОГО campaigns.get (уже прочитан).
+  // FAIL-SAFE: отчёт не получен → НЕ действуем (тихий лог). Уже suspended → suspend no-op.
+  let catastrophe: 'none' | 'soft' | 'hard' = 'none'
+  let catastropheAlerted = false
+  try {
+    const budgetMicro = campaign.DailyBudget?.Amount ?? 0
+    if (budgetMicro > 0) {
+      const spentTodayRub = await fetchTodaySpendRub(now)
+      if (spentTodayRub === null) {
+        console.warn(`[cron:${JOB_LABEL}] интрадей-расход не получен — катастрофа-детектор пропущен (fail-safe)`)
+      } else {
+        const budgetRub = Math.round(budgetMicro / MICRO)
+        const level = classifyBudgetOveruse({ spentTodayRub, dailyBudgetRub: budgetMicro / MICRO })
+        const mskTime = new Date(now.getTime() + 3 * 3600_000).toISOString().slice(11, 16)
+        const ratio = (spentTodayRub / (budgetMicro / MICRO)).toFixed(2)
+        const saveCatAlert = async (kind: string, text: string) => {
+          await prisma.borisDirectSnapshot.create({
+            data: {
+              tickDate: todayTick,
+              kind: 'watch_alert',
+              payload: { kind, severity: 'critical', text } as Prisma.InputJsonValue,
+            },
+          })
+        }
+        catastrophe = level
+        if (level === 'hard') {
+          // Суспенд — только если кампания ещё крутится (уже suspended → no-op, не
+          // дублируем). Через write-gate → ActionLog + зрячесть к ошибкам API (спринт A).
+          if (campaign.State === 'ON') {
+            const gate = await suspendCampaignEmergency(
+              `катастрофа расхода: ${spentTodayRub.toFixed(0)} ₽ ≥ ${CATASTROPHE_HARD_FACTOR}× бюджета ${budgetRub} ₽ (интрадей ${mskTime} МСК)`
+            )
+            if (!alreadyAlerted.has('catastrophe_hard')) {
+              const head = gate.applied
+                ? '🚨 Кампания ОСТАНОВЛЕНА АВАРИЙНО'
+                : '🚨 Катастрофа расхода — остановку записал «сделал бы» (наблюдение/стоп-кран, кампания НЕ остановлена)'
+              const errNote = gate.writeErrors?.length
+                ? ` ⚠️ остановка вернула ошибку API: ${gate.writeErrors.join('; ')}`
+                : ''
+              await sendToDirectChat(
+                `${head}: расход ${spentTodayRub.toFixed(0)} ₽ при бюджете ${budgetRub} ₽ (${ratio}× ≥ ${CATASTROPHE_HARD_FACTOR}×) на ${mskTime} МСК. ` +
+                  `Возобновление — только владелец (в интерфейсе Директа); «Борис, статус» покажет состояние.${errNote}`
+              )
+              catastropheAlerted = true
+              // Дедуп-снапшот ставим ТОЛЬКО при УСПЕШНОЙ остановке. Если suspend не
+              // применился (ошибка API / наблюдение) — кампания всё ещё жжёт бюджет,
+              // и на следующем watch нужен ПОВТОРНЫЙ алерт (эскалация): дедуп не пишем.
+              // Успешный suspend переведёт State в SUSPENDED → дублей suspend всё равно нет.
+              if (gate.applied) {
+                await saveCatAlert('catastrophe_hard', `расход ${spentTodayRub.toFixed(0)} ≥ ${CATASTROPHE_HARD_FACTOR}× ${budgetRub}`)
+              }
+            }
+          }
+        } else if (level === 'soft') {
+          // Мягкий: только алерт владельцу, БЕЗ действий; не чаще 1 раза в день.
+          if (!alreadyAlerted.has('catastrophe_soft')) {
+            await sendToDirectChat(
+              `⚠️ Расход достиг дневного бюджета: ${spentTodayRub.toFixed(0)} ₽ ≥ ${budgetRub} ₽ (${ratio}×) на ${mskTime} МСК — слежу, действий пока не предпринимаю.`
+            )
+            await saveCatAlert('catastrophe_soft', `расход ${spentTodayRub.toFixed(0)} ≥ ${budgetRub}`)
+            catastropheAlerted = true
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[cron:${JOB_LABEL}] катастрофа-детектор упал (fail-safe, без действий)`, err)
+  }
+
   return NextResponse.json({
     ok: true,
     problems: problems.length,
     alerted,
     deduped: problems.length - alerted,
+    catastrophe,
+    catastropheAlerted,
   })
 }
 

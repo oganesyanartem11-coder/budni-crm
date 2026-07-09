@@ -259,6 +259,7 @@ describe('runCollectTick', () => {
     mockPrisma.borisDirectReportJob.create.mockImplementation(async () => ({ id: `job-${++n}` }))
     mockPrisma.borisDirectReportJob.update.mockResolvedValue({})
     mockPrisma.landingLead.count.mockResolvedValue(0)
+    mockGetLeads.mockResolvedValue([]) // лиды окна аномалий — по умолчанию пусто
   }
 
   it('снапшоты + заказ двух отчётов за вчера + первый шаг поллинга', async () => {
@@ -294,6 +295,22 @@ describe('runCollectTick', () => {
     // Спокойный день, тег YES → аномалий нет; катастрофу пока не меряем.
     expect(res.anomalies).toEqual([])
     expect(res.catastrophe).toBe(false)
+  })
+
+  it('MINOR-2: leads_zero считает заявки БЕЗ тестовых — 0 реальных + 1 «Тестик» → аномалия срабатывает', async () => {
+    setupCollect()
+    mockPollReport.mockResolvedValue({ status: 'pending', retryInSec: 30 })
+    // Вчера (среда 01.07): только тестовая заявка. 7 дней до этого: 14 реальных → avg 2/день.
+    mockGetLeads
+      .mockResolvedValueOnce([{ id: 't1', name: 'Тестик', phoneDigits: '79995555555' }])
+      .mockResolvedValueOnce(
+        Array.from({ length: 14 }, (_, i) => ({ id: `r${i}`, name: 'Клиент', phoneDigits: '79991112233' }))
+      )
+
+    const res = await runCollectTick(NOW)
+
+    // Тестовая «Тестик» отфильтрована → реальных вчера 0 при среднем 2 → аномалия.
+    expect(res.anomalies).toContainEqual(expect.objectContaining({ kind: 'leads_zero' }))
   })
 
   it('ADD_METRICA_TAG=NO → critical-аномалия', async () => {
@@ -453,6 +470,25 @@ describe('runProcessTick', () => {
       (c) => c[0].data.kind === 'daily_totals'
     )
     expect(totalsSnap?.[0].data.payload).toMatchObject({ date: YESTERDAY, spendRub: 790 })
+  })
+
+  it('MINOR-3: первый гейт DATA_MISMATCH — Метрика day-bound; протухший latest-снапшот не даёт ложный диагноз', async () => {
+    setupProcessHappyPath()
+    const baseFindFirst = mockPrisma.borisDirectSnapshot.findFirst.getMockImplementation()!
+    // Метрика: за НУЖНЫЙ день снапшота нет (day-bound → null); «последний» (другой
+    // день, tickDate не задан) — протухшие 100 достижений.
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string; tickDate?: unknown } }) => {
+      if (args.where.kind === 'metrika_goal') {
+        return args.where.tickDate ? null : { payload: [{ goalReaches: 100 }] }
+      }
+      return baseFindFirst(args)
+    })
+
+    const res = await runProcessTick(NOW)
+
+    // Метрика за день отсутствует → из сравнения ИСКЛЮЧЕНА → нет ложного расхождения
+    // (иначе протухшие 100 против отчёта 2 / БД 1 дали бы ложный DATA_MISMATCH).
+    expect(res.decisions).not.toContainEqual(expect.objectContaining({ reasonCode: 'DATA_MISMATCH' }))
   })
 
   it('OBSERVE: гейт вернул applied=false → всё в «сделал бы», ничего в applied', async () => {

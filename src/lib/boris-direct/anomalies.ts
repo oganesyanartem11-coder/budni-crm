@@ -2,6 +2,8 @@
 // уже посчитаны кодом снаружи (снапшоты/отчёты/лиды), здесь только сравнения
 // с порогами. null во входе = «данных нет» → соответствующая проверка молчит.
 
+import { CATASTROPHE_SOFT_FACTOR, CATASTROPHE_HARD_FACTOR } from './config'
+
 export interface Anomaly {
   severity: 'warn' | 'critical'
   kind: string
@@ -170,4 +172,23 @@ export function detectLeadReconcileLoss(input: {
  */
 export function isCatastrophe(input: { spentTodayRub: number; dailyBudgetRub: number }): boolean {
   return input.spentTodayRub > input.dailyBudgetRub * CATASTROPHE_BUDGET_FACTOR
+}
+
+/**
+ * Классификация интрадей-расхода против ЖИВОГО дневного бюджета (watch-надзор):
+ *  - 'hard' (≥ CATASTROPHE_HARD_FACTOR×) → аварийная остановка + алерт;
+ *  - 'soft' (≥ CATASTROPHE_SOFT_FACTOR×) → только critical-алерт владельцу;
+ *  - 'none' → тишина.
+ * Пороги — из config (менять решает владелец). Бюджет ≤ 0 (нет данных) → 'none'
+ * (не судим — детектор доп. сеть, не источник ложных тревог). Границы включающие (≥).
+ */
+export function classifyBudgetOveruse(input: {
+  spentTodayRub: number
+  dailyBudgetRub: number
+}): 'none' | 'soft' | 'hard' {
+  if (!(input.dailyBudgetRub > 0)) return 'none'
+  const ratio = input.spentTodayRub / input.dailyBudgetRub
+  if (ratio >= CATASTROPHE_HARD_FACTOR) return 'hard'
+  if (ratio >= CATASTROPHE_SOFT_FACTOR) return 'soft'
+  return 'none'
 }
