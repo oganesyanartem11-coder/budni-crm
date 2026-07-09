@@ -14,8 +14,8 @@ const DEFAULT_INBOX_MODEL = 'claude-haiku-4-5-20251001'
 const DEFAULT_FALLBACK_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_VISION_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_BORIS_MODEL = 'claude-sonnet-4-6'
-const DEFAULT_BORIS_DIRECT_MODEL = 'claude-opus-4-7'
-const DEFAULT_BORIS_DIRECT_LIGHT_MODEL = 'claude-haiku-4-5-20251001'
+const DEFAULT_BORIS_DIRECT_MODEL = 'claude-opus-4-8'
+const DEFAULT_BORIS_DIRECT_LIGHT_MODEL = 'claude-sonnet-4-6'
 
 /** parseMenuSchedule: разбор структуры меню из Excel/фото (Opus). */
 export function getParserModel(): string {
@@ -67,7 +67,7 @@ export function getBorisDirectModel(): string {
 
 /**
  * Борис-Директ: ЛЁГКОЕ/рутинное (короткие формулировки, классификация
- * бесспорных случаев). Haiku — дёшево, вызовы частые.
+ * бесспорных случаев). Sonnet — дешевле heavy-Opus, тянет рутинную классификацию.
  */
 export function getBorisDirectLightModel(): string {
   return process.env.ANTHROPIC_MODEL_BORIS_DIRECT_LIGHT ?? DEFAULT_BORIS_DIRECT_LIGHT_MODEL

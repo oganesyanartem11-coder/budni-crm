@@ -11,7 +11,7 @@
  *  - direct-client / metrika-client / telegram → фейки читают симулированный мир;
  *  - reports → РЕАЛЬНЫЕ build*Body/parseReportTsv, фейковый только pollReport (TSV из мира);
  *  - llm → РЕАЛЬНЫЙ учёт стоимости, фейковый только callBorisDirectLlm (stub-классификатор
- *    мусора или живой Haiku с дисковым кешем — режим задаёт прогон).
+ *    мусора или живой Sonnet с дисковым кешем — режим задаёт прогон).
  */
 
 import { vi } from 'vitest'

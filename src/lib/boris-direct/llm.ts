@@ -3,7 +3,7 @@
  *
  * - heavy (Opus, env ANTHROPIC_MODEL_BORIS_DIRECT) — спорные минусы,
  *   недельный/месячный разбор, стратегия, текст владельцу;
- * - light (Haiku, env ANTHROPIC_MODEL_BORIS_DIRECT_LIGHT) — рутина.
+ * - light (Sonnet, env ANTHROPIC_MODEL_BORIS_DIRECT_LIGHT) — рутина.
  *
  * Opus НЕ гоняем на арифметике — все числа считает код до вызова.
  * Каждый вызов логируется в BorisDirectLlmLog (модель/токены/стоимость);
@@ -26,8 +26,10 @@ export type LlmTier = 'heavy' | 'light'
 
 // Тарифы USD за миллион токенов по семействам (при смене моделей — обновить).
 // Cache-тиры Anthropic: write 1.25× input, read 0.10× input.
+// Opus 5/25 — единый тариф Opus 4.7 и 4.8 (офиц. страница цен Anthropic 08.07.2026);
+// прежние 15/75 были завышены ×3. Sonnet 3/15, Haiku 1/5 — верны.
 const PRICES: Array<{ match: RegExp; inputPerM: number; outputPerM: number }> = [
-  { match: /opus/i, inputPerM: 15, outputPerM: 75 },
+  { match: /opus/i, inputPerM: 5, outputPerM: 25 },
   { match: /sonnet/i, inputPerM: 3, outputPerM: 15 },
   { match: /haiku/i, inputPerM: 1, outputPerM: 5 },
 ]
@@ -160,7 +162,17 @@ export async function callBorisDirectLlm(call: BorisDirectLlmCall): Promise<Bori
     const usedModel = response.model ?? model
     const inputTokens = response.usage?.input_tokens ?? 0
     const outputTokens = response.usage?.output_tokens ?? 0
-    const costUsd = computeLlmCostUsd(usedModel, inputTokens, outputTokens)
+    // Кеш-токены из usage прокидываем в стоимость (write 1.25×, read 0.10× input-тарифа).
+    // Отсутствуют в ответе → 0, стоимость без кеша не меняется.
+    const cacheCreationInputTokens = response.usage?.cache_creation_input_tokens ?? 0
+    const cacheReadInputTokens = response.usage?.cache_read_input_tokens ?? 0
+    const costUsd = computeLlmCostUsd(
+      usedModel,
+      inputTokens,
+      outputTokens,
+      cacheCreationInputTokens,
+      cacheReadInputTokens
+    )
     const text = response.content
       .map((block) => (block.type === 'text' ? block.text : ''))
       .join('')
