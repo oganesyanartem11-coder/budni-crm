@@ -98,6 +98,13 @@ export interface QueryStatRow {
   query: string
   adGroupName: string
   adGroupId: string
+  /**
+   * Id ключа (Criterion), на который Директ сматчил этот запрос (broad match:
+   * запрос ≠ текст ключа). null — колонки нет / пусто / нечисловое (напр.
+   * автотаргет). Экономика (биддинг/конвертер-защита) агрегируется ПО НЕМУ,
+   * а не по тексту запроса; null → строка в пофразную экономику не идёт.
+   */
+  criterionId: number | null
   impressions: number
   clicks: number
   costRub: number
@@ -144,16 +151,26 @@ export function readReportConversions(raw: Record<string, string>): number {
   return tsvNumber(raw.Conversions)
 }
 
+/** CriterionId ячейки TSV → число (id живого ключа) или null (пусто/--/нечисло). */
+function parseCriterionId(raw: string | undefined): number | null {
+  const v = raw?.trim()
+  if (!v || !/^\d+$/.test(v)) return null
+  const n = Number(v)
+  return Number.isSafeInteger(n) ? n : null
+}
+
 /**
- * Строка TSV-отчёта Директа (поля Query, AdGroupName, AdGroupId, Impressions,
- * Clicks, Cost, Conversions[_goalId]) → QueryStatRow. Конверсии читаем
- * suffix-aware (см. readReportConversions); '--'/пусто означает 0.
+ * Строка TSV-отчёта Директа (поля Query, AdGroupName, AdGroupId, CriterionId,
+ * Impressions, Clicks, Cost, Conversions[_goalId]) → QueryStatRow. Конверсии
+ * читаем suffix-aware (см. readReportConversions); '--'/пусто означает 0.
+ * criterionId — id ключа для агрегации экономики (null → не в экономику).
  */
 export function toQueryStatRow(raw: Record<string, string>): QueryStatRow {
   return {
     query: raw.Query ?? '',
     adGroupName: raw.AdGroupName ?? '',
     adGroupId: raw.AdGroupId ?? '',
+    criterionId: parseCriterionId(raw.CriterionId),
     impressions: tsvNumber(raw.Impressions),
     clicks: tsvNumber(raw.Clicks),
     costRub: tsvNumber(raw.Cost),

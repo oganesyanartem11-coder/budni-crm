@@ -70,6 +70,7 @@ describe('buildSearchQueryReportBody', () => {
       'Query',
       'AdGroupName',
       'AdGroupId',
+      'CriterionId',
       'Impressions',
       'Clicks',
       'Cost',

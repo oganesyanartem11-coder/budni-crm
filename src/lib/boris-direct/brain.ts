@@ -188,6 +188,50 @@ async function loadDailyTotals(endInclusive: Date, days: number): Promise<DailyT
   return [...byDay.values()]
 }
 
+/** Дневной агрегат SQ по ключу (CriterionId) — единица снапшота 'query_criterion_daily'. */
+interface CriterionDayStat {
+  criterionId: number
+  clicks: number
+  conversions: number
+}
+
+/**
+ * Окно пофразной экономики ПО КЛЮЧУ (MAJOR-2): суммирует снапшоты
+ * 'query_criterion_daily' за days МСК-дней до endInclusive в Map<criterionId,
+ * {clicks, conversions}>. Каждый снапшот — уже агрегат дня по CriterionId;
+ * дубликаты дня (ретраи тика) схлопываем — последняя запись на tickDate
+ * побеждает. Старые тики (до перехода на ID) этого вида снапшота НЕ писали →
+ * их дни просто отсутствуют (мягкая совместимость: ключ без истории окна
+ * останется «тонким» → hold, без гадания по тексту).
+ */
+async function loadCriterionWindow(
+  endInclusive: Date,
+  days: number
+): Promise<Map<number, { clicks: number; conversions: number }>> {
+  const acc = new Map<number, { clicks: number; conversions: number }>()
+  if (days <= 0) return acc
+  const from = new Date(endInclusive.getTime() - (days - 1) * DAY_MS)
+  const snaps = await prisma.borisDirectSnapshot.findMany({
+    where: { kind: 'query_criterion_daily', tickDate: { gte: from, lte: endInclusive } },
+    orderBy: { createdAt: 'asc' },
+  })
+  // Дедуп по дню: последний снапшот на tickDate побеждает (идемпотентный агрегат дня).
+  const byDay = new Map<number, CriterionDayStat[]>()
+  for (const snap of snaps) {
+    byDay.set(snap.tickDate.getTime(), (snap.payload as unknown as CriterionDayStat[]) ?? [])
+  }
+  for (const list of byDay.values()) {
+    for (const s of list) {
+      if (typeof s?.criterionId !== 'number') continue
+      const cur = acc.get(s.criterionId) ?? { clicks: 0, conversions: 0 }
+      cur.clicks += s.clicks
+      cur.conversions += s.conversions
+      acc.set(s.criterionId, cur)
+    }
+  }
+  return acc
+}
+
 /**
  * Истинный КУМУЛЯТИВ кликов кампании из Reports API за [startDate … dateTo]
  * — для карантинного гейта. ОТДЕЛЬНЫЙ от суточного отчёта фетч: суточный
@@ -732,6 +776,29 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     console.error('[boris-direct/brain] персист BorisDirectQueryDailyStat упал — день не сохранён', err)
   }
 
+  // MAJOR-2: ID-снапшот дня для пофразной экономики — агрегат вчерашних SQ-строк
+  // по CriterionId (id ключа, на который Директ сматчил запрос). Из этих снапшотов
+  // §7 собирает окно 14/30 дн ПО КЛЮЧУ (а не по тексту запроса). Строки без
+  // числового CriterionId (автотаргет/пусто) не пишем — в пофразный биддинг не идут.
+  try {
+    const byCriterion = new Map<number, { clicks: number; conversions: number }>()
+    for (const row of rows) {
+      if (row.criterionId == null) continue
+      const cur = byCriterion.get(row.criterionId) ?? { clicks: 0, conversions: 0 }
+      cur.clicks += row.clicks
+      cur.conversions += row.conversions
+      byCriterion.set(row.criterionId, cur)
+    }
+    const payload: CriterionDayStat[] = [...byCriterion.entries()].map(([criterionId, s]) => ({
+      criterionId,
+      clicks: s.clicks,
+      conversions: s.conversions,
+    }))
+    await saveSnapshot(dayStart, 'query_criterion_daily', payload)
+  } catch (err) {
+    console.error('[boris-direct/brain] снапшот query_criterion_daily не записался', err)
+  }
+
   try {
     // Итоги дня — для аномалий на следующих тиках «сбор».
     await saveSnapshot(dayStart, 'daily_totals', {
@@ -919,11 +986,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
 
   const state = await getDirectRoleState()
 
-  // ЭКОНОМИЧЕСКАЯ КОНСТИТУЦИЯ (ШАГ 6): защита конвертеров по окну 30 дней.
-  // Фраза с ≥1 заявкой за 30д — НЕ кандидат на минус/понижение с мотивом
-  // «дорого» (только наблюдаем/кормим). Считаем один раз, используем в §6
-  // (минус) и §7 (ставки). Ключи: по (группа+запрос) и по тексту запроса.
-  const conv30dByGroupQuery = new Map<string, number>()
+  // ЭКОНОМИЧЕСКАЯ КОНСТИТУЦИЯ (ШАГ 6): защита конвертеров по окну 30 дней ДЛЯ
+  // МИНУСА — по ТЕКСТУ запроса (минус кампейн-левел, оперирует текстами). Защита
+  // конвертеров для СТАВОК (§7) считается ОТДЕЛЬНО по CriterionId (loadCriterionWindow),
+  // т.к. заявка приписана КЛЮЧУ, на который сматчился запрос, а не тексту.
   const conv30dByQueryText = new Map<string, number>()
   try {
     const convWindowStart = new Date(
@@ -934,8 +1000,6 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     })
     for (const s of stats30) {
       const nq = normQueryKey(s.query)
-      const gk = `${s.adGroupId}\0${nq}`
-      conv30dByGroupQuery.set(gk, (conv30dByGroupQuery.get(gk) ?? 0) + s.conversions)
       conv30dByQueryText.set(nq, (conv30dByQueryText.get(nq) ?? 0) + s.conversions)
     }
   } catch (err) {
@@ -965,6 +1029,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             query: s.query,
             adGroupName: s.adGroupName ?? '',
             adGroupId: s.adGroupId,
+            // Минус работает по тексту запроса; CriterionId тут не нужен (агрегат
+            // по тексту из накопленного DailyStat, где id ключа не хранится).
+            criterionId: null,
             impressions: 0,
             clicks: 0,
             costRub: 0,
@@ -1216,31 +1283,46 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     const bidsSnap = (await latestSnapshotPayload<KeywordBidRecord[]>('keywordbids')) ?? []
     const keywordsForBids = (await latestSnapshotPayload<KeywordRecord[]>('keywords')) ?? []
     if (bidsSnap.length > 0) {
-      // Мост keywordId → нормализованный текст ключа (голова фразы).
+      // Мост keywordId → нормализованный текст ключа — ТОЛЬКО для реестра
+      // подтверждённых конвертеров (страховка поверх, isRegisteredConverter).
       const keyTextById = new Map<number, string>(
         keywordsForBids.map((k) => [k.Id, normQueryKey(k.Keyword)])
       )
-      // Головная экономика фразы за окно созревания: (adGroupId, normQuery) →
-      // {clicks, leads}. Источник — накопленный BorisDirectQueryDailyStat (в §3
-      // уже дописан вчерашний день) + сегодняшний отчёт rows как подстраховка.
-      const windowStartBids = new Date(dayStart.getTime() - (PHRASE_ECON_WINDOW_DAYS - 1) * DAY_MS)
-      const headStat = new Map<string, { clicks: number; leads: number }>()
-      const addHead = (adGroupId: string, query: string, clicks: number, leads: number) => {
-        const key = `${adGroupId}\0${normQueryKey(query)}`
-        const acc = headStat.get(key) ?? { clicks: 0, leads: 0 }
+      // MAJOR-2: головная экономика фразы ПО КЛЮЧУ (CriterionId), НЕ по тексту
+      // запроса. Ключи — broad match (запрос ≠ текст ключа): клики/заявки
+      // приписываются КЛЮЧУ, на который Директ сматчил запрос. Окно = история из
+      // ID-снапшотов 'query_criterion_daily' (дни СТРОГО до сегодня) + сегодняшний
+      // отчёт rows по CriterionId. liveKeyIds отсекает автотаргет/орфан-ID (в
+      // пофразный биддинг не идут). Ключ без данных окна → тонкая → hold.
+      const liveKeyIds = new Set(keywordsForBids.map((k) => k.Id))
+      const headStat = new Map<number, { clicks: number; leads: number }>()
+      const addHead = (criterionId: number | null | undefined, clicks: number, leads: number) => {
+        if (criterionId == null || !liveKeyIds.has(criterionId)) return
+        const acc = headStat.get(criterionId) ?? { clicks: 0, leads: 0 }
         acc.clicks += clicks
         acc.leads += leads
-        headStat.set(key, acc)
+        headStat.set(criterionId, acc)
       }
+      // Защита конвертера для СТАВОК — по CriterionId (заявка защищает КЛЮЧ, на
+      // который сматчился запрос). Для МИНУСА защита остаётся по тексту (выше).
+      const conv30dByCriterion = new Map<number, number>()
+      const addConv = (criterionId: number | null | undefined, conv: number) => {
+        if (criterionId == null || !liveKeyIds.has(criterionId)) return
+        conv30dByCriterion.set(criterionId, (conv30dByCriterion.get(criterionId) ?? 0) + conv)
+      }
+      const histEnd = new Date(dayStart.getTime() - DAY_MS)
       try {
-        const ws = await prisma.borisDirectQueryDailyStat.findMany({
-          where: { date: { gte: windowStartBids, lte: dayStart } },
-        })
-        for (const s of ws) addHead(s.adGroupId, s.query, s.clicks, s.conversions)
+        const headHist = await loadCriterionWindow(histEnd, PHRASE_ECON_WINDOW_DAYS - 1)
+        for (const [cid, s] of headHist) addHead(cid, s.clicks, s.conversions)
+        const convHist = await loadCriterionWindow(histEnd, CONVERTER_PROTECT_WINDOW_DAYS - 1)
+        for (const [cid, s] of convHist) addConv(cid, s.conversions)
       } catch (err) {
-        console.error('[boris-direct/brain] окно пофразной экономики недоступно', err)
+        console.error('[boris-direct/brain] окно пофразной экономики по ключу недоступно', err)
       }
-      for (const row of rows) addHead(row.adGroupId, row.query, row.clicks, row.conversions)
+      for (const row of rows) {
+        addHead(row.criterionId, row.clicks, row.conversions)
+        addConv(row.criterionId, row.conversions)
+      }
 
       const changes: BidChange[] = []
       // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
@@ -1248,13 +1330,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       for (const bid of bidsSnap) {
         const auctionBids = bid.Search?.AuctionBids ?? []
         if (auctionBids.length === 0) continue
-        const groupId = String(bid.AdGroupId)
         const currentBidMicro = bid.Search?.Bid ?? 0
-        // Головная экономика ЭТОЙ фразы (её собственный запрос).
-        const head = headStat.get(`${groupId}\0${keyTextById.get(bid.KeywordId) ?? ''}`) ?? {
-          clicks: 0,
-          leads: 0,
-        }
+        // Головная экономика ЭТОГО ключа — по CriterionId (== bid.KeywordId).
+        // Нет данных окна / ключ не в отчёте → {0,0} → тонкая → hold (fail-safe).
+        const head = headStat.get(bid.KeywordId) ?? { clicks: 0, leads: 0 }
         // Тонкая фраза (мало кликов, нет заявок) — НЕ трогаем ставку: судить не
         // на чем, а болтанка вредит дисциплине (демоутнутая горелка, у которой
         // клики выпали из окна, не должна прыгать назад в 65). Только наблюдаем.
@@ -1278,8 +1357,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // минимум как «горелку» (заявка ценнее экономии на клике). Головная
         // экономика 14д ИЛИ ≥1 заявка за 30д → трактуем как конвертера (нижний
         // блок, «кормим»), а не хвост.
-        const conv30d =
-          conv30dByGroupQuery.get(`${groupId}\0${keyTextById.get(bid.KeywordId) ?? ''}`) ?? 0
+        const conv30d = conv30dByCriterion.get(bid.KeywordId) ?? 0
         // ШАГ 3а: подтверждённый конвертер держим как конвертера (нижний блок), даже
         // если 30д-статистика занижена (баг суффиксной колонки конверсий до фикса).
         const converter =

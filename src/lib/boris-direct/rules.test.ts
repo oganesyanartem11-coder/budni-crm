@@ -34,6 +34,7 @@ function makeRow(overrides: Partial<QueryStatRow> = {}): QueryStatRow {
     query: 'доставка обедов в офис',
     adGroupName: 'G1',
     adGroupId: '1',
+    criterionId: null,
     impressions: 100,
     clicks: 5,
     costRub: 500,

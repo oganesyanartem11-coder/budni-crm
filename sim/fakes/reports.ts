@@ -109,15 +109,18 @@ function buildLine(fieldNames: string[], values: Record<string, string>, reportT
     .join('\t')
 }
 
-/** SEARCH_QUERY_PERFORMANCE_REPORT: агрегат за диапазон по (query, adGroupId). */
+/** SEARCH_QUERY_PERFORMANCE_REPORT: агрегат за диапазон по (query, adGroupId).
+ * CriterionId — id ключа, породившего запрос (паритет с боевым SQ-отчётом): в мире
+ * симуляции запрос принадлежит одному keywordId (ObservedQueryRow.keywordId). */
 function buildSearchQueryTsv(fieldNames: string[], rows: ObservedQueryRow[]): string {
-  const byKey = new Map<string, Agg & { query: string }>()
+  const byKey = new Map<string, Agg & { query: string; keywordId: number }>()
   for (const row of rows) {
     const key = `${row.adGroupId} ${row.query}`
     let agg = byKey.get(key)
     if (!agg) {
       agg = {
         query: row.query,
+        keywordId: row.keywordId,
         adGroupId: row.adGroupId,
         adGroupName: row.adGroupName,
         impressions: 0,
@@ -143,6 +146,7 @@ function buildSearchQueryTsv(fieldNames: string[], rows: ObservedQueryRow[]): st
           Query: agg.query,
           AdGroupName: agg.adGroupName,
           AdGroupId: agg.adGroupId,
+          CriterionId: String(agg.keywordId),
           Impressions: String(agg.impressions),
           Clicks: String(agg.clicks),
           Cost: fmtCost(agg.costRub),

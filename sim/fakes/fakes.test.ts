@@ -132,6 +132,7 @@ function queryRow(day: number, query: string, over: Partial<ObservedQueryRow> = 
   return {
     day,
     query,
+    keywordId: 1,
     adGroupId: 'G1',
     adGroupName: 'Офисы',
     impressions: 0,
@@ -362,7 +363,7 @@ describe('fakePollReport', () => {
 
     const [header] = poll.tsv.split('\n')
     expect(header).toBe(
-      ['Query', 'AdGroupName', 'AdGroupId', 'Impressions', 'Clicks', 'Cost', 'Conversions'].join('\t')
+      ['Query', 'AdGroupName', 'AdGroupId', 'CriterionId', 'Impressions', 'Clicks', 'Cost', 'Conversions'].join('\t')
     )
 
     const rows = parseReportTsv(poll.tsv) // боевой парсер понимает наш TSV

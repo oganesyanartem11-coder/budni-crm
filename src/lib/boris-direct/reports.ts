@@ -43,7 +43,10 @@ export function buildSearchQueryReportBody(
         Filter: campaignFilter(),
       },
       Goals: [String(METRIKA_GOAL_ID)],
-      FieldNames: ['Query', 'AdGroupName', 'AdGroupId', 'Impressions', 'Clicks', 'Cost', 'Conversions'],
+      // CriterionId — id ключа, на который Директ сматчил запрос (broad match):
+      // экономика агрегируется по нему, а не по тексту запроса. Поле выверено
+      // живым зондом SQ-отчёта (принято, совпадает с Id из keywords.get).
+      FieldNames: ['Query', 'AdGroupName', 'AdGroupId', 'CriterionId', 'Impressions', 'Clicks', 'Cost', 'Conversions'],
       ReportName: reportName,
       ReportType: 'SEARCH_QUERY_PERFORMANCE_REPORT',
       DateRangeType: 'CUSTOM_DATE',
