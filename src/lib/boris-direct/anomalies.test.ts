@@ -6,6 +6,7 @@ import {
   detectAnomalies,
   detectLeadReconcileLoss,
   isCatastrophe,
+  classifyBudgetOveruse,
   type AnomalyInput,
 } from './anomalies'
 
@@ -153,5 +154,26 @@ describe('isCatastrophe', () => {
   it('ровно ×1.5 и ниже → не катастрофа', () => {
     expect(isCatastrophe({ spentTodayRub: 4500, dailyBudgetRub: 3000 })).toBe(false)
     expect(isCatastrophe({ spentTodayRub: 3000, dailyBudgetRub: 3000 })).toBe(false)
+  })
+})
+
+describe('classifyBudgetOveruse — интрадей-надзор (soft ≥1.0×, hard ≥1.5×)', () => {
+  it('расход ниже бюджета → none', () => {
+    expect(classifyBudgetOveruse({ spentTodayRub: 2999, dailyBudgetRub: 3000 })).toBe('none')
+    expect(classifyBudgetOveruse({ spentTodayRub: 0, dailyBudgetRub: 3000 })).toBe('none')
+  })
+
+  it('ровно ×1.0 и до ×1.5 → soft (алерт, без действий)', () => {
+    expect(classifyBudgetOveruse({ spentTodayRub: 3000, dailyBudgetRub: 3000 })).toBe('soft')
+    expect(classifyBudgetOveruse({ spentTodayRub: 4499, dailyBudgetRub: 3000 })).toBe('soft')
+  })
+
+  it('ровно ×1.5 и выше → hard (аварийная остановка)', () => {
+    expect(classifyBudgetOveruse({ spentTodayRub: 4500, dailyBudgetRub: 3000 })).toBe('hard')
+    expect(classifyBudgetOveruse({ spentTodayRub: 9000, dailyBudgetRub: 3000 })).toBe('hard')
+  })
+
+  it('бюджет ≤ 0 (нет данных) → none (не судим, fail-safe)', () => {
+    expect(classifyBudgetOveruse({ spentTodayRub: 5000, dailyBudgetRub: 0 })).toBe('none')
   })
 })

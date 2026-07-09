@@ -126,6 +126,27 @@ export function buildDeviceReportBody(
   }
 }
 
+/**
+ * Тело интрадей-отчёта расхода СЕГОДНЯ (DateRangeType=TODAY) для катастрофа-
+ * детектора watch-надзора. TODAY-диапазон НЕ допускает DateFrom/DateTo внутри
+ * SelectionCriteria (иначе ошибка валидации). Поля выверены живым зондом:
+ * TODAY принят, отчёт готов быстро (1 поллинг), Date=сегодня-МСК, Cost/Clicks.
+ * Goals не запрашиваем — нужен только расход.
+ */
+export function buildTodaySpendReportBody(reportName: string): unknown {
+  return {
+    params: {
+      SelectionCriteria: { Filter: campaignFilter() },
+      FieldNames: ['Date', 'Clicks', 'Cost'],
+      ReportName: reportName,
+      ReportType: 'CUSTOM_REPORT',
+      DateRangeType: 'TODAY',
+      Format: 'TSV',
+      IncludeVAT: 'YES',
+    },
+  }
+}
+
 export type ReportPollResult =
   | { status: 'ready'; tsv: string }
   | { status: 'pending'; retryInSec: number }

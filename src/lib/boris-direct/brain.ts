@@ -447,12 +447,14 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
     const avg = (xs: number[]): number | null =>
       xs.length > 0 ? xs.reduce((a, b) => a + b, 0) / xs.length : null
 
-    const leadsYesterday = await prisma.landingLead.count({
-      where: { createdAt: { gte: tickYesterday, lt: tickToday } },
-    })
-    const leads7d = await prisma.landingLead.count({
-      where: { createdAt: { gte: new Date(tickYesterday.getTime() - 7 * DAY_MS), lt: tickYesterday } },
-    })
+    // MINOR-2: считаем заявки БЕЗ тестовых (как process/weekly) — иначе тестовая
+    // «Тестик» глушит leads_zero (день с 0 реальных + 1 тестовой выглядел как «1»).
+    const leadsYesterday = filterOutTestLeads(
+      await getLeadsForPeriod(tickYesterday, new Date(tickToday.getTime() - 1))
+    ).length
+    const leads7d = filterOutTestLeads(
+      await getLeadsForPeriod(new Date(tickYesterday.getTime() - 7 * DAY_MS), new Date(tickYesterday.getTime() - 1))
+    ).length
 
     anomalies = detectAnomalies({
       spentYesterdayRub: yesterdayTotals?.spendRub ?? null,
@@ -855,12 +857,18 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   // сигналу. Только ЭМИССИЯ диагноза, действий не меняет.
   try {
     const reportConv = rows.reduce((acc, r) => acc + r.conversions, 0)
-    const metrikaGoal =
-      (await latestSnapshotPayload<Array<{ goalReaches?: number }>>('metrika_goal'))?.reduce(
-        (acc, g) => acc + (g.goalReaches ?? 0),
-        0
-      ) ?? 0
-    const counts = [reportConv, metrikaGoal, leadsTotal].filter((c) => Number.isFinite(c))
+    // MINOR-3: Метрику берём ПРИВЯЗАННОЙ к тому же дню (dayStart), а НЕ latest —
+    // протухший снапшот другого дня (вчера Метрика не отдалась) давал ложный
+    // DATA_MISMATCH. Один фетч на оба гейта. Нет снапшота за день → Метрику из
+    // сравнения ИСКЛЮЧАЕМ (отсутствие данных ≠ расхождение).
+    const metrikaGoalDay = await snapshotPayloadForDay<Array<{ goalReaches?: number }>>(
+      'metrika_goal',
+      dayStart
+    )
+    const metrikaGoal = metrikaGoalDay?.reduce((acc, g) => acc + (g.goalReaches ?? 0), 0) ?? 0
+    const counts = [reportConv, ...(metrikaGoalDay ? [metrikaGoal] : []), leadsTotal].filter((c) =>
+      Number.isFinite(c)
+    )
     const maxC = Math.max(...counts)
     const minC = Math.min(...counts)
     if (maxC >= DATA_MISMATCH_MIN_COUNT && maxC >= minC * DATA_MISMATCH_RATIO) {
@@ -868,35 +876,29 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         type: 'diagnosis',
         targetType: 'campaign',
         targetId: String(DIRECT_CAMPAIGN_ID),
-        summary: `источники заявок расходятся: отчёт ${reportConv}, Метрика ${metrikaGoal}, БД ${leadsTotal} — первопричина в данных, не в трафике`,
+        summary: `источники заявок расходятся: отчёт ${reportConv}, Метрика ${metrikaGoalDay ? metrikaGoal : 'н/д'}, БД ${leadsTotal} — первопричина в данных, не в трафике`,
         reasonCode: 'DATA_MISMATCH',
-        factors: { reportConv, metrikaGoal, leadsTotal },
+        // Метрика отсутствует за день → 'н/д' (а не 0): телеметрия честно отражает
+        // «данных нет» (в сравнение Метрика в этом случае и не входила).
+        factors: { reportConv, metrikaGoal: metrikaGoalDay ? metrikaGoal : 'н/д', leadsTotal },
       })
     }
 
     // ШАГ 3: общий гейт DATA_MISMATCH (MIN_COUNT=3) прячет потерю ОДНОЙ заявки.
     // Чувствительная сверка «конверсии Метрики (цель 575665118) vs заявки в БД»,
     // порог 1. Эмитим АНОМАЛИЮ — она дойдёт до владельца через тик (в отличие от
-    // decision, который в чат не идёт). Прочие пороги не трогаем.
-    //
-    // Метрику берём ПРИВЯЗАННОЙ к тому же дню, что и заявки (dayStart): иначе,
-    // если вчера Метрика не отдалась, latestSnapshotPayload вернул бы ПРОТУХШИЙ
-    // снапшот другого дня и дал бы ложный [СВЕРКА]. Нет снапшота за день → не сверяем.
+    // decision, который в чат не идёт). Прочие пороги не трогаем. Метрика — тот же
+    // day-bound снапшот, что и в гейте выше (нет за день → не сверяем).
     // ОГРАНИЧЕНИЕ: goalReaches и заявки в БД имеют разные слепые зоны (adblock
     // занижает цели, сбой persist занижает записи), поэтому одиночная потеря может
     // быть замаскирована одиночным adblock-лидом. Основной сигнал одиночной потери —
     // алёрт [INTAKE] в реальном времени при сбое persist; эта сверка — доп. бэкстоп.
-    const metrikaGoalDay = await snapshotPayloadForDay<Array<{ goalReaches?: number }>>(
-      'metrika_goal',
-      dayStart
-    )
     if (metrikaGoalDay) {
-      const rawReaches = metrikaGoalDay.reduce((acc, g) => acc + (g.goalReaches ?? 0), 0)
       // ШАГ 3б (фантом-правило): достижения ДО фикса фронта (b669b35, 05.07)
       // могли сработать на неуспешной отправке. Для этой сверки вес 0 (день
       // целиком под подозрением), чтобы пре-фикс-фантомы не давали ложный
       // [СВЕРКА]. Дни ≥ фикса весят 1 → штатная работа/полигон не меняются.
-      const metrikaGoalYesterday = phantomWeight(yesterday) * rawReaches
+      const metrikaGoalYesterday = phantomWeight(yesterday) * metrikaGoal
       const reconcileLoss = detectLeadReconcileLoss({
         reportConv,
         metrikaGoal: metrikaGoalYesterday,

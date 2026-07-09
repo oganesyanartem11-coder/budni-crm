@@ -12,6 +12,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   buildSearchQueryReportBody,
   buildCampaignPerformanceReportBody,
+  buildTodaySpendReportBody,
   pollReport,
   parseReportTsv,
 } from './reports'
@@ -76,6 +77,24 @@ describe('buildSearchQueryReportBody', () => {
       'Cost',
       'Conversions',
     ])
+  })
+})
+
+describe('buildTodaySpendReportBody (интрадей-расход)', () => {
+  it('DateRangeType=TODAY, БЕЗ DateFrom/DateTo, фильтр кампании, поля Date/Clicks/Cost', () => {
+    const body = buildTodaySpendReportBody('today-spend-1') as { params: ReportParams }
+
+    expect(body.params.ReportType).toBe('CUSTOM_REPORT')
+    expect(body.params.DateRangeType).toBe('TODAY')
+    // TODAY-диапазон НЕ допускает DateFrom/DateTo в SelectionCriteria.
+    expect(body.params.SelectionCriteria.DateFrom).toBeUndefined()
+    expect(body.params.SelectionCriteria.DateTo).toBeUndefined()
+    expect(body.params.SelectionCriteria.Filter).toEqual([
+      { Field: 'CampaignId', Operator: 'EQUALS', Values: [String(DIRECT_CAMPAIGN_ID)] },
+    ])
+    expect(body.params.FieldNames).toEqual(['Date', 'Clicks', 'Cost'])
+    expect(body.params.ReportName).toBe('today-spend-1')
+    expect(body.params.Format).toBe('TSV')
   })
 })
 
