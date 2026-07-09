@@ -82,6 +82,26 @@ describe('formatAnomalyMessage — детерминированно, без LLM'
   })
 })
 
+describe('М3: строка недорасхода в дневном блоке', () => {
+  it('расход X из Y (Z%) + гейт открыт при недорасходе', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({
+        data: day({ spendRub: 1200, underspend: { spentYesterdayRub: 1200, dailyBudgetRub: 3000, gateOpen: true, medianRub: 1000 } }),
+      })
+    )
+    expect(block).toContain('Расход 1200 ₽ из 3000 ₽ (40%)')
+    expect(block).toContain('гейт недорасхода: открыт')
+  })
+  it('гейт закрыт при расходе у нормы; нет данных бюджета → строки нет', () => {
+    const closed = buildDailyDataBlock(
+      dailyInput({ data: day({ spendRub: 2900, underspend: { spentYesterdayRub: 2900, dailyBudgetRub: 3000, gateOpen: false, medianRub: 2800 } }) })
+    )
+    expect(closed).toContain('гейт недорасхода: закрыт')
+    const noBudget = buildDailyDataBlock(dailyInput()) // underspend не задан
+    expect(noBudget).not.toContain('гейт недорасхода')
+  })
+})
+
 describe('buildDailyDataBlock — числа форматирует код', () => {
   it('рубли без копеек, CTR с 2 знаками, счётчики заявок', () => {
     const block = buildDailyDataBlock(dailyInput())
@@ -327,6 +347,22 @@ describe('buildWeeklyDataBlock — агрегация кодом', () => {
     const block = buildWeeklyDataBlock([], { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
     expect(block).toContain('данных за неделю нет')
     expect(block).toContain('Средняя цена заявки: нет данных')
+  })
+
+  it('М3: underspendWeekly → строка недорасхода + оценка упущенного объёма при медиане < 80%', () => {
+    const block = buildWeeklyDataBlock(days, {
+      llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0,
+      underspendWeekly: { medianSpendRub: 1000, dailyBudgetRub: 3000 }, // 33% < 80% → систематический
+    })
+    expect(block).toContain('Недорасход: медиана 1000 ₽/день из 3000 ₽ (33%)')
+    expect(block).toContain('кликов/день упущено') // грубая оценка объёма
+    // Медиана у нормы (85%) → строка недорасхода есть, но оценки упущенного НЕТ.
+    const nearNorm = buildWeeklyDataBlock(days, {
+      llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0,
+      underspendWeekly: { medianSpendRub: 2550, dailyBudgetRub: 3000 },
+    })
+    expect(nearNorm).toContain('Недорасход: медиана 2550')
+    expect(nearNorm).not.toContain('упущено')
   })
 
   it('М2: matchTypeShare → строка «доля SYNONYM-трафика N%» (видимость); нет → строки нет', () => {

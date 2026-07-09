@@ -12,7 +12,12 @@
 
 import type { DailyReportData } from './brain'
 import type { Anomaly } from './anomalies'
-import { BID_CEILING_MICRO, MICRO } from './config'
+import {
+  BID_CEILING_MICRO,
+  MICRO,
+  UNDERSPEND_START_PCT,
+  MEDIAN_ENTRY_PRICE_RUB,
+} from './config'
 import { callBorisDirectLlm } from './llm'
 import { formatCplWithValue } from './economics'
 import { isRegisteredConverter, converterLessonsForContext } from './converters'
@@ -200,6 +205,17 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     anomaliesSection(input),
   ]
 
+  // М3: строка недорасхода — расход vs живой бюджет + состояние гейта подъёма.
+  const us = d.underspend
+  if (us && us.dailyBudgetRub > 0) {
+    const spent = us.spentYesterdayRub ?? 0
+    const pct = Math.round((spent / us.dailyBudgetRub) * 100)
+    lines.push(
+      `Расход ${Math.round(spent)} ₽ из ${Math.round(us.dailyBudgetRub)} ₽ (${pct}%); ` +
+        `гейт недорасхода: ${us.gateOpen ? 'открыт (систематический недорасход)' : 'закрыт (расход у нормы)'}`
+    )
+  }
+
   // ШАГ 2: частота ретраев фронта — сколько дублей заявок приёмник отсеял сегодня.
   if (input.dedupDroppedToday && input.dedupDroppedToday > 0) {
     lines.push(`Дублей-ретраев заявок отсеяно за сегодня: ${input.dedupDroppedToday}`)
@@ -268,6 +284,11 @@ export interface WeeklyReportExtras {
    * материал для будущих операторных предложений. Пусто → строку не печатаем.
    */
   matchTypeShare?: { synonymPct: number; synonymClicks: number; keywordClicks: number }
+  /**
+   * М3: недорасход недели — медиана дневного расхода vs живой бюджет. При медиане
+   * < 80% бюджета печатаем грубую оценку упущенного объёма. Пусто → строки нет.
+   */
+  underspendWeekly?: { medianSpendRub: number; dailyBudgetRub: number }
 }
 
 /** 'YYYY-MM-DD' → 'DD.MM'. */
@@ -321,6 +342,23 @@ function aggregateQueries(days: DailyReportData[]): Map<string, QueryAggregate> 
 }
 
 /** Детерминированный блок цифр недельного отчёта (тренды считает код). */
+/** М3: строки недорасхода недели + грубая оценка упущенного ОБЪЁМА (медиана < 80%). */
+function underspendWeeklyLines(us?: { medianSpendRub: number; dailyBudgetRub: number }): string[] {
+  if (!us || !(us.dailyBudgetRub > 0)) return []
+  const pct = Math.round((us.medianSpendRub / us.dailyBudgetRub) * 100)
+  const lines = [
+    `- Недорасход: медиана ${Math.round(us.medianSpendRub)} ₽/день из ${Math.round(us.dailyBudgetRub)} ₽ (${pct}%)`,
+  ]
+  if (us.medianSpendRub < UNDERSPEND_START_PCT * us.dailyBudgetRub) {
+    const missedClicks = Math.round((us.dailyBudgetRub - us.medianSpendRub) / MEDIAN_ENTRY_PRICE_RUB)
+    lines.push(
+      `  систематический недорасход → ≈${missedClicks} кликов/день упущено ` +
+        `(по медианной цене входа ~${MEDIAN_ENTRY_PRICE_RUB} ₽; оценка ОБЪЁМА, не заявок)`
+    )
+  }
+  return lines
+}
+
 export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyReportExtras): string {
   const sorted = [...days].sort((a, b) => a.dateLabel.localeCompare(b.dateLabel))
   const spendRub = sorted.reduce((acc, d) => acc + (d.spendRub ?? 0), 0)
@@ -391,6 +429,7 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
             `(${extras.matchTypeShare.synonymClicks} синонимных кликов из ${extras.matchTypeShare.synonymClicks + extras.matchTypeShare.keywordClicks})`,
         ]
       : []),
+    ...underspendWeeklyLines(extras.underspendWeekly),
     '',
     'ДИНАМИКА ПО ДНЯМ:',
     dayLines.length > 0 ? dayLines.join('\n') : 'данных за неделю нет',
