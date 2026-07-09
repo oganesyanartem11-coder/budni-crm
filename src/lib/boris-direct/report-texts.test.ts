@@ -329,6 +329,17 @@ describe('buildWeeklyDataBlock — агрегация кодом', () => {
     expect(block).toContain('Средняя цена заявки: нет данных')
   })
 
+  it('М2: matchTypeShare → строка «доля SYNONYM-трафика N%» (видимость); нет → строки нет', () => {
+    const withShare = buildWeeklyDataBlock(days, {
+      llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0,
+      matchTypeShare: { synonymPct: 61.4, synonymClicks: 35, keywordClicks: 22 },
+    })
+    expect(withShare).toContain('Доля SYNONYM-трафика: 61% (35 синонимных кликов из 57)')
+
+    const without = buildWeeklyDataBlock(days, { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
+    expect(without).not.toContain('SYNONYM')
+  })
+
   it('ШАГ 4: leadCounts → три счётчика + различия + оговорка о слепой БД + явный период', () => {
     const block = buildWeeklyDataBlock(days, {
       llmSpendUsd: 0,

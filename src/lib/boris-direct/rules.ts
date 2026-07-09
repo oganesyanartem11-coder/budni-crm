@@ -12,6 +12,9 @@ import {
   BID_CEILING_MICRO,
   CB_MAX_BID_CHANGES_PER_TICK,
   CB_MAX_BID_MASS_SHIFT,
+  BEHAVIORAL_MIN_VISITS,
+  BEHAVIORAL_BOUNCE_PCT,
+  BEHAVIORAL_MAX_DURATION_SEC,
 } from './config'
 import type { QueryStatRow } from './attribution'
 
@@ -218,6 +221,52 @@ export function isSuspiciousNegativesShrink(
   if (liveCount === 0 && snapshotCount > 0) return true
   if (snapshotCount < NEGATIVES_SHRINK_MIN_BASELINE) return false
   return liveCount < snapshotCount * NEGATIVES_SHRINK_RATIO
+}
+
+// ---------- Поведенческие минус-кандидаты (М2: пофразное зрение Метрики) ----------
+
+/** Строка пофразного поведения из Метрики (getGoalStatsByPhrase). */
+export interface PhraseBehaviorRow {
+  phrase: string
+  visits: number
+  bounceRate: number
+  avgDurationSec: number
+  goalReaches: number
+}
+
+export interface BehavioralMinusCandidate {
+  phrase: string
+  visits: number
+  bounceRate: number
+  avgDurationSec: number
+  reason: 'high_bounce' | 'short_duration' | 'high_bounce_short_duration'
+}
+
+/**
+ * Кандидаты в минус ПО ПОВЕДЕНИЮ (только для предложения владельцу, НЕ авто-минус):
+ * фраза с рекламным трафиком (≥ BEHAVIORAL_MIN_VISITS визитов), нулём заявок и
+ * плохим поведением — высокий отказ (≥ BEHAVIORAL_BOUNCE_PCT %) И/ИЛИ мгновенный
+ * уход (< BEHAVIORAL_MAX_DURATION_SEC сек). Хорошее поведение или наличие заявки —
+ * не кандидат. Конвертер-защиту/гео накладывает вызывающий (как для обычных минусов).
+ */
+export function pickBehavioralMinusCandidates(rows: PhraseBehaviorRow[]): BehavioralMinusCandidate[] {
+  const out: BehavioralMinusCandidate[] = []
+  for (const r of rows) {
+    if (r.visits < BEHAVIORAL_MIN_VISITS || r.goalReaches !== 0) continue
+    const highBounce = r.bounceRate >= BEHAVIORAL_BOUNCE_PCT
+    const shortDuration = r.avgDurationSec < BEHAVIORAL_MAX_DURATION_SEC
+    if (!highBounce && !shortDuration) continue
+    const reason: BehavioralMinusCandidate['reason'] =
+      highBounce && shortDuration ? 'high_bounce_short_duration' : highBounce ? 'high_bounce' : 'short_duration'
+    out.push({
+      phrase: r.phrase.trim(),
+      visits: r.visits,
+      bounceRate: r.bounceRate,
+      avgDurationSec: r.avgDurationSec,
+      reason,
+    })
+  }
+  return out
 }
 
 // ---------- Ставки: бинарная шкала ----------

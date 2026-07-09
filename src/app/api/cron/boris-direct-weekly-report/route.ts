@@ -24,6 +24,7 @@ import {
   parseReportTsv,
   buildCampaignPerformanceReportBody,
   buildSearchQueryReportBody,
+  buildMatchTypeShareReportBody,
 } from '@/lib/boris-direct/reports'
 import { toQueryStatRow, getLeadsForPeriod, splitLeadsByOrigin } from '@/lib/boris-direct/attribution'
 import { filterOutTestLeads } from '@/lib/boris-direct/test-markers'
@@ -75,13 +76,33 @@ async function buildDaysFromReports(
   toDay: string,
   from: Date,
   to: Date
-): Promise<{ days: DailyReportData[]; directAttrib: number } | null> {
+): Promise<{
+  days: DailyReportData[]
+  directAttrib: number
+  matchTypeShare?: { synonymPct: number; synonymClicks: number; keywordClicks: number }
+} | null> {
   const stamp = Math.floor(Date.now() / 1000)
-  const [cpTsv, sqTsv] = await Promise.all([
+  const [cpTsv, sqTsv, mtTsv] = await Promise.all([
     fetchReportTsv(buildCampaignPerformanceReportBody(fromDay, toDay, `bd_wk_cp_${stamp}`)),
     fetchReportTsv(buildSearchQueryReportBody(fromDay, toDay, `bd_wk_sq_${stamp}`)),
+    fetchReportTsv(buildMatchTypeShareReportBody(fromDay, toDay, `bd_wk_mt_${stamp}`)),
   ])
   if (!cpTsv) return null
+
+  // М2: доля SYNONYM-трафика (клики по типу соответствия). Отдельный отчёт (MatchType
+  // дробит строки — в дневной SQ его не кладём). Недоступен → строку не печатаем.
+  let matchTypeShare: { synonymPct: number; synonymClicks: number; keywordClicks: number } | undefined
+  if (mtTsv) {
+    let keywordClicks = 0
+    let synonymClicks = 0
+    for (const row of parseReportTsv(mtTsv)) {
+      const clicks = num(row.Clicks)
+      if (row.MatchType === 'SYNONYM') synonymClicks += clicks
+      else if (row.MatchType === 'KEYWORD') keywordClicks += clicks
+    }
+    const total = keywordClicks + synonymClicks
+    if (total > 0) matchTypeShare = { synonymPct: (synonymClicks / total) * 100, synonymClicks, keywordClicks }
+  }
 
   // Per-day totals из CUSTOM_REPORT (Date × группа).
   const byDay = new Map<string, { spendRub: number; clicks: number; impressions: number }>()
@@ -149,7 +170,7 @@ async function buildDaysFromReports(
     peak.topQueries = topWeekQueries
   }
 
-  return { days, directAttrib }
+  return { days, directAttrib, matchTypeShare }
 }
 
 async function handler(request: Request) {
@@ -172,11 +193,13 @@ async function handler(request: Request) {
   // 1. Дни из отчётов за ВЕСЬ период (добор), фолбэк — снапшоты daily_result.
   let days: DailyReportData[] = []
   let directAttrib = 0
+  let matchTypeShare: { synonymPct: number; synonymClicks: number; keywordClicks: number } | undefined
   try {
     const built = await buildDaysFromReports(fromDay, toDay, from, to)
     if (built) {
       days = built.days
       directAttrib = built.directAttrib
+      matchTypeShare = built.matchTypeShare
     }
   } catch (err) {
     console.error('[boris-direct/weekly] сбор по отчётам не удался — фолбэк на снапшоты', err)
@@ -223,6 +246,7 @@ async function handler(request: Request) {
     proposalsPending,
     period: { from: fromDay, to: toDay },
     leadCounts: { directAttrib, metrika, delivered, deliveredBlindBefore: DB_BLIND_BEFORE_MSK },
+    matchTypeShare,
   })
   const sent = await sendToDirectChat(text)
 

@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * (rules, anomalies, парсеры отчётов/атрибуции) работают настоящие.
  */
 
-const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLeads, mockGate, mockGetState, mockLlm, mockLessons, mockOutcomes } =
+const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetGoalStatsByPhrase, mockGetLeads, mockGate, mockGetState, mockLlm, mockLessons, mockOutcomes } =
   vi.hoisted(() => ({
     mockPrisma: {
       borisDirectSnapshot: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
@@ -32,6 +32,7 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetLe
     },
     mockPollReport: vi.fn(),
     mockGetGoalStatsByDay: vi.fn(),
+    mockGetGoalStatsByPhrase: vi.fn(),
     mockGetLeads: vi.fn(),
     mockGate: {
       applyBidChanges: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock('./metrika-client', () => ({
   getGoalStatsByDevice: async () => [],
   getGoalStatsByDemographics: async () => [],
   getGoalStatsByHour: async () => [],
+  getGoalStatsByPhrase: mockGetGoalStatsByPhrase,
 }))
 vi.mock('./attribution', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./attribution')>()
@@ -75,7 +77,7 @@ vi.mock('./prompts', () => ({ getBorisDirectSystemPrompt: () => 'SYS' }))
 vi.mock('./lessons', () => mockLessons)
 vi.mock('./outcomes', () => mockOutcomes)
 
-import { runCollectTick, runProcessTick, mskDay, mskDayStartUtc, yesterdayMsk } from './brain'
+import { runCollectTick, runProcessTick, backfillCriterionHistory, mskDay, mskDayStartUtc, yesterdayMsk } from './brain'
 import { MICRO } from './config'
 
 // 2026-07-02 09:00 UTC → сегодня-МСК 2026-07-02, вчера-МСК 2026-07-01.
@@ -228,6 +230,8 @@ beforeEach(() => {
     TimeTargeting: { Schedule: { Items: [] } },
     NegativeKeywords: { Items: [] },
   })
+  // М2: пофразное поведение — нейтральный дефолт (пусто → поведенческие кандидаты молчат).
+  mockGetGoalStatsByPhrase.mockResolvedValue([])
   mockPrisma.borisDirectQueryDailyStat.findMany.mockResolvedValue([])
   // Память-опыт: нейтральные дефолты (модули lessons/outcomes мокнуты целиком).
   mockOutcomes.measureActionOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
@@ -276,7 +280,7 @@ describe('runCollectTick', () => {
     const kinds = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data.kind)
     expect(kinds).toEqual([
       'campaign', 'keywords', 'keywordbids', 'ads', 'metrika_goal',
-      'bidmodifiers', 'adgroups', 'campaign_settings', 'metrika_device', 'metrika_demo', 'metrika_hour',
+      'bidmodifiers', 'adgroups', 'campaign_settings', 'metrika_device', 'metrika_demo', 'metrika_hour', 'metrika_phrase',
     ])
 
     // Два отчёта с уникальными именами за вчера.
@@ -793,6 +797,179 @@ describe('runProcessTick — память-опыт (персист статис�
   })
 })
 
+describe('DEVICE_SKEW — точный ₽ из device-отчёта Директа (М2)', () => {
+  it('device-отчёт с Device → точные ₽ (costEstimated=false), фолбэк на Метрику не задействован', async () => {
+    setupProcessHappyPath()
+    const DEVICE_TSV = [
+      'Device\tImpressions\tClicks\tCost\tConversions_575665118_LSCCD',
+      'DESKTOP\t100\t30\t1500.00\t2',
+      'MOBILE\t50\t20\t800.00\t0', // слив: 20 кликов, 800 ₽, 0 заявок
+    ].join('\n')
+    // device-отчёт (ReportName bd_dev_*) → device-TSV; прочие отчёты → CUM_TSV.
+    mockPollReport.mockImplementation(async (body: { params?: { ReportName?: string } }) => {
+      const name = body?.params?.ReportName ?? ''
+      if (name.startsWith('bd_dev_')) return { status: 'ready', tsv: DEVICE_TSV }
+      return { status: 'ready', tsv: CUM_TSV }
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    const skew = res.proposalDrafts.find((p) => p.type === 'device_skew')
+    expect(skew).toBeDefined()
+    const payload = skew!.payload as { device: string; costRub: number; costEstimated: boolean }
+    expect(payload.device).toBe('MOBILE')
+    expect(payload.costRub).toBe(800) // ТОЧНЫЙ ₽ из отчёта Директа
+    expect(payload.costEstimated).toBe(false)
+    expect(skew!.argument).not.toContain('≈') // не оценка
+  })
+})
+
+describe('поведенческие минус-кандидаты (М2, ТОЛЬКО предложением)', () => {
+  it('фраза с плохим поведением → предложение behavioral_minus; реестровый конвертер защищён', async () => {
+    setupProcessHappyPath()
+    const phraseRows = [
+      { phrase: 'чужое кафе рядом', visits: 5, bounceRate: 90, avgDurationSec: 6, goalReaches: 0 }, // мусор
+      { phrase: 'бизнес ланч доставка москва', visits: 4, bounceRate: 80, avgDurationSec: 5, goalReaches: 0 }, // реестровый конвертер
+      { phrase: 'обеды в офис москва хорошие', visits: 5, bounceRate: 10, avgDurationSec: 120, goalReaches: 0 }, // хорошее поведение
+    ]
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'metrika_phrase') return { payload: phraseRows }
+      if (args.where.kind === 'keywords') return { payload: KEYWORDS_PAYLOAD }
+      if (args.where.kind === 'keywordbids') return { payload: BIDS_PAYLOAD }
+      if (args.where.kind === 'campaign_settings') {
+        return {
+          payload: {
+            Id: 711897777, Name: 'x', StartDate: '2026-06-25',
+            TimeTargeting: { Schedule: { Items: [] } },
+            NegativeKeywords: { Items: [] }, Statistics: { Clicks: 37, Impressions: 900 },
+          },
+        }
+      }
+      return null
+    })
+
+    const res = await runProcessTick(NOW)
+
+    const behavioral = res.proposalDrafts.find((p) => p.type === 'behavioral_minus')
+    expect(behavioral).toBeDefined()
+    const phrases = (behavioral!.payload as { phrases: string[] }).phrases
+    expect(phrases).toContain('чужое кафе рядом') // высокий отказ + мгновенный уход
+    expect(phrases).not.toContain('бизнес ланч доставка москва') // реестровый конвертер — защищён
+    expect(phrases).not.toContain('обеды в офис москва хорошие') // хорошее поведение — не кандидат
+    // Никакого АВТО-минуса по поведению: applyBidChanges/addNegativeKeywords поведение не дёргает.
+    // (проверяем, что поведенческий блок не пишет в кабинет — только proposalDraft)
+    expect(behavioral!.question).toContain('поведению')
+  })
+
+  it('Метрика пуста → блок молчит (нет behavioral_minus, тик done)', async () => {
+    setupProcessHappyPath() // metrika_phrase не замокан → findFirst вернёт null
+    const res = await runProcessTick(NOW)
+    expect(res.status).toBe('done')
+    expect(res.proposalDrafts.some((p) => p.type === 'behavioral_minus')).toBe(false)
+  })
+})
+
+describe('backfillCriterionHistory (self-heal истории пофразной экономики)', () => {
+  const NOW_BF = new Date('2026-07-09T09:00:00Z')
+  // Суффиксная колонка конверсий (как отдаёт живой API при Goals). 205769314414 —
+  // автотаргет (20<adGroupId>): числовой CriterionId, идёт в снапшот (как в process),
+  // отфильтруется по liveKeyIds при чтении. Пустой CriterionId → в снапшот НЕ идёт.
+  const BF_TSV = [
+    'Date\tCriterionId\tImpressions\tClicks\tCost\tConversions_575665118_LSCCD\tAvgTrafficVolume',
+    '2026-06-30\t111\t8\t0\t0.00\t--\t8.50',
+    '2026-07-01\t111\t50\t4\t200.00\t1\t28.90',
+    '2026-07-01\t205769314414\t5\t0\t0.00\t--\t8.50',
+    '2026-07-01\t\t3\t1\t50.00\t0\t8.50',
+  ].join('\n')
+
+  function createdSnapshots(kind: string) {
+    const calls = mockPrisma.borisDirectSnapshot.create.mock.calls as Array<
+      [{ data: { tickDate: Date; kind: string; payload: unknown } }]
+    >
+    return calls.map((c) => c[0].data).filter((d) => d.kind === kind)
+  }
+
+  beforeEach(() => {
+    mockPrisma.borisDirectSnapshot.create.mockResolvedValue({})
+  })
+
+  it('добирает ТОЛЬКО отсутствующие даты (08.07 есть → его не трогаем; форма head-совместима)', async () => {
+    // Уже есть снапшот за 08.07 → backfill добирает 30.06..07.07.
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValue([
+      { tickDate: mskDayStartUtc('2026-07-08') },
+    ])
+    mockPollReport.mockResolvedValue({ status: 'ready', tsv: BF_TSV })
+
+    const res = await backfillCriterionHistory('2026-06-30', '2026-07-08', NOW_BF)
+
+    const snaps = createdSnapshots('query_criterion_daily')
+    const days = snaps.map((s) => mskDay(s.tickDate)).sort()
+    // 30.06..07.07 = 8 дней; 08.07 НЕ перезаписан.
+    expect(days).toEqual([
+      '2026-06-30', '2026-07-01', '2026-07-02', '2026-07-03',
+      '2026-07-04', '2026-07-05', '2026-07-06', '2026-07-07',
+    ])
+    expect(res.backfilledDays).toHaveLength(8)
+
+    // 01.07: ключ 111 (4 клика, 1 заявка из суффиксной колонки) + автотаргет; пустой CriterionId отброшен.
+    const d0107 = snaps.find((s) => mskDay(s.tickDate) === '2026-07-01')!.payload as Array<{
+      criterionId: number; clicks: number; conversions: number; avgTrafficVolume: number
+    }>
+    const key111 = d0107.find((x) => x.criterionId === 111)!
+    expect(key111).toMatchObject({ criterionId: 111, clicks: 4, conversions: 1, avgTrafficVolume: 28.9 })
+    expect(d0107.some((x) => x.criterionId === 205769314414)).toBe(true) // автотаргет в снапшоте
+    expect(d0107.every((x) => typeof x.criterionId === 'number')).toBe(true) // пустой CriterionId отброшен
+    // 30.06: только ключ 111 с 0 кликов; день без данных (напр. 05.07) — пустой снапшот (маркер «добрано»).
+    const d3006 = snaps.find((s) => mskDay(s.tickDate) === '2026-06-30')!.payload as unknown[]
+    expect(d3006).toHaveLength(1)
+    const d0505 = snaps.find((s) => mskDay(s.tickDate) === '2026-07-05')!.payload as unknown[]
+    expect(d0505).toEqual([])
+  })
+
+  it('ВЧЕРА не добирается backfill (его пишет тик обработки) — только история StartDate..позавчера', async () => {
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValue([]) // ничего нет
+    mockPollReport.mockResolvedValue({ status: 'ready', tsv: BF_TSV })
+
+    const res = await backfillCriterionHistory('2026-06-30', '2026-07-08', NOW_BF)
+
+    // yesterday=08.07 → backfill закрывает 30.06..07.07 (позавчера), 08.07 НЕ трогает.
+    expect(res.backfilledDays).toContain('2026-07-07')
+    expect(res.backfilledDays).not.toContain('2026-07-08')
+    const days = createdSnapshots('query_criterion_daily').map((s) => mskDay(s.tickDate))
+    expect(days).not.toContain('2026-07-08')
+  })
+
+  it('повторный запуск — no-op: все дни есть → ни отчёта, ни записей', async () => {
+    // Все дни 30.06..08.07 присутствуют.
+    const allDays = ['06-30', '07-01', '07-02', '07-03', '07-04', '07-05', '07-06', '07-07', '07-08']
+      .map((d) => ({ tickDate: mskDayStartUtc(`2026-${d}`) }))
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValue(allDays)
+
+    const res = await backfillCriterionHistory('2026-06-30', '2026-07-08', NOW_BF)
+
+    expect(res.backfilledDays).toHaveLength(0)
+    expect(mockPollReport).not.toHaveBeenCalled() // отчёт не заказывали
+    expect(createdSnapshots('query_criterion_daily')).toHaveLength(0)
+  })
+
+  it('FAIL-SAFE: отчёт failed → 0 записей, дни НЕ помечены (ретрай на след. тике)', async () => {
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValue([])
+    mockPollReport.mockResolvedValue({ status: 'failed', error: 'HTTP 500' })
+
+    const res = await backfillCriterionHistory('2026-06-30', '2026-07-08', NOW_BF)
+
+    expect(res.backfilledDays).toHaveLength(0)
+    expect(createdSnapshots('query_criterion_daily')).toHaveLength(0)
+  })
+
+  it('нет StartDate → no-op (fail-safe)', async () => {
+    const res = await backfillCriterionHistory(null, '2026-07-08', NOW_BF)
+    expect(res.backfilledDays).toHaveLength(0)
+    expect(mockPollReport).not.toHaveBeenCalled()
+  })
+})
+
 describe('пофразная экономика по CriterionId (MAJOR-2: агрегация по ключу, не по тексту)', () => {
   const SQ_HEADER = 'Query\tAdGroupName\tAdGroupId\tCriterionId\tImpressions\tClicks\tCost\tConversions'
   function sqTsv(
@@ -875,7 +1052,10 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
   it('строки автотаргета / нежившие CriterionId в пофразный биддинг НЕ идут', async () => {
     setupEconomics({
       sq: sqTsv([
-        { q: 'что-то автотаргет', g: '1', cid: '---autotargeting', clicks: 50, conv: 3 }, // нечисловой ID → null
+        // Автотаргет: CriterionId ЧИСЛОВОЙ вида 20<adGroupId> (сырьё живого API; строка
+        // '---autotargeting' лежит в отдельной колонке Criterion, которую отчёт не тянет).
+        // Числовой, но НЕ живой ключ → отсекается по liveKeyIds, как орфан-ID ниже.
+        { q: 'что-то автотаргет', g: '1', cid: '205769314414', clicks: 50, conv: 3 },
         { q: 'орфан ключ', g: '1', cid: '999999', clicks: 50, conv: 3 }, // числовой, но НЕ живой ключ
       ]),
       keywords: [kw(100, 'обеды', 1)],
@@ -885,7 +1065,8 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     const res = await runProcessTick(NOW)
 
     expect(res.status).toBe('done')
-    // Ни автотаргет, ни орфан-ID не приписались живому ключу 100 → он тонкий → hold → правок нет.
+    // Ни автотаргет (не в liveKeyIds), ни орфан-ID не приписались живому ключу 100 →
+    // он тонкий → hold → правок нет.
     expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
   })
 

@@ -263,6 +263,11 @@ export interface WeeklyReportExtras {
     /** Дата, до которой БД LandingLead была слепа (persist не существовал), МСК. */
     deliveredBlindBefore?: string
   }
+  /**
+   * М2: доля SYNONYM-трафика (синонимные подстановки Директа к ключам) — видимость,
+   * материал для будущих операторных предложений. Пусто → строку не печатаем.
+   */
+  matchTypeShare?: { synonymPct: number; synonymClicks: number; keywordClicks: number }
 }
 
 /** 'YYYY-MM-DD' → 'DD.MM'. */
@@ -380,6 +385,12 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     `- CTR: ${formatCtr(ctr)}`,
     ...leadsSection,
     `- Средняя цена заявки: ${formatCplWithValue(costPerLead)}`,
+    ...(extras.matchTypeShare
+      ? [
+          `- Доля SYNONYM-трафика: ${extras.matchTypeShare.synonymPct.toFixed(0)}% ` +
+            `(${extras.matchTypeShare.synonymClicks} синонимных кликов из ${extras.matchTypeShare.synonymClicks + extras.matchTypeShare.keywordClicks})`,
+        ]
+      : []),
     '',
     'ДИНАМИКА ПО ДНЯМ:',
     dayLines.length > 0 ? dayLines.join('\n') : 'данных за неделю нет',

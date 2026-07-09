@@ -104,6 +104,41 @@ export function adjustedDeviceTypes(mods: Array<{ Type: string }>): Set<string> 
   return s
 }
 
+/**
+ * Канонический ключ demo-сегмента для сверки Директ↔Метрика (разные словари):
+ * пол → gender:male|female; возраст → age:25-34 / age:55+. Срезает префикс «Age »,
+ * приводит неразрывный дефис (‑, U+2011) и подчёркивание к обычному дефису.
+ * Метрика: 'gender:male' / 'age:Age 25‑34'; Директ: GENDER_MALE / AGE_25_34.
+ */
+export function canonicalizeDemoSegment(label: string): string {
+  const s = label.toLowerCase().replace(/[‑_]/g, '-')
+  if (s.includes('female')) return 'gender:female' // проверяем female ДО male (подстрока)
+  if (s.includes('male')) return 'gender:male'
+  const plus = s.match(/(\d+)\s*\+/)
+  if (plus) return `age:${plus[1]}+`
+  const range = s.match(/(\d+)\s*-\s*(\d+)/)
+  if (range) return `age:${range[1]}-${range[2]}`
+  return s
+}
+
+/**
+ * Множество УЖЕ настроенных demo-сегментов (канонические ключи) из bidmodifiers.get:
+ * DemographicsAdjustment по полу и/или возрасту. Чтобы AUDIENCE_WASTE не предлагал
+ * владельцу корректировку, которая уже стоит.
+ */
+export function adjustedDemoSegments(
+  mods: Array<{ DemographicsAdjustment?: { Age?: string; Gender?: string } }>
+): Set<string> {
+  const s = new Set<string>()
+  for (const m of mods) {
+    const d = m.DemographicsAdjustment
+    if (!d) continue
+    if (d.Gender) s.add(canonicalizeDemoSegment(d.Gender))
+    if (d.Age) s.add(canonicalizeDemoSegment(d.Age))
+  }
+  return s
+}
+
 /** Сегменты пол/возраст из demo-среза Метрики (агрегат отдельно по полу и по возрасту). */
 export function buildDemoSegments(
   rows: Array<{ gender: string; age: string; visits: number; goalReaches: number }>
@@ -275,7 +310,10 @@ export function diagnoseAudienceWaste(
   if (overallConversions <= 0) return null
   const drain = segments
     .filter(
-      (s) => s.conversions === 0 && s.visits >= AUDIENCE_MIN_VISITS && !adjustedSegments.has(s.label)
+      (s) =>
+        s.conversions === 0 &&
+        s.visits >= AUDIENCE_MIN_VISITS &&
+        !adjustedSegments.has(canonicalizeDemoSegment(s.label))
     )
     .sort((a, b) => b.visits - a.visits)[0]
   if (!drain) return null

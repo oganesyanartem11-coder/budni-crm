@@ -10,6 +10,7 @@ import {
   MetrikaApiError,
   metrikaStat,
   getGoalStatsByDay,
+  getGoalStatsByPhrase,
   buildOfflineConversionsCsv,
   uploadOfflineConversions,
 } from './metrika-client'
@@ -88,6 +89,34 @@ describe('metrikaStat', () => {
     expect((err as MetrikaApiError).status).toBe(503)
     expect((err as MetrikaApiError).detail).toBeUndefined()
     expect((err as MetrikaApiError).message).not.toContain(TOKEN)
+  })
+})
+
+describe('getGoalStatsByPhrase (пофразное поведение)', () => {
+  it('lastDirectSearchPhrase × visits/bounceRate/avgDuration/goals, фильтр рекламы', async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        data: [
+          { dimensions: [{ name: 'доставка обедов по клину' }], metrics: [2, 50, 8, 0] },
+          { dimensions: [{ name: 'бизнес ланч доставка москва' }], metrics: [2, 0, 97, 1] },
+        ],
+        totals: [4, 25, 52, 1],
+      })
+    )
+
+    const rows = await getGoalStatsByPhrase('2026-06-30', '2026-07-08')
+
+    expect(rows).toEqual([
+      { phrase: 'доставка обедов по клину', visits: 2, bounceRate: 50, avgDurationSec: 8, goalReaches: 0 },
+      { phrase: 'бизнес ланч доставка москва', visits: 2, bounceRate: 0, avgDurationSec: 97, goalReaches: 1 },
+    ])
+    const url = new URL(mockFetch.mock.calls[0][0] as string)
+    expect(url.searchParams.get('dimensions')).toBe('ym:s:lastDirectSearchPhrase')
+    expect(url.searchParams.get('filters')).toBe("ym:s:lastTrafficSource=='ad'")
+    const metrics = url.searchParams.get('metrics') ?? ''
+    expect(metrics).toContain('ym:s:bounceRate')
+    expect(metrics).toContain('ym:s:avgVisitDurationSeconds')
+    expect(metrics).toContain(`goal${METRIKA_GOAL_ID}reaches`)
   })
 })
 

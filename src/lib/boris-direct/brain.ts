@@ -33,6 +33,8 @@ import {
 import {
   buildSearchQueryReportBody,
   buildCampaignPerformanceReportBody,
+  buildCriterionHistoryReportBody,
+  buildDeviceReportBody,
   pollReport,
   parseReportTsv,
 } from './reports'
@@ -41,6 +43,7 @@ import {
   getGoalStatsByDevice,
   getGoalStatsByDemographics,
   getGoalStatsByHour,
+  getGoalStatsByPhrase,
 } from './metrika-client'
 import {
   diagnoseDeviceSkew,
@@ -49,6 +52,7 @@ import {
   diagnoseGroupMinusGap,
   normalizeDevice,
   adjustedDeviceTypes,
+  adjustedDemoSegments,
   buildDemoSegments,
   isWeekend,
   type DeviceRow,
@@ -59,6 +63,8 @@ import {
   matchLeadsToTerms,
   toQueryStatRow,
   computeCostPerLead,
+  readReportConversions,
+  parseCriterionId,
   type QueryStatRow,
 } from './attribution'
 import type { DecisionRecord, ReasonCode } from './reason-codes'
@@ -86,6 +92,8 @@ import {
   pickDataDrivenMinusCandidates,
   prepareMinusCandidates,
   recommendBid,
+  pickBehavioralMinusCandidates,
+  type PhraseBehaviorRow,
 } from './rules'
 import { applyBidChanges, addNegativeKeywords, type BidChange } from './write-gate'
 import { getDirectRoleState } from './state'
@@ -281,6 +289,177 @@ async function fetchCumulativeCampaignClicks(
   return null // всё ещё pending после лимита → карантин из осторожности
 }
 
+/** Агрегат дня backfill: как CriterionDayStat + позиция (avgTrafficVolume). head
+ *  читает первые 3 поля; позиция копится для будущего анализа позиция×CPL. */
+interface CriterionDayStatBackfill extends CriterionDayStat {
+  avgTrafficVolume: number
+}
+
+/**
+ * ИДЕМПОТЕНТНЫЙ SELF-HEAL окна пофразной экономики: добирает из Reports дни
+ * [StartDate … yesterday], которых НЕТ в снапшотах query_criterion_daily, и
+ * пишет по ним снапшоты (форма CriterionDayStatBackfill — совместима с чтением
+ * head: loadCriterionWindow читает criterionId/clicks/conversions, доп. поле
+ * avgTrafficVolume игнорирует). История кампании живёт в Директе, но снапшоты
+ * роли начались позже её старта — этот шаг закрывает разрыв.
+ *
+ * ДИАПАЗОН — StartDate..ПОЗАВЧЕРА: вчерашний день пишет тик «обработка» (SQ), а
+ * backfill закрывает только ИСТОРИЧЕСКИЙ разрыв. Так, когда история догнана, шаг
+ * — истинный no-op (отчёт не заказывается КАЖДЫЙ тик ради вчера); день, который
+ * процесс пропустил, самолечится на следующем тике (лаг 1 день).
+ *
+ * ИДЕМПОТЕНТНОСТЬ: существующие дни (в т.ч. живые снапшоты тика «обработка») НЕ
+ * перезаписываются — добираются только отсутствующие. Дыр нет → no-op.
+ *
+ * FAIL-SAFE: нет StartDate / отчёт не готов после лимита / failed / сеть упала →
+ * 0 записей, дни НЕ помечаются (ретрай сам на следующем тике). Один эфемерный
+ * report-job (БЕЗ записи BorisDirectReportJob), как у карантинного кумулятива.
+ *
+ * Строки автотаргета (числовой CriterionId 20<adGroupId>) пишутся в снапшот как
+ * в тике «обработка» — при чтении head они отсекаются по liveKeyIds. Пустой/
+ * нечисловой CriterionId в снапшот не идёт (в пофразную экономику не участвует).
+ */
+export async function backfillCriterionHistory(
+  startDate: string | null,
+  yesterday: string,
+  _now: Date = new Date()
+): Promise<{ backfilledDays: string[] }> {
+  if (!startDate) return { backfilledDays: [] }
+  const startTick = mskDayStartUtc(startDate)
+  // Конец диапазона — ПОЗАВЧЕРА (вчера пишет тик «обработка»). Пусто → StartDate
+  // ≥ вчера (совсем молодая кампания) → нечего добирать.
+  const endTick = new Date(mskDayStartUtc(yesterday).getTime() - DAY_MS)
+  if (startTick.getTime() > endTick.getTime()) return { backfilledDays: [] }
+
+  // Какие дни диапазона уже есть в снапшотах?
+  let existing: Array<{ tickDate: Date }>
+  try {
+    existing = await prisma.borisDirectSnapshot.findMany({
+      where: { kind: 'query_criterion_daily', tickDate: { gte: startTick, lte: endTick } },
+      select: { tickDate: true },
+    })
+  } catch (err) {
+    console.error('[boris-direct/brain] backfill: чтение существующих дней упало', err)
+    return { backfilledDays: [] }
+  }
+  const haveDays = new Set(existing.map((s) => mskDay(s.tickDate)))
+  const missing: string[] = []
+  for (let t = startTick.getTime(); t <= endTick.getTime(); t += DAY_MS) {
+    const day = mskDay(new Date(t))
+    if (!haveDays.has(day)) missing.push(day)
+  }
+  if (missing.length === 0) return { backfilledDays: [] }
+
+  // ОДИН эфемерный отчёт за весь диапазон StartDate..позавчера (стабильный ReportName
+  // при поллинге). Даты и порядок как у карантинного кумулятива.
+  const endDay = mskDay(endTick)
+  const compact = `${startDate.replace(/-/g, '')}_${endDay.replace(/-/g, '')}`
+  const body = buildCriterionHistoryReportBody(startDate, endDay, `bd_bf_${compact}_${Date.now()}`)
+  let tsv: string | null = null
+  const MAX_ATTEMPTS = 5
+  const MAX_WAIT_SEC = 10
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let poll
+    try {
+      poll = await pollReport(body)
+    } catch (err) {
+      console.error('[boris-direct/brain] backfill: сеть упала', err)
+      return { backfilledDays: [] }
+    }
+    if (poll.status === 'ready') {
+      tsv = poll.tsv
+      break
+    }
+    if (poll.status === 'failed') {
+      console.error(`[boris-direct/brain] backfill: отчёт failed — ${poll.error}`)
+      return { backfilledDays: [] }
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(poll.retryInSec, MAX_WAIT_SEC) * 1000))
+    }
+  }
+  if (tsv === null) return { backfilledDays: [] } // всё ещё pending → ретрай на след. тике
+
+  // Разбор: день → CriterionId → агрегат (clicks/conversions suffix-aware/позиция).
+  const missingSet = new Set(missing)
+  const byDay = new Map<string, Map<number, CriterionDayStatBackfill>>()
+  for (const raw of parseReportTsv(tsv)) {
+    const day = (raw.Date ?? '').trim()
+    if (!missingSet.has(day)) continue // существующие дни не трогаем
+    const criterionId = parseCriterionId(raw.CriterionId)
+    if (criterionId == null) continue // автотаргет-строки без числового id/пусто — мимо
+    const acc = byDay.get(day) ?? new Map<number, CriterionDayStatBackfill>()
+    const cur = acc.get(criterionId) ?? { criterionId, clicks: 0, conversions: 0, avgTrafficVolume: 0 }
+    cur.clicks += tsvNumber(raw.Clicks)
+    cur.conversions += readReportConversions(raw)
+    // Date×CriterionId — одна строка на (день, ключ): позиция берётся как есть.
+    cur.avgTrafficVolume = tsvNumber(raw.AvgTrafficVolume)
+    acc.set(criterionId, cur)
+    byDay.set(day, acc)
+  }
+
+  // Пишем снапшот на КАЖДЫЙ отсутствующий день (пустой [] у дня без строк — маркер
+  // «добрано», чтобы след. тик не передобирал; отчёт за весь диапазон полон).
+  const backfilledDays: string[] = []
+  for (const day of missing) {
+    const acc = byDay.get(day)
+    const payload: CriterionDayStatBackfill[] = acc ? [...acc.values()] : []
+    try {
+      await saveSnapshot(mskDayStartUtc(day), 'query_criterion_daily', payload)
+      backfilledDays.push(day)
+    } catch (err) {
+      console.error(`[boris-direct/brain] backfill: снапшот дня ${day} не записался`, err)
+    }
+  }
+  return { backfilledDays }
+}
+
+/** Точный ₽-расход по устройствам (М2): эфемерный device-отчёт Директа
+ *  (Device × Clicks/Cost/Conversions за окно). Питает DEVICE_SKEW ТОЧНЫМИ деньгами
+ *  вместо оценки по визитам Метрики. Строки без валидного Device отбрасываем (в
+ *  полигоне CUSTOM-фейк не отдаёт Device → пусто → §7.5 откатывается на Метрику).
+ *  FAIL-SAFE: отчёт не готов/ошибка/сеть → null (вызывающий → фолбэк на оценку). */
+async function fetchDeviceReport(
+  dateFrom: string,
+  dateTo: string
+): Promise<Array<{ device: string; clicks: number; costRub: number; conversions: number }> | null> {
+  const compact = `${dateFrom.replace(/-/g, '')}_${dateTo.replace(/-/g, '')}`
+  const body = buildDeviceReportBody(dateFrom, dateTo, `bd_dev_${compact}_${Date.now()}`)
+  const MAX_ATTEMPTS = 4
+  const MAX_WAIT_SEC = 8
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let poll
+    try {
+      poll = await pollReport(body)
+    } catch (err) {
+      console.error('[boris-direct/brain] device-отчёт: сеть упала', err)
+      return null
+    }
+    if (poll.status === 'ready') {
+      const out: Array<{ device: string; clicks: number; costRub: number; conversions: number }> = []
+      for (const raw of parseReportTsv(poll.tsv)) {
+        const device = (raw.Device ?? '').trim()
+        if (!device) continue // нет валидного Device (напр. sim CUSTOM-фейк) → строку мимо
+        out.push({
+          device,
+          clicks: tsvNumber(raw.Clicks),
+          costRub: tsvNumber(raw.Cost),
+          conversions: readReportConversions(raw),
+        })
+      }
+      return out
+    }
+    if (poll.status === 'failed') {
+      console.error(`[boris-direct/brain] device-отчёт failed — ${poll.error}`)
+      return null
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(poll.retryInSec, MAX_WAIT_SEC) * 1000))
+    }
+  }
+  return null
+}
+
 // ---------- Тик «сбор» ----------
 
 export interface CollectResult {
@@ -362,10 +541,24 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
   } catch (err) {
     pushError('adgroups.get', err)
   }
+  let campaignSettings: CampaignSettings | null = null
   try {
-    await saveSnapshot(tickToday, 'campaign_settings', await getCampaignSettings())
+    campaignSettings = await getCampaignSettings()
+    await saveSnapshot(tickToday, 'campaign_settings', campaignSettings)
   } catch (err) {
     pushError('campaigns.get(settings)', err)
+  }
+  // 2c. BACKFILL истории пофразной экономики (self-heal): добираем дни StartDate..вчера,
+  // которых нет в query_criterion_daily (Директ хранит историю, снапшоты роли — позже
+  // старта кампании). Идемпотентно (существующие дни не трогаем), FAIL-SAFE (ошибка/
+  // неготовый отчёт → не добираем, тик живёт; ретрай на след. тике). ТОЛЬКО чтение Reports.
+  try {
+    const bf = await backfillCriterionHistory(campaignSettings?.StartDate ?? null, yesterday, now)
+    if (bf.backfilledDays.length > 0) {
+      console.log(`[boris-direct/brain] backfill: добрано дней истории ${bf.backfilledDays.length}`)
+    }
+  } catch (err) {
+    pushError('backfill истории', err)
   }
   try {
     await saveSnapshot(tickToday, 'metrika_device', await getGoalStatsByDevice(windowFrom, yesterday))
@@ -381,6 +574,13 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
     await saveSnapshot(tickToday, 'metrika_hour', await getGoalStatsByHour(windowFrom, yesterday))
   } catch (err) {
     pushError('metrika.hour', err)
+  }
+  // М2: пофразное ПОВЕДЕНИЕ (окно, фильтр рекламы) — питает поведенческие
+  // минус-кандидаты (предложением) в тике «обработка». Пусто/сбой → блок молчит.
+  try {
+    await saveSnapshot(tickToday, 'metrika_phrase', await getGoalStatsByPhrase(windowFrom, yesterday))
+  } catch (err) {
+    pushError('metrika.phrase', err)
   }
 
   // 3. Заказ двух отчётов за вчера. reportName уникален (метка времени) —
@@ -1269,6 +1469,52 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     pushBlockError('минусовка', err)
   }
 
+  // 6b. ПОВЕДЕНЧЕСКИЕ минус-кандидаты (М2, пофразное зрение Метрики) — ТОЛЬКО
+  // ПРЕДЛОЖЕНИЕМ владельцу, НЕ авто-минус. Фраза с рекламным трафиком (≥ порога
+  // визитов), плохим поведением на сайте (высокий отказ / мгновенный уход) и нулём
+  // заявок — вероятный нецелевой трафик, видимый по поведению задолго до порога
+  // показов. Конвертер-защита (реестр + 30д по тексту) и гео (вне-зону не дублируем
+  // со структурной минусовкой) — как для обычных минусов. Метрика пуста → молчим.
+  try {
+    const phraseRows = (await latestSnapshotPayload<PhraseBehaviorRow[]>('metrika_phrase')) ?? []
+    if (phraseRows.length > 0) {
+      const behavioral = pickBehavioralMinusCandidates(phraseRows).filter((c) => {
+        // Конвертер-защита: ≥1 заявка за 30д по тексту ИЛИ подтверждённый реестром — не трогаем.
+        const conv30d = Math.max(
+          conv30dByQueryText.get(normQueryKey(c.phrase)) ?? 0,
+          isRegisteredConverter(c.phrase) ? 1 : 0
+        )
+        if (conv30d > 0) return false
+        // Вне-зонные города уже ловит структурная минусовка — не дублируем предложением.
+        return classifyQueryGeo(c.phrase) !== 'out_of_zone'
+      })
+      if (behavioral.length > 0) {
+        const parts = behavioral.map((c) => {
+          const beh =
+            c.reason === 'high_bounce'
+              ? `отказ ${Math.round(c.bounceRate)}%`
+              : c.reason === 'short_duration'
+                ? `${Math.round(c.avgDurationSec)} сек на сайте`
+                : `отказ ${Math.round(c.bounceRate)}%, ${Math.round(c.avgDurationSec)} сек`
+          return `«${c.phrase}» — ${c.visits} визитов, 0 заявок, ${beh}`
+        })
+        proposalDrafts.push({
+          type: 'behavioral_minus',
+          topicKey: 'behavioral_minus',
+          payload: { phrases: behavioral.map((c) => c.phrase), behavior: behavioral },
+          argument: `Фразы с рекламным трафиком, плохим поведением на сайте и нулём заявок за период: ${parts.join('; ')}. Похоже на нецелевой трафик — минусовка уберёт слив, больше заявок на рубль.`,
+          question: 'Занести эти фразы в минусы по поведению?',
+          triggerMetric: 'behavioral_visits_no_conv',
+          triggerValue: behavioral.reduce((a, c) => a + c.visits, 0),
+        })
+        // ЭМИССИЯ диагноза не делаем: поведенческие сигналы в полигон-решения не
+        // идут (sim не отдаёт пофразное поведение) — только предложение владельцу.
+      }
+    }
+  } catch (err) {
+    pushBlockError('поведенческие кандидаты', err)
+  }
+
   // 7. СТАВКИ: ПОФРАЗНЫЙ экономбиддинг (Цикл 2.0). Ставка каждой фразы — по её
   // СОБСТВЕННОЙ головной экономике (запрос фразы = текст её ключа), а не по
   // групповой корзине. Ключ: CPL(tv) ∝ cpc(tv) (клики/CR сокращаются) — дешевле
@@ -1510,25 +1756,42 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       proposalDrafts.push(schedule.proposal)
     }
 
-    // (б) DEVICE_SKEW — срез Метрики по устройствам + текущие корректировки.
-    // costRub — оценка (доля визитов × расход окна): Метрика даёт визиты, не ₽.
-    const deviceStats =
-      (await latestSnapshotPayload<
-        Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>
-      >('metrika_device')) ?? []
-    if (deviceStats.length > 0) {
-      const windowSpend = (await loadDailyTotals(dayStart, DIAG_WINDOW)).reduce(
-        (a, t) => a + t.spendRub,
-        0
-      )
-      const totalVisits = deviceStats.reduce((a, d) => a + d.visits, 0)
-      const deviceRows: DeviceRow[] = deviceStats.map((d) => ({
+    // (б) DEVICE_SKEW — М2: приоритет ТОЧНОМУ ₽-расходу из device-отчёта Директа
+    // (Device × Clicks/Cost/Conversions за окно). Фолбэк — оценка по визитам Метрики
+    // (costEstimated), если device-отчёт не готов/пуст. Fetch здесь (не в collect):
+    // не мешает поллингу SQ/CP в тике «сбор». В полигоне CUSTOM-фейк без Device → []
+    // → фолбэк на Метрику (в sim пусто) → DEVICE_SKEW молчит (байт-в-байт).
+    const directDevice = (await fetchDeviceReport(mskDay(windowStart), yesterday)) ?? []
+    let deviceRows: DeviceRow[] = []
+    if (directDevice.length > 0) {
+      deviceRows = directDevice.map((d) => ({
         device: normalizeDevice(d.device),
-        clicks: d.visits,
-        conversions: d.goalReaches,
-        costRub: totalVisits > 0 ? windowSpend * (d.visits / totalVisits) : 0,
-        costEstimated: true,
+        clicks: d.clicks,
+        conversions: d.conversions,
+        costRub: d.costRub, // точный ₽ из отчёта Директа
+        costEstimated: false,
       }))
+    } else {
+      const deviceStats =
+        (await latestSnapshotPayload<
+          Array<{ device: string; visits: number; goalReaches: number; bounceRate: number }>
+        >('metrika_device')) ?? []
+      if (deviceStats.length > 0) {
+        const windowSpend = (await loadDailyTotals(dayStart, DIAG_WINDOW)).reduce(
+          (a, t) => a + t.spendRub,
+          0
+        )
+        const totalVisits = deviceStats.reduce((a, d) => a + d.visits, 0)
+        deviceRows = deviceStats.map((d) => ({
+          device: normalizeDevice(d.device),
+          clicks: d.visits,
+          conversions: d.goalReaches,
+          costRub: totalVisits > 0 ? windowSpend * (d.visits / totalVisits) : 0,
+          costEstimated: true,
+        }))
+      }
+    }
+    if (deviceRows.length > 0) {
       const skew = diagnoseDeviceSkew(deviceRows, adjustedDeviceTypes(bidmods))
       if (skew) {
         decisions.push(skew.decision)
@@ -1543,7 +1806,13 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       >('metrika_demo')) ?? []
     if (demoStats.length > 0) {
       const overallConv = demoStats.reduce((a, d) => a + d.goalReaches, 0)
-      const audience = diagnoseAudienceWaste(buildDemoSegments(demoStats), overallConv, new Set())
+      // Реальное множество уже настроенных демо-корректировок (М2): не предлагаем
+      // владельцу то, что уже стоит (раньше сюда шёл пустой Set).
+      const audience = diagnoseAudienceWaste(
+        buildDemoSegments(demoStats),
+        overallConv,
+        adjustedDemoSegments(bidmods)
+      )
       if (audience) {
         decisions.push(audience.decision)
         proposalDrafts.push(audience.proposal)

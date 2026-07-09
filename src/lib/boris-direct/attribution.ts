@@ -152,7 +152,7 @@ export function readReportConversions(raw: Record<string, string>): number {
 }
 
 /** CriterionId ячейки TSV → число (id живого ключа) или null (пусто/--/нечисло). */
-function parseCriterionId(raw: string | undefined): number | null {
+export function parseCriterionId(raw: string | undefined): number | null {
   const v = raw?.trim()
   if (!v || !/^\d+$/.test(v)) return null
   const n = Number(v)

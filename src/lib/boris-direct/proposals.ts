@@ -67,6 +67,12 @@ export function formatProposalSummary(type: string, payload: unknown): string {
             : null
       return rub !== null ? `Дневной бюджет: ${rub} ₽` : 'Дневной бюджет'
     }
+    case 'behavioral_minus': {
+      const phrases = Array.isArray(p.phrases) ? p.phrases.map(String) : []
+      const head = phrases.slice(0, 5).join(', ')
+      const tail = phrases.length > 5 ? '…' : ''
+      return `Минус по поведению: ${phrases.length} фраз${head ? `: ${head}${tail}` : ''}`
+    }
     case 'lift_minus_gate':
       return 'Снять гейт спорных минусов'
     case 'device_skew':

@@ -17,6 +17,7 @@ import {
   recommendBid,
   checkCircuitBreaker,
   isSuspiciousNegativesShrink,
+  pickBehavioralMinusCandidates,
 } from './rules'
 import {
   QUARANTINE_DAYS,
@@ -275,6 +276,41 @@ describe('recommendBid — бинарная шкала', () => {
   })
 })
 
+describe('pickBehavioralMinusCandidates (поведенческие кандидаты — предложением)', () => {
+  const row = (o: Partial<{ phrase: string; visits: number; bounceRate: number; avgDurationSec: number; goalReaches: number }>) => ({
+    phrase: 'фраза', visits: 5, bounceRate: 0, avgDurationSec: 60, goalReaches: 0, ...o,
+  })
+
+  it('≥3 визита, 0 заявок, высокий отказ → кандидат high_bounce', () => {
+    const out = pickBehavioralMinusCandidates([row({ phrase: 'мусор кафе', bounceRate: 80 })])
+    expect(out).toEqual([
+      { phrase: 'мусор кафе', visits: 5, bounceRate: 80, avgDurationSec: 60, reason: 'high_bounce' },
+    ])
+  })
+
+  it('≥3 визита, 0 заявок, мгновенный уход → кандидат short_duration', () => {
+    const out = pickBehavioralMinusCandidates([row({ avgDurationSec: 8 })])
+    expect(out[0].reason).toBe('short_duration')
+  })
+
+  it('и отказ, и мгновенный уход → high_bounce_short_duration', () => {
+    const out = pickBehavioralMinusCandidates([row({ bounceRate: 90, avgDurationSec: 5 })])
+    expect(out[0].reason).toBe('high_bounce_short_duration')
+  })
+
+  it('< порога визитов → НЕ кандидат (шум)', () => {
+    expect(pickBehavioralMinusCandidates([row({ visits: 2, bounceRate: 90 })])).toEqual([])
+  })
+
+  it('есть заявка → НЕ кандидат (конвертит)', () => {
+    expect(pickBehavioralMinusCandidates([row({ goalReaches: 1, bounceRate: 90 })])).toEqual([])
+  })
+
+  it('хорошее поведение (низкий отказ, долгий визит) → НЕ кандидат', () => {
+    expect(pickBehavioralMinusCandidates([row({ bounceRate: 20, avgDurationSec: 120 })])).toEqual([])
+  })
+})
+
 describe('checkCircuitBreaker', () => {
   it('пустой список → ок', () => {
     expect(checkCircuitBreaker([])).toEqual({ ok: true })
@@ -313,6 +349,16 @@ describe('checkCircuitBreaker', () => {
 
   it('масса с нуля вверх → стоп (вне паттерна)', () => {
     expect(checkCircuitBreaker([{ fromMicro: 0, toMicro: 100 * MICRO }]).ok).toBe(false)
+  })
+
+  it('ЗАЛП после backfill: пачка конвертеров 40 ₽ → TV65 (150 ₽) — рост массы ×3.75 → CB стоп', () => {
+    // М2: наполнение окон историей делает много фраз не-тонкими; на ближайшем тике
+    // конвертеры разом поднимаются в нижний блок. Даже если правок ≤40, скачок
+    // ставочной массы (275%) вне паттерна → circuit breaker останавливает пачку.
+    const burst = Array.from({ length: 10 }, () => ({ fromMicro: 40 * MICRO, toMicro: 150 * MICRO }))
+    const res = checkCircuitBreaker(burst)
+    expect(res.ok).toBe(false)
+    expect(res.reason).toContain('масс')
   })
 })
 
