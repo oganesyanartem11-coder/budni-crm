@@ -902,4 +902,39 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     // 25 кликов есть, но CriterionId пуст → не приписаны ключу 100 → тонкая → hold.
     expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
   })
+
+  it('РЕЕСТРОВЫЙ конвертер, «тонкий» по объёму (<20 кликов, 0 заявок в окне) — кормится TV65, НЕ глохнет в hold (конвертер-защита ДО thin-гейта)', async () => {
+    // 'бизнес ланч доставка москва' — подтверждённый конвертер из converters.ts.
+    // По объёму окна он «тонкий» (3 клика, 0 заявок) → thin-гейт увёл бы его в hold
+    // ДО проверки конвертерства. Реестровая защита обязана обойти thin-гейт.
+    setupEconomics({
+      sq: sqTsv([{ q: 'бизнес ланч доставка москва', g: '1', cid: '300', clicks: 3, conv: 0, imp: 10 }]),
+      keywords: [kw(300, 'бизнес ланч доставка москва', 1)],
+      bids: [bid(300, 1, 40)],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // Реестровый конвертер доходит до recommendBid → вход в нижний блок TV65 (150 ₽).
+    // До фикса порядка гейтов он глох как «тонкий» и правок не было вовсе.
+    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
+    expect(mockGate.applyBidChanges.mock.calls[0][0]).toEqual([
+      { keywordId: 300, fromMicro: 40 * MICRO, toMicro: 150 * MICRO },
+    ])
+  })
+
+  it('НЕ-конвертер, тонкий (<20 кликов, 0 заявок) — остаётся hold (thin-гейт НЕ ослаблен)', async () => {
+    setupEconomics({
+      sq: sqTsv([{ q: 'обеды в офис', g: '1', cid: '400', clicks: 3, conv: 0, imp: 10 }]),
+      keywords: [kw(400, 'обеды в офис', 1)],
+      bids: [bid(400, 1, 40)],
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    // Не реестровый, не конвертер, мало кликов → тонкая → hold → правок нет.
+    expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
+  })
 })
