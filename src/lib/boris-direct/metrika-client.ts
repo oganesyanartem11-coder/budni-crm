@@ -242,6 +242,37 @@ export async function getGoalStatsByHour(
   }))
 }
 
+/**
+ * Пофразное ПОВЕДЕНИЕ рекламного трафика по поисковой фразе Директа
+ * (lastDirectSearchPhrase): визиты, отказы (%), средняя длительность (сек),
+ * заявки. Изолируем рекламу фильтром 'ad'. Питает поведенческие минус-кандидаты
+ * (ТОЛЬКО предложением): фраза с трафиком, но 100%-отказом / мгновенным уходом и
+ * нулём заявок видна по поведению задолго до порога показов. Выверено зондом:
+ * 'доставка обедов по клину' → 2 визита, 50% отказ, 8 сек, 0 целей.
+ */
+export async function getGoalStatsByPhrase(
+  dateFrom: string,
+  dateTo: string
+): Promise<
+  Array<{ phrase: string; visits: number; bounceRate: number; avgDurationSec: number; goalReaches: number }>
+> {
+  const resp = await metrikaStat({
+    dimensions: 'ym:s:lastDirectSearchPhrase',
+    metrics: `ym:s:visits,ym:s:bounceRate,ym:s:avgVisitDurationSeconds,${GOAL_REACHES_METRIC}`,
+    date1: dateFrom,
+    date2: dateTo,
+    filters: AD_TRAFFIC_FILTER,
+    limit: '1000',
+  })
+  return resp.data.map((row) => ({
+    phrase: row.dimensions[0]?.name ?? '',
+    visits: row.metrics[0] ?? 0,
+    bounceRate: row.metrics[1] ?? 0,
+    avgDurationSec: row.metrics[2] ?? 0,
+    goalReaches: row.metrics[3] ?? 0,
+  }))
+}
+
 // ---------- Офлайн-конверсии (задел — активируем, когда пойдут сделки) ----------
 
 /** Строка офлайн-конверсии: идентификатор клика/визита + цель + момент. */

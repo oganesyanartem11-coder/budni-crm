@@ -127,6 +127,68 @@ export function buildDeviceReportBody(
 }
 
 /**
+ * Тело backfill-отчёта истории ПО КЛЮЧУ (CUSTOM_REPORT): Date × CriterionId с
+ * Impressions/Clicks/Cost/Conversions/AvgTrafficVolume за диапазон. Питает
+ * идемпотентный self-heal окна пофразной экономики (query_criterion_daily), когда
+ * снапшоты роли не покрывают дни до её деплоя (история кампании в Директе есть).
+ * Поля выверены живым зондом: Date×CriterionId + Goals(Conversions_<goal>_LSCCD) +
+ * AvgTrafficVolume сосуществуют (258 строк за 30.06–08.07). Конверсии читаются
+ * suffix-aware (readReportConversions). Даты — CUSTOM_DATE внутри SelectionCriteria.
+ */
+export function buildCriterionHistoryReportBody(
+  dateFrom: string,
+  dateTo: string,
+  reportName: string
+): unknown {
+  return {
+    params: {
+      SelectionCriteria: {
+        DateFrom: dateFrom,
+        DateTo: dateTo,
+        Filter: campaignFilter(),
+      },
+      Goals: [String(METRIKA_GOAL_ID)],
+      FieldNames: ['Date', 'CriterionId', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'AvgTrafficVolume'],
+      ReportName: reportName,
+      ReportType: 'CUSTOM_REPORT',
+      DateRangeType: 'CUSTOM_DATE',
+      Format: 'TSV',
+      IncludeVAT: 'YES',
+    },
+  }
+}
+
+/**
+ * Тело отчёта доли типов соответствия (SEARCH_QUERY): MatchType × Clicks за период —
+ * для строки «доля SYNONYM-трафика N%» в недельном отчёте (видимость, материал для
+ * будущих операторных предложений). ОТДЕЛЬНОЕ тело (не общий SQ): добавлять MatchType
+ * в дневной SQ нельзя — он дробит строки, а upsert QueryDailyStat по (date,query,
+ * adGroupId) их бы перезаписал (недосчёт). Goals не нужны — считаем только клики.
+ * Поле MatchType выверено зондом (KEYWORD/SYNONYM/NONE).
+ */
+export function buildMatchTypeShareReportBody(
+  dateFrom: string,
+  dateTo: string,
+  reportName: string
+): unknown {
+  return {
+    params: {
+      SelectionCriteria: {
+        DateFrom: dateFrom,
+        DateTo: dateTo,
+        Filter: campaignFilter(),
+      },
+      FieldNames: ['MatchType', 'Clicks', 'Impressions'],
+      ReportName: reportName,
+      ReportType: 'SEARCH_QUERY_PERFORMANCE_REPORT',
+      DateRangeType: 'CUSTOM_DATE',
+      Format: 'TSV',
+      IncludeVAT: 'YES',
+    },
+  }
+}
+
+/**
  * Тело интрадей-отчёта расхода СЕГОДНЯ (DateRangeType=TODAY) для катастрофа-
  * детектора watch-надзора. TODAY-диапазон НЕ допускает DateFrom/DateTo внутри
  * SelectionCriteria (иначе ошибка валидации). Поля выверены живым зондом:

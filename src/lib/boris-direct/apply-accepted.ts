@@ -41,6 +41,10 @@ async function applyOne(
   const payload = asRecord(proposal.payload)
 
   switch (proposal.type) {
+    // Поведенческие минусы (М2) применяются ТЕМ ЖЕ путём, что обычные минус-фразы:
+    // единая точка addNegativeKeywords (мерж с живым кабинетом, fail-safe). Разрешённый
+    // write-набор НЕ расширяется — это campaigns.update(NegativeKeywords), как и minus_words.
+    case 'behavioral_minus':
     case 'minus_words': {
       const phrases = Array.isArray(payload.phrases)
         ? payload.phrases.filter((p): p is string => typeof p === 'string')

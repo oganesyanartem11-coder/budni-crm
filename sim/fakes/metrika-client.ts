@@ -164,6 +164,16 @@ export async function getGoalStatsByHour(
   return []
 }
 
+/** Пофразное поведение: мир не отдаёт (нейтрально) → поведенческие кандидаты молчат. */
+export async function getGoalStatsByPhrase(
+  _dateFrom: string,
+  _dateTo: string
+): Promise<
+  Array<{ phrase: string; visits: number; bounceRate: number; avgDurationSec: number; goalReaches: number }>
+> {
+  return []
+}
+
 /** Страницы входа: в мире одна посадочная — '/' с агрегатом за диапазон. */
 export async function getGoalStatsByLandingPage(
   dateFrom: string,

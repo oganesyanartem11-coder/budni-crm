@@ -5,6 +5,8 @@ import {
   isWeekend,
   normalizeDevice,
   adjustedDeviceTypes,
+  adjustedDemoSegments,
+  canonicalizeDemoSegment,
   buildDemoSegments,
   diagnoseDeviceSkew,
   diagnoseScheduleWaste,
@@ -140,6 +142,39 @@ describe('diagnoseAudienceWaste', () => {
   it('молчит, если кампания в целом не конвертит', () => {
     const segs = buildDemoSegments([{ gender: 'male', age: '45-54', visits: 50, goalReaches: 0 }])
     expect(diagnoseAudienceWaste(segs, 0, new Set())).toBeNull()
+  })
+  it('НЕ предлагает сегмент, у которого УЖЕ есть демо-корректировка (Директ↔Метрика по канону)', () => {
+    // Единственный дренаж — gender:male (male не конвертит, female и возраст 25-34 — да).
+    // Метрика-метка 'gender:male' vs Директ-энум GENDER_MALE — оба к канону gender:male.
+    const segs = buildDemoSegments([
+      { gender: 'male', age: '25-34', visits: 50, goalReaches: 0 },
+      { gender: 'female', age: '25-34', visits: 30, goalReaches: 3 },
+    ])
+    const adjusted = adjustedDemoSegments([{ DemographicsAdjustment: { Gender: 'GENDER_MALE' } }])
+    expect(diagnoseAudienceWaste(segs, 3, adjusted)).toBeNull()
+  })
+})
+
+describe('canonicalizeDemoSegment / adjustedDemoSegments (сверка Директ↔Метрика)', () => {
+  it('пол: female/GENDER_FEMALE → gender:female; male/GENDER_MALE → gender:male', () => {
+    expect(canonicalizeDemoSegment('gender:female')).toBe('gender:female')
+    expect(canonicalizeDemoSegment('GENDER_FEMALE')).toBe('gender:female')
+    expect(canonicalizeDemoSegment('gender:male')).toBe('gender:male')
+    expect(canonicalizeDemoSegment('GENDER_MALE')).toBe('gender:male')
+  })
+  it('возраст: Метрика «Age 25‑34» (неразрывный дефис) и Директ AGE_25_34 → age:25-34; 55+ → age:55+', () => {
+    expect(canonicalizeDemoSegment('age:Age 25‑34')).toBe('age:25-34')
+    expect(canonicalizeDemoSegment('AGE_25_34')).toBe('age:25-34')
+    expect(canonicalizeDemoSegment('age:Age 55+')).toBe('age:55+')
+  })
+  it('adjustedDemoSegments: собирает канон-ключи Age/Gender из корректировок', () => {
+    const s = adjustedDemoSegments([
+      { DemographicsAdjustment: { Gender: 'GENDER_MALE' } },
+      { DemographicsAdjustment: { Age: 'AGE_25_34' } },
+      { DemographicsAdjustment: {} },
+      {},
+    ])
+    expect(s).toEqual(new Set(['gender:male', 'age:25-34']))
   })
 })
 

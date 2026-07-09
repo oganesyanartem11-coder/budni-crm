@@ -13,6 +13,8 @@ import {
   buildSearchQueryReportBody,
   buildCampaignPerformanceReportBody,
   buildTodaySpendReportBody,
+  buildCriterionHistoryReportBody,
+  buildMatchTypeShareReportBody,
   pollReport,
   parseReportTsv,
 } from './reports'
@@ -76,6 +78,54 @@ describe('buildSearchQueryReportBody', () => {
       'Clicks',
       'Cost',
       'Conversions',
+    ])
+  })
+})
+
+describe('buildCriterionHistoryReportBody (backfill истории по ключу)', () => {
+  const body = buildCriterionHistoryReportBody('2026-06-30', '2026-07-08', 'bf-1') as {
+    params: ReportParams
+  }
+
+  it('CUSTOM_REPORT, даты ВНУТРИ SelectionCriteria, фильтр кампании, Goals строкой', () => {
+    expect(body.params.ReportType).toBe('CUSTOM_REPORT')
+    expect(body.params.DateRangeType).toBe('CUSTOM_DATE')
+    expect(body.params.SelectionCriteria.DateFrom).toBe('2026-06-30')
+    expect(body.params.SelectionCriteria.DateTo).toBe('2026-07-08')
+    expect(body.params.DateFrom).toBeUndefined()
+    expect(body.params.SelectionCriteria.Filter).toEqual([
+      { Field: 'CampaignId', Operator: 'EQUALS', Values: [String(DIRECT_CAMPAIGN_ID)] },
+    ])
+    expect(body.params.Goals).toEqual([String(METRIKA_GOAL_ID)])
+  })
+
+  it('поля: Date × CriterionId × Impressions/Clicks/Cost/Conversions/AvgTrafficVolume', () => {
+    expect(body.params.FieldNames).toEqual([
+      'Date',
+      'CriterionId',
+      'Impressions',
+      'Clicks',
+      'Cost',
+      'Conversions',
+      'AvgTrafficVolume',
+    ])
+    expect(body.params.ReportName).toBe('bf-1')
+    expect(body.params.Format).toBe('TSV')
+    expect(body.params.IncludeVAT).toBe('YES')
+  })
+})
+
+describe('buildMatchTypeShareReportBody (доля SYNONYM для weekly)', () => {
+  const body = buildMatchTypeShareReportBody('2026-06-30', '2026-07-08', 'mt-1') as {
+    params: ReportParams
+  }
+  it('SQ-отчёт MatchType × Clicks × Impressions, БЕЗ Goals (нужны только клики по типу)', () => {
+    expect(body.params.ReportType).toBe('SEARCH_QUERY_PERFORMANCE_REPORT')
+    expect(body.params.FieldNames).toEqual(['MatchType', 'Clicks', 'Impressions'])
+    expect(body.params.Goals).toBeUndefined()
+    expect(body.params.SelectionCriteria.DateFrom).toBe('2026-06-30')
+    expect(body.params.SelectionCriteria.Filter).toEqual([
+      { Field: 'CampaignId', Operator: 'EQUALS', Values: [String(DIRECT_CAMPAIGN_ID)] },
     ])
   })
 })
