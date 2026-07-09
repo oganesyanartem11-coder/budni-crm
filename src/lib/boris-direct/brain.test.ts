@@ -446,9 +446,14 @@ describe('runProcessTick', () => {
     // СТАВКИ (пофразно): конвертер (2 заявки на своём запросе) → вход в нижний
     // блок TV65 (150 ₽), было 100 ₽. Ключ 22 без головных данных → тонкая →
     // держим (ставку не трогаем).
+    // М3 (Байес): ключ 11 — конвертер (promote → TV65 150 ₽); ключ 22 — тонкий, но
+    // Байес даёт вход (promote → TV65) вместо поглощающего hold (встроенный exploration).
     expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
     expect(mockGate.applyBidChanges).toHaveBeenCalledWith(
-      [{ keywordId: 11, fromMicro: 100 * MICRO, toMicro: 150 * MICRO }],
+      [
+        { keywordId: 11, fromMicro: 100 * MICRO, toMicro: 150 * MICRO },
+        { keywordId: 22, fromMicro: 50 * MICRO, toMicro: 150 * MICRO },
+      ],
       expect.stringContaining('пофразный экономбиддинг')
     )
 
@@ -1065,12 +1070,15 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     const res = await runProcessTick(NOW)
 
     expect(res.status).toBe('done')
-    // Ни автотаргет (не в liveKeyIds), ни орфан-ID не приписались живому ключу 100 →
-    // он тонкий → hold → правок нет.
-    expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
+    // Автотаргет/орфан НЕ в liveKeyIds → их 3 заявки ключу 100 НЕ приписаны. М3: Байес
+    // даёт тонкому ключу вход (promote), но headLeads=0 в решении доказывает отсутствие
+    // утечки (если бы приписалось — было бы 3, и ключ стал бы «конвертером»).
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '100')
+    expect(bidDec).toBeDefined()
+    expect((bidDec!.factors as { headLeads: number }).headLeads).toBe(0)
   })
 
-  it('FAIL-SAFE: строка без CriterionId → в биддинг не идёт, ключ остаётся тонким (hold)', async () => {
+  it('FAIL-SAFE: строка без CriterionId не приписывается ключу (М3: promote как тонкий, headLeads=0)', async () => {
     setupEconomics({
       sq: sqTsv([{ q: 'обеды в офис москва', g: '1', cid: '', clicks: 25, conv: 1 }]), // CriterionId пуст → null
       keywords: [kw(100, 'обеды', 1)],
@@ -1080,8 +1088,10 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     const res = await runProcessTick(NOW)
 
     expect(res.status).toBe('done')
-    // 25 кликов есть, но CriterionId пуст → не приписаны ключу 100 → тонкая → hold.
-    expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
+    // 25 кликов/1 заявка есть, но CriterionId пуст → ключу 100 НЕ приписаны → headLeads=0.
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '100')
+    expect(bidDec).toBeDefined()
+    expect((bidDec!.factors as { headLeads: number }).headLeads).toBe(0)
   })
 
   it('РЕЕСТРОВЫЙ конвертер, «тонкий» по объёму (<20 кликов, 0 заявок в окне) — кормится TV65, НЕ глохнет в hold (конвертер-защита ДО thin-гейта)', async () => {
@@ -1105,7 +1115,7 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     ])
   })
 
-  it('НЕ-конвертер, тонкий (<20 кликов, 0 заявок) — остаётся hold (thin-гейт НЕ ослаблен)', async () => {
+  it('М3: ТОНКАЯ фраза (3 клика, 0 заявок) → promote (вход TV65), поглощающего hold больше НЕТ (встроенный exploration)', async () => {
     setupEconomics({
       sq: sqTsv([{ q: 'обеды в офис', g: '1', cid: '400', clicks: 3, conv: 0, imp: 10 }]),
       keywords: [kw(400, 'обеды в офис', 1)],
@@ -1115,7 +1125,75 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     const res = await runProcessTick(NOW)
 
     expect(res.status).toBe('done')
-    // Не реестровый, не конвертер, мало кликов → тонкая → hold → правок нет.
-    expect(mockGate.applyBidChanges).not.toHaveBeenCalled()
+    // Байес: posterior≈prior (мало данных) → вердикт promote → вход в нижний блок TV65,
+    // а не вечный hold. Фраза получает ШАНС собрать данные (exploration).
+    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
+    const changes = mockGate.applyBidChanges.mock.calls[0][0] as Array<{ keywordId: number; toMicro: number }>
+    expect(changes).toEqual([{ keywordId: 400, fromMicro: 40 * MICRO, toMicro: 150 * MICRO }])
+  })
+
+  it('М3: горелка (много кликов, 0 заявок) → demote к TV15 (уверенно ниже порога)', async () => {
+    // 50 кликов, 0 заявок при CR кампании (тут CR=0 → fallback 0.05): posterior уверенно
+    // ниже порога → demote → минимум TV15 (50 ₽ на шкале AUCTION).
+    setupEconomics({
+      sq: sqTsv([{ q: 'горелка фраза', g: '1', cid: '500', clicks: 50, conv: 0 }]),
+      keywords: [kw(500, 'горелка фраза', 1)],
+      bids: [bid(500, 1, 200)], // сейчас высоко (200 ₽) → demote вниз
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    const changes = mockGate.applyBidChanges.mock.calls[0]?.[0] as Array<{ keywordId: number; toMicro: number }> | undefined
+    expect(changes).toEqual([{ keywordId: 500, fromMicro: 200 * MICRO, toMicro: 50 * MICRO }]) // TV15
+  })
+
+  it('М3: гейт недорасхода ОТКРЫТ виден в отчёте, но подъём ОТЛОЖЕН → конвертер на базовом входе TV65 (150 ₽)', async () => {
+    setupEconomics({
+      sq: sqTsv([{ q: 'конвертер сильный', g: '1', cid: '600', clicks: 30, conv: 4 }]),
+      keywords: [kw(600, 'конвертер сильный', 1)],
+      bids: [bid(600, 1, 40)],
+    })
+    // Живой бюджет 3000, расход недорасходуется (медиана 950 < 2400, вчера 1100 < 2850) → гейт ОТКРЫТ.
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'campaign') {
+        return { payload: { Id: 711897777, State: 'ON', DailyBudget: { Amount: 3000 * MICRO, Mode: 'STANDARD' } } }
+      }
+      if (args.where.kind === 'keywords') return { payload: [kw(600, 'конвертер сильный', 1)] }
+      if (args.where.kind === 'keywordbids') return { payload: [bid(600, 1, 40)] }
+      if (args.where.kind === 'campaign_settings') {
+        return {
+          payload: {
+            Id: 711897777, Name: 'x', StartDate: '2026-06-25',
+            TimeTargeting: { Schedule: { Items: [] } },
+            NegativeKeywords: { Items: [] }, Statistics: { Clicks: 37, Impressions: 900 },
+          },
+        }
+      }
+      return null
+    })
+    mockPrisma.borisDirectSnapshot.findMany.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'daily_totals') {
+        return [
+          { payload: { date: '2026-06-26', spendRub: 800, clicks: 30, impressions: 300 } }, // Пт
+          { payload: { date: '2026-06-29', spendRub: 900, clicks: 30, impressions: 300 } }, // Пн
+          { payload: { date: '2026-06-30', spendRub: 1000, clicks: 30, impressions: 300 } }, // Вт
+          { payload: { date: '2026-07-01', spendRub: 1100, clicks: 30, impressions: 300 } }, // Ср (вчера)
+        ]
+      }
+      if (args.where.kind === 'campaign') {
+        return Array.from({ length: 6 }, (_, i) => ({ tickDate: new Date(`2026-06-2${5 + (i % 5)}T00:00:00Z`) }))
+      }
+      return []
+    })
+
+    const res = await runProcessTick(NOW)
+
+    expect(res.status).toBe('done')
+    const changes = mockGate.applyBidChanges.mock.calls[0]?.[0] as Array<{ keywordId: number; toMicro: number }> | undefined
+    // Маржинал ОТЛОЖЕН (полигон: осцилляция TV рушит дисциплину): конвертер идёт на
+    // БАЗОВЫЙ вход TV65 (150 ₽), не на маржинальный TV75. Гейт при этом виден в отчёте.
+    expect(changes).toEqual([{ keywordId: 600, fromMicro: 40 * MICRO, toMicro: 150 * MICRO }])
+    expect(res.reportData?.underspend?.gateOpen).toBe(true) // недорасход виден (открытый гейт)
   })
 })

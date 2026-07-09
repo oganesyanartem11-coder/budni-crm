@@ -29,6 +29,8 @@ import {
 import { toQueryStatRow, getLeadsForPeriod, splitLeadsByOrigin } from '@/lib/boris-direct/attribution'
 import { filterOutTestLeads } from '@/lib/boris-direct/test-markers'
 import { getGoalStatsByDay } from '@/lib/boris-direct/metrika-client'
+import { isWorkday } from '@/lib/boris-direct/workdays'
+import { MICRO, DAILY_BUDGET_MICRO } from '@/lib/boris-direct/config'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -240,6 +242,30 @@ async function handler(request: Request) {
   const llmSpend = await getLlmSpendForPeriod(from, to)
   const proposalsPending = await prisma.borisDirectProposal.count({ where: { status: 'PENDING' } })
 
+  // М3: недорасход недели — медиана дневного расхода по РАБОЧИМ дням vs ЖИВОЙ бюджет.
+  let underspendWeekly: { medianSpendRub: number; dailyBudgetRub: number } | undefined
+  try {
+    const workdaySpends = days
+      .filter((d) => isWorkday(d.dateLabel) && d.spendRub != null)
+      .map((d) => d.spendRub as number)
+      .sort((a, b) => a - b)
+    if (workdaySpends.length > 0) {
+      const n = workdaySpends.length
+      const medianSpendRub =
+        n % 2 === 1 ? workdaySpends[(n - 1) / 2] : (workdaySpends[n / 2 - 1] + workdaySpends[n / 2]) / 2
+      const campaignSnap = await prisma.borisDirectSnapshot.findFirst({
+        where: { kind: 'campaign' },
+        orderBy: [{ tickDate: 'desc' }, { createdAt: 'desc' }],
+      })
+      const budgetMicro =
+        (campaignSnap?.payload as { DailyBudget?: { Amount?: number } } | null)?.DailyBudget?.Amount ??
+        DAILY_BUDGET_MICRO
+      underspendWeekly = { medianSpendRub, dailyBudgetRub: budgetMicro / MICRO }
+    }
+  } catch (err) {
+    console.error('[boris-direct/weekly] недорасход недели не посчитан', err)
+  }
+
   const text = await generateWeeklyReportText(days, {
     llmSpendUsd: llmSpend.costUsd,
     llmCalls: llmSpend.calls,
@@ -247,6 +273,7 @@ async function handler(request: Request) {
     period: { from: fromDay, to: toDay },
     leadCounts: { directAttrib, metrika, delivered, deliveredBlindBefore: DB_BLIND_BEFORE_MSK },
     matchTypeShare,
+    underspendWeekly,
   })
   const sent = await sendToDirectChat(text)
 

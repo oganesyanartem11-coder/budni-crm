@@ -72,10 +72,20 @@ import {
   DIRECT_CAMPAIGN_ID,
   DATA_MISMATCH_RATIO,
   DATA_MISMATCH_MIN_COUNT,
-  PHRASE_MIN_CLICKS,
   PHRASE_ECON_WINDOW_DAYS,
+  PHRASE_ECON_WINDOW_WORKDAYS,
+  CONVERTER_PROTECT_WINDOW_WORKDAYS,
+  PRIOR_CR_FALLBACK,
   TV_LOWER_BLOCK_ENTRY,
   TV_TAIL,
+} from './config'
+import { phraseBidVerdict } from './bayes'
+import { workdayWindowStartUtc, isWorkday } from './workdays'
+import { underspendGateOpen, type UnderspendGate } from './underspend'
+import {
+  MICRO,
+  UNDERSPEND_WINDOW_WORKDAYS,
+  LEADS_ZERO_AVG_WORKDAYS,
 } from './config'
 import { detectAnomalies, detectLeadReconcileLoss, type Anomaly } from './anomalies'
 import { classifyQueryGeo, isGeoMinusReason } from './geo'
@@ -94,6 +104,7 @@ import {
   recommendBid,
   pickBehavioralMinusCandidates,
   type PhraseBehaviorRow,
+  type RecommendBidResult,
 } from './rules'
 import { applyBidChanges, addNegativeKeywords, type BidChange } from './write-gate'
 import { getDirectRoleState } from './state'
@@ -214,11 +225,12 @@ interface CriterionDayStat {
  */
 async function loadCriterionWindow(
   endInclusive: Date,
-  days: number
+  workdays: number
 ): Promise<Map<number, { clicks: number; conversions: number }>> {
   const acc = new Map<number, { clicks: number; conversions: number }>()
-  if (days <= 0) return acc
-  const from = new Date(endInclusive.getTime() - (days - 1) * DAY_MS)
+  if (workdays <= 0) return acc
+  // М3: окно в РАБОЧИХ днях (B2B живёт по будням; 14 календ. окно = 10 рабочих).
+  const from = workdayWindowStartUtc(mskDay(endInclusive), workdays)
   const snaps = await prisma.borisDirectSnapshot.findMany({
     where: { kind: 'query_criterion_daily', tickDate: { gte: from, lte: endInclusive } },
     orderBy: { createdAt: 'asc' },
@@ -652,8 +664,12 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
     const leadsYesterday = filterOutTestLeads(
       await getLeadsForPeriod(tickYesterday, new Date(tickToday.getTime() - 1))
     ).length
-    const leads7d = filterOutTestLeads(
-      await getLeadsForPeriod(new Date(tickYesterday.getTime() - 7 * DAY_MS), new Date(tickYesterday.getTime() - 1))
+    // М3: средний поток заявок для leads_zero — по РАБОЧИМ дням (B2B живёт по будням;
+    // выходные с 0 заявок не должны занижать «норму»). Окно — до дня перед вчера.
+    const dayBeforeYesterday = mskDay(new Date(tickYesterday.getTime() - DAY_MS))
+    const leadsWindowStart = workdayWindowStartUtc(dayBeforeYesterday, LEADS_ZERO_AVG_WORKDAYS)
+    const leadsWindow = filterOutTestLeads(
+      await getLeadsForPeriod(leadsWindowStart, new Date(tickYesterday.getTime() - 1))
     ).length
 
     anomalies = detectAnomalies({
@@ -663,7 +679,7 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
       avgImpressions7d: avg(history.map((t) => t.impressions)),
       addMetricaTag: campaign ? getAddMetricaTagValue(campaign) : null,
       leadsYesterday,
-      avgLeads7d: leads7d / 7,
+      avgLeads7d: leadsWindow / LEADS_ZERO_AVG_WORKDAYS,
       // REJECTED считаем по объявлениям (ads.get); если чтение ads упало —
       // прежний прокси по фразам, чтобы отказ модерации не потерялся.
       rejectedAdsCount: ads
@@ -720,6 +736,13 @@ export interface DailyReportData {
   costPerLeadRub: number | null
   topQueries: Array<{ query: string; clicks: number; costRub: number; conversions: number }>
   quarantine: boolean
+  /** М3: расход vs живой бюджет + состояние гейта маржинального подъёма. */
+  underspend?: {
+    spentYesterdayRub: number | null
+    dailyBudgetRub: number
+    gateOpen: boolean
+    medianRub: number | null
+  }
   llm?: never
 }
 
@@ -1144,6 +1167,35 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     .slice(0, 5)
     .map((r) => ({ query: r.query, clicks: r.clicks, costRub: r.costRub, conversions: r.conversions }))
 
+  // М3: ГЕЙТ НЕДОРАСХОДА — считаем ОДИН раз здесь (используется §7-маржиналом и
+  // отчётом). DailyBudget — из ЖИВОГО снапшота кампании. Окно — рабочие дни.
+  let underspendGate: UnderspendGate = { open: false, medianRub: null, reason: 'не считался' }
+  let dailyBudgetRub = 0
+  try {
+    const liveCampaign = await latestSnapshotPayload<CampaignState>('campaign')
+    dailyBudgetRub = (liveCampaign?.DailyBudget?.Amount ?? 0) / MICRO
+    const spendWindow = await loadDailyTotals(dayStart, UNDERSPEND_WINDOW_WORKDAYS * 2 + 3)
+    const workdaySpends = spendWindow.filter((t) => isWorkday(t.date))
+    const recent = workdaySpends.slice(-UNDERSPEND_WINDOW_WORKDAYS).map((t) => t.spendRub)
+    const yTotals = spendWindow.find((t) => t.date === yesterday)
+    // Гистерезис: прошлое состояние гейта (снапшот) — иначе петля «газ↔тормоз» осциллирует.
+    const prevGate = await latestSnapshotPayload<{ open: boolean }>('underspend_gate')
+    underspendGate = underspendGateOpen({
+      recentDailySpendsRub: recent,
+      yesterdaySpendRub: yTotals?.spendRub ?? null,
+      dailyBudgetRub,
+      previouslyOpen: prevGate?.open ?? false,
+    })
+    // Пишем новое состояние для гистерезиса следующего тика (ошибка записи не критична).
+    try {
+      await saveSnapshot(dayStart, 'underspend_gate', { open: underspendGate.open })
+    } catch (err) {
+      console.error('[boris-direct/brain] снапшот underspend_gate не записался', err)
+    }
+  } catch (err) {
+    console.error('[boris-direct/brain] гейт недорасхода не посчитан — маржинал молчит', err)
+  }
+
   const reportData: DailyReportData = {
     dateLabel: yesterday,
     spendRub,
@@ -1155,6 +1207,12 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     costPerLeadRub,
     topQueries,
     quarantine,
+    underspend: {
+      spentYesterdayRub: spendRub,
+      dailyBudgetRub,
+      gateOpen: underspendGate.open,
+      medianRub: underspendGate.medianRub,
+    },
   }
 
   if (quarantine) {
@@ -1194,9 +1252,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   // т.к. заявка приписана КЛЮЧУ, на который сматчился запрос, а не тексту.
   const conv30dByQueryText = new Map<string, number>()
   try {
-    const convWindowStart = new Date(
-      dayStart.getTime() - (CONVERTER_PROTECT_WINDOW_DAYS - 1) * DAY_MS
-    )
+    // М3: окно защиты конвертеров МИНУСА (по тексту) в РАБОЧИХ днях.
+    const convWindowStart = workdayWindowStartUtc(mskDay(dayStart), CONVERTER_PROTECT_WINDOW_WORKDAYS)
     const stats30 = await prisma.borisDirectQueryDailyStat.findMany({
       where: { date: { gte: convWindowStart, lte: dayStart } },
     })
@@ -1219,7 +1276,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   try {
     let minusRows: QueryStatRow[] = rows
     try {
-      const windowStartMinus = new Date(dayStart.getTime() - (PHRASE_ECON_WINDOW_DAYS - 1) * DAY_MS)
+      // М3: окно накопленных показов для минус-кандидатов в РАБОЧИХ днях.
+      const windowStartMinus = workdayWindowStartUtc(mskDay(dayStart), PHRASE_ECON_WINDOW_WORKDAYS)
       const ws = await prisma.borisDirectQueryDailyStat.findMany({
         where: { date: { gte: windowStartMinus, lte: dayStart } },
       })
@@ -1560,9 +1618,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       }
       const histEnd = new Date(dayStart.getTime() - DAY_MS)
       try {
-        const headHist = await loadCriterionWindow(histEnd, PHRASE_ECON_WINDOW_DAYS - 1)
+        // М3: окна в РАБОЧИХ днях (история строго до сегодня + сегодняшние rows ниже).
+        const headHist = await loadCriterionWindow(histEnd, PHRASE_ECON_WINDOW_WORKDAYS - 1)
         for (const [cid, s] of headHist) addHead(cid, s.clicks, s.conversions)
-        const convHist = await loadCriterionWindow(histEnd, CONVERTER_PROTECT_WINDOW_DAYS - 1)
+        const convHist = await loadCriterionWindow(histEnd, CONVERTER_PROTECT_WINDOW_WORKDAYS - 1)
         for (const [cid, s] of convHist) addConv(cid, s.conversions)
       } catch (err) {
         console.error('[boris-direct/brain] окно пофразной экономики по ключу недоступно', err)
@@ -1572,6 +1631,15 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         addConv(row.criterionId, row.conversions)
       }
 
+      // М3: CR кампании за окно (матожидание prior Байеса) — по агрегату headStat.
+      let totalHeadClicks = 0
+      let totalHeadLeads = 0
+      for (const [, s] of headStat) {
+        totalHeadClicks += s.clicks
+        totalHeadLeads += s.leads
+      }
+      const campaignCr = totalHeadClicks > 0 ? totalHeadLeads / totalHeadClicks : PRIOR_CR_FALLBACK
+
       const changes: BidChange[] = []
       // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
       const bidCodes = new Set<ReasonCode>()
@@ -1580,46 +1648,50 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         if (auctionBids.length === 0) continue
         const currentBidMicro = bid.Search?.Bid ?? 0
         // Головная экономика ЭТОГО ключа — по CriterionId (== bid.KeywordId).
-        // Нет данных окна / ключ не в отчёте → {0,0} → тонкая → hold (fail-safe).
         const head = headStat.get(bid.KeywordId) ?? { clicks: 0, leads: 0 }
-        // Реестровый конвертер (converters.ts — подтверждён владельцем заявкой)
-        // проверяется ДО thin-гейта: доказанный конвертер НЕ может быть «тонким»
-        // для целей кормления. Иначе он глох как тонкий и не получал вход TV65.
-        const registryConverter = isRegisteredConverter(keyTextById.get(bid.KeywordId))
-        // Тонкая фраза (мало кликов, нет заявок) — НЕ трогаем ставку: судить не
-        // на чем, а болтанка вредит дисциплине (демоутнутая горелка, у которой
-        // клики выпали из окна, не должна прыгать назад в 65). Только наблюдаем.
-        // ИСКЛЮЧЕНИЕ — реестровый конвертер: его кормим (см. выше).
-        if (!registryConverter && head.leads === 0 && head.clicks < PHRASE_MIN_CLICKS) {
+        const conv30d = conv30dByCriterion.get(bid.KeywordId) ?? 0
+        // Защита конвертера ПОВЕРХ Байеса (страховка, не ослаблена М3): реестровый
+        // (converters.ts) ИЛИ ≥1 заявка за окно защиты — НЕ демоутится независимо
+        // от posterior (заявка ценнее экономии на клике).
+        const protectedConv =
+          isProtectedConverter(conv30d) || isRegisteredConverter(keyTextById.get(bid.KeywordId))
+
+        // М3 — ЭМПИРИЧЕСКИЙ БАЙЕС вместо бинарного thin-гейта:
+        //  promote → вход в нижний блок (TV65); demote → минимум (TV15); hold → не трогаем.
+        //  Тонкая фраза (0 данных): posterior≈prior(CR кампании) → обычно promote —
+        //  встроенный exploration, поглощающего hold больше нет. Асимметрия порогов
+        //  (демоушен 0.8 строже промоушена 0.5) гасит «пилу» без временных локов.
+        const bv = phraseBidVerdict({ leads: head.leads, clicks: head.clicks, campaignCr })
+        let verdict = bv.verdict
+        if (verdict === 'demote' && protectedConv) verdict = 'promote' // защищённый — не роняем
+
+        if (verdict === 'hold') {
           decisions.push({
             type: 'hold',
             targetType: 'keyword',
             targetId: String(bid.KeywordId),
-            summary: `тонкая фраза — наблюдаем (клики ${head.clicks})`,
+            summary: `держим уровень — вердикт неопределён (клики ${head.clicks}, заявки ${head.leads}, P<порога ${bv.pBelow.toFixed(2)})`,
             reasonCode: 'CORE_LOWER_BLOCK',
-            factors: { fromMicro: currentBidMicro, headLeads: head.leads, headClicks: head.clicks },
+            factors: {
+              fromMicro: currentBidMicro,
+              headLeads: head.leads,
+              headClicks: head.clicks,
+              pBelow: Math.round(bv.pBelow * 100) / 100,
+            },
           })
           continue
         }
-        // Пофразная классификация → целевой уровень + код природы фразы.
-        // Конвертер → вход в нижний блок (дешевле TV75), горелка → минимум.
-        // Cut 2 (спуск сильных конвертеров к минимуму) ОТКЛОНЁН витком 5: давал
-        // +2 economics, но −9 discipline / −12 anomalies (болтанка вокруг порога
-        // заявок = «пила»). Чистый спуск требует bounce-lock — в бэклог.
-        // ЭКОНОМИЧЕСКАЯ КОНСТИТУЦИЯ (ШАГ 6a): конвертера за 30д НЕ понижаем в
-        // минимум как «горелку» (заявка ценнее экономии на клике). Головная
-        // экономика 14д ИЛИ ≥1 заявка за 30д → трактуем как конвертера (нижний
-        // блок, «кормим»), а не хвост.
-        const conv30d = conv30dByCriterion.get(bid.KeywordId) ?? 0
-        // ШАГ 3а: подтверждённый конвертер держим как конвертера (нижний блок), даже
-        // если 30д-статистика занижена (баг суффиксной колонки конверсий до фикса).
-        const converter =
-          head.leads > 0 ||
-          isProtectedConverter(conv30d) ||
-          registryConverter
-        const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
-        const phraseCode: ReasonCode = converter ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
-        const rec = recommendBid({ auctionBids, desiredTv, currentBidMicro })
+
+        const desiredTv = verdict === 'promote' ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
+        const phraseCode: ReasonCode = verdict === 'promote' ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
+        // М3: МАРЖИНАЛЬНЫЙ ПОДЪЁМ при открытом гейте — ОТЛОЖЕН. Полигон показал: подъём
+        // уровня, привязанный к шумному posterior + петля «газ↔расход», осциллирует TV
+        // (discipline 96→50) — та же «пила», для которой аудит отложил Cut-2 (нужен
+        // bounce-lock/фиксация уровня, отдельная машинерия). Гейт недорасхода считается
+        // и виден в отчётах (видимость проблемы), но ставки НЕ поднимает: базовый вход
+        // Байеса. Механизм подъёма — следующий спринт с level-lock.
+        const marginalUplift = false
+        const rec: RecommendBidResult = recommendBid({ auctionBids, desiredTv, currentBidMicro })
         if (rec.changed) {
           changes.push({ keywordId: bid.KeywordId, fromMicro: currentBidMicro, toMicro: rec.targetBidMicro })
           bidCodes.add(phraseCode)
@@ -1627,7 +1699,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             type: 'bid',
             targetType: 'keyword',
             targetId: String(bid.KeywordId),
-            summary: `ставка к TV${rec.targetTv ?? '?'} по пофразной экономике (заявки ${head.leads}, клики ${head.clicks})`,
+            summary: `ставка к TV${rec.targetTv ?? '?'}${marginalUplift ? ' (маржинальный подъём при недорасходе)' : ''} по Байесу (заявки ${head.leads}, клики ${head.clicks})`,
             reasonCode: phraseCode,
             factors: {
               fromMicro: currentBidMicro,

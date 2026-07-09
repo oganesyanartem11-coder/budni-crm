@@ -18,9 +18,11 @@ import {
   OUTCOME_IMPROVED_RATIO,
   OUTCOME_MIN_CLICKS,
   OUTCOME_WINDOW_DAYS,
+  OUTCOME_WINDOW_WORKDAYS,
   OUTCOME_WORSE_RATIO,
   isAutoCorrectionEnabled,
 } from './config'
+import { workdayWindowStartUtc, addWorkdaysUtc } from './workdays'
 import { createProposal, type ProposalInput } from './proposals'
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -99,11 +101,22 @@ function computeVerdict(before: WindowStats, after: WindowStats): OutcomeComputa
   return { verdict, data: { before, after, ratio } }
 }
 
-/** Окна вокруг точки отсчёта: ДО = [anchor−W, anchor), ПОСЛЕ = [anchor, anchor+W). */
+/** МСК-день UTC-момента (без импорта brain — избегаем цикла). */
+function mskDayOf(date: Date): string {
+  return new Date(date.getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+/**
+ * Окна вокруг точки отсчёта в РАБОЧИХ днях (М3): ДО = [anchor − N рабочих, anchor),
+ * ПОСЛЕ = [anchor, anchor + N рабочих). B2B живёт по будням — календарное окно
+ * растягивало «до/после» через выходные и искажало сравнение.
+ */
 async function measureAround(anchor: Date, adGroupId?: string): Promise<OutcomeComputation> {
-  const windowMs = OUTCOME_WINDOW_DAYS * DAY_MS
-  const before = await loadWindowStats(new Date(anchor.getTime() - windowMs), anchor, adGroupId)
-  const after = await loadWindowStats(anchor, new Date(anchor.getTime() + windowMs), adGroupId)
+  const anchorDay = mskDayOf(anchor)
+  const beforeStart = workdayWindowStartUtc(anchorDay, OUTCOME_WINDOW_WORKDAYS)
+  const afterEnd = addWorkdaysUtc(anchorDay, OUTCOME_WINDOW_WORKDAYS)
+  const before = await loadWindowStats(beforeStart, anchor, adGroupId)
+  const after = await loadWindowStats(anchor, afterEnd, adGroupId)
   return computeVerdict(before, after)
 }
 
