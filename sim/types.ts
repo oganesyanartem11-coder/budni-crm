@@ -407,7 +407,7 @@ export interface RunnerOptions {
   set: ScenarioSet | 'calibration' | 'metamorphic'
   policy: PolicyName
   seeds: number[]
-  /** 'live' = реальный Haiku с кешем; 'stub' = детерминированная эвристика без сети. */
+  /** 'live' = реальный Sonnet с кешем; 'stub' = детерминированная эвристика без сети. */
   llmMode: 'live' | 'stub'
   outDir: string
 }
