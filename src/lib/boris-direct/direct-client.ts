@@ -240,16 +240,28 @@ export interface AuctionBid {
   Price: number
 }
 
-/** Ставка ключа из keywordbids.get (поисковый срез). */
+/** Ставка ключа из keywordbids.get (поисковый срез, УЖЕ нормализовано). */
 export interface KeywordBidRecord {
   KeywordId: number
   AdGroupId: number
   CampaignId: number
   Search?: {
     Bid?: number
+    /** Плоский массив позиций аукциона (после нормализации сырой формы API). */
     AuctionBids?: AuctionBid[]
   }
 }
+
+// Нормализация сырой формы keywordbids.get вынесена в отдельный НЕмокаемый
+// модуль (keywordbids-normalize.ts): в полигоне этот модуль подменяется фейком,
+// поэтому фейк не может импортировать нормализатор отсюда (цикл) — он берёт его
+// из общего модуля. Реэкспорт сохраняет прежний публичный API direct-client.
+export {
+  normalizeAuctionBids,
+  normalizeKeywordBidRecord,
+  type RawKeywordBidRecord,
+} from './keywordbids-normalize'
+import { normalizeKeywordBidRecord, type RawKeywordBidRecord } from './keywordbids-normalize'
 
 // ---------- Разведочные чтения (сессия «Прозрение»): корректировки, группы,
 // расписание, внешние правки. ТОЛЬКО чтение — write по ним НЕ добавляем. ----------
@@ -356,7 +368,7 @@ export async function getKeywordBids(): Promise<KeywordBidRecord[]> {
   const all: KeywordBidRecord[] = []
   let offset = 0
   for (;;) {
-    const result = await directCall<{ KeywordBids?: KeywordBidRecord[]; LimitedBy?: number }>(
+    const result = await directCall<{ KeywordBids?: RawKeywordBidRecord[]; LimitedBy?: number }>(
       'keywordbids',
       'get',
       {
@@ -366,7 +378,9 @@ export async function getKeywordBids(): Promise<KeywordBidRecord[]> {
         Page: { Limit: PAGE_LIMIT, Offset: offset },
       }
     )
-    all.push(...(result?.KeywordBids ?? []))
+    // Нормализуем сырую форму AuctionBids ({AuctionBidItems}) → плоский массив
+    // на границе транспорта: снапшот и весь код ниже видят только чистый массив.
+    for (const raw of result?.KeywordBids ?? []) all.push(normalizeKeywordBidRecord(raw))
     if (result?.LimitedBy == null) break
     offset = result.LimitedBy
   }

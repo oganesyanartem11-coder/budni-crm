@@ -1336,10 +1336,15 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // Головная экономика ЭТОГО ключа — по CriterionId (== bid.KeywordId).
         // Нет данных окна / ключ не в отчёте → {0,0} → тонкая → hold (fail-safe).
         const head = headStat.get(bid.KeywordId) ?? { clicks: 0, leads: 0 }
+        // Реестровый конвертер (converters.ts — подтверждён владельцем заявкой)
+        // проверяется ДО thin-гейта: доказанный конвертер НЕ может быть «тонким»
+        // для целей кормления. Иначе он глох как тонкий и не получал вход TV65.
+        const registryConverter = isRegisteredConverter(keyTextById.get(bid.KeywordId))
         // Тонкая фраза (мало кликов, нет заявок) — НЕ трогаем ставку: судить не
         // на чем, а болтанка вредит дисциплине (демоутнутая горелка, у которой
         // клики выпали из окна, не должна прыгать назад в 65). Только наблюдаем.
-        if (head.leads === 0 && head.clicks < PHRASE_MIN_CLICKS) {
+        // ИСКЛЮЧЕНИЕ — реестровый конвертер: его кормим (см. выше).
+        if (!registryConverter && head.leads === 0 && head.clicks < PHRASE_MIN_CLICKS) {
           decisions.push({
             type: 'hold',
             targetType: 'keyword',
@@ -1365,7 +1370,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         const converter =
           head.leads > 0 ||
           isProtectedConverter(conv30d) ||
-          isRegisteredConverter(keyTextById.get(bid.KeywordId))
+          registryConverter
         const desiredTv = converter ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
         const phraseCode: ReasonCode = converter ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
         const rec = recommendBid({ auctionBids, desiredTv, currentBidMicro })

@@ -25,6 +25,10 @@ import {
   DIRECT_CAMPAIGN_ID,
   METRIKA_COUNTER_ID,
 } from '../../src/lib/boris-direct/config'
+// Нормализатор транспорта — тот же, что у боевого getKeywordBids (паритет формы API).
+// Берём из ОБЩЕГО модуля, а НЕ из direct-client: в полигоне direct-client подменён
+// этим фейком (mocks.setup.ts), импорт нормализатора оттуда дал бы цикл на самого себя.
+import { normalizeKeywordBidRecord } from '../../src/lib/boris-direct/keywordbids-normalize'
 import type {
   AdRecord,
   CampaignState,
@@ -142,19 +146,26 @@ export async function getKeywordBids(): Promise<KeywordBidRecord[]> {
   const ctx = getCtx()
   const latest = ctx.days[ctx.days.length - 1]
   if (!latest) return []
-  return latest.keywordBids.map((b) => ({
-    KeywordId: b.keywordId,
-    AdGroupId: b.adGroupId as unknown as number,
-    CampaignId: DIRECT_CAMPAIGN_ID,
-    Search: {
-      Bid: b.bidMicro,
-      AuctionBids: b.auction.map((a) => ({
-        TrafficVolume: a.tv,
-        Bid: a.bidMicro,
-        Price: a.priceMicro,
-      })),
-    },
-  }))
+  // Эмитируем СЫРУЮ форму живого API (AuctionBids объектом { AuctionBidItems: [...] })
+  // и прогоняем через ТУ ЖЕ нормализацию, что боевой getKeywordBids — регрессия
+  // нормализации транспорта ловится и полигоном, а не только юнитом.
+  return latest.keywordBids.map((b) =>
+    normalizeKeywordBidRecord({
+      KeywordId: b.keywordId,
+      AdGroupId: b.adGroupId as unknown as number,
+      CampaignId: DIRECT_CAMPAIGN_ID,
+      Search: {
+        Bid: b.bidMicro,
+        AuctionBids: {
+          AuctionBidItems: b.auction.map((a) => ({
+            TrafficVolume: a.tv,
+            Bid: a.bidMicro,
+            Price: a.priceMicro,
+          })),
+        },
+      },
+    })
+  )
 }
 
 // ---------- Разведочные чтения (сессия «Прозрение») ----------

@@ -1,0 +1,475 @@
+{
+  "result": {
+    "KeywordBids": [
+      {
+        "Search": {
+          "Bid": 141000000,
+          "AuctionBids": {
+            "AuctionBidItems": [
+              {
+                "TrafficVolume": 139,
+                "Bid": 747800000,
+                "Price": 315100000
+              },
+              {
+                "TrafficVolume": 120,
+                "Bid": 628900000,
+                "Price": 259100000
+              },
+              {
+                "TrafficVolume": 119,
+                "Bid": 627200000,
+                "Price": 256000000
+              },
+              {
+                "TrafficVolume": 118,
+                "Bid": 625500000,
+                "Price": 252800000
+              },
+              {
+                "TrafficVolume": 117,
+                "Bid": 623800000,
+                "Price": 249600000
+              },
+              {
+                "TrafficVolume": 116,
+                "Bid": 622100000,
+                "Price": 246400000
+              },
+              {
+                "TrafficVolume": 115,
+                "Bid": 620400000,
+                "Price": 243100000
+              },
+              {
+                "TrafficVolume": 114,
+                "Bid": 618700000,
+                "Price": 239800000
+              },
+              {
+                "TrafficVolume": 113,
+                "Bid": 617000000,
+                "Price": 236500000
+              },
+              {
+                "TrafficVolume": 112,
+                "Bid": 615300000,
+                "Price": 233100000
+              },
+              {
+                "TrafficVolume": 111,
+                "Bid": 613600000,
+                "Price": 229600000
+              },
+              {
+                "TrafficVolume": 110,
+                "Bid": 611900000,
+                "Price": 226100000
+              },
+              {
+                "TrafficVolume": 109,
+                "Bid": 610200000,
+                "Price": 222600000
+              },
+              {
+                "TrafficVolume": 108,
+                "Bid": 608500000,
+                "Price": 219000000
+              },
+              {
+                "TrafficVolume": 107,
+                "Bid": 606800000,
+                "Price": 215400000
+              },
+              {
+                "TrafficVolume": 106,
+                "Bid": 605100000,
+                "Price": 211700000
+              },
+              {
+                "TrafficVolume": 105,
+                "Bid": 603400000,
+                "Price": 207900000
+              },
+              {
+                "TrafficVolume": 104,
+                "Bid": 601700000,
+                "Price": 204100000
+              },
+              {
+                "TrafficVolume": 103,
+                "Bid": 600000000,
+                "Price": 200300000
+              },
+              {
+                "TrafficVolume": 102,
+                "Bid": 598300000,
+                "Price": 196300000
+              },
+              {
+                "TrafficVolume": 101,
+                "Bid": 596600000,
+                "Price": 192400000
+              },
+              {
+                "TrafficVolume": 100,
+                "Bid": 594900000,
+                "Price": 188300000
+              },
+              {
+                "TrafficVolume": 99,
+                "Bid": 593200000,
+                "Price": 184200000
+              },
+              {
+                "TrafficVolume": 98,
+                "Bid": 591500000,
+                "Price": 180000000
+              },
+              {
+                "TrafficVolume": 97,
+                "Bid": 589800000,
+                "Price": 175800000
+              },
+              {
+                "TrafficVolume": 96,
+                "Bid": 588100000,
+                "Price": 171500000
+              },
+              {
+                "TrafficVolume": 95,
+                "Bid": 586400000,
+                "Price": 167100000
+              },
+              {
+                "TrafficVolume": 94,
+                "Bid": 584700000,
+                "Price": 162600000
+              },
+              {
+                "TrafficVolume": 93,
+                "Bid": 583000000,
+                "Price": 158100000
+              },
+              {
+                "TrafficVolume": 92,
+                "Bid": 581300000,
+                "Price": 153500000
+              },
+              {
+                "TrafficVolume": 91,
+                "Bid": 579600000,
+                "Price": 148800000
+              },
+              {
+                "TrafficVolume": 90,
+                "Bid": 577900000,
+                "Price": 144000000
+              },
+              {
+                "TrafficVolume": 89,
+                "Bid": 572300000,
+                "Price": 139100000
+              },
+              {
+                "TrafficVolume": 88,
+                "Bid": 566600000,
+                "Price": 134200000
+              },
+              {
+                "TrafficVolume": 87,
+                "Bid": 560900000,
+                "Price": 129200000
+              },
+              {
+                "TrafficVolume": 86,
+                "Bid": 555300000,
+                "Price": 124200000
+              },
+              {
+                "TrafficVolume": 85,
+                "Bid": 549600000,
+                "Price": 119100000
+              },
+              {
+                "TrafficVolume": 80,
+                "Bid": 158200000,
+                "Price": 101900000
+              },
+              {
+                "TrafficVolume": 75,
+                "Bid": 148000000,
+                "Price": 98500000
+              },
+              {
+                "TrafficVolume": 70,
+                "Bid": 141000000,
+                "Price": 95100000
+              },
+              {
+                "TrafficVolume": 65,
+                "Bid": 136600000,
+                "Price": 91800000
+              },
+              {
+                "TrafficVolume": 15,
+                "Bid": 80100000,
+                "Price": 39100000
+              },
+              {
+                "TrafficVolume": 10,
+                "Bid": 74500000,
+                "Price": 19400000
+              },
+              {
+                "TrafficVolume": 5,
+                "Bid": 12600000,
+                "Price": 12600000
+              }
+            ]
+          }
+        },
+        "Warnings": [],
+        "Errors": [],
+        "CampaignId": 711897777,
+        "AdGroupId": 5769314414,
+        "KeywordId": 57580142615
+      },
+      {
+        "Search": {
+          "Bid": 76000000,
+          "AuctionBids": {
+            "AuctionBidItems": [
+              {
+                "TrafficVolume": 139,
+                "Bid": 548400000,
+                "Price": 244700000
+              },
+              {
+                "TrafficVolume": 120,
+                "Bid": 461200000,
+                "Price": 205800000
+              },
+              {
+                "TrafficVolume": 119,
+                "Bid": 460000000,
+                "Price": 203700000
+              },
+              {
+                "TrafficVolume": 118,
+                "Bid": 458700000,
+                "Price": 201500000
+              },
+              {
+                "TrafficVolume": 117,
+                "Bid": 457500000,
+                "Price": 199300000
+              },
+              {
+                "TrafficVolume": 116,
+                "Bid": 456200000,
+                "Price": 197100000
+              },
+              {
+                "TrafficVolume": 115,
+                "Bid": 455000000,
+                "Price": 194900000
+              },
+              {
+                "TrafficVolume": 114,
+                "Bid": 453700000,
+                "Price": 192600000
+              },
+              {
+                "TrafficVolume": 113,
+                "Bid": 452500000,
+                "Price": 190300000
+              },
+              {
+                "TrafficVolume": 112,
+                "Bid": 451200000,
+                "Price": 187900000
+              },
+              {
+                "TrafficVolume": 111,
+                "Bid": 450000000,
+                "Price": 185500000
+              },
+              {
+                "TrafficVolume": 110,
+                "Bid": 448700000,
+                "Price": 183100000
+              },
+              {
+                "TrafficVolume": 109,
+                "Bid": 447500000,
+                "Price": 180700000
+              },
+              {
+                "TrafficVolume": 108,
+                "Bid": 446300000,
+                "Price": 178200000
+              },
+              {
+                "TrafficVolume": 107,
+                "Bid": 445000000,
+                "Price": 175700000
+              },
+              {
+                "TrafficVolume": 106,
+                "Bid": 443800000,
+                "Price": 173200000
+              },
+              {
+                "TrafficVolume": 105,
+                "Bid": 442500000,
+                "Price": 170600000
+              },
+              {
+                "TrafficVolume": 104,
+                "Bid": 441300000,
+                "Price": 168000000
+              },
+              {
+                "TrafficVolume": 103,
+                "Bid": 440000000,
+                "Price": 165300000
+              },
+              {
+                "TrafficVolume": 102,
+                "Bid": 438800000,
+                "Price": 162600000
+              },
+              {
+                "TrafficVolume": 101,
+                "Bid": 437500000,
+                "Price": 159900000
+              },
+              {
+                "TrafficVolume": 100,
+                "Bid": 436300000,
+                "Price": 157100000
+              },
+              {
+                "TrafficVolume": 99,
+                "Bid": 435100000,
+                "Price": 154300000
+              },
+              {
+                "TrafficVolume": 98,
+                "Bid": 433800000,
+                "Price": 151400000
+              },
+              {
+                "TrafficVolume": 97,
+                "Bid": 432600000,
+                "Price": 148500000
+              },
+              {
+                "TrafficVolume": 96,
+                "Bid": 431300000,
+                "Price": 145600000
+              },
+              {
+                "TrafficVolume": 95,
+                "Bid": 430100000,
+                "Price": 142600000
+              },
+              {
+                "TrafficVolume": 94,
+                "Bid": 428800000,
+                "Price": 139500000
+              },
+              {
+                "TrafficVolume": 93,
+                "Bid": 427600000,
+                "Price": 136400000
+              },
+              {
+                "TrafficVolume": 92,
+                "Bid": 426300000,
+                "Price": 133200000
+              },
+              {
+                "TrafficVolume": 91,
+                "Bid": 425100000,
+                "Price": 130000000
+              },
+              {
+                "TrafficVolume": 90,
+                "Bid": 423800000,
+                "Price": 126700000
+              },
+              {
+                "TrafficVolume": 89,
+                "Bid": 419700000,
+                "Price": 123400000
+              },
+              {
+                "TrafficVolume": 88,
+                "Bid": 415500000,
+                "Price": 120000000
+              },
+              {
+                "TrafficVolume": 87,
+                "Bid": 411300000,
+                "Price": 116600000
+              },
+              {
+                "TrafficVolume": 86,
+                "Bid": 407200000,
+                "Price": 113200000
+              },
+              {
+                "TrafficVolume": 85,
+                "Bid": 403000000,
+                "Price": 109700000
+              },
+              {
+                "TrafficVolume": 80,
+                "Bid": 152500000,
+                "Price": 97500000
+              },
+              {
+                "TrafficVolume": 75,
+                "Bid": 141400000,
+                "Price": 94200000
+              },
+              {
+                "TrafficVolume": 70,
+                "Bid": 132700000,
+                "Price": 91100000
+              },
+              {
+                "TrafficVolume": 65,
+                "Bid": 131000000,
+                "Price": 87900000
+              },
+              {
+                "TrafficVolume": 15,
+                "Bid": 76000000,
+                "Price": 42800000
+              },
+              {
+                "TrafficVolume": 10,
+                "Bid": 70800000,
+                "Price": 26900000
+              },
+              {
+                "TrafficVolume": 5,
+                "Bid": 18400000,
+                "Price": 18400000
+              }
+            ]
+          }
+        },
+        "Warnings": [],
+        "Errors": [],
+        "CampaignId": 711897777,
+        "AdGroupId": 5769314414,
+        "KeywordId": 57580142616
+      }
+    ],
+    "LimitedBy": 2
+  }
+}

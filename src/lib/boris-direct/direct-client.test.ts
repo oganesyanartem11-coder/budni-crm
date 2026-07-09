@@ -18,6 +18,7 @@ import {
   getKeywords,
   getAutotargetingRecords,
   getKeywordBids,
+  normalizeAuctionBids,
   getAds,
   setKeywordBids,
   updateCampaignNegatives,
@@ -30,6 +31,7 @@ import {
   type CampaignState,
 } from './direct-client'
 import { DIRECT_CAMPAIGN_ID, MICRO } from './config'
+import keywordbidsRaw from './__fixtures__/keywordbids-raw.json'
 
 const TEST_TOKEN = 'test-token-a1b2c3d4e5f6g7h8'
 
@@ -252,6 +254,48 @@ describe('getKeywordBids', () => {
     const { params } = sentBody(0)
     expect(params.SearchFieldNames).toEqual(['Bid', 'AuctionBids'])
     expect(sentBody(1).params.Page).toEqual({ Limit: 10000, Offset: 10000 })
+  })
+
+  it('нормализует СЫРУЮ объект-форму AuctionBids ({AuctionBidItems:[...]}) в плоский массив — фикстура живого API', async () => {
+    // Живой keywordbids.get отдаёт Search.AuctionBids ОБЪЕКТОМ {AuctionBidItems:[...]},
+    // а не плоским массивом. Юнит парсит записанную фикстуру ответа (не рукописный мок),
+    // чтобы регрессия транспорта ловилась на реальной форме API.
+    // Фикстура содержит LimitedBy (живой ответ страничный) — вторая страница
+    // терминальная (пусто, без LimitedBy), чтобы пагинация getKeywordBids завершилась.
+    fetchMock
+      .mockImplementationOnce(async () => jsonResponse(keywordbidsRaw))
+      .mockImplementation(async () => jsonResponse({ result: { KeywordBids: [] } }))
+
+    const bids = await getKeywordBids()
+
+    expect(bids.length).toBeGreaterThan(0)
+    const auction = bids[0].Search?.AuctionBids
+    expect(Array.isArray(auction)).toBe(true)
+    expect(auction!.length).toBeGreaterThan(0)
+    expect(auction![0]).toHaveProperty('TrafficVolume')
+    expect(auction![0]).toHaveProperty('Bid')
+    expect(auction![0]).toHaveProperty('Price')
+    // Плоский массив итерабелен .filter — то, что делает recommendBid (не падает).
+    expect(() => auction!.filter((a) => a.TrafficVolume < 85)).not.toThrow()
+  })
+})
+
+describe('normalizeAuctionBids', () => {
+  const item = { TrafficVolume: 65, Bid: 95 * MICRO, Price: 90 * MICRO }
+
+  it('сырая объект-форма {AuctionBidItems:[...]} → её массив', () => {
+    expect(normalizeAuctionBids({ AuctionBidItems: [item] })).toEqual([item])
+  })
+
+  it('уже-плоский массив → как есть (вариативность API)', () => {
+    expect(normalizeAuctionBids([item])).toEqual([item])
+  })
+
+  it('undefined / пустой объект / объект без items → [] (нет лесенки, не ошибка)', () => {
+    expect(normalizeAuctionBids(undefined)).toEqual([])
+    expect(normalizeAuctionBids(null)).toEqual([])
+    expect(normalizeAuctionBids({})).toEqual([])
+    expect(normalizeAuctionBids({ AuctionBidItems: [] })).toEqual([])
   })
 })
 
