@@ -102,6 +102,25 @@ describe('М3: строка недорасхода в дневном блоке'
   })
 })
 
+describe('М3.5: строка ввода портфеля (ramp-in) в дневном блоке', () => {
+  it('применено X из Y плановых, осталось ~Z — когда есть остаток', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({ data: day({ portfolioRampIn: { applied: 40, planned: 93, deferred: 53 } }) })
+    )
+    expect(block).toContain('ввод портфеля: применено 40 из 93 плановых')
+    expect(block).toContain('осталось ~53')
+  })
+  it('нет остатка (deferred=0) → строки нет (штатный тик, не метрим)', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({ data: day({ portfolioRampIn: { applied: 5, planned: 5, deferred: 0 } }) })
+    )
+    expect(block).not.toContain('ввод портфеля')
+  })
+  it('поле не задано → строки нет', () => {
+    expect(buildDailyDataBlock(dailyInput())).not.toContain('ввод портфеля')
+  })
+})
+
 describe('buildDailyDataBlock — числа форматирует код', () => {
   it('рубли без копеек, CTR с 2 знаками, счётчики заявок', () => {
     const block = buildDailyDataBlock(dailyInput())
