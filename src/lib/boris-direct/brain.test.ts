@@ -78,7 +78,7 @@ vi.mock('./lessons', () => mockLessons)
 vi.mock('./outcomes', () => mockOutcomes)
 
 import { runCollectTick, runProcessTick, backfillCriterionHistory, mskDay, mskDayStartUtc, yesterdayMsk } from './brain'
-import { MICRO } from './config'
+import { MICRO, MARGINAL_UPLIFT_ENABLED } from './config'
 
 // 2026-07-02 09:00 UTC → сегодня-МСК 2026-07-02, вчера-МСК 2026-07-01.
 const NOW = new Date('2026-07-02T09:00:00Z')
@@ -443,19 +443,19 @@ describe('runProcessTick', () => {
       expect.objectContaining({ candidate: 'корпоративное питание тендер', verdict: 'keep' })
     )
 
-    // СТАВКИ (пофразно): конвертер (2 заявки на своём запросе) → вход в нижний
-    // блок TV65 (150 ₽), было 100 ₽. Ключ 22 без головных данных → тонкая →
-    // держим (ставку не трогаем).
-    // М3 (Байес): ключ 11 — конвертер (promote → TV65 150 ₽); ключ 22 — тонкий, но
-    // Байес даёт вход (promote → TV65) вместо поглощающего hold (встроенный exploration).
+    // СТАВКИ (пофразно): оба ключа — promote к TV65 (150 ₽) по Байесу (ключ 11 —
+    // конвертер с 2 заявками; ключ 22 — тонкий, встроенный exploration).
+    // М3.5 RAMP-IN: как ПАЧКА оба (+50% и +200%) дают +100% массы → CB не пропускает
+    // целиком. Приоритет — конвертер (ключ 11, +50% влезает под mass-cap) применяется;
+    // тонкая exploration (ключ 22, +200%) откладывается порционным вводом. РЕШЕНИЯ по
+    // обоим эмитированы (level-lock от вердикта), applyBidChanges получает подмножество.
     expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
-    expect(mockGate.applyBidChanges).toHaveBeenCalledWith(
-      [
-        { keywordId: 11, fromMicro: 100 * MICRO, toMicro: 150 * MICRO },
-        { keywordId: 22, fromMicro: 50 * MICRO, toMicro: 150 * MICRO },
-      ],
-      expect.stringContaining('пофразный экономбиддинг')
-    )
+    expect(mockGate.applyBidChanges.mock.calls[0][0]).toEqual([
+      { keywordId: 11, fromMicro: 100 * MICRO, toMicro: 150 * MICRO },
+    ])
+    const bid22Dec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '22')
+    expect((bid22Dec!.factors as { toMicro: number }).toMicro).toBe(150 * MICRO)
+    expect(res.reportData?.portfolioRampIn).toEqual({ applied: 1, planned: 2, deferred: 1 })
 
     expect(res.appliedSummaries).toHaveLength(2)
     expect(res.wouldDoSummaries).toHaveLength(0)
@@ -1027,10 +1027,11 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     expect(res.status).toBe('done')
     // Текст ключа 'обеды' ≠ запросу — по СТАРОЙ (текстовой) логике head пуст → тонкая → hold.
     // По ID клики 25 + заявка 1 приписаны ключу 100 → КОНВЕРТЕР → подъём к TV65 (150 ₽).
-    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
-    expect(mockGate.applyBidChanges.mock.calls[0][0]).toEqual([
-      { keywordId: 100, fromMicro: 40 * MICRO, toMicro: 150 * MICRO },
-    ])
+    // Одиночная правка 40→150 (+275%) не проходит mass-cap CB в одиночку → ramp-in
+    // откладывает применение, но РЕШЕНИЕ (вердикт→уровень) эмитировано корректно.
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '100')
+    expect(bidDec).toBeDefined()
+    expect((bidDec!.factors as { toMicro: number }).toMicro).toBe(150 * MICRO)
   })
 
   it('(б) АУДИТ: «горелка» по одной словоформе, но заявки через длинные варианты ТОГО ЖЕ ключа → НЕ режем в TV15', async () => {
@@ -1047,11 +1048,11 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
 
     expect(res.status).toBe('done')
     // Агрегат по ID: 31 клик + 1 заявка → КОНВЕРТЕР → нижний блок TV65 (150 ₽),
-    // а НЕ «горелка → TV15 (50 ₽)». Это и есть опасный кейс (б) аудита.
-    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
-    const changes = mockGate.applyBidChanges.mock.calls[0][0] as Array<{ keywordId: number; toMicro: number }>
-    expect(changes[0].keywordId).toBe(200)
-    expect(changes[0].toMicro).toBe(150 * MICRO) // TV65, не 50 ₽ (TV15)
+    // а НЕ «горелка → TV15 (50 ₽)». Это и есть опасный кейс (б) аудита. Решение
+    // эмитировано; применение одиночной +275% правки метрится ramp-in под CB.
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '200')
+    expect(bidDec).toBeDefined()
+    expect((bidDec!.factors as { toMicro: number }).toMicro).toBe(150 * MICRO) // TV65, не 50 ₽ (TV15)
   })
 
   it('строки автотаргета / нежившие CriterionId в пофразный биддинг НЕ идут', async () => {
@@ -1108,11 +1109,11 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
 
     expect(res.status).toBe('done')
     // Реестровый конвертер доходит до recommendBid → вход в нижний блок TV65 (150 ₽).
-    // До фикса порядка гейтов он глох как «тонкий» и правок не было вовсе.
-    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
-    expect(mockGate.applyBidChanges.mock.calls[0][0]).toEqual([
-      { keywordId: 300, fromMicro: 40 * MICRO, toMicro: 150 * MICRO },
-    ])
+    // До фикса порядка гейтов он глох как «тонкий» и правок не было вовсе. Одиночная
+    // правка 40→150 (+275%) метрится ramp-in под CB — решение эмитировано.
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '300')
+    expect(bidDec).toBeDefined()
+    expect((bidDec!.factors as { toMicro: number }).toMicro).toBe(150 * MICRO)
   })
 
   it('М3: ТОНКАЯ фраза (3 клика, 0 заявок) → promote (вход TV65), поглощающего hold больше НЕТ (встроенный exploration)', async () => {
@@ -1126,10 +1127,11 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
 
     expect(res.status).toBe('done')
     // Байес: posterior≈prior (мало данных) → вердикт promote → вход в нижний блок TV65,
-    // а не вечный hold. Фраза получает ШАНС собрать данные (exploration).
-    expect(mockGate.applyBidChanges).toHaveBeenCalledTimes(1)
-    const changes = mockGate.applyBidChanges.mock.calls[0][0] as Array<{ keywordId: number; toMicro: number }>
-    expect(changes).toEqual([{ keywordId: 400, fromMicro: 40 * MICRO, toMicro: 150 * MICRO }])
+    // а не вечный hold. Фраза получает ШАНС собрать данные (exploration). Одиночный
+    // +275% откладывается ramp-in под CB — но РЕШЕНИЕ (promote→TV65) эмитировано.
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '400')
+    expect(bidDec).toBeDefined()
+    expect((bidDec!.factors as { toMicro: number }).toMicro).toBe(150 * MICRO)
   })
 
   it('М3: горелка (много кликов, 0 заявок) → demote к TV15 (уверенно ниже порога)', async () => {
@@ -1148,7 +1150,7 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     expect(changes).toEqual([{ keywordId: 500, fromMicro: 200 * MICRO, toMicro: 50 * MICRO }]) // TV15
   })
 
-  it('М3: гейт недорасхода ОТКРЫТ виден в отчёте, но подъём ОТЛОЖЕН → конвертер на базовом входе TV65 (150 ₽)', async () => {
+  it('М3.5: гейт открыт + level-lock — маржинальный подъём ПОД ФЛАГОМ (вкл → TV75, выкл → база TV65)', async () => {
     setupEconomics({
       sq: sqTsv([{ q: 'конвертер сильный', g: '1', cid: '600', clicks: 30, conv: 4 }]),
       keywords: [kw(600, 'конвертер сильный', 1)],
@@ -1190,10 +1192,22 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
     const res = await runProcessTick(NOW)
 
     expect(res.status).toBe('done')
-    const changes = mockGate.applyBidChanges.mock.calls[0]?.[0] as Array<{ keywordId: number; toMicro: number }> | undefined
-    // Маржинал ОТЛОЖЕН (полигон: осцилляция TV рушит дисциплину): конвертер идёт на
-    // БАЗОВЫЙ вход TV65 (150 ₽), не на маржинальный TV75. Гейт при этом виден в отчёте.
-    expect(changes).toEqual([{ keywordId: 600, fromMicro: 40 * MICRO, toMicro: 150 * MICRO }])
+    const bidDec = res.decisions?.find((d) => d.type === 'bid' && d.targetId === '600')
+    expect(bidDec).toBeDefined()
+    const f = bidDec!.factors as { toMicro: number; targetTv: number }
+    if (MARGINAL_UPLIFT_ENABLED) {
+      // Флаг ВКЛ: гейт открыт → подъём ПОВЕРХ level-lock. Конвертер (posteriorCr≈0.133)
+      // уходит выше базового TV65 на TV75 (E[CPL]=180/0.133≈1350 ≤ cap 2000 ₽; премиум
+      // TV85 — вето). Уровень фиксируется в момент установки (не прыгает от posterior-шума).
+      expect(f.toMicro).toBe(200 * MICRO) // TV75
+      expect(f.targetTv).toBe(75)
+      expect(bidDec!.summary).toContain('маржинальный подъём')
+    } else {
+      // Флаг ВЫКЛ (частичная приёмка М3.5 по гейту полигона): подъём отложен, конвертер
+      // на БАЗОВОМ входе TV65 (150 ₽). Гейт при этом виден в отчёте (видимость недорасхода).
+      expect(f.toMicro).toBe(150 * MICRO) // TV65
+      expect(bidDec!.summary).not.toContain('маржинальный подъём')
+    }
     expect(res.reportData?.underspend?.gateOpen).toBe(true) // недорасход виден (открытый гейт)
   })
 })

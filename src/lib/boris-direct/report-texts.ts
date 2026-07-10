@@ -216,6 +216,16 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     )
   }
 
+  // М3.5: ввод портфеля порциями (ramp-in) — строка только пока догоняем (есть
+  // остаток). deferred=0 → штатный тик, план влез в CB целиком, не метрим.
+  const ramp = d.portfolioRampIn
+  if (ramp && ramp.deferred > 0) {
+    lines.push(
+      `ввод портфеля: применено ${ramp.applied} из ${ramp.planned} плановых, ` +
+        `осталось ~${ramp.deferred} — докрою за ближайшие тики (по частям под предохранителем)`
+    )
+  }
+
   // ШАГ 2: частота ретраев фронта — сколько дублей заявок приёмник отсеял сегодня.
   if (input.dedupDroppedToday && input.dedupDroppedToday > 0) {
     lines.push(`Дублей-ретраев заявок отсеяно за сегодня: ${input.dedupDroppedToday}`)

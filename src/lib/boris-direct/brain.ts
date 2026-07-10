@@ -81,11 +81,27 @@ import {
 } from './config'
 import { phraseBidVerdict } from './bayes'
 import { workdayWindowStartUtc, isWorkday } from './workdays'
-import { underspendGateOpen, type UnderspendGate } from './underspend'
+import { underspendGateOpen, recommendMarginalBid, type UnderspendGate } from './underspend'
+import {
+  resolveLevel,
+  serializeLevels,
+  deserializeLevels,
+  type PhraseLevelMap,
+  type PhraseLevelSnapshot,
+} from './level-lock'
+import {
+  selectRampInSubset,
+  formatCbStoppedPlan,
+  type EnrichedChange,
+  type CbStoppedChange,
+} from './ramp-in'
 import {
   MICRO,
   UNDERSPEND_WINDOW_WORKDAYS,
   LEADS_ZERO_AVG_WORKDAYS,
+  MARGINAL_UPLIFT_ENABLED,
+  MARGINAL_CPL_CAP_PCT,
+  getLeadValueRub,
 } from './config'
 import { detectAnomalies, detectLeadReconcileLoss, type Anomaly } from './anomalies'
 import { classifyQueryGeo, isGeoMinusReason } from './geo'
@@ -106,7 +122,7 @@ import {
   type PhraseBehaviorRow,
   type RecommendBidResult,
 } from './rules'
-import { applyBidChanges, addNegativeKeywords, type BidChange } from './write-gate'
+import { applyBidChanges, addNegativeKeywords } from './write-gate'
 import { getDirectRoleState } from './state'
 import { deriveAndRefreshLessons } from './lessons'
 import {
@@ -742,6 +758,16 @@ export interface DailyReportData {
     dailyBudgetRub: number
     gateOpen: boolean
     medianRub: number | null
+  }
+  /**
+   * М3.5: ввод портфеля порциями (ramp-in). Заполнено, когда план правок ставок
+   * не влез в CB целиком и применено подмножество; остаток догоняется на
+   * следующих тиках. deferred=0 → строку не показываем (штатный тик).
+   */
+  portfolioRampIn?: {
+    applied: number
+    planned: number
+    deferred: number
   }
   llm?: never
 }
@@ -1640,142 +1666,225 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       }
       const campaignCr = totalHeadClicks > 0 ? totalHeadLeads / totalHeadClicks : PRIOR_CR_FALLBACK
 
-      const changes: BidChange[] = []
-      // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
-      const bidCodes = new Set<ReasonCode>()
-      for (const bid of bidsSnap) {
-        const auctionBids = bid.Search?.AuctionBids ?? []
-        if (auctionBids.length === 0) continue
-        const currentBidMicro = bid.Search?.Bid ?? 0
-        // Головная экономика ЭТОГО ключа — по CriterionId (== bid.KeywordId).
-        const head = headStat.get(bid.KeywordId) ?? { clicks: 0, leads: 0 }
-        const conv30d = conv30dByCriterion.get(bid.KeywordId) ?? 0
-        // Защита конвертера ПОВЕРХ Байеса (страховка, не ослаблена М3): реестровый
-        // (converters.ts) ИЛИ ≥1 заявка за окно защиты — НЕ демоутится независимо
-        // от posterior (заявка ценнее экономии на клике).
-        const protectedConv =
-          isProtectedConverter(conv30d) || isRegisteredConverter(keyTextById.get(bid.KeywordId))
-
-        // М3 — ЭМПИРИЧЕСКИЙ БАЙЕС вместо бинарного thin-гейта:
-        //  promote → вход в нижний блок (TV65); demote → минимум (TV15); hold → не трогаем.
-        //  Тонкая фраза (0 данных): posterior≈prior(CR кампании) → обычно promote —
-        //  встроенный exploration, поглощающего hold больше нет. Асимметрия порогов
-        //  (демоушен 0.8 строже промоушена 0.5) гасит «пилу» без временных локов.
-        const bv = phraseBidVerdict({ leads: head.leads, clicks: head.clicks, campaignCr })
-        let verdict = bv.verdict
-        if (verdict === 'demote' && protectedConv) verdict = 'promote' // защищённый — не роняем
-
-        if (verdict === 'hold') {
-          decisions.push({
-            type: 'hold',
-            targetType: 'keyword',
-            targetId: String(bid.KeywordId),
-            summary: `держим уровень — вердикт неопределён (клики ${head.clicks}, заявки ${head.leads}, P<порога ${bv.pBelow.toFixed(2)})`,
-            reasonCode: 'CORE_LOWER_BLOCK',
-            factors: {
-              fromMicro: currentBidMicro,
-              headLeads: head.leads,
-              headClicks: head.clicks,
-              pBelow: Math.round(bv.pBelow * 100) / 100,
-            },
-          })
-          continue
-        }
-
-        const desiredTv = verdict === 'promote' ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
-        const phraseCode: ReasonCode = verdict === 'promote' ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
-        // М3: МАРЖИНАЛЬНЫЙ ПОДЪЁМ при открытом гейте — ОТЛОЖЕН. Полигон показал: подъём
-        // уровня, привязанный к шумному posterior + петля «газ↔расход», осциллирует TV
-        // (discipline 96→50) — та же «пила», для которой аудит отложил Cut-2 (нужен
-        // bounce-lock/фиксация уровня, отдельная машинерия). Гейт недорасхода считается
-        // и виден в отчётах (видимость проблемы), но ставки НЕ поднимает: базовый вход
-        // Байеса. Механизм подъёма — следующий спринт с level-lock.
-        const marginalUplift = false
-        const rec: RecommendBidResult = recommendBid({ auctionBids, desiredTv, currentBidMicro })
-        if (rec.changed) {
-          changes.push({ keywordId: bid.KeywordId, fromMicro: currentBidMicro, toMicro: rec.targetBidMicro })
-          bidCodes.add(phraseCode)
-          decisions.push({
-            type: 'bid',
-            targetType: 'keyword',
-            targetId: String(bid.KeywordId),
-            summary: `ставка к TV${rec.targetTv ?? '?'}${marginalUplift ? ' (маржинальный подъём при недорасходе)' : ''} по Байесу (заявки ${head.leads}, клики ${head.clicks})`,
-            reasonCode: phraseCode,
-            factors: {
-              fromMicro: currentBidMicro,
-              toMicro: rec.targetBidMicro,
-              targetTv: rec.targetTv ?? 0,
-              headLeads: head.leads,
-              headClicks: head.clicks,
-            },
-          })
-        } else {
-          // Держимся. Природа фразы — тот же phraseCode; КРОМЕ случая, когда
-          // держит именно потолок/отсутствие аукциона (это и есть причина).
-          const holdCode: ReasonCode =
-            rec.holdReason === 'ceiling'
-              ? 'AUCTION_ABOVE_CEILING'
-              : rec.holdReason === 'no_auction'
-                ? 'LOW_COVERAGE'
-                : phraseCode
-          const holdSummary =
-            rec.holdReason === 'ceiling'
-              ? 'вход дороже потолка — держимся'
-              : rec.holdReason === 'no_auction'
-                ? 'нет подходящей позиции аукциона — ждём'
-                : `уже на целевом уровне (заявки ${head.leads}, клики ${head.clicks})`
-          decisions.push({
-            type: 'hold',
-            targetType: 'keyword',
-            targetId: String(bid.KeywordId),
-            summary: holdSummary,
-            reasonCode: holdCode,
-            factors: { fromMicro: currentBidMicro, headLeads: head.leads, headClicks: head.clicks },
-          })
-        }
+      // М3.5: LEVEL-LOCK — читаем зафиксированные уровни фраз (kind 'phrase_tv_lock').
+      // FAIL-SAFE: если ЧТЕНИЕ сломалось (throw) — уровни неизвестны → ставки в этот
+      // тик НЕ трогаем и ничего не сбрасываем. Пустой снапшот (bootstrap: findFirst
+      // вернул null) — НЕ поломка: карта пустая, уровни устанавливаются от вердикта.
+      let levels: PhraseLevelMap = new Map()
+      let levelsAvailable = true
+      try {
+        levels = deserializeLevels(await latestSnapshotPayload<PhraseLevelSnapshot>('phrase_tv_lock'))
+      } catch (err) {
+        console.error(
+          '[boris-direct/brain] уровни phrase_tv_lock не прочитались — ставки в этот тик не трогаю',
+          err
+        )
+        levelsAvailable = false
       }
 
-      if (changes.length > 0) {
-        // Префикс машинных кодов пачки в reason — дубль в payload лога.
-        const bidsCodePrefix = (['PROVEN_CONVERTER_VOLUME', 'CORE_LOWER_BLOCK', 'TAIL_MIN_TV'] as const)
-          .filter((code) => bidCodes.has(code))
-          .join(',')
-        const gate = await applyBidChanges(
-          changes,
-          `[${bidsCodePrefix}] пофразный экономбиддинг (конвертер→нижний блок, горелка→минимум, тонкая→вход): ${changes.length} фраз`
+      if (levelsAvailable) {
+        const leadValueRub = getLeadValueRub()
+        // hold-фразы сохраняют прежний lock (копируем поверх, обновляем только тронутые).
+        // Прунинг: заносим только ЖИВЫЕ ключи (liveKeyIds) — локи снятых/удалённых фраз
+        // не тащим вечно (иначе снапшот phrase_tv_lock растёт орфанами без нужды).
+        const nextLevels: PhraseLevelMap = new Map(
+          [...levels].filter(([id]) => liveKeyIds.has(id))
         )
-        if (gate.breakerTripped) {
-          anomalies.push({
-            severity: 'critical',
-            kind: 'circuit_breaker',
-            text: `Circuit breaker остановил пачку правок ставок (${changes.length} шт.) — вне паттерна, нужен разбор владельцем.`,
-          })
-          // ЭМИССИЯ: сработавший предохранитель — машинный alert.
-          decisions.push({
-            type: 'alert',
-            targetType: 'campaign',
-            targetId: String(DIRECT_CAMPAIGN_ID),
-            summary: `circuit breaker: пачка правок ставок (${changes.length} шт.) вне паттерна`,
-            reasonCode: 'CIRCUIT_BREAKER',
-            factors: { changes: changes.length },
-          })
-        } else if (gate.writeErrors?.length) {
-          // A: keywordbids.set вернул поэлементные Errors. Частичный успех
-          // (applied=true) — часть ставок реально применилась, считаем её; полный
-          // провал (applied=false) — ничего не применилось. В обоих случаях аномалия.
-          const summary = `ставки: ${changes.length} фраз к целевым позициям шкалы`
-          anomalies.push({
-            severity: 'critical',
-            kind: gate.partial ? 'bids_partial_fail' : 'bids_write_fail',
-            text: gate.partial
-              ? `Ставки применены ЧАСТИЧНО, часть фраз с ошибкой: ${gate.writeErrors.join('; ')}. Проверь ставки в кабинете.`
-              : `Ставки НЕ применились в Директе (ошибки API): ${gate.writeErrors.join('; ')}.`,
-          })
-          if (gate.applied) appliedSummaries.push(`${summary} (частично)`)
-        } else {
-          const summary = `ставки: ${changes.length} фраз к целевым позициям шкалы`
-          if (gate.applied) appliedSummaries.push(summary)
-          else wouldDoSummaries.push(summary)
+        const enriched: EnrichedChange[] = []
+        // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
+        const bidCodes = new Set<ReasonCode>()
+        const keyTextOf = (id: number): string => keyTextById.get(id) ?? `#${id}`
+
+        for (const bid of bidsSnap) {
+          const auctionBids = bid.Search?.AuctionBids ?? []
+          if (auctionBids.length === 0) continue
+          const currentBidMicro = bid.Search?.Bid ?? 0
+          // Головная экономика ЭТОГО ключа — по CriterionId (== bid.KeywordId).
+          const head = headStat.get(bid.KeywordId) ?? { clicks: 0, leads: 0 }
+          const conv30d = conv30dByCriterion.get(bid.KeywordId) ?? 0
+          // Защита конвертера ПОВЕРХ Байеса (страховка, не ослаблена): реестровый
+          // (converters.ts) ИЛИ ≥1 заявка за окно защиты — НЕ демоутится независимо
+          // от posterior (заявка ценнее экономии на клике).
+          const protectedConv =
+            isProtectedConverter(conv30d) || isRegisteredConverter(keyTextById.get(bid.KeywordId))
+
+          // ЭМПИРИЧЕСКИЙ БАЙЕС (М3): promote → нижний блок; demote → минимум; hold → не трогаем.
+          const bv = phraseBidVerdict({ leads: head.leads, clicks: head.clicks, campaignCr })
+          let verdict = bv.verdict
+          if (verdict === 'demote' && protectedConv) verdict = 'promote' // защищённый — не роняем
+
+          if (verdict === 'hold') {
+            // Level-lock: hold — уровень фразы НЕ трогаем (прежний lock держится в nextLevels).
+            decisions.push({
+              type: 'hold',
+              targetType: 'keyword',
+              targetId: String(bid.KeywordId),
+              summary: `держим уровень — вердикт неопределён (клики ${head.clicks}, заявки ${head.leads}, P<порога ${bv.pBelow.toFixed(2)})`,
+              reasonCode: 'CORE_LOWER_BLOCK',
+              factors: {
+                fromMicro: currentBidMicro,
+                headLeads: head.leads,
+                headClicks: head.clicks,
+                pBelow: Math.round(bv.pBelow * 100) / 100,
+              },
+            })
+            continue
+          }
+
+          const baseTv = verdict === 'promote' ? TV_LOWER_BLOCK_ENTRY : TV_TAIL
+          const phraseCode: ReasonCode = verdict === 'promote' ? 'PROVEN_CONVERTER_VOLUME' : 'TAIL_MIN_TV'
+
+          // ШАГ4: МАРЖИНАЛЬНЫЙ ПОДЪЁМ ПОВЕРХ level-lock (вторая попытка). Кандидатный
+          // upliftTv считаем ТОЛЬКО при открытом гейте недорасхода; level-lock применит
+          // его лишь в момент (пере)установки уровня и далее ЗАМОРОЗИТ — надбавка НЕ
+          // прыгает от posterior-шума (причина №1 провала М3). Закрытие гейта уровни НЕ
+          // откатывает (они зафиксированы) — петля «газ↔расход» разорвана (причина №2).
+          let upliftTv: number | null = null
+          if (MARGINAL_UPLIFT_ENABLED && verdict === 'promote' && underspendGate.open) {
+            const upl = recommendMarginalBid({
+              auctionBids,
+              posteriorCr: bv.posteriorMean,
+              leadValueRub,
+              cplCapPct: MARGINAL_CPL_CAP_PCT,
+              currentBidMicro,
+            })
+            if (upl.changed && upl.targetTv != null) upliftTv = upl.targetTv
+          }
+
+          const lvl = resolveLevel({ prev: levels.get(bid.KeywordId), verdict, baseTv, upliftTv })
+          nextLevels.set(bid.KeywordId, lvl.lock)
+          const desiredTv = lvl.tv
+          const uplifted = desiredTv > baseTv
+
+          const rec: RecommendBidResult = recommendBid({ auctionBids, desiredTv, currentBidMicro })
+          if (rec.changed) {
+            // Уверенность вердикта для приоритета ramp-in: promote → P(CR≥порога),
+            // demote → P(CR<порога). Exploration — promote тонкой беззаявочной фразы.
+            const confidence = verdict === 'promote' ? 1 - bv.pBelow : bv.pBelow
+            const isExploration = verdict === 'promote' && !protectedConv && head.leads === 0
+            enriched.push({
+              keywordId: bid.KeywordId,
+              fromMicro: currentBidMicro,
+              toMicro: rec.targetBidMicro,
+              verdict,
+              confidence,
+              protectedConv,
+              isExploration,
+            })
+            bidCodes.add(phraseCode)
+            decisions.push({
+              type: 'bid',
+              targetType: 'keyword',
+              targetId: String(bid.KeywordId),
+              summary: `ставка к TV${rec.targetTv ?? '?'}${uplifted ? ' (маржинальный подъём при недорасходе)' : ''} по Байесу (заявки ${head.leads}, клики ${head.clicks})`,
+              reasonCode: phraseCode,
+              factors: {
+                fromMicro: currentBidMicro,
+                toMicro: rec.targetBidMicro,
+                targetTv: rec.targetTv ?? 0,
+                headLeads: head.leads,
+                headClicks: head.clicks,
+              },
+            })
+          } else {
+            // Держимся. Природа фразы — тот же phraseCode; КРОМЕ случая, когда
+            // держит именно потолок/отсутствие аукциона (это и есть причина).
+            const holdCode: ReasonCode =
+              rec.holdReason === 'ceiling'
+                ? 'AUCTION_ABOVE_CEILING'
+                : rec.holdReason === 'no_auction'
+                  ? 'LOW_COVERAGE'
+                  : phraseCode
+            const holdSummary =
+              rec.holdReason === 'ceiling'
+                ? 'вход дороже потолка — держимся'
+                : rec.holdReason === 'no_auction'
+                  ? 'нет подходящей позиции аукциона — ждём'
+                  : `уже на целевом уровне (заявки ${head.leads}, клики ${head.clicks})`
+            decisions.push({
+              type: 'hold',
+              targetType: 'keyword',
+              targetId: String(bid.KeywordId),
+              summary: holdSummary,
+              reasonCode: holdCode,
+              factors: { fromMicro: currentBidMicro, headLeads: head.leads, headClicks: head.clicks },
+            })
+          }
+        }
+
+        // Персист уровней на следующий тик (guarded — незапись не роняет тик).
+        try {
+          await saveSnapshot(dayStart, 'phrase_tv_lock', serializeLevels(nextLevels))
+        } catch (err) {
+          console.error('[boris-direct/brain] снапшот phrase_tv_lock не записался', err)
+        }
+
+        // М3.5: RAMP-IN — план не влезает в CB целиком (после деплоя мозг хочет
+        // перестроить полпортфеля), применяем ПОДМНОЖЕСТВО строго в рамках CB
+        // (приоритет конвертеры), остаток НЕ храним очередью — пересчёт на след. тике.
+        if (enriched.length > 0) {
+          const ramp = selectRampInSubset(enriched)
+          // Строка отчёта — только пока догоняем (есть остаток).
+          if (ramp.deferred.length > 0) {
+            reportData.portfolioRampIn = {
+              applied: ramp.apply.length,
+              planned: enriched.length,
+              deferred: ramp.deferred.length,
+            }
+          }
+          if (ramp.apply.length > 0) {
+            // Префикс машинных кодов пачки в reason — дубль в payload лога.
+            const bidsCodePrefix = (['PROVEN_CONVERTER_VOLUME', 'CORE_LOWER_BLOCK', 'TAIL_MIN_TV'] as const)
+              .filter((code) => bidCodes.has(code))
+              .join(',')
+            const rampNote =
+              ramp.deferred.length > 0 ? ` (ввод порциями: ${ramp.apply.length} из ${enriched.length})` : ''
+            const gate = await applyBidChanges(
+              ramp.apply,
+              `[${bidsCodePrefix}] пофразный экономбиддинг (конвертер→нижний блок, горелка→минимум, тонкая→вход): ${ramp.apply.length} фраз${rampNote}`
+            )
+            if (gate.breakerTripped) {
+              // Штатный ramp-in под CB до срабатывания доводить НЕ должен (подмножество
+              // ≤ лимита по построению). Сработало → реальная аномалия. Немой стоп-алерт
+              // ЗАПРЕЩЁН как класс — шлём владельцу СОДЕРЖАНИЕ остановленного плана.
+              const stopped: CbStoppedChange[] = ramp.applyEnriched.map((c) => ({
+                keyText: keyTextOf(c.keywordId),
+                fromMicro: c.fromMicro,
+                toMicro: c.toMicro,
+                verdict: c.verdict,
+              }))
+              anomalies.push({
+                severity: 'critical',
+                kind: 'circuit_breaker',
+                text: formatCbStoppedPlan({ changes: stopped }),
+              })
+              decisions.push({
+                type: 'alert',
+                targetType: 'campaign',
+                targetId: String(DIRECT_CAMPAIGN_ID),
+                summary: `circuit breaker: пачка правок ставок (${ramp.apply.length} шт.) вне паттерна`,
+                reasonCode: 'CIRCUIT_BREAKER',
+                factors: { changes: ramp.apply.length },
+              })
+            } else if (gate.writeErrors?.length) {
+              // A: keywordbids.set вернул поэлементные Errors. Частичный успех
+              // (applied=true) — часть ставок реально применилась; полный провал
+              // (applied=false) — ничего. В обоих случаях аномалия.
+              const summary = `ставки: ${ramp.apply.length} фраз к целевым позициям шкалы`
+              anomalies.push({
+                severity: 'critical',
+                kind: gate.partial ? 'bids_partial_fail' : 'bids_write_fail',
+                text: gate.partial
+                  ? `Ставки применены ЧАСТИЧНО, часть фраз с ошибкой: ${gate.writeErrors.join('; ')}. Проверь ставки в кабинете.`
+                  : `Ставки НЕ применились в Директе (ошибки API): ${gate.writeErrors.join('; ')}.`,
+              })
+              if (gate.applied) appliedSummaries.push(`${summary} (частично)`)
+            } else {
+              const summary = `ставки: ${ramp.apply.length} фраз к целевым позициям шкалы${rampNote}`
+              if (gate.applied) appliedSummaries.push(summary)
+              else wouldDoSummaries.push(summary)
+            }
+          }
         }
       }
     }

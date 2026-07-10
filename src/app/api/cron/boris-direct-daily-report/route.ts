@@ -79,6 +79,11 @@ async function handler(request: Request) {
       costPerLeadRub: payload.costPerLeadRub ?? null,
       topQueries: payload.topQueries ?? [],
       quarantine: payload.quarantine ?? false,
+      // Снапшот несёт эти поля (DailyResultPayload = DailyReportData & …); без явного
+      // проброса они терялись при реконструкции data → строки не рендерились.
+      // М3: строка недорасхода (была латентно потеряна). М3.5: ввод портфеля (ramp-in).
+      underspend: payload.underspend,
+      portfolioRampIn: payload.portfolioRampIn,
     },
     appliedSummaries: payload.appliedSummaries ?? [],
     wouldDoSummaries: payload.wouldDoSummaries ?? [],
