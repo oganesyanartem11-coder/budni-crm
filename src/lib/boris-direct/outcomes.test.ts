@@ -279,14 +279,24 @@ describe('generateCorrectionProposals — за флагом владельца',
     ratio: 1.3,
   }
 
-  it('флаг выключен → no-op, БД не трогаем', async () => {
-    vi.stubEnv('BORIS_DIRECT_AUTO_CORRECTION', '')
+  it('флаг явно выключен (=false) → no-op, БД не трогаем', async () => {
+    vi.stubEnv('BORIS_DIRECT_AUTO_CORRECTION', 'false')
 
     const result = await generateCorrectionProposals(now)
 
     expect(result).toEqual({ created: 0 })
     expect(mockActionLog.findMany).not.toHaveBeenCalled()
     expect(mockCreateProposal).not.toHaveBeenCalled()
+  })
+
+  it('М4: по умолчанию (флаг не задан) — ВКЛючён, разбирает worse-исходы', async () => {
+    vi.stubEnv('BORIS_DIRECT_AUTO_CORRECTION', '')
+    mockActionLog.findMany.mockResolvedValue([])
+
+    const result = await generateCorrectionProposals(now)
+
+    expect(result).toEqual({ created: 0 })
+    expect(mockActionLog.findMany).toHaveBeenCalled() // не no-op: искал исходы
   })
 
   it('флаг включён → bid_revert и minus_review по worse-исходам, счёт только created:true', async () => {

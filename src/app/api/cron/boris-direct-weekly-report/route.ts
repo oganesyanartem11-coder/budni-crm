@@ -19,6 +19,8 @@ import { mskDay, mskDayStartUtc, type DailyReportData } from '@/lib/boris-direct
 import { getLlmSpendForPeriod } from '@/lib/boris-direct/llm'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
 import { generateWeeklyReportText } from '@/lib/boris-direct/report-texts'
+import { generateWeeklyConsilium } from '@/lib/boris-direct/consilium'
+import { getActiveLessonsReport } from '@/lib/boris-direct/lessons'
 import {
   pollReport,
   parseReportTsv,
@@ -275,7 +277,34 @@ async function handler(request: Request) {
     matchTypeShare,
     underspendWeekly,
   })
-  const sent = await sendToDirectChat(text)
+
+  // М4 ШАГ 2: недельный консилиум (heavy) — 3–5 гипотез владельцу ОТДЕЛЬНЫМ РАЗДЕЛОМ
+  // недельного отчёта, СТРОГО текст (не в кабинет, не предложения-с-кнопками). Один
+  // heavy-вызов в неделю. Fail-safe: любой сбой/пусто → '' → раздела нет, отчёт уходит.
+  let lessonsDigest: string | undefined
+  try {
+    lessonsDigest = await getActiveLessonsReport()
+  } catch (err) {
+    console.error('[boris-direct/weekly] уроки для консилиума недоступны', err)
+  }
+  const consilium = await generateWeeklyConsilium({
+    period: { from: fromDay, to: toDay },
+    days: days.map((d) => ({
+      dateLabel: d.dateLabel,
+      spendRub: d.spendRub,
+      clicks: d.clicks,
+      leadsFromDirect: d.leadsFromDirect,
+      costPerLeadRub: d.costPerLeadRub,
+    })),
+    topQueries: days.flatMap((d) => d.topQueries),
+    leadCounts: { directAttrib, metrika, delivered },
+    underspendWeekly,
+    matchTypeShare,
+    lessonsDigest,
+  })
+
+  const fullText = consilium ? `${text}\n\n${consilium}` : text
+  const sent = await sendToDirectChat(fullText)
 
   await markRanToday(JOB_LABEL, { days: days.length, sent: sent.ok })
 

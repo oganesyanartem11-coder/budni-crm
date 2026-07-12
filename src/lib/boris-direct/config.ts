@@ -69,6 +69,12 @@ export const PRIOR_WEIGHT_CLICKS = 15
 /** Дефолт CR кампании, когда окно пусто (нет данных для prior). */
 export const PRIOR_CR_FALLBACK = 0.05
 
+/** М4: окно прайора CR кампании в РАБОЧИХ днях — ОТДЕЛЬНОЕ от окна пофразной
+ *  экономики (PHRASE_ECON_WINDOW_WORKDAYS=10). Матожидание Beta-prior устойчивее на
+ *  длинной истории; истории меньше окна → берётся что есть (на молодой кампании
+ *  поведение не меняется). НЕ связывать с PHRASE_ECON_WINDOW_WORKDAYS. Меняет владелец. */
+export const PRIOR_CR_WINDOW_WORKDAYS = 30
+
 /** CR-порог вердикта как ДОЛЯ CR кампании (относительный, а не абсолютный: при CR
  *  кампании 4% и 20% «горелка» — разное). Горелка = CR уверенно ниже
  *  VERDICT_CR_THRESHOLD_FRAC × CR_кампании (0.5 = ниже половины нормы). */
@@ -255,6 +261,18 @@ export const MARGINAL_UPLIFT_ENABLED = false
  */
 export const CB_ALERT_TOP_N = 5
 
+// ---------- М4: обучение и прозрачность ----------
+
+/** ШАГ 1: сколько дней держим снапшоты decision-trace (kind='decisions') до прунинга.
+ *  ~194 записи/тик ≈ 25–40 КБ/день; 30 дней — окно «Борис, почему» + разбор. */
+export const TRACE_RETENTION_DAYS = 30
+
+/** ШАГ 4: живой конвертер СТАРЕЕТ (STALE, защита снята) после N ПОЛНЫХ окон подряд
+ *  (клики ≥ PHRASE_MIN_CLICKS за окно) с 0 конверсий. Мало кликов — окно не полное,
+ *  храповик не тикает (не наказываем за отсутствие данных). Реестровые (converters.ts)
+ *  не стареют НИКОГДА (страховка поверх). Меняет владелец. */
+export const CONVERTER_STALE_WINDOWS = 3
+
 // ---------- Стоимость LLM (другие деньги, не рекламный бюджет) ----------
 
 /** Месячный потолок трат на LLM роли, USD. Env-override. */
@@ -343,9 +361,13 @@ export const OUTCOME_IMPROVED_RATIO = 0.8
 
 /**
  * Авто-предложения коррекции по плохим исходам (откат ставки, снятие минуса).
- * ВЫКЛЮЧЕНО по умолчанию — включает владелец env-переменной
- * BORIS_DIRECT_AUTO_CORRECTION=true по накоплении данных. Код заложен.
+ * М4 ШАГ 5: ВКЛючено по умолчанию (применение принятых доведено до конца).
+ * Выключить: BORIS_DIRECT_AUTO_CORRECTION=false.
  */
 export function isAutoCorrectionEnabled(): boolean {
-  return process.env.BORIS_DIRECT_AUTO_CORRECTION === 'true'
+  // М4 ШАГ 5: ВКЛючено по умолчанию (применение принятых коррекций доведено до
+  // конца — bid_revert/minus_review реально откатываются существующими механиками).
+  // Выключить может владелец: BORIS_DIRECT_AUTO_CORRECTION=false. Коррекции остаются
+  // ПРЕДЛОЖЕНИЯМИ (применяются только после «да»), автоприменения нет.
+  return process.env.BORIS_DIRECT_AUTO_CORRECTION !== 'false'
 }

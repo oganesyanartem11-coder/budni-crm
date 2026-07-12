@@ -14,6 +14,7 @@ import type { BorisDirectProposal } from '@prisma/client'
 import { getAcceptedUnapplied, markProposalApplied } from './proposals'
 import { prepareMinusCandidates } from './rules'
 import { addNegativeKeywords, applyDailyBudget } from './write-gate'
+import { revertActionById } from './rollback'
 import { MICRO } from './config'
 
 export interface ApplyAcceptedResult {
@@ -134,6 +135,28 @@ async function applyOne(
       // decideProposal) — применять нечего, просто помечаем; в skipped не пишем.
       await markProposalApplied(proposal.id)
       return
+
+    // М4 ШАГ 5: принятые коррекции применяются РЕАЛЬНО существующими механиками
+    // через revertActionById (write-gate; bid_revert уважает level-lock, minus_review
+    // = removeNegativeKeywords по added). Write-набор НЕ расширяется. «Требует ручного
+    // применения» для этих типов больше не возникает.
+    case 'bid_revert':
+    case 'minus_review': {
+      const actionLogId = typeof payload.actionLogId === 'string' ? payload.actionLogId : null
+      if (!actionLogId) {
+        await markProposalApplied(proposal.id)
+        skipped.push(`${proposal.type}: в payload нет actionLogId — применять нечего (предложение ${proposal.id})`)
+        return
+      }
+      const res = await revertActionById(actionLogId)
+      await markProposalApplied(proposal.id)
+      if (res.ok) {
+        applied.push(`${proposal.type}: ${res.message}`)
+      } else {
+        skipped.push(`${proposal.type}: ${res.message} (предложение ${proposal.id})`)
+      }
+      return
+    }
 
     default:
       // Неизвестный тип: помечаем (чтобы не крутить вечно) и честно говорим.

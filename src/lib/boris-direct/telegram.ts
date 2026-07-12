@@ -32,6 +32,7 @@ import {
 import { revertLastAction } from './rollback'
 import { decideProposal } from './proposals'
 import { getActiveLessonsReport } from './lessons'
+import { explainPhrase } from './explain'
 
 // ---------- Отправка в чат Директа ----------
 
@@ -138,6 +139,20 @@ export async function handleDirectChatMessage(
     .replace(/,/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+
+  // «Борис, почему <фраза>» — прозрачность решений (ШАГ 1). ТОЛЬКО ЧТЕНИЕ, не
+  // команда состояния; отвечаем сразу. Пустая («борис почему») → switch → next().
+  if (command.startsWith('почему ')) {
+    let explanation: string
+    try {
+      explanation = await explainPhrase(command.slice('почему '.length).trim())
+    } catch (err) {
+      console.error('[boris-direct/telegram] команда «почему» упала', err)
+      explanation = 'Не получилось объяснить, смотри логи'
+    }
+    await ctx.reply(explanation, { parse_mode: 'HTML' })
+    return
+  }
 
   let reply: string
   try {

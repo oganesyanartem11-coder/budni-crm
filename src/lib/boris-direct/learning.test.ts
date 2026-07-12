@@ -21,6 +21,7 @@ import {
   recordVerdicts,
   recordOwnerDecision,
   getLearningStats,
+  getRecentOwnerMinusDecisions,
   shouldOfferGateLift,
   buildGateLiftProposalInput,
   type LearningStats,
@@ -30,6 +31,28 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockCreateMany.mockResolvedValue({ count: 0 })
   mockUpdateMany.mockResolvedValue({ count: 0 })
+})
+
+describe('getRecentOwnerMinusDecisions (ШАГ 3: истина владельца по фразе)', () => {
+  it('истина = matched?verdict:flip(verdict); дедуп по фразе (свежее решение)', async () => {
+    mockFindMany.mockResolvedValue([
+      { candidate: 'вакансии', verdict: 'minus', matched: true, decidedAt: new Date('2026-07-10') },
+      { candidate: 'обеды электросталь', verdict: 'minus', matched: false, decidedAt: new Date('2026-07-09') },
+      { candidate: 'рецепты', verdict: 'keep', matched: false, decidedAt: new Date('2026-07-08') },
+      { candidate: 'корпитание', verdict: 'keep', matched: true, decidedAt: new Date('2026-07-07') },
+      { candidate: 'вакансии', verdict: 'minus', matched: false, decidedAt: new Date('2026-07-01') },
+    ])
+    const res = await getRecentOwnerMinusDecisions(20, new Date('2026-07-11'))
+    expect(res).toEqual([
+      { candidate: 'вакансии', ownerSaysTrash: true },
+      { candidate: 'обеды электросталь', ownerSaysTrash: false },
+      { candidate: 'рецепты', ownerSaysTrash: true },
+      { candidate: 'корпитание', ownerSaysTrash: false },
+    ])
+    const arg = mockFindMany.mock.calls[0][0]
+    expect(arg.orderBy).toEqual({ decidedAt: 'desc' })
+    expect(arg.take).toBe(20)
+  })
 })
 
 describe('recordVerdicts', () => {

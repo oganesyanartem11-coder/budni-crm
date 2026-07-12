@@ -4,7 +4,7 @@
  * и src/lib/leads/*.ts, 2026-07):
  *
  * - borisDirectState:          findUnique, upsert (unique key)
- * - borisDirectSnapshot:       create, findFirst, findMany (+select, +distinct)
+ * - borisDirectSnapshot:       create, findFirst, findMany (+select, +distinct), deleteMany
  * - borisDirectReportJob:      create, update, updateMany, findFirst, findMany
  * - borisDirectActionLog:      create, update, findFirst, findMany
  * - borisDirectProposal:       create, update, updateMany, findUnique, findFirst, findMany
@@ -412,6 +412,15 @@ export class FakeModel {
     const matches = this.filter(args.where, op)
     for (const row of matches) this.applyData(row, args.data)
     return { count: matches.length }
+  }
+
+  async deleteMany(args?: { where?: Row }): Promise<{ count: number }> {
+    const op = this.op('deleteMany')
+    assertAllowedKeys(args as Row | undefined, ['where'], op)
+    const matches = new Set(this.filter(args?.where, op))
+    const before = this.rows.length
+    this.rows = this.rows.filter((r) => !matches.has(r))
+    return { count: before - this.rows.length }
   }
 
   async upsert(args: { where: Row; create: Row; update: Row }): Promise<Row> {
