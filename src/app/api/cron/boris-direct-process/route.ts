@@ -32,6 +32,7 @@ import { applyAcceptedProposals } from '@/lib/boris-direct/apply-accepted'
 import { getDirectRoleState } from '@/lib/boris-direct/state'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
 import { formatAnomalyMessage } from '@/lib/boris-direct/report-texts'
+import { runForecastCycle } from '@/lib/boris-direct/forecast'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -158,6 +159,15 @@ async function handler(request: Request) {
   // --- Fail-safe/рассинхрон-алёрты применения принятых минусов — сразу владельцу. ---
   for (const alert of acceptedAlerts) {
     await sendToDirectChat(alert)
+  }
+
+  // --- М5: суточный цикл прогноза (детект слома за вчера + прогноз на сегодня). ---
+  // Живёт в РОУТЕ, не в мозг-тике: daily_totals за вчера уже записан выше, а полигон
+  // роут не исполняет → на sim-скоринг не влияет. Fail-safe внутри (тик не роняет).
+  try {
+    await runForecastCycle()
+  } catch (err) {
+    console.error(`[cron:${JOB_LABEL}] цикл прогноза упал (не критично)`, err)
   }
 
   await markRanToday(JOB_LABEL, {

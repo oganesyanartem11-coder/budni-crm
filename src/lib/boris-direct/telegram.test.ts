@@ -15,6 +15,9 @@ const {
   mockDecideProposal,
   mockGetActiveLessonsReport,
   mockExplainPhrase,
+  mockFindRecentLeadCandidates,
+  mockMarkDealWon,
+  mockCancelDeal,
 } = vi.hoisted(() => {
   // Регистрация scope 'bdir' происходит ПРИ ИМПОРТЕ модуля — сохраняем handler
   // в замыкании, т.к. vi.clearAllMocks() в beforeEach стирает mock.calls.
@@ -38,6 +41,9 @@ const {
     mockDecideProposal: vi.fn(),
     mockGetActiveLessonsReport: vi.fn(),
     mockExplainPhrase: vi.fn(),
+    mockFindRecentLeadCandidates: vi.fn(),
+    mockMarkDealWon: vi.fn(),
+    mockCancelDeal: vi.fn(),
   }
 })
 
@@ -73,6 +79,16 @@ vi.mock('./lessons', () => ({
 vi.mock('./explain', () => ({
   explainPhrase: mockExplainPhrase,
 }))
+// Чистые функции deals (parseDealCommand/findLeadMatches) — РЕАЛЬНЫЕ; мокаем только I/O.
+vi.mock('./deals', async (importActual) => {
+  const actual = await importActual<typeof import('./deals')>()
+  return {
+    ...actual,
+    findRecentLeadCandidates: mockFindRecentLeadCandidates,
+    markDealWon: mockMarkDealWon,
+    cancelDeal: mockCancelDeal,
+  }
+})
 
 import { sendToDirectChat, isDirectChat, handleDirectChatMessage } from './telegram'
 
@@ -113,6 +129,9 @@ beforeEach(() => {
   mockSetAutoNegativesEnabled.mockResolvedValue(undefined)
   mockGetActiveLessonsReport.mockResolvedValue('Мои уроки: пока пусто.')
   mockExplainPhrase.mockResolvedValue('Держал: тонкая, 3 клика, заявок 0.')
+  mockFindRecentLeadCandidates.mockResolvedValue([])
+  mockMarkDealWon.mockResolvedValue(undefined)
+  mockCancelDeal.mockResolvedValue(undefined)
 })
 
 describe('sendToDirectChat', () => {
@@ -330,6 +349,66 @@ describe('handleDirectChatMessage — команды владельца', () => 
       'Не получилось применить команду, смотри логи',
       { parse_mode: 'HTML' }
     )
+  })
+})
+
+describe('М5: команда «Борис, сделка …»', () => {
+  const lead = (over: Partial<{ id: string; phoneDigits: string; name: string; utmTerm: string | null }> = {}) => ({
+    id: over.id ?? 'lead-1',
+    phoneDigits: over.phoneDigits ?? '79991234567',
+    phone: null,
+    name: over.name ?? 'Иван',
+    createdAt: new Date('2026-07-10T09:00:00Z'),
+    utmTerm: over.utmTerm ?? 'обеды в офис',
+  })
+  const replyText = (ctx: MockCtx) => ctx.reply.mock.calls[0][0] as string
+
+  it('однозначный лид → записывает сделку (markDealWon) + подтверждение', async () => {
+    mockFindRecentLeadCandidates.mockResolvedValue([lead()])
+    const ctx = makeCtx(-100777, 'Борис, сделка 79991234567 150000')
+    await handleDirectChatMessage(asCtx(ctx), vi.fn())
+    expect(mockMarkDealWon).toHaveBeenCalledWith('lead-1', 150000)
+    expect(replyText(ctx)).toContain('Записал сделку')
+    expect(replyText(ctx)).toContain('150000 ₽')
+  })
+
+  it('неоднозначно (два лида) → перечисляет, не пишет', async () => {
+    mockFindRecentLeadCandidates.mockResolvedValue([lead({ id: 'a' }), lead({ id: 'b', name: 'Пётр' })])
+    const ctx = makeCtx(-100777, 'Борис, сделка 79991234567 150000')
+    await handleDirectChatMessage(asCtx(ctx), vi.fn())
+    expect(mockMarkDealWon).not.toHaveBeenCalled()
+    expect(replyText(ctx)).toContain('несколько заявок')
+  })
+
+  it('не найден → честно говорит, не пишет', async () => {
+    mockFindRecentLeadCandidates.mockResolvedValue([])
+    const ctx = makeCtx(-100777, 'Борис, сделка 0000 150000')
+    await handleDirectChatMessage(asCtx(ctx), vi.fn())
+    expect(mockMarkDealWon).not.toHaveBeenCalled()
+    expect(replyText(ctx)).toContain('Не нашёл заявку')
+  })
+
+  it('отмена → снимает отметку (cancelDeal)', async () => {
+    mockFindRecentLeadCandidates.mockResolvedValue([lead()])
+    const ctx = makeCtx(-100777, 'Борис, сделка 79991234567 отмена')
+    await handleDirectChatMessage(asCtx(ctx), vi.fn())
+    expect(mockCancelDeal).toHaveBeenCalledWith('lead-1')
+    expect(replyText(ctx)).toContain('Снял отметку')
+  })
+
+  it('тестовый лид-маркер → не метим (не найден)', async () => {
+    mockFindRecentLeadCandidates.mockResolvedValue([lead({ phoneDigits: '79995555555', name: 'Тестик' })])
+    const ctx = makeCtx(-100777, 'Борис, сделка 79995555555 150000')
+    await handleDirectChatMessage(asCtx(ctx), vi.fn())
+    expect(mockMarkDealWon).not.toHaveBeenCalled()
+    expect(replyText(ctx)).toContain('Не нашёл заявку')
+  })
+
+  it('кривая команда → подсказка синтаксиса, не пишет', async () => {
+    const ctx = makeCtx(-100777, 'Борис, сделка 12 много')
+    await handleDirectChatMessage(asCtx(ctx), vi.fn())
+    expect(mockMarkDealWon).not.toHaveBeenCalled()
+    expect(replyText(ctx)).toContain('Не понял команду сделки')
   })
 })
 

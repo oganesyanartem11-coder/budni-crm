@@ -33,6 +33,14 @@ import { revertLastAction } from './rollback'
 import { decideProposal } from './proposals'
 import { getActiveLessonsReport } from './lessons'
 import { explainPhrase } from './explain'
+import {
+  parseDealCommand,
+  findLeadMatches,
+  findRecentLeadCandidates,
+  markDealWon,
+  cancelDeal,
+  type DealLeadCandidate,
+} from './deals'
 
 // ---------- Отправка в чат Директа ----------
 
@@ -57,6 +65,54 @@ export async function sendToDirectChat(
     parseMode: 'HTML',
     replyMarkup: opts?.replyMarkup,
   })
+}
+
+/** Короткое описание лида для подтверждения (без утечки полного телефона). */
+function formatLeadShort(lead: DealLeadCandidate): string {
+  const digits = (lead.phoneDigits ?? '').replace(/\D/g, '')
+  const last4 = digits.length >= 4 ? `…${digits.slice(-4)}` : digits || '—'
+  const name = lead.name?.trim() || 'без имени'
+  const day = new Date(lead.createdAt.getTime() + 3 * 3600_000).toISOString().slice(0, 10)
+  const term = lead.utmTerm?.trim() ? `, фраза «${lead.utmTerm.trim()}»` : ''
+  return `${name} (тел. ${last4}, заявка ${day}${term})`
+}
+
+/**
+ * М5: команда «Борис, сделка <телефон> <сумма>» / «... отмена». Находит лид,
+ * ставит dealStatus/dealAmount, отвечает подтверждением. Неоднозначно →
+ * перечисляет кандидатов; не найден → честно говорит. Пишет ТОЛЬКО в нашу БД
+ * (LandingLead), не в кабинет Директа.
+ */
+async function handleDealCommand(command: string): Promise<string> {
+  const parsed = parseDealCommand(command)
+  if (parsed.kind === 'invalid') {
+    return (
+      `Не понял команду сделки: ${parsed.error}\n` +
+      `Пример: <code>Борис, сделка 79991234567 150000</code> (или последние 4 цифры телефона), ` +
+      `отмена: <code>Борис, сделка 79991234567 отмена</code>`
+    )
+  }
+
+  const candidates = await findRecentLeadCandidates(parsed.identifierDigits)
+  const matches = findLeadMatches(parsed.identifierDigits, candidates)
+
+  if (matches.length === 0) {
+    return 'Не нашёл заявку по этому телефону за последние полгода. Проверь номер (можно последние 4 цифры).'
+  }
+  if (matches.length > 1) {
+    const list = matches.slice(0, 8).map((m) => `— ${formatLeadShort(m)}`).join('\n')
+    return (
+      `Нашёл несколько заявок с таким телефоном — уточни ПОЛНЫЙ номер, чтобы не ошибиться:\n${list}`
+    )
+  }
+
+  const lead = matches[0]
+  if (parsed.kind === 'cancel') {
+    await cancelDeal(lead.id)
+    return `Снял отметку сделки: ${formatLeadShort(lead)}.`
+  }
+  await markDealWon(lead.id, parsed.amountRub!)
+  return `Записал сделку: ${formatLeadShort(lead)} — сумма ${Math.round(parsed.amountRub!)} ₽. Учту в недельной «Выручке».`
 }
 
 /** Это чат Директа? env не задан / chatId нет → false (тихо). */
@@ -151,6 +207,20 @@ export async function handleDirectChatMessage(
       explanation = 'Не получилось объяснить, смотри логи'
     }
     await ctx.reply(explanation, { parse_mode: 'HTML' })
+    return
+  }
+
+  // М5: «Борис, сделка <телефон> <сумма>» / «... отмена» — отметка выручки
+  // (пишем dealStatus/dealAmount лида, не в кабинет). Аргументная команда до switch.
+  if (command === 'сделка' || command.startsWith('сделка ')) {
+    let reply: string
+    try {
+      reply = await handleDealCommand(command)
+    } catch (err) {
+      console.error('[boris-direct/telegram] команда «сделка» упала', err)
+      reply = 'Не получилось записать сделку, смотри логи'
+    }
+    await ctx.reply(reply, { parse_mode: 'HTML' })
     return
   }
 

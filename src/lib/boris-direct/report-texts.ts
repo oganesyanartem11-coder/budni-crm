@@ -17,7 +17,11 @@ import {
   MICRO,
   UNDERSPEND_START_PCT,
   MEDIAN_ENTRY_PRICE_RUB,
+  getLeadValueRub,
 } from './config'
+import type { RevenueSummary } from './deals'
+import type { CohortEffect, CohortMetrics } from './cohorts'
+import { COHORT_MIN_CLICKS } from './config'
 import { callBorisDirectLlm } from './llm'
 import { formatCplWithValue } from './economics'
 import { isRegisteredConverter, converterLessonsForContext } from './converters'
@@ -132,6 +136,9 @@ export interface DailyReportInput {
   /** Готовая секция «ОПЫТ» (formatLessonsBlock). Пусто/undefined → секции нет;
    * undefined в generateDailyReportText → уроки подтягиваются сами. */
   lessonsBlock?: string
+  /** М5: готовая строка прогноз/факт (renderForecastLine). Пусто → строки нет
+   * (прогноз ещё не строился). Считает route, здесь только вставляем. */
+  forecastLine?: string
 }
 
 /** Русская форма слова «алерт» по числу: 1 алерт, 2 алерта, 5 алертов. */
@@ -191,6 +198,8 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     `- CTR: ${formatCtr(d.ctr)}`,
     `- Заявок всего: ${d.leadsTotal}, из Директа: ${d.leadsFromDirect}`,
     `- Цена заявки: ${formatCplWithValue(d.costPerLeadRub)}`,
+    // М5: прогноз/факт по кликам и расходу — самокалибровка (только видимость).
+    ...(input.forecastLine ? [`- Прогноз/факт: ${input.forecastLine}`] : []),
     '',
     'ТОП-ЗАПРОСЫ:',
     topQueries,
@@ -303,6 +312,115 @@ export interface WeeklyReportExtras {
    * < 80% бюджета печатаем грубую оценку упущенного объёма. Пусто → строки нет.
    */
   underspendWeekly?: { medianSpendRub: number; dailyBudgetRub: number }
+  /**
+   * М5: выручка по сделкам (отмечает владелец командой). weekly — за период (по
+   * дате заявки), allTime — всего. Пусто → секции нет. ТОЛЬКО видимость, в биддинг
+   * не идёт. Средний чек сопоставляется с LEAD_VALUE (вывод; константу не меняем).
+   */
+  revenue?: { weekly: RevenueSummary; allTime: RevenueSummary }
+  /**
+   * М5: «эффект первой порции» — когорта поднятых 10.07 (A) vs портфель (B),
+   * метрики до/после. Пусто → блока нет. Мало данных → «вывод рано» БЕЗ вердикта.
+   * Никаких решений из блока — только текст владельцу (арбитр по подъёмам).
+   */
+  cohortEffect?: CohortEffect
+}
+
+/** Цена клика когорты, ₽ (null при 0 кликов). */
+function cohortCpc(m: CohortMetrics): number | null {
+  return m.clicks > 0 ? m.spendRub / m.clicks : null
+}
+
+/** Цена заявки когорты, ₽ (null при 0 конверсий). */
+function cohortCpl(m: CohortMetrics): number | null {
+  return m.conversions > 0 ? m.spendRub / m.conversions : null
+}
+
+/** Строка окна когорты: клики/день, CPC, конверсии, CPL. */
+function cohortWindowLine(label: string, m: CohortMetrics): string {
+  const perDay = m.days > 0 ? (m.clicks / m.days).toFixed(1) : '—'
+  const cpc = cohortCpc(m)
+  const cpl = cohortCpl(m)
+  return (
+    `  ${label}: ${perDay} кликов/день, ` +
+    `цена клика ${cpc == null ? '—' : `${Math.round(cpc)} ₽`}, ` +
+    `конверсий ${m.conversions}, ` +
+    `цена заявки ${cpl == null ? '—' : `${Math.round(cpl)} ₽`}`
+  )
+}
+
+/**
+ * М5 блок «эффект первой порции»: когорта A (поднятые 10.07) vs B (портфель),
+ * до/после. Мало данных → «вывод рано» без вердикта; иначе цифры БЕЗ авто-решения
+ * (решение о подъёмах — за владельцем, это лишь живой арбитр).
+ */
+function cohortLines(e: CohortEffect): string[] {
+  const lines = [
+    `ЭФФЕКТ ПЕРВОЙ ПОРЦИИ (подняты ${ddmm(e.raiseDay)} — A: ${e.cohortA.after.keywords} фраз, B: остальной портфель):`,
+  ]
+  if (!e.enoughData) {
+    lines.push(
+      `- данных мало: кликов в когорте A после подъёма ${e.cohortA.after.clicks} (нужно ≥${COHORT_MIN_CLICKS}) — ` +
+        `вывод делать рано, привожу текущие цифры без вердикта`
+    )
+  }
+  lines.push(
+    'Когорта A (поднятые):',
+    cohortWindowLine('до', e.cohortA.before),
+    cohortWindowLine('после', e.cohortA.after),
+    'Когорта B (остальной портфель):',
+    cohortWindowLine('до', e.cohortB.before),
+    cohortWindowLine('после', e.cohortB.after)
+  )
+  if (e.enoughData) {
+    lines.push('- цифры набрали вес; сравни клики/день и цену клика A до/после — это арбитр решения о подъёмах (решает владелец).')
+  }
+  return lines
+}
+
+/** Целые рубли с пробелом-разделителем тысяч (для сумм выручки). */
+function rub(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+}
+
+/**
+ * М5 секция «Деньги»: выручка недели/всего, по фразам (utm_term), сопоставление
+ * среднего чека с модельной ценностью заявки (LEAD_VALUE) — ТОЛЬКО вывод, константу
+ * НЕ меняем (решение владельца). Нет сделок → приглашение отмечать их командой.
+ */
+function moneyLines(revenue: NonNullable<WeeklyReportExtras['revenue']>): string[] {
+  const { weekly, allTime } = revenue
+  const header = 'ДЕНЬГИ — выручка по сделкам (отмечает владелец: «Борис, сделка <телефон> <сумма>»):'
+  if (allTime.dealCount === 0) {
+    return [header, '- сделок пока не отмечено — отмечай их командой, посчитаю выручку на фразу']
+  }
+
+  const lines = [
+    header,
+    `- Выручка за неделю: ${rub(weekly.totalRevenue)} ₽ (${weekly.dealCount} сделок, по дате заявки); ` +
+      `всего: ${rub(allTime.totalRevenue)} ₽ (${allTime.dealCount})`,
+    'По фразам (за всё время):',
+    ...allTime.byPhrase.slice(0, 8).map((p) => `- «${p.query}»: ${rub(p.revenue)} ₽ (${p.deals})`),
+  ]
+  if (allTime.unattributedDeals > 0) {
+    lines.push(`- без атрибуции (нет utm_term): ${rub(allTime.unattributedRevenue)} ₽ (${allTime.unattributedDeals})`)
+  }
+
+  if (allTime.avgCheckRub != null) {
+    const leadValue = getLeadValueRub()
+    const avg = allTime.avgCheckRub
+    const verdict =
+      avg > leadValue * 1.1
+        ? 'фактический чек ВЫШЕ модельной ценности заявки — модель консервативна'
+        : avg < leadValue * 0.9
+          ? 'фактический чек НИЖЕ модельной ценности — модель может её завышать'
+          : 'близко к модельной ценности'
+    lines.push(
+      `- Средний чек ${rub(avg)} ₽ vs ценность заявки в модели ${rub(leadValue)} ₽ — ${verdict}. ` +
+        `Константу LEAD_VALUE не меняю (это решение владельца).`
+    )
+  }
+  return lines
 }
 
 /** 'YYYY-MM-DD' → 'DD.MM'. */
@@ -456,6 +574,10 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     'КОНВЕРТЕРЫ ПОД ЗАЩИТОЙ (не минусовать/не выключать/не понижать «дорого»):',
     converterLines.length > 0 ? converterLines.join('\n') : 'нет',
     '',
+    // М5: секция «Деньги» — выручка по сделкам (только видимость, не в биддинг).
+    ...(extras.revenue ? [...moneyLines(extras.revenue), ''] : []),
+    // М5: блок «эффект первой порции» — арбитр подъёмов (только текст, без решений).
+    ...(extras.cohortEffect ? [...cohortLines(extras.cohortEffect), ''] : []),
     // Итог дистилляции уроков — детерминированно, кодом (не LLM).
     ...(extras.lessonsSummary
       ? [

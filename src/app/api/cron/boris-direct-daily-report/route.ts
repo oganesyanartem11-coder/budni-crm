@@ -14,6 +14,7 @@ import { alreadyRanToday, markRanToday, getTodayCronAnomalyCount } from '@/lib/b
 import { yesterdayMsk, mskDayStartUtc, type DailyReportData } from '@/lib/boris-direct/brain'
 import { getDirectRoleState } from '@/lib/boris-direct/state'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
+import { loadForecastForDay, renderForecastLine } from '@/lib/boris-direct/forecast'
 import { countDedupDropsToday } from '@/lib/leads/dedup'
 import {
   generateDailyReportText,
@@ -67,6 +68,21 @@ async function handler(request: Request) {
   // ШАГ 2: сколько дублей-ретраев заявок отсеял приёмник сегодня (для строки в сводке).
   const dedupDroppedToday = await countDedupDropsToday(now)
 
+  // М5: строка прогноз/факт за вчера (retrospective). Прогноз за вчера персистил
+  // тик «обработка» позавчера; факт — из payload (clicks/spendRub). Нет прогноза
+  // → строки нет (fail-safe, отчёт уходит как прежде).
+  let forecastLine: string | undefined
+  try {
+    const forecast = await loadForecastForDay(yesterday)
+    forecastLine =
+      renderForecastLine(forecast, {
+        clicks: payload.clicks ?? 0,
+        spendRub: payload.spendRub ?? 0,
+      }) ?? undefined
+  } catch (err) {
+    console.error('[cron:boris-direct-daily-report] строка прогноза не построилась', err)
+  }
+
   const input: DailyReportInput = {
     data: {
       dateLabel: payload.dateLabel ?? yesterday,
@@ -95,6 +111,7 @@ async function handler(request: Request) {
     anomaliesFiredToday,
     dedupDroppedToday,
     observe: state.mode === 'OBSERVE',
+    forecastLine,
   }
 
   const text = await generateDailyReportText(input)
