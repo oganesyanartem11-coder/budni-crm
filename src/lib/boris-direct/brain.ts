@@ -90,6 +90,7 @@ import {
   deserializeLevels,
   type PhraseLevelMap,
   type PhraseLevelSnapshot,
+  type LockedLevel,
 } from './level-lock'
 import {
   selectRampInSubset,
@@ -777,6 +778,8 @@ export interface DailyReportData {
     applied: number
     planned: number
     deferred: number
+    /** ШАГ3: причина, когда применено 0 (defer-all) — в строку отчёта. */
+    reason?: string
   }
   llm?: never
 }
@@ -1787,6 +1790,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         const nextLevels: PhraseLevelMap = new Map(
           [...levels].filter(([id]) => liveKeyIds.has(id))
         )
+        // ШАГ4: локи фиксируем ТОЛЬКО после РЕАЛЬНОГО применения (не намерение) —
+        // «планируемые» уровни правок копим отдельно, переносим в nextLevels лишь для
+        // применённых после applyBidChanges.
+        const plannedLockById = new Map<number, LockedLevel>()
         const enriched: EnrichedChange[] = []
         // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
         const bidCodes = new Set<ReasonCode>()
@@ -1851,7 +1858,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           }
 
           const lvl = resolveLevel({ prev: levels.get(bid.KeywordId), verdict, baseTv, upliftTv })
-          nextLevels.set(bid.KeywordId, lvl.lock)
+          // ШАГ4: НЕ фиксируем уровень здесь (это НАМЕРЕНИЕ). Фиксация — после
+          // применения: rec.changed → в plannedLockById (перенос по факту write);
+          // держим на уровне (rec.changed=false) → уже на уровне, лок ставим сразу.
           const desiredTv = lvl.tv
           const uplifted = desiredTv > baseTv
 
@@ -1870,6 +1879,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
               protectedConv,
               isExploration,
             })
+            plannedLockById.set(bid.KeywordId, lvl.lock) // ШАГ4: зафиксируем ПОСЛЕ применения
             bidCodes.add(phraseCode)
             decisions.push({
               type: 'bid',
@@ -1886,6 +1896,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
               },
             })
           } else {
+            // Держим на уровне: фраза УЖЕ на этом уровне (write не нужен) → лок сразу.
+            nextLevels.set(bid.KeywordId, lvl.lock)
             // Держимся. Природа фразы — тот же phraseCode; КРОМЕ случая, когда
             // держит именно потолок/отсутствие аукциона (это и есть причина).
             const holdCode: ReasonCode =
@@ -1911,24 +1923,25 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           }
         }
 
-        // Персист уровней на следующий тик (guarded — незапись не роняет тик).
-        try {
-          await saveSnapshot(dayStart, 'phrase_tv_lock', serializeLevels(nextLevels))
-        } catch (err) {
-          console.error('[boris-direct/brain] снапшот phrase_tv_lock не записался', err)
-        }
-
-        // М3.5: RAMP-IN — план не влезает в CB целиком (после деплоя мозг хочет
-        // перестроить полпортфеля), применяем ПОДМНОЖЕСТВО строго в рамках CB
-        // (приоритет конвертеры), остаток НЕ храним очередью — пересчёт на след. тике.
+        // М3.5/fix: RAMP-IN — план порциями под CB, масс-база = ЖИВОЙ ПОРТФЕЛЬ (пороги
+        // 40/0.5 неизменны). Остаток пересчитывается след. тиком (не очередь). ШАГ4:
+        // phrase_tv_lock фиксируем ТОЛЬКО применённым (перенос после applyBidChanges).
+        let appliedKeywordIds: number[] = []
         if (enriched.length > 0) {
+          // ЧАСТИЧНАЯ ПРИЁМКА: сходимость (масс-база = живой портфель) ОТЛОЖЕНА по гейту
+          // полигона (применение хвоста роняло economics holdout −7). Стопор ОСТАЁТСЯ
+          // (subset-база CB: all-upward хвост без демоутов не входит), но теперь ВИДИМ
+          // (ШАГ3 defer-all алерт) + лок чинится (ШАГ4). Ретюн подъёмов — отдельным спринтом.
+          const deferAllReason =
+            'каждая правка превышает лимит массы поодиночке (нет демоутов для базы) — нужен ретюн подъёмов'
           const ramp = selectRampInSubset(enriched)
-          // Строка отчёта — только пока догоняем (есть остаток).
+          // Строка отчёта — пока догоняем (есть остаток); при 0 применённых — с причиной.
           if (ramp.deferred.length > 0) {
             reportData.portfolioRampIn = {
               applied: ramp.apply.length,
               planned: enriched.length,
               deferred: ramp.deferred.length,
+              ...(ramp.apply.length === 0 ? { reason: deferAllReason } : {}),
             }
           }
           if (ramp.apply.length > 0) {
@@ -1942,6 +1955,7 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
               ramp.apply,
               `[${bidsCodePrefix}] пофразный экономбиддинг (конвертер→нижний блок, горелка→минимум, тонкая→вход): ${ramp.apply.length} фраз${rampNote}`
             )
+            appliedKeywordIds = gate.appliedKeywordIds // ШАГ4: лок только применённым
             if (gate.breakerTripped) {
               // Штатный ramp-in под CB до срабатывания доводить НЕ должен (подмножество
               // ≤ лимита по построению). Сработало → реальная аномалия. Немой стоп-алерт
@@ -1984,6 +1998,55 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
               else wouldDoSummaries.push(summary)
             }
           }
+
+          // ШАГ3: НЕМОЙ defer-all ЗАПРЕЩЁН — применили 0, но остаток есть → владельцу
+          // СОДЕРЖАТЕЛЬНЫЙ алерт (причина + топ-5 по |Δ|), ТРОТ 1/день (не спамим тиком).
+          if (ramp.apply.length === 0 && ramp.deferred.length > 0) {
+            try {
+              const alreadyToday = await snapshotPayloadForDay('rampin_deferall_alert', dayStart)
+              if (!alreadyToday) {
+                const stopped: CbStoppedChange[] = ramp.deferred.map((c) => ({
+                  keyText: keyTextOf(c.keywordId),
+                  fromMicro: c.fromMicro,
+                  toMicro: c.toMicro,
+                  verdict: c.verdict,
+                }))
+                anomalies.push({
+                  severity: 'critical',
+                  kind: 'circuit_breaker',
+                  text:
+                    `Ввод портфеля застрял: применено 0 из ${ramp.deferred.length} правок — ${deferAllReason}.\n` +
+                    formatCbStoppedPlan({ changes: stopped }),
+                })
+                decisions.push({
+                  type: 'alert',
+                  targetType: 'campaign',
+                  targetId: String(DIRECT_CAMPAIGN_ID),
+                  summary: `ramp-in defer-all: 0 из ${ramp.deferred.length} (${deferAllReason})`,
+                  reasonCode: 'CIRCUIT_BREAKER',
+                  factors: { deferred: ramp.deferred.length },
+                })
+                await saveSnapshot(dayStart, 'rampin_deferall_alert', { deferred: ramp.deferred.length })
+              }
+            } catch (err) {
+              console.error('[boris-direct/brain] defer-all алерт не отправлен', err)
+            }
+          }
+
+          // ШАГ4: переносим лок ТОЛЬКО применённым фразам (частичный успех учтён в
+          // appliedKeywordIds); неприменённый хвост лока НЕ получает → перепланируется.
+          for (const id of appliedKeywordIds) {
+            const lock = plannedLockById.get(id)
+            if (lock) nextLevels.set(id, lock)
+          }
+        }
+
+        // Персист уровней ПОСЛЕ применения (guarded): лок получили только реально
+        // применённые + уже стоящие на уровне (hold). Незапись не роняет тик.
+        try {
+          await saveSnapshot(dayStart, 'phrase_tv_lock', serializeLevels(nextLevels))
+        } catch (err) {
+          console.error('[boris-direct/brain] снапшот phrase_tv_lock не записался', err)
         }
       }
     }
