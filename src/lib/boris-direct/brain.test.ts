@@ -78,7 +78,8 @@ vi.mock('./lessons', () => mockLessons)
 vi.mock('./outcomes', () => mockOutcomes)
 
 import { runCollectTick, runProcessTick, backfillCriterionHistory, mskDay, mskDayStartUtc, yesterdayMsk } from './brain'
-import { MICRO, MARGINAL_UPLIFT_ENABLED } from './config'
+import { MICRO, MARGINAL_UPLIFT_ENABLED, PRIOR_CR_WINDOW_WORKDAYS } from './config'
+import { workdayWindowStartUtc } from './workdays'
 
 // 2026-07-02 09:00 UTC → сегодня-МСК 2026-07-02, вчера-МСК 2026-07-01.
 const NOW = new Date('2026-07-02T09:00:00Z')
@@ -1209,5 +1210,39 @@ describe('пофразная экономика по CriterionId (MAJOR-2: аг�
       expect(bidDec!.summary).not.toContain('маржинальный подъём')
     }
     expect(res.reportData?.underspend?.gateOpen).toBe(true) // недорасход виден (открытый гейт)
+  })
+})
+
+describe('М4 микродолг (д): прайор CR кампании — отдельное окно PRIOR_CR_WINDOW_WORKDAYS', () => {
+  it('CR кампании (prior Байеса) читается по окну 30 рабочих дней, отдельно от 10-дн окна фразы', async () => {
+    setupProcessHappyPath()
+    // Перехватываем окна query_criterion_daily, сохраняя маршрутизацию карантина.
+    const critWheres: Array<{ gte: Date; lte: Date }> = []
+    mockPrisma.borisDirectSnapshot.findMany.mockImplementation(
+      async (args: { where: { kind: string; tickDate?: { gte: Date; lte: Date } } }) => {
+        if (args.where.kind === 'query_criterion_daily') {
+          if (args.where.tickDate) critWheres.push(args.where.tickDate)
+          return []
+        }
+        if (args.where.kind === 'campaign') {
+          return Array.from({ length: 6 }, (_, i) => ({ tickDate: new Date(`2026-06-2${5 + (i % 5)}T00:00:00Z`) }))
+        }
+        if (args.where.kind === 'daily_totals') {
+          return [{ tickDate: new Date('2026-06-28T21:00:00Z'), payload: { date: '2026-06-28', spendRub: 500, clicks: 40, impressions: 200 } }]
+        }
+        return []
+      }
+    )
+
+    await runProcessTick(NOW)
+
+    // Прайор кампании грузится по ОТДЕЛЬНОМУ окну PRIOR_CR_WINDOW_WORKDAYS (30 раб. дней),
+    // а не по 10-дн окну пофразной экономики — и это окно самое ШИРОКОЕ (начинается раньше).
+    expect(critWheres.length).toBeGreaterThan(0)
+    const endDay = mskDay(critWheres[0].lte)
+    const expectedPriorStart = workdayWindowStartUtc(endDay, PRIOR_CR_WINDOW_WORKDAYS - 1).getTime()
+    const starts = critWheres.map((w) => w.gte.getTime())
+    expect(starts).toContain(expectedPriorStart)
+    expect(Math.min(...starts)).toBe(expectedPriorStart)
   })
 })

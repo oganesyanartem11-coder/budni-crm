@@ -76,6 +76,7 @@ import {
   PHRASE_ECON_WINDOW_WORKDAYS,
   CONVERTER_PROTECT_WINDOW_WORKDAYS,
   PRIOR_CR_FALLBACK,
+  PRIOR_CR_WINDOW_WORKDAYS,
   TV_LOWER_BLOCK_ENTRY,
   TV_TAIL,
 } from './config'
@@ -1657,14 +1658,34 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         addConv(row.criterionId, row.conversions)
       }
 
-      // М3: CR кампании за окно (матожидание prior Байеса) — по агрегату headStat.
-      let totalHeadClicks = 0
-      let totalHeadLeads = 0
-      for (const [, s] of headStat) {
-        totalHeadClicks += s.clicks
-        totalHeadLeads += s.leads
+      // М4: CR кампании (матожидание prior Байеса) — по ОТДЕЛЬНОМУ окну
+      // PRIOR_CR_WINDOW_WORKDAYS рабочих дней, НЕ по 10-дн окну пофразной экономики
+      // (headStat). Длинное окно даёт устойчивое матожидание prior; истории меньше
+      // окна → берётся что есть (на молодой кампании == прежнее поведение). Строки без
+      // CriterionId / не-живые ключи в prior не идут (как в head). FAIL-SAFE: окно не
+      // прочиталось → prior по сегодняшним строкам/фолбэку, ставки тик не блокирует.
+      const priorStat = new Map<number, { clicks: number; leads: number }>()
+      const addPrior = (criterionId: number | null | undefined, clicks: number, leads: number) => {
+        if (criterionId == null || !liveKeyIds.has(criterionId)) return
+        const acc = priorStat.get(criterionId) ?? { clicks: 0, leads: 0 }
+        acc.clicks += clicks
+        acc.leads += leads
+        priorStat.set(criterionId, acc)
       }
-      const campaignCr = totalHeadClicks > 0 ? totalHeadLeads / totalHeadClicks : PRIOR_CR_FALLBACK
+      try {
+        const priorHist = await loadCriterionWindow(histEnd, PRIOR_CR_WINDOW_WORKDAYS - 1)
+        for (const [cid, s] of priorHist) addPrior(cid, s.clicks, s.conversions)
+      } catch (err) {
+        console.error('[boris-direct/brain] окно прайора CR кампании недоступно', err)
+      }
+      for (const row of rows) addPrior(row.criterionId, row.clicks, row.conversions)
+      let totalPriorClicks = 0
+      let totalPriorLeads = 0
+      for (const [, s] of priorStat) {
+        totalPriorClicks += s.clicks
+        totalPriorLeads += s.leads
+      }
+      const campaignCr = totalPriorClicks > 0 ? totalPriorLeads / totalPriorClicks : PRIOR_CR_FALLBACK
 
       // М3.5: LEVEL-LOCK — читаем зафиксированные уровни фраз (kind 'phrase_tv_lock').
       // FAIL-SAFE: если ЧТЕНИЕ сломалось (throw) — уровни неизвестны → ставки в этот
