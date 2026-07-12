@@ -1313,15 +1313,16 @@ describe('М4 ШАГ 3: секция ОПЫТ в классификаторе м
   })
 })
 
-describe('fix ШАГ 3: немой defer-all запрещён', () => {
-  it('крошечный портфель → каждая правка > лимита массы → apply 0 + содержательный алерт + причина в отчёте', async () => {
+describe('ветка Б узкое закрытие: застрявший all-upward хвост принимается на факт (без алерта)', () => {
+  it('чистый all-upward стоп (apply=0) → лок на текущий уровень + тихая инфо-запись, БЕЗ critical-алерта и без «застрял» в отчёте', async () => {
     setupProcessHappyPath()
-    // Портфель = Σ ставок = 2 ₽ (обе по 1 ₽) → подъём к TV65 (150 ₽) > 50% массы →
-    // ramp-in откладывает ВСЁ (apply=0). Раньше это был немой «0 из N».
+    // Ставки на TV15 (50 ₽ = позиционная ставка TV15). Подъём к TV65 (150 ₽) = +200% > 50%
+    // массы подмножества → ramp-in откладывает ВСЁ (apply=0). Раньше — defer-all алерт;
+    // теперь (verdict B на честном движке) — принимаем хвост на ФАКТИЧЕСКОМ уровне (TV15).
     mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
       if (args.where.kind === 'keywords') return { payload: KEYWORDS_PAYLOAD }
       if (args.where.kind === 'keywordbids')
-        return { payload: BIDS_PAYLOAD.map((b) => ({ ...b, Search: { ...b.Search, Bid: 1 * MICRO } })) }
+        return { payload: BIDS_PAYLOAD.map((b) => ({ ...b, Search: { ...b.Search, Bid: 50 * MICRO } })) }
       if (args.where.kind === 'campaign_settings') {
         return {
           payload: {
@@ -1334,19 +1335,31 @@ describe('fix ШАГ 3: немой defer-all запрещён', () => {
           },
         }
       }
-      return null // phrase_tv_lock / rampin_deferall_alert → null (не алертили сегодня)
+      return null // phrase_tv_lock / rampin_tail_accepted → null (сегодня ещё не принимали)
     })
 
     const res = await runProcessTick(NOW)
 
+    // НЕТ повторяющегося critical-алерта «застрял».
     const alert = res.anomalies.find(
       (a) => a.kind === 'circuit_breaker' && (a.text ?? '').includes('Ввод портфеля застрял')
     )
-    expect(alert).toBeDefined()
-    expect(alert!.text).toContain('превышает лимит массы')
-    expect(res.reportData?.portfolioRampIn?.applied).toBe(0)
-    expect(res.reportData?.portfolioRampIn?.reason).toContain('масс')
-    expect(res.decisions?.some((d) => d.reasonCode === 'CIRCUIT_BREAKER' && d.summary.includes('defer-all'))).toBe(true)
+    expect(alert).toBeUndefined()
+    // Отчёт НЕ показывает хвост как остаток.
+    expect(res.reportData?.portfolioRampIn).toBeUndefined()
+    // Тихая инфо-запись о принятии хвоста (тип hold, НЕ alert).
+    const accepted = res.decisions?.find(
+      (d) => d.reasonCode === 'TAIL_MIN_TV' && d.summary.includes('принят на текущих уровнях')
+    )
+    expect(accepted).toBeDefined()
+    expect(accepted!.type).toBe('hold')
+    // Лок на ФАКТИЧЕСКИЙ уровень (TV15): застрявшие фразы записаны в phrase_tv_lock на tv=15.
+    const created = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data as { kind: string; payload: unknown })
+    const lockSnap = created.find((d) => d.kind === 'phrase_tv_lock')
+    const levels = ((lockSnap?.payload as { levels?: Array<{ tv: number }> })?.levels ?? [])
+    expect(levels.some((l) => l.tv === 15)).toBe(true)
+    // Снапшот-трот принятия хвоста записан (1/день).
+    expect(created.some((d) => d.kind === 'rampin_tail_accepted')).toBe(true)
   })
 })
 
