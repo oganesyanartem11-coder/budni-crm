@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * (rules, anomalies, парсеры отчётов/атрибуции) работают настоящие.
  */
 
-const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetGoalStatsByPhrase, mockGetLeads, mockGate, mockGetState, mockLlm, mockLessons, mockOutcomes } =
+const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetGoalStatsByPhrase, mockGetLeads, mockGate, mockGetState, mockLlm, mockLessons, mockOutcomes, mockGetRecentOwnerMinusDecisions } =
   vi.hoisted(() => ({
     mockPrisma: {
       borisDirectSnapshot: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() },
@@ -48,6 +48,7 @@ const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetGo
       measureProposalOutcomes: vi.fn(),
       generateCorrectionProposals: vi.fn(),
     },
+    mockGetRecentOwnerMinusDecisions: vi.fn(),
   }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
@@ -73,7 +74,11 @@ vi.mock('./attribution', async (importOriginal) => {
 vi.mock('./write-gate', () => mockGate)
 vi.mock('./state', () => ({ getDirectRoleState: mockGetState }))
 vi.mock('./llm', () => ({ callBorisDirectLlm: mockLlm }))
-vi.mock('./prompts', () => ({ getBorisDirectSystemPrompt: () => 'SYS' }))
+vi.mock('./prompts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./prompts')>()
+  return { ...actual, getBorisDirectSystemPrompt: () => 'SYS' }
+})
+vi.mock('./learning', () => ({ getRecentOwnerMinusDecisions: mockGetRecentOwnerMinusDecisions }))
 vi.mock('./lessons', () => mockLessons)
 vi.mock('./outcomes', () => mockOutcomes)
 
@@ -239,6 +244,7 @@ beforeEach(() => {
   mockOutcomes.measureProposalOutcomes.mockResolvedValue({ measured: 0, worse: 0, unmeasurable: 0 })
   mockOutcomes.generateCorrectionProposals.mockResolvedValue({ created: 0 })
   mockLessons.deriveAndRefreshLessons.mockResolvedValue({ created: 0, confirmed: 0, refuted: 0, staled: 0 })
+  mockGetRecentOwnerMinusDecisions.mockResolvedValue([])
 })
 
 describe('хелперы времени (МСК = UTC+3)', () => {
@@ -1279,5 +1285,22 @@ describe('М4 ШАГ 4: живая конвертер-память', () => {
     const mem = memSnap!.payload as Record<string, { status: string; criterionId: number }>
     expect(mem['11']?.status).toBe('ACTIVE')
     expect(mem['22']).toBeUndefined()
+  })
+})
+
+describe('М4 ШАГ 3: секция ОПЫТ в классификаторе минусов', () => {
+  it('промпт классификатора содержит конвертеры (реестр) и решения владельца', async () => {
+    setupProcessHappyPath()
+    mockGetRecentOwnerMinusDecisions.mockResolvedValue([
+      { candidate: 'вакансии повар', ownerSaysTrash: true },
+    ])
+    await runProcessTick(NOW)
+    const classify = mockLlm.mock.calls.find((c) => c[0].purpose === 'minus_classify')
+    expect(classify).toBeDefined()
+    const system = classify![0].system as string
+    expect(system).toContain('ОПЫТ')
+    expect(system).toContain('НЕ мусор') // конвертеры «не мусор»
+    expect(system).toContain('бизнес ланч доставка москва') // реестровый конвертер
+    expect(system).toContain('вакансии повар') // решение владельца
   })
 })

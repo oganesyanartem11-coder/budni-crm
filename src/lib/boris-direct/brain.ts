@@ -112,7 +112,7 @@ import {
   filterOutProtectedConverters,
   CONVERTER_PROTECT_WINDOW_DAYS,
 } from './economics'
-import { isRegisteredConverter } from './converters'
+import { isRegisteredConverter, CONFIRMED_CONVERTERS } from './converters'
 import {
   updateConverterMemory,
   activeConverterIds,
@@ -139,7 +139,8 @@ import {
   generateCorrectionProposals,
 } from './outcomes'
 import { callBorisDirectLlm } from './llm'
-import { getBorisDirectSystemPrompt } from './prompts'
+import { getBorisDirectSystemPrompt, formatMinusClassifierExperience } from './prompts'
+import { getRecentOwnerMinusDecisions } from './learning'
 import { getDoctrineBlock } from './doctrine'
 
 // ---------- Время: МСК = UTC+3 ----------
@@ -1404,9 +1405,21 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             ['negative-keywords', 'match-operators', 'keywords', 'autotargeting'],
             { maxItems: 6, maxTokens: 700 }
           )
+          // ШАГ 3: секция ОПЫТ — конвертеры (реестр + живая память) НЕ мусор + выжимка
+          // решений владельца по спорным минусам. Справка, НЕ приказ; скромный бюджет.
+          const experienceBlock = formatMinusClassifierExperience({
+            converterPhrases: [
+              ...CONFIRMED_CONVERTERS.map((c) => c.phrase),
+              ...Object.values(prevConverterMemory)
+                .filter((e) => e.status === 'ACTIVE')
+                .map((e) => e.phrase),
+            ],
+            ownerDecisions: await getRecentOwnerMinusDecisions(),
+          })
           const system =
             getBorisDirectSystemPrompt({ mode: state.mode, frozen: state.frozen }) +
             `\n\nЗАДАЧА КЛАССИФИКАТОРА: для каждого кандидата в минус-фразы реши, СТРУКТУРНЫЙ ли это мусор для нашего бизнеса (доставка обедов на коллективы). Мусор: чужое кафе/бренд/навигация к конкуренту; запросы не про доставку обедов на коллектив (вакансии, рецепты, розница на одного); запросы ДРУГИХ регионов. ГЕО: зона доставки — Москва и ВСЯ Московская область (регионы 213+1). Города МО (например Электросталь, Балашиха, Химки, Подольск, Мытищи, Королёв) — ЦЕЛЕВЫЕ, это НЕ мусор. Мусор по гео — только запросы про регионы ВНЕ Москвы и МО (например Благовещенск, Элиста, Санкт-Петербург, Екатеринбург). Верни СТРОГО JSON-массив без пояснений и без markdown: [{"candidate": string, "structural": boolean, "confident": boolean, "reason": string}]. confident=true только если сомнений нет.` +
+            (experienceBlock ? `\n\n${experienceBlock}` : '') +
             (minusDoctrine ? `\n\n${minusDoctrine}` : '')
           const llmResult = await callBorisDirectLlm({
             purpose: 'minus_classify',

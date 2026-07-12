@@ -91,6 +91,37 @@ export async function getLearningStats(now: Date = new Date()): Promise<Learning
   return { decided, matchRate: matchedCount / decided, streak }
 }
 
+export interface OwnerMinusDecision {
+  candidate: string
+  /** Истина владельца: счёл ли он фразу мусором (минус). */
+  ownerSaysTrash: boolean
+}
+
+/**
+ * ШАГ 3: последние N решённых спорных минусов — истина ВЛАДЕЛЬЦА по фразе (для
+ * секции ОПЫТ классификатора). Истина = вердикт Бориса, если matched; иначе
+ * обратный (владелец не согласился). Дедуп по фразе — свежее решение побеждает.
+ */
+export async function getRecentOwnerMinusDecisions(
+  limit = 20,
+  now: Date = new Date()
+): Promise<OwnerMinusDecision[]> {
+  const rows = await prisma.borisDirectMinusVerdict.findMany({
+    where: { decidedAt: { not: null, lte: now } },
+    orderBy: { decidedAt: 'desc' },
+    take: limit,
+  })
+  const seen = new Set<string>()
+  const out: OwnerMinusDecision[] = []
+  for (const row of rows) {
+    if (seen.has(row.candidate)) continue // одна фраза — только свежее решение
+    seen.add(row.candidate)
+    const ownerVerdict = row.matched === true ? row.verdict : row.verdict === 'minus' ? 'keep' : 'minus'
+    out.push({ candidate: row.candidate, ownerSaysTrash: ownerVerdict === 'minus' })
+  }
+  return out
+}
+
 /** Пора ли предлагать снять гейт спорных минусов. */
 export function shouldOfferGateLift(stats: LearningStats): boolean {
   return (

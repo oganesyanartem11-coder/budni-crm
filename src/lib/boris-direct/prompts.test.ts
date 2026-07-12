@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getBorisDirectSystemPrompt } from './prompts'
+import { getBorisDirectSystemPrompt, formatMinusClassifierExperience } from './prompts'
 import {
   BORIS_VOICE_BLOCK,
   BORIS_TELEGRAM_FORMAT_BLOCK,
@@ -51,5 +51,36 @@ describe('getBorisDirectSystemPrompt — переиспользование ли
   it('бюджет меняет только владелец; режимы — командами через код', () => {
     expect(observe).toMatch(/меняет только владелец/i)
     expect(observe).toMatch(/обрабатывает код/i)
+  })
+})
+
+describe('formatMinusClassifierExperience (ШАГ 3: секция ОПЫТ)', () => {
+  it('пусто на пустом входе (секции нет)', () => {
+    expect(formatMinusClassifierExperience({ converterPhrases: [], ownerDecisions: [] })).toBe('')
+  })
+
+  it('конвертеры → строка «НЕ мусор» с фразами (дедуп)', () => {
+    const out = formatMinusClassifierExperience({
+      converterPhrases: ['бизнес ланч доставка', 'бизнес ланч доставка', 'корпоративное питание'],
+      ownerDecisions: [],
+    })
+    expect(out).toContain('ОПЫТ')
+    expect(out).toContain('НЕ мусор')
+    expect(out).toContain('бизнес ланч доставка')
+    expect(out).toContain('корпоративное питание')
+    // дедуп: фраза не повторяется дважды
+    expect(out.match(/бизнес ланч доставка/g)?.length).toBe(1)
+  })
+
+  it('решения владельца → раздельно мусор и НЕ мусор', () => {
+    const out = formatMinusClassifierExperience({
+      converterPhrases: [],
+      ownerDecisions: [
+        { candidate: 'вакансии повар', ownerSaysTrash: true },
+        { candidate: 'обеды в электросталь', ownerSaysTrash: false },
+      ],
+    })
+    expect(out).toMatch(/подтвердил как мусор.*вакансии повар/)
+    expect(out).toMatch(/оставил.*обеды в электросталь/)
   })
 })

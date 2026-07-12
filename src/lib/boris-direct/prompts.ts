@@ -58,3 +58,53 @@ ${BORIS_TELEGRAM_FORMAT_BLOCK}
 Текущее время: ${new Date().toISOString()} (МСК = UTC+3).
 `
 }
+
+/** Максимум фраз в одной строке ОПЫТ (скромный токен-бюджет light-вызова). */
+const MINUS_EXPERIENCE_MAX = 20
+
+export interface MinusClassifierExperienceInput {
+  /** Действующие конвертеры (реестр + живая память) — «эти фразы НЕ мусор». */
+  converterPhrases: string[]
+  /** Последние решения владельца по спорным минусам (истина владельца по фразе). */
+  ownerDecisions: Array<{ candidate: string; ownerSaysTrash: boolean }>
+}
+
+function uniqTrimmed(list: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of list) {
+    const s = raw.trim()
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+  }
+  return out
+}
+
+const quoteList = (phrases: string[]): string =>
+  phrases.slice(0, MINUS_EXPERIENCE_MAX).map((p) => `«${p}»`).join(', ')
+
+/**
+ * ШАГ 3: секция ОПЫТ для промпта light-классификатора минусов. Даёт классификатору
+ * (а) действующие конвертеры (реестр + живая память) — не мусор; (б) выжимку решений
+ * владельца по спорным минусам. Справка, НЕ приказ: классификатор решает по сути.
+ * Пусто → секции нет (нечего подсказать).
+ */
+export function formatMinusClassifierExperience(input: MinusClassifierExperienceInput): string {
+  const converters = uniqTrimmed(input.converterPhrases)
+  const trash = uniqTrimmed(input.ownerDecisions.filter((d) => d.ownerSaysTrash).map((d) => d.candidate))
+  const notTrash = uniqTrimmed(input.ownerDecisions.filter((d) => !d.ownerSaysTrash).map((d) => d.candidate))
+
+  const lines: string[] = []
+  if (converters.length > 0) {
+    lines.push(`- Действующие конвертеры (эти фразы и их близкие варианты — НЕ мусор): ${quoteList(converters)}.`)
+  }
+  if (trash.length > 0) {
+    lines.push(`- Владелец ранее подтвердил как мусор: ${quoteList(trash)}.`)
+  }
+  if (notTrash.length > 0) {
+    lines.push(`- Владелец ранее оставил (НЕ мусор): ${quoteList(notTrash)}.`)
+  }
+  if (lines.length === 0) return ''
+  return ['ОПЫТ (учитывай, но решай по сути каждого кандидата):', ...lines].join('\n')
+}
