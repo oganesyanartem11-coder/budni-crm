@@ -361,9 +361,13 @@ export const OUTCOME_IMPROVED_RATIO = 0.8
 
 /**
  * Авто-предложения коррекции по плохим исходам (откат ставки, снятие минуса).
- * ВЫКЛЮЧЕНО по умолчанию — включает владелец env-переменной
- * BORIS_DIRECT_AUTO_CORRECTION=true по накоплении данных. Код заложен.
+ * М4 ШАГ 5: ВКЛючено по умолчанию (применение принятых доведено до конца).
+ * Выключить: BORIS_DIRECT_AUTO_CORRECTION=false.
  */
 export function isAutoCorrectionEnabled(): boolean {
-  return process.env.BORIS_DIRECT_AUTO_CORRECTION === 'true'
+  // М4 ШАГ 5: ВКЛючено по умолчанию (применение принятых коррекций доведено до
+  // конца — bid_revert/minus_review реально откатываются существующими механиками).
+  // Выключить может владелец: BORIS_DIRECT_AUTO_CORRECTION=false. Коррекции остаются
+  // ПРЕДЛОЖЕНИЯМИ (применяются только после «да»), автоприменения нет.
+  return process.env.BORIS_DIRECT_AUTO_CORRECTION !== 'false'
 }

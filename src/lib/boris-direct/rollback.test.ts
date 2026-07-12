@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const { mockPrisma, mockGate } = vi.hoisted(() => ({
   mockPrisma: {
     borisDirectActionLog: { findFirst: vi.fn(), update: vi.fn() },
+    borisDirectSnapshot: { findFirst: vi.fn(), create: vi.fn() },
   },
   mockGate: {
     applyBidChanges: vi.fn(),
@@ -18,12 +19,14 @@ const { mockPrisma, mockGate } = vi.hoisted(() => ({
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('./write-gate', () => mockGate)
 
-import { revertLastAction } from './rollback'
+import { revertLastAction, revertActionById } from './rollback'
 import { MICRO } from './config'
 
 beforeEach(() => {
   vi.clearAllMocks()
   mockPrisma.borisDirectActionLog.update.mockResolvedValue({})
+  mockPrisma.borisDirectSnapshot.findFirst.mockResolvedValue(null) // лока нет по умолчанию
+  mockPrisma.borisDirectSnapshot.create.mockResolvedValue({})
   mockGate.applyBidChanges.mockResolvedValue({
     applied: true,
     logId: 'revert-log',
@@ -255,5 +258,62 @@ describe('revertLastAction', () => {
     expect(res.ok).toBe(false)
     expect(res.message).toContain('breaker')
     expect(mockPrisma.borisDirectActionLog.update).not.toHaveBeenCalled()
+  })
+})
+
+describe('revertActionById (М4 ШАГ 5: откат конкретного действия)', () => {
+  it('действие не найдено / уже откачено → ok=false', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue(null)
+    const res = await revertActionById('nope')
+    expect(res.ok).toBe(false)
+    expect(res.message).toMatch(/не найдено|откачено/)
+    // Ищем по id, applied, не откаченное.
+    const where = mockPrisma.borisDirectActionLog.findFirst.mock.calls[0][0].where
+    expect(where).toMatchObject({ id: 'nope', applied: true, revertedAt: null })
+  })
+
+  it('откат ставок по id — обратное действие + СНЯТИЕ level-lock отканных фраз', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
+      id: 'act1',
+      action: 'keywordbids.set',
+      before: [{ keywordId: 11, bidMicro: 100 * MICRO }],
+      after: [{ keywordId: 11, bidMicro: 200 * MICRO }],
+    })
+    mockPrisma.borisDirectSnapshot.findFirst.mockResolvedValue({
+      tickDate: new Date('2026-07-10T00:00:00Z'),
+      payload: {
+        levels: [
+          { keywordId: 11, verdict: 'promote', tv: 65 },
+          { keywordId: 22, verdict: 'demote', tv: 15 },
+        ],
+      },
+    })
+
+    const res = await revertActionById('act1')
+
+    expect(res.ok).toBe(true)
+    // обратное действие: from текущего 200 → к прежнему 100.
+    expect(mockGate.applyBidChanges).toHaveBeenCalledWith(
+      [{ keywordId: 11, fromMicro: 200 * MICRO, toMicro: 100 * MICRO }],
+      expect.any(String),
+      'act1'
+    )
+    // level-lock ключа 11 снят, 22 сохранён (переустановит вердикт след. тика).
+    const created = mockPrisma.borisDirectSnapshot.create.mock.calls[0][0].data
+    expect(created.kind).toBe('phrase_tv_lock')
+    expect(created.payload.levels).toEqual([{ keywordId: 22, verdict: 'demote', tv: 15 }])
+  })
+
+  it('минус-ревью по id — убирает добавленные фразы (removeNegativeKeywords), lock не трогаем', async () => {
+    mockPrisma.borisDirectActionLog.findFirst.mockResolvedValue({
+      id: 'act2',
+      action: 'campaigns.update.negatives',
+      before: ['старый минус'],
+      after: ['старый минус', 'новый минус'],
+    })
+    const res = await revertActionById('act2')
+    expect(res.ok).toBe(true)
+    expect(mockGate.removeNegativeKeywords).toHaveBeenCalledWith(['новый минус'], expect.any(String), 'act2')
+    expect(mockPrisma.borisDirectSnapshot.create).not.toHaveBeenCalled() // минуса не трогают level-lock
   })
 })

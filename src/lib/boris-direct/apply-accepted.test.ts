@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { BorisDirectProposal } from '@prisma/client'
 
-const { mockGetAccepted, mockMarkApplied, mockAddNegatives, mockApplyBudget, mockPrepare } =
+const { mockGetAccepted, mockMarkApplied, mockAddNegatives, mockApplyBudget, mockPrepare, mockRevertActionById } =
   vi.hoisted(() => ({
     mockGetAccepted: vi.fn(),
     mockMarkApplied: vi.fn(),
     mockAddNegatives: vi.fn(),
     mockApplyBudget: vi.fn(),
     mockPrepare: vi.fn(),
+    mockRevertActionById: vi.fn(),
   }))
 
 vi.mock('./proposals', () => ({
@@ -19,6 +20,7 @@ vi.mock('./write-gate', () => ({
   applyDailyBudget: mockApplyBudget,
 }))
 vi.mock('./rules', () => ({ prepareMinusCandidates: mockPrepare }))
+vi.mock('./rollback', () => ({ revertActionById: mockRevertActionById }))
 
 import { applyAcceptedProposals } from './apply-accepted'
 
@@ -44,6 +46,49 @@ beforeEach(() => {
   })
   mockApplyBudget.mockResolvedValue({ applied: true, logId: 'log2' })
   mockPrepare.mockImplementation((phrases: string[]) => ({ accepted: phrases, rejected: [] }))
+  mockRevertActionById.mockResolvedValue({ ok: true, message: 'откатил' })
+})
+
+describe('М4 ШАГ 5: принятые коррекции (bid_revert / minus_review)', () => {
+  it('bid_revert → revertActionById(actionLogId) + applied, без «ручного применения»', async () => {
+    mockGetAccepted.mockResolvedValue([
+      proposal({ id: 'c1', type: 'bid_revert', payload: { actionLogId: 'act9' } }),
+    ])
+    mockRevertActionById.mockResolvedValue({ ok: true, message: 'Откатил ставки по 3 фразам.' })
+    const result = await applyAcceptedProposals()
+    expect(mockRevertActionById).toHaveBeenCalledWith('act9')
+    expect(mockMarkApplied).toHaveBeenCalledWith('c1')
+    expect(result.applied.some((s) => s.includes('Откатил ставки'))).toBe(true)
+    expect(result.skipped.join(' ')).not.toContain('ручного применения')
+  })
+
+  it('minus_review → revertActionById(actionLogId) + applied', async () => {
+    mockGetAccepted.mockResolvedValue([
+      proposal({ id: 'c2', type: 'minus_review', payload: { actionLogId: 'act8' } }),
+    ])
+    mockRevertActionById.mockResolvedValue({ ok: true, message: 'Убрал 2 фразы.' })
+    const result = await applyAcceptedProposals()
+    expect(mockRevertActionById).toHaveBeenCalledWith('act8')
+    expect(result.applied.some((s) => s.includes('Убрал'))).toBe(true)
+  })
+
+  it('коррекция не применилась (ok=false) → skipped с причиной, помечена applied (без петли)', async () => {
+    mockGetAccepted.mockResolvedValue([
+      proposal({ id: 'c3', type: 'bid_revert', payload: { actionLogId: 'act7' } }),
+    ])
+    mockRevertActionById.mockResolvedValue({ ok: false, message: 'CB не пропустил.' })
+    const result = await applyAcceptedProposals()
+    expect(mockMarkApplied).toHaveBeenCalledWith('c3')
+    expect(result.skipped.some((s) => s.includes('CB не пропустил'))).toBe(true)
+    expect(result.applied).toHaveLength(0)
+  })
+
+  it('bid_revert без actionLogId → skipped, revert не зовём', async () => {
+    mockGetAccepted.mockResolvedValue([proposal({ id: 'c4', type: 'bid_revert', payload: {} })])
+    const result = await applyAcceptedProposals()
+    expect(mockRevertActionById).not.toHaveBeenCalled()
+    expect(result.skipped.some((s) => s.includes('actionLogId'))).toBe(true)
+  })
 })
 
 describe('applyAcceptedProposals', () => {
