@@ -316,6 +316,20 @@ describe('фейк-присма', () => {
     ctx.reset()
     expect(await p.borisDirectSnapshot.findMany()).toEqual([])
   })
+
+  it('deleteMany удаляет строки по where и возвращает count (прунинг трассы)', async () => {
+    const p = ctx.fakePrisma
+    await p.borisDirectSnapshot.create({ data: { tickDate: dayToDate(0), kind: 'decisions', payload: [1] } })
+    await p.borisDirectSnapshot.create({ data: { tickDate: dayToDate(5), kind: 'decisions', payload: [2] } })
+    await p.borisDirectSnapshot.create({ data: { tickDate: dayToDate(5), kind: 'keywords', payload: [] } })
+    const res = await p.borisDirectSnapshot.deleteMany({
+      where: { kind: 'decisions', tickDate: { lt: dayToDate(3) } },
+    })
+    expect(res).toEqual({ count: 1 })
+    const left = await p.borisDirectSnapshot.findMany({ where: { kind: 'decisions' } })
+    expect(left).toHaveLength(1)
+    expect((left[0].tickDate as Date).getTime()).toBe(dayToDate(5).getTime())
+  })
 })
 
 // ---------- fakePollReport ----------

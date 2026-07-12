@@ -1267,3 +1267,17 @@ describe('М4 ШАГ 1: персист decision trace (kind=decisions) + пру�
     expect((del!.where.tickDate.lt as Date).getTime()).toBe(expectedCutoff)
   })
 })
+
+describe('М4 ШАГ 4: живая конвертер-память', () => {
+  it('ключ с конверсией в окне → снапшот converter_memory с ACTIVE-записью', async () => {
+    setupProcessHappyPath()
+    await runProcessTick(NOW)
+    const created = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data)
+    const memSnap = created.find((d) => d.kind === 'converter_memory')
+    expect(memSnap).toBeDefined()
+    // Ключ 11 конвертит (2 заявки в SQ) → ACTIVE; ключ 22 (0 заявок) записи не получает.
+    const mem = memSnap!.payload as Record<string, { status: string; criterionId: number }>
+    expect(mem['11']?.status).toBe('ACTIVE')
+    expect(mem['22']).toBeUndefined()
+  })
+})

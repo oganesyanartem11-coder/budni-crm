@@ -113,6 +113,12 @@ import {
   CONVERTER_PROTECT_WINDOW_DAYS,
 } from './economics'
 import { isRegisteredConverter } from './converters'
+import {
+  updateConverterMemory,
+  activeConverterIds,
+  type ConverterMemory,
+  type ConverterWindowStat,
+} from './converter-memory'
 import { filterOutTestLeads } from './test-markers'
 import { phantomWeight } from './phantom'
 import {
@@ -918,6 +924,21 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   const dayStart = mskDayStartUtc(yesterday)
   const dayEnd = new Date(dayStart.getTime() + DAY_MS - 1)
 
+  // М4 ШАГ 4: живая конвертер-память (prev-снапшот, ОДИН раз на тик). Даёт (1) защиту
+  // минусов ПО ТЕКСТУ ACTIVE-конвертеров (как реестр) — в двух отдельных блоках
+  // минусовки ниже; (2) prev для обновления автомата в §7 ставок. FAIL-SAFE: не
+  // прочиталось → пустая память (реестр + isProtectedConverter продолжают защищать).
+  let prevConverterMemory: ConverterMemory = {}
+  try {
+    prevConverterMemory = (await latestSnapshotPayload<ConverterMemory>('converter_memory')) ?? {}
+  } catch (err) {
+    console.error('[boris-direct/brain] конвертер-память не прочиталась — без живой защиты этот тик', err)
+  }
+  const liveConverterTexts = new Set<string>()
+  for (const entry of Object.values(prevConverterMemory)) {
+    if (entry.status === 'ACTIVE') liveConverterTexts.add(normQueryKey(entry.phrase))
+  }
+
   const pushBlockError = (block: string, err: unknown) => {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[boris-direct/brain] process: блок «${block}» упал`, err)
@@ -1344,7 +1365,12 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       candidatesRaw,
       // ШАГ 3а: подтверждённый владельцем конвертер защищён независимо от 30д-статистики
       // (историческая статистика была занижена багом суффиксной колонки конверсий).
-      (q) => Math.max(conv30dByQueryText.get(normQueryKey(q)) ?? 0, isRegisteredConverter(q) ? 1 : 0)
+      (q) =>
+        Math.max(
+          conv30dByQueryText.get(normQueryKey(q)) ?? 0,
+          isRegisteredConverter(q) ? 1 : 0,
+          liveConverterTexts.has(normQueryKey(q)) ? 1 : 0 // М4: живой ACTIVE-конвертер — как реестр
+        )
     )
     if (protectedConverters.length > 0) {
       decisions.push({
@@ -1568,7 +1594,8 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // Конвертер-защита: ≥1 заявка за 30д по тексту ИЛИ подтверждённый реестром — не трогаем.
         const conv30d = Math.max(
           conv30dByQueryText.get(normQueryKey(c.phrase)) ?? 0,
-          isRegisteredConverter(c.phrase) ? 1 : 0
+          isRegisteredConverter(c.phrase) ? 1 : 0,
+          liveConverterTexts.has(normQueryKey(c.phrase)) ? 1 : 0 // М4: живой ACTIVE-конвертер
         )
         if (conv30d > 0) return false
         // Вне-зонные города уже ловит структурная минусовка — не дублируем предложением.
@@ -1640,9 +1667,13 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       // Защита конвертера для СТАВОК — по CriterionId (заявка защищает КЛЮЧ, на
       // который сматчился запрос). Для МИНУСА защита остаётся по тексту (выше).
       const conv30dByCriterion = new Map<number, number>()
-      const addConv = (criterionId: number | null | undefined, conv: number) => {
+      // М4: клики окна защиты по CriterionId — для храповика конвертер-памяти
+      // (полное окно = клики ≥ PHRASE_MIN_CLICKS). Тот же 21-раб.-дн источник, что conv.
+      const convClicks30dByCriterion = new Map<number, number>()
+      const addConv = (criterionId: number | null | undefined, clicks: number, conv: number) => {
         if (criterionId == null || !liveKeyIds.has(criterionId)) return
         conv30dByCriterion.set(criterionId, (conv30dByCriterion.get(criterionId) ?? 0) + conv)
+        convClicks30dByCriterion.set(criterionId, (convClicks30dByCriterion.get(criterionId) ?? 0) + clicks)
       }
       const histEnd = new Date(dayStart.getTime() - DAY_MS)
       try {
@@ -1650,13 +1681,13 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         const headHist = await loadCriterionWindow(histEnd, PHRASE_ECON_WINDOW_WORKDAYS - 1)
         for (const [cid, s] of headHist) addHead(cid, s.clicks, s.conversions)
         const convHist = await loadCriterionWindow(histEnd, CONVERTER_PROTECT_WINDOW_WORKDAYS - 1)
-        for (const [cid, s] of convHist) addConv(cid, s.conversions)
+        for (const [cid, s] of convHist) addConv(cid, s.clicks, s.conversions)
       } catch (err) {
         console.error('[boris-direct/brain] окно пофразной экономики по ключу недоступно', err)
       }
       for (const row of rows) {
         addHead(row.criterionId, row.clicks, row.conversions)
-        addConv(row.criterionId, row.conversions)
+        addConv(row.criterionId, row.clicks, row.conversions)
       }
 
       // М4: CR кампании (матожидание prior Байеса) — по ОТДЕЛЬНОМУ окну
@@ -1687,6 +1718,37 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         totalPriorLeads += s.leads
       }
       const campaignCr = totalPriorClicks > 0 ? totalPriorLeads / totalPriorClicks : PRIOR_CR_FALLBACK
+
+      // М4 ШАГ 4: обновляем автомат живой конвертер-памяти по окну защиты (клики+
+      // конверсии за CONVERTER_PROTECT_WINDOW_WORKDAYS по CriterionId). NEXT-память
+      // даёт защиту СТАВОК (activeLiveConverterIds): ACTIVE-конвертер не демоутится
+      // даже когда заявка выпала из окна — до срабатывания храповика
+      // (CONVERTER_STALE_WINDOWS полных пустых окон). Реестр + isProtectedConverter —
+      // жёсткая страховка поверх. Персист kind='converter_memory' (fail-safe).
+      const converterWindow: ConverterWindowStat[] = []
+      for (const cid of liveKeyIds) {
+        const conv = conv30dByCriterion.get(cid) ?? 0
+        const clicks = convClicks30dByCriterion.get(cid) ?? 0
+        if (conv === 0 && clicks === 0) continue
+        converterWindow.push({
+          criterionId: cid,
+          phrase: keyTextById.get(cid) ?? String(cid),
+          clicks,
+          conversions: conv,
+        })
+      }
+      const nextConverterMemory = updateConverterMemory({
+        prev: prevConverterMemory,
+        window: converterWindow,
+        todayMsk: mskDay(dayStart),
+        liveIds: liveKeyIds,
+      })
+      const activeLiveConverterIds = activeConverterIds(nextConverterMemory)
+      try {
+        await saveSnapshot(dayStart, 'converter_memory', nextConverterMemory)
+      } catch (err) {
+        console.error('[boris-direct/brain] персист конвертер-памяти не удался', err)
+      }
 
       // М3.5: LEVEL-LOCK — читаем зафиксированные уровни фраз (kind 'phrase_tv_lock').
       // FAIL-SAFE: если ЧТЕНИЕ сломалось (throw) — уровни неизвестны → ставки в этот
@@ -1728,7 +1790,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           // (converters.ts) ИЛИ ≥1 заявка за окно защиты — НЕ демоутится независимо
           // от posterior (заявка ценнее экономии на клике).
           const protectedConv =
-            isProtectedConverter(conv30d) || isRegisteredConverter(keyTextById.get(bid.KeywordId))
+            isProtectedConverter(conv30d) ||
+            isRegisteredConverter(keyTextById.get(bid.KeywordId)) ||
+            activeLiveConverterIds.has(bid.KeywordId) // М4: живой ACTIVE-конвертер защищён от демоута
 
           // ЭМПИРИЧЕСКИЙ БАЙЕС (М3): promote → нижний блок; demote → минимум; hold → не трогаем.
           const bv = phraseBidVerdict({ leads: head.leads, clicks: head.clicks, campaignCr })
