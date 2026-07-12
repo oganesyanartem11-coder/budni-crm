@@ -218,7 +218,13 @@ function setupProcessHappyPath() {
   ])
   mockLlm.mockResolvedValue({ text: LLM_CLASSIFY_OK, model: 'haiku', costUsd: 0.001, downgraded: false })
   mockGate.addNegativeKeywords.mockResolvedValue({ applied: true, logId: 'n1', aborted: false, added: 1 })
-  mockGate.applyBidChanges.mockResolvedValue({ applied: true, logId: 'b1', clamped: 0, breakerTripped: false })
+  mockGate.applyBidChanges.mockImplementation(async (changes: Array<{ keywordId: number }>) => ({
+    applied: true,
+    logId: 'b1',
+    clamped: 0,
+    breakerTripped: false,
+    appliedKeywordIds: changes.map((c) => c.keywordId),
+  }))
   setState({ mode: 'LIVE' })
 }
 
@@ -511,7 +517,7 @@ describe('runProcessTick', () => {
     setupProcessHappyPath()
     setState({ mode: 'OBSERVE' })
     mockGate.addNegativeKeywords.mockResolvedValue({ applied: false, logId: 'n1', aborted: false, added: 1 })
-    mockGate.applyBidChanges.mockResolvedValue({ applied: false, logId: 'b1', clamped: 0, breakerTripped: false })
+    mockGate.applyBidChanges.mockResolvedValue({ applied: false, logId: 'b1', clamped: 0, breakerTripped: false, appliedKeywordIds: [] })
 
     const res = await runProcessTick(NOW)
 
@@ -591,7 +597,7 @@ describe('runProcessTick', () => {
 
   it('circuit breaker на ставках → critical-аномалия, не в applied', async () => {
     setupProcessHappyPath()
-    mockGate.applyBidChanges.mockResolvedValue({ applied: false, logId: 'b1', clamped: 0, breakerTripped: true })
+    mockGate.applyBidChanges.mockResolvedValue({ applied: false, logId: 'b1', clamped: 0, breakerTripped: true, appliedKeywordIds: [] })
 
     const res = await runProcessTick(NOW)
 
@@ -636,6 +642,7 @@ describe('runProcessTick', () => {
       clamped: 0,
       breakerTripped: false,
       writeErrors: ['5005: Неверный параметр'],
+      appliedKeywordIds: [],
     })
 
     const res = await runProcessTick(NOW)
@@ -657,6 +664,7 @@ describe('runProcessTick', () => {
       breakerTripped: false,
       partial: true,
       writeErrors: ['5005: Неверный параметр'],
+      appliedKeywordIds: [11],
     })
 
     const res = await runProcessTick(NOW)
@@ -1302,5 +1310,64 @@ describe('М4 ШАГ 3: секция ОПЫТ в классификаторе м
     expect(system).toContain('НЕ мусор') // конвертеры «не мусор»
     expect(system).toContain('бизнес ланч доставка москва') // реестровый конвертер
     expect(system).toContain('вакансии повар') // решение владельца
+  })
+})
+
+describe('fix ШАГ 3: немой defer-all запрещён', () => {
+  it('крошечный портфель → каждая правка > лимита массы → apply 0 + содержательный алерт + причина в отчёте', async () => {
+    setupProcessHappyPath()
+    // Портфель = Σ ставок = 2 ₽ (обе по 1 ₽) → подъём к TV65 (150 ₽) > 50% массы →
+    // ramp-in откладывает ВСЁ (apply=0). Раньше это был немой «0 из N».
+    mockPrisma.borisDirectSnapshot.findFirst.mockImplementation(async (args: { where: { kind: string } }) => {
+      if (args.where.kind === 'keywords') return { payload: KEYWORDS_PAYLOAD }
+      if (args.where.kind === 'keywordbids')
+        return { payload: BIDS_PAYLOAD.map((b) => ({ ...b, Search: { ...b.Search, Bid: 1 * MICRO } })) }
+      if (args.where.kind === 'campaign_settings') {
+        return {
+          payload: {
+            Id: 711897777,
+            Name: 'x',
+            StartDate: '2026-06-25',
+            TimeTargeting: { Schedule: { Items: [] } },
+            NegativeKeywords: { Items: [] },
+            Statistics: { Clicks: 37, Impressions: 900 },
+          },
+        }
+      }
+      return null // phrase_tv_lock / rampin_deferall_alert → null (не алертили сегодня)
+    })
+
+    const res = await runProcessTick(NOW)
+
+    const alert = res.anomalies.find(
+      (a) => a.kind === 'circuit_breaker' && (a.text ?? '').includes('Ввод портфеля застрял')
+    )
+    expect(alert).toBeDefined()
+    expect(alert!.text).toContain('превышает лимит массы')
+    expect(res.reportData?.portfolioRampIn?.applied).toBe(0)
+    expect(res.reportData?.portfolioRampIn?.reason).toContain('масс')
+    expect(res.decisions?.some((d) => d.reasonCode === 'CIRCUIT_BREAKER' && d.summary.includes('defer-all'))).toBe(true)
+  })
+})
+
+describe('fix ШАГ 4: phrase_tv_lock только применённым', () => {
+  const lockKeys = (created: Array<{ kind: string; payload: unknown }>): number[] => {
+    const snap = created.find((d) => d.kind === 'phrase_tv_lock')
+    return ((snap?.payload as { levels?: Array<{ keywordId: number }> })?.levels ?? []).map((l) => l.keywordId)
+  }
+
+  it('breakerTripped (0 применено) → планируемая фраза НЕ получает лок (не намерение)', async () => {
+    setupProcessHappyPath()
+    mockGate.applyBidChanges.mockResolvedValue({ applied: false, logId: 'b1', clamped: 0, breakerTripped: true, appliedKeywordIds: [] })
+    await runProcessTick(NOW)
+    const created = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data)
+    expect(lockKeys(created)).not.toContain(11) // ключ 11 планировался, но write не прошёл
+  })
+
+  it('LIVE happy-path: применённая фраза получает лок', async () => {
+    setupProcessHappyPath()
+    await runProcessTick(NOW)
+    const created = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data)
+    expect(lockKeys(created)).toContain(11) // ключ 11 применён → зафиксирован
   })
 })

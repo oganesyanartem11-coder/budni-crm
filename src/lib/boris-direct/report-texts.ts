@@ -220,9 +220,13 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
   // остаток). deferred=0 → штатный тик, план влез в CB целиком, не метрим.
   const ramp = d.portfolioRampIn
   if (ramp && ramp.deferred > 0) {
+    // ШАГ3: при 0 применённых (defer-all) строка дополняется ПРИЧИНОЙ — не немой «0 из N».
+    const tail =
+      ramp.applied === 0 && ramp.reason
+        ? ` — застряло (0 применено): ${ramp.reason}`
+        : ' — докрою за ближайшие тики (по частям под предохранителем)'
     lines.push(
-      `ввод портфеля: применено ${ramp.applied} из ${ramp.planned} плановых, ` +
-        `осталось ~${ramp.deferred} — докрою за ближайшие тики (по частям под предохранителем)`
+      `ввод портфеля: применено ${ramp.applied} из ${ramp.planned} плановых, осталось ~${ramp.deferred}${tail}`
     )
   }
 

@@ -196,6 +196,9 @@ export interface ApplyBidsResult extends GateResult {
   clamped: number
   /** Circuit breaker не пропустил пачку — НЕ применено, вызывающий шлёт владельцу. */
   breakerTripped: boolean
+  /** ШАГ4: keywordId РЕАЛЬНО применённых ставок (частичный успех — только успешные;
+   *  breakerTripped/полный провал/observe → пусто). Для фиксации phrase_tv_lock. */
+  appliedKeywordIds: number[]
 }
 
 /**
@@ -240,9 +243,12 @@ export async function applyBidChanges(
         revertOfId,
       },
     })
-    return { applied: false, logId: log.id, clamped, breakerTripped: true }
+    return { applied: false, logId: log.id, clamped, breakerTripped: true, appliedKeywordIds: [] }
   }
 
+  // ШАГ4: id реально применённых ставок. Полный успех → reconcilePartial НЕ зовётся
+  // → остаётся весь список; частичный → перезаписывается только успешными.
+  let appliedIds = safe.map((c) => c.keywordId)
   const result = await executeDirectWrite({
     action: 'keywordbids.set',
     targetType: 'keyword',
@@ -257,11 +263,13 @@ export async function applyBidChanges(
     reconcilePartial: (failedIndices) => {
       const failed = new Set(failedIndices)
       const keep = <T>(arr: T[]): T[] => arr.filter((_, i) => !failed.has(i))
+      appliedIds = safe.filter((_, i) => !failed.has(i)).map((c) => c.keywordId)
       return { before: keep(before), after: keep(after) }
     },
   })
 
-  return { ...result, clamped, breakerTripped: false }
+  // Ничего не применено (observe/стоп-кран/полный провал) → пустой список.
+  return { ...result, clamped, breakerTripped: false, appliedKeywordIds: result.applied ? appliedIds : [] }
 }
 
 // ---------- Минус-фразы ----------
