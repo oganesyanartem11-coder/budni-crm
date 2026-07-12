@@ -29,10 +29,18 @@ import {
   buildMatchTypeShareReportBody,
 } from '@/lib/boris-direct/reports'
 import { toQueryStatRow, getLeadsForPeriod, splitLeadsByOrigin } from '@/lib/boris-direct/attribution'
+import { getWonDeals, aggregateRevenueByPhrase } from '@/lib/boris-direct/deals'
+import { getCohortEffect } from '@/lib/boris-direct/cohorts'
 import { filterOutTestLeads } from '@/lib/boris-direct/test-markers'
 import { getGoalStatsByDay } from '@/lib/boris-direct/metrika-client'
 import { isWorkday } from '@/lib/boris-direct/workdays'
-import { MICRO, DAILY_BUDGET_MICRO } from '@/lib/boris-direct/config'
+import {
+  MICRO,
+  DAILY_BUDGET_MICRO,
+  UPLIFT_COHORT_RAISE_DAY,
+  COHORT_MIN_CLICKS,
+  PHRASE_ECON_WINDOW_WORKDAYS,
+} from '@/lib/boris-direct/config'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -268,6 +276,30 @@ async function handler(request: Request) {
     console.error('[boris-direct/weekly] недорасход недели не посчитан', err)
   }
 
+  // М5: выручка по сделкам (владелец отмечает командой) — за неделю и всего.
+  // ТОЛЬКО видимость. Сбой не роняет отчёт (секции просто не будет).
+  let revenue: { weekly: ReturnType<typeof aggregateRevenueByPhrase>; allTime: ReturnType<typeof aggregateRevenueByPhrase> } | undefined
+  try {
+    const deals = await getWonDeals(from, to)
+    revenue = {
+      weekly: aggregateRevenueByPhrase(deals.inPeriod),
+      allTime: aggregateRevenueByPhrase(deals.all),
+    }
+  } catch (err) {
+    console.error('[boris-direct/weekly] выручка по сделкам не посчитана', err)
+  }
+
+  // М5: «эффект первой порции» — когорта поднятых 10.07 vs портфель, до/после.
+  // Read-only (ActionLog + 2 SQ-отчёта). Сбой/недозрев → блока просто не будет.
+  let cohortEffect
+  try {
+    cohortEffect =
+      (await getCohortEffect(UPLIFT_COHORT_RAISE_DAY, toDay, PHRASE_ECON_WINDOW_WORKDAYS, COHORT_MIN_CLICKS)) ??
+      undefined
+  } catch (err) {
+    console.error('[boris-direct/weekly] эффект первой порции не посчитан', err)
+  }
+
   const text = await generateWeeklyReportText(days, {
     llmSpendUsd: llmSpend.costUsd,
     llmCalls: llmSpend.calls,
@@ -276,6 +308,8 @@ async function handler(request: Request) {
     leadCounts: { directAttrib, metrika, delivered, deliveredBlindBefore: DB_BLIND_BEFORE_MSK },
     matchTypeShare,
     underspendWeekly,
+    revenue,
+    cohortEffect,
   })
 
   // М4 ШАГ 2: недельный консилиум (heavy) — 3–5 гипотез владельцу ОТДЕЛЬНЫМ РАЗДЕЛОМ

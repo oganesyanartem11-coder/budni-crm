@@ -121,6 +121,99 @@ describe('М3.5: строка ввода портфеля (ramp-in) в днев�
   })
 })
 
+describe('М5: строка прогноз/факт в дневном блоке', () => {
+  it('forecastLine задан → строка «Прогноз/факт: …»', () => {
+    const block = buildDailyDataBlock(
+      dailyInput({ forecastLine: 'клики: ждал 60±3, факт 58; расход: ждал 5000±283 ₽, факт 4900 ₽' })
+    )
+    expect(block).toContain('Прогноз/факт: клики: ждал 60±3')
+  })
+  it('forecastLine не задан → строки нет', () => {
+    expect(buildDailyDataBlock(dailyInput())).not.toContain('Прогноз/факт')
+  })
+})
+
+describe('М5: секция «Деньги» в недельном блоке', () => {
+  const days = [day({ dateLabel: '2026-07-06' })]
+  const rev = (over = {}) => ({
+    llmSpendUsd: 0,
+    llmCalls: 0,
+    proposalsPending: 0,
+    ...over,
+  })
+  it('выручка есть → суммы, фразы, средний чек vs LEAD_VALUE (константу не меняем)', () => {
+    const block = buildWeeklyDataBlock(days, rev({
+      revenue: {
+        weekly: { byPhrase: [{ query: 'обеды в офис', revenue: 150000, deals: 2 }], unattributedRevenue: 0, unattributedDeals: 0, totalRevenue: 150000, dealCount: 2, avgCheckRub: 75000 },
+        allTime: { byPhrase: [{ query: 'обеды в офис', revenue: 150000, deals: 2 }], unattributedRevenue: 20000, unattributedDeals: 1, totalRevenue: 170000, dealCount: 3, avgCheckRub: 56666.67 },
+      },
+    }))
+    expect(block).toContain('ДЕНЬГИ')
+    expect(block).toContain('Выручка за неделю: 150 000 ₽ (2 сделок')
+    expect(block).toContain('всего: 170 000 ₽ (3)')
+    expect(block).toContain('«обеды в офис»: 150 000 ₽ (2)')
+    expect(block).toContain('без атрибуции (нет utm_term): 20 000 ₽ (1)')
+    expect(block).toContain('vs ценность заявки в модели 20 000 ₽')
+    expect(block).toContain('LEAD_VALUE не меняю')
+  })
+  it('сделок нет → приглашение отмечать, без цифр', () => {
+    const block = buildWeeklyDataBlock(days, rev({
+      revenue: {
+        weekly: { byPhrase: [], unattributedRevenue: 0, unattributedDeals: 0, totalRevenue: 0, dealCount: 0, avgCheckRub: null },
+        allTime: { byPhrase: [], unattributedRevenue: 0, unattributedDeals: 0, totalRevenue: 0, dealCount: 0, avgCheckRub: null },
+      },
+    }))
+    expect(block).toContain('сделок пока не отмечено')
+  })
+  it('revenue не задан → секции нет (обратная совместимость)', () => {
+    expect(buildWeeklyDataBlock(days, rev())).not.toContain('ДЕНЬГИ')
+  })
+})
+
+describe('М5: блок «эффект первой порции» в недельном блоке', () => {
+  const days = [day({ dateLabel: '2026-07-06' })]
+  const base = { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 }
+  const metrics = (o: Partial<{ keywords: number; clicks: number; spendRub: number; conversions: number; days: number; impressions: number }> = {}) => ({
+    keywords: o.keywords ?? 39, days: o.days ?? 2, impressions: o.impressions ?? 1000,
+    clicks: o.clicks ?? 20, spendRub: o.spendRub ?? 2000, conversions: o.conversions ?? 1,
+  })
+
+  it('мало данных → «вывод рано» без вердикта, цифры есть', () => {
+    const block = buildWeeklyDataBlock(days, {
+      ...base,
+      cohortEffect: {
+        raiseDay: '2026-07-10',
+        cohortA: { before: metrics({ clicks: 40 }), after: metrics({ clicks: 12 }) }, // 12 < 30
+        cohortB: { before: metrics({ clicks: 200 }), after: metrics({ clicks: 100 }) },
+        enoughData: false,
+      },
+    })
+    expect(block).toContain('ЭФФЕКТ ПЕРВОЙ ПОРЦИИ')
+    expect(block).toContain('данных мало')
+    expect(block).toContain('Когорта A (поднятые)')
+    expect(block).toContain('Когорта B (остальной портфель)')
+    expect(block).not.toContain('решает владелец') // вывода нет, пока мало данных
+  })
+
+  it('данных достаточно → цифры + арбитр (решает владелец), без авто-решения', () => {
+    const block = buildWeeklyDataBlock(days, {
+      ...base,
+      cohortEffect: {
+        raiseDay: '2026-07-10',
+        cohortA: { before: metrics({ clicks: 40, spendRub: 4000 }), after: metrics({ clicks: 60, spendRub: 6600 }) },
+        cohortB: { before: metrics({ clicks: 200 }), after: metrics({ clicks: 210 }) },
+        enoughData: true,
+      },
+    })
+    expect(block).toContain('цена клика 110 ₽') // 6600/60
+    expect(block).toContain('решает владелец')
+  })
+
+  it('cohortEffect не задан → блока нет', () => {
+    expect(buildWeeklyDataBlock(days, base)).not.toContain('ЭФФЕКТ ПЕРВОЙ ПОРЦИИ')
+  })
+})
+
 describe('buildDailyDataBlock — числа форматирует код', () => {
   it('рубли без копеек, CTR с 2 знаками, счётчики заявок', () => {
     const block = buildDailyDataBlock(dailyInput())
