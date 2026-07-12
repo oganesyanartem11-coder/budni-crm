@@ -261,6 +261,12 @@ export const MARGINAL_UPLIFT_ENABLED = false
  */
 export const CB_ALERT_TOP_N = 5
 
+// ---------- М4: обучение и прозрачность ----------
+
+/** ШАГ 1: сколько дней держим снапшоты decision-trace (kind='decisions') до прунинга.
+ *  ~194 записи/тик ≈ 25–40 КБ/день; 30 дней — окно «Борис, почему» + разбор. */
+export const TRACE_RETENTION_DAYS = 30
+
 // ---------- Стоимость LLM (другие деньги, не рекламный бюджет) ----------
 
 /** Месячный потолок трат на LLM роли, USD. Env-override. */

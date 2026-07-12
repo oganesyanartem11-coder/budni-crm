@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const { mockPrisma, mockDirect, mockPollReport, mockGetGoalStatsByDay, mockGetGoalStatsByPhrase, mockGetLeads, mockGate, mockGetState, mockLlm, mockLessons, mockOutcomes } =
   vi.hoisted(() => ({
     mockPrisma: {
-      borisDirectSnapshot: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn() },
+      borisDirectSnapshot: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), deleteMany: vi.fn() },
       borisDirectReportJob: {
         create: vi.fn(),
         update: vi.fn(),
@@ -78,7 +78,7 @@ vi.mock('./lessons', () => mockLessons)
 vi.mock('./outcomes', () => mockOutcomes)
 
 import { runCollectTick, runProcessTick, backfillCriterionHistory, mskDay, mskDayStartUtc, yesterdayMsk } from './brain'
-import { MICRO, MARGINAL_UPLIFT_ENABLED, PRIOR_CR_WINDOW_WORKDAYS } from './config'
+import { MICRO, MARGINAL_UPLIFT_ENABLED, PRIOR_CR_WINDOW_WORKDAYS, TRACE_RETENTION_DAYS } from './config'
 import { workdayWindowStartUtc } from './workdays'
 
 // 2026-07-02 09:00 UTC → сегодня-МСК 2026-07-02, вчера-МСК 2026-07-01.
@@ -1244,5 +1244,26 @@ describe('М4 микродолг (д): прайор CR кампании — от
     const starts = critWheres.map((w) => w.gte.getTime())
     expect(starts).toContain(expectedPriorStart)
     expect(Math.min(...starts)).toBe(expectedPriorStart)
+  })
+})
+
+describe('М4 ШАГ 1: персист decision trace (kind=decisions) + прунинг', () => {
+  it('process-тик пишет весь массив decisions снапшотом и прунит старше TRACE_RETENTION_DAYS', async () => {
+    setupProcessHappyPath()
+    const res = await runProcessTick(NOW)
+
+    const created = mockPrisma.borisDirectSnapshot.create.mock.calls.map((c) => c[0].data)
+    const traceSnap = created.find((d) => d.kind === 'decisions')
+    expect(traceSnap).toBeDefined()
+    expect(Array.isArray(traceSnap!.payload)).toBe(true)
+    expect(res.decisions!.length).toBeGreaterThan(0)
+    expect((traceSnap!.payload as unknown[]).length).toBe(res.decisions!.length)
+
+    // Прунинг старых трасс: kind=decisions, tickDate < dayStart − TRACE_RETENTION_DAYS.
+    const del = mockPrisma.borisDirectSnapshot.deleteMany.mock.calls[0]?.[0]
+    expect(del?.where?.kind).toBe('decisions')
+    const dayStart = mskDayStartUtc(yesterdayMsk(NOW).dateFrom)
+    const expectedCutoff = dayStart.getTime() - TRACE_RETENTION_DAYS * 24 * 60 * 60 * 1000
+    expect((del!.where.tickDate.lt as Date).getTime()).toBe(expectedCutoff)
   })
 })

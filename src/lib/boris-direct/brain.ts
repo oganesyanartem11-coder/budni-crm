@@ -77,6 +77,7 @@ import {
   CONVERTER_PROTECT_WINDOW_WORKDAYS,
   PRIOR_CR_FALLBACK,
   PRIOR_CR_WINDOW_WORKDAYS,
+  TRACE_RETENTION_DAYS,
   TV_LOWER_BLOCK_ENTRY,
   TV_TAIL,
 } from './config'
@@ -2062,6 +2063,21 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
   const memory = await runMemoryHooks(now)
 
   emitAnomalyAlerts()
+
+  // М4 ШАГ 1: персист decision-trace тика — весь текущий массив decisions одним
+  // снапшотом kind='decisions' (для команды «Борис, почему» и разбора владельцем);
+  // прунинг старше TRACE_RETENTION_DAYS. FAIL-SAFE: сбой персиста/прунинга НЕ роняет
+  // тик (трасса — прозрачность, не решение; в кабинет ничего не пишется).
+  try {
+    await saveSnapshot(dayStart, 'decisions', decisions)
+    const traceCutoff = new Date(dayStart.getTime() - TRACE_RETENTION_DAYS * DAY_MS)
+    await prisma.borisDirectSnapshot.deleteMany({
+      where: { kind: 'decisions', tickDate: { lt: traceCutoff } },
+    })
+  } catch (err) {
+    console.error('[boris-direct/brain] персист decision-trace не удался', err)
+  }
+
   return {
     status: 'done',
     appliedSummaries,
