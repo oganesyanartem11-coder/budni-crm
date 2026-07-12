@@ -303,8 +303,18 @@ export function makeCpcByTv(rng: Rng, base: Record<number, number> = BASE_CPC_BY
  * остаются сравнимыми).
  *
  * Калибровка: trueCr целевых 0.02–0.08 (ядро выше хвоста), demandPerDay
- * ядро ~40–90, хвост ~20–40, ставка ~52 ₽ (между входом в 65 и 75).
+ * ядро ~40–90, хвост ~20–40.
+ *
+ * СТАРТОВАЯ СТАВКА — по ЖИВОМУ ФАКТУ A (keywordbids.get 12.07, 194 ключа): в реальном
+ * портфеле ~28% фраз стоят НИЖЕ входа (медиана −13%, фактически на рунге TV15), 72% —
+ * на входе (TV65). Прежняя калибровка стартовала ВСЕ на входе (~52 ₽ → TV65), из-за чего
+ * бездействие было бесплатным, а любой ввод хвоста — только оверштотом. Теперь мир стартует
+ * с реалистичным хвостом ниже входа: удержание ниже-входа стоит показов/объёма (мир уже это
+ * моделирует: показы ∝ tv/75), а ввод конвертера с рунга TV15 на вход РЕАЛЬНО захватывает
+ * объём. Один rng()-дро (как прежний jitterInt) — поток случайности НЕ сдвигается; оракул
+ * optimalTv (levelEconomics, не зависит от старта) НЕ меняется, скорер/гейт НЕ трогаются.
  */
+const BELOW_ENTRY_SHARE = 0.28 // ФАКТ A: доля портфеля ниже входа
 export function makePhrase(rng: Rng, poolIndex: number, overrides: Partial<PhraseSpec> = {}): PhraseSpec {
   const spec = TARGET_PHRASE_POOL[poolIndex]
   if (!spec) throw new Error(`Нет фразы в пуле: индекс ${poolIndex}`)
@@ -317,7 +327,13 @@ export function makePhrase(rng: Rng, poolIndex: number, overrides: Partial<Phras
   const demandPerDay = spec.core
     ? clamp(jitterInt(rng, 70, 0.3), 40, 200)
     : clamp(jitterInt(rng, 30, 0.3), 20, 90)
-  const startBidMicro = jitterInt(rng, 52, 0.15) * 1_000_000
+  // ФАКТ A: 28% ниже входа (bid 30–42 ₽ → TV15, cpc15≈25 ≤ bid < cpc65≈45); 72% на входе
+  // (46–58 ₽ → TV65). Тот же ОДИН rng()-дро, что и прежний jitterInt (поток не сдвинут).
+  const u = rng()
+  const startBidMicro =
+    (u < BELOW_ENTRY_SHARE
+      ? Math.round(30 + (u / BELOW_ENTRY_SHARE) * 12)
+      : Math.round(46 + ((u - BELOW_ENTRY_SHARE) / (1 - BELOW_ENTRY_SHARE)) * 12)) * 1_000_000
   return {
     keywordId: keywordIdOf(poolIndex),
     adGroupId: g.id,

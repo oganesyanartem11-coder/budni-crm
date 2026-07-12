@@ -1795,6 +1795,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // применённых после applyBidChanges.
         const plannedLockById = new Map<number, LockedLevel>()
         const enriched: EnrichedChange[] = []
+        // ВЕТКА Б УЗКОЕ ЗАКРЫТИЕ: фактический достигнутый уровень фразы (для lock застрявшего
+        // all-upward хвоста на факт). Наибольший TV аукциона, чья позиционная ставка ≤ текущей.
+        const currentTvById = new Map<number, number>()
         // Коды пачки правок — для префикса reason в write-gate (дубль в лог).
         const bidCodes = new Set<ReasonCode>()
         const keyTextOf = (id: number): string => keyTextById.get(id) ?? `#${id}`
@@ -1803,6 +1806,10 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
           const auctionBids = bid.Search?.AuctionBids ?? []
           if (auctionBids.length === 0) continue
           const currentBidMicro = bid.Search?.Bid ?? 0
+          currentTvById.set(
+            bid.KeywordId,
+            auctionBids.filter((b) => b.Bid <= currentBidMicro).reduce((mx, b) => Math.max(mx, b.TrafficVolume), 0)
+          )
           // Головная экономика ЭТОГО ключа — по CriterionId (== bid.KeywordId).
           const head = headStat.get(bid.KeywordId) ?? { clicks: 0, leads: 0 }
           const conv30d = conv30dByCriterion.get(bid.KeywordId) ?? 0
@@ -1928,20 +1935,17 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
         // phrase_tv_lock фиксируем ТОЛЬКО применённым (перенос после applyBidChanges).
         let appliedKeywordIds: number[] = []
         if (enriched.length > 0) {
-          // ЧАСТИЧНАЯ ПРИЁМКА: сходимость (масс-база = живой портфель) ОТЛОЖЕНА по гейту
-          // полигона (применение хвоста роняло economics holdout −7). Стопор ОСТАЁТСЯ
-          // (subset-база CB: all-upward хвост без демоутов не входит), но теперь ВИДИМ
-          // (ШАГ3 defer-all алерт) + лок чинится (ШАГ4). Ретюн подъёмов — отдельным спринтом.
-          const deferAllReason =
-            'каждая правка превышает лимит массы поодиночке (нет демоутов для базы) — нужен ретюн подъёмов'
+          // Стопор ОСТАЁТСЯ (subset-база CB: all-upward хвост без демоутов не входит целиком).
+          // МИКС (есть демоуты, apply>0) — вводим порциями как раньше. ЧИСТЫЙ all-upward стоп
+          // (apply=0) — узкое закрытие ветки Б ниже (принимаем на факт, не перепланируем).
           const ramp = selectRampInSubset(enriched)
-          // Строка отчёта — пока догоняем (есть остаток); при 0 применённых — с причиной.
-          if (ramp.deferred.length > 0) {
+          // Строка отчёта только при ЧАСТИЧНОМ вводе (apply>0 && остаток): «ввод порциями».
+          // Чистый all-upward стоп (apply=0) отчёт НЕ показывает — хвост принят (см. ниже).
+          if (ramp.deferred.length > 0 && ramp.apply.length > 0) {
             reportData.portfolioRampIn = {
               applied: ramp.apply.length,
               planned: enriched.length,
               deferred: ramp.deferred.length,
-              ...(ramp.apply.length === 0 ? { reason: deferAllReason } : {}),
             }
           }
           if (ramp.apply.length > 0) {
@@ -1999,37 +2003,41 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
             }
           }
 
-          // ШАГ3: НЕМОЙ defer-all ЗАПРЕЩЁН — применили 0, но остаток есть → владельцу
-          // СОДЕРЖАТЕЛЬНЫЙ алерт (причина + топ-5 по |Δ|), ТРОТ 1/день (не спамим тиком).
+          // ВЕТКА Б УЗКОЕ ЗАКРЫТИЕ (спринт ПОЛИГОН-РЕАЛИЗМ, verdict B). Ранее: застрявший
+          // all-upward хвост (apply=0, все deferred — подъёмы, нет демоутов для CB-массы)
+          // ПЕРЕПЛАНИРОВАЛСЯ каждый тик и слал defer-all алерт (ШАГ3). ЗАМЕР на честном движке
+          // (калибровка по живому ФАКТУ A: 28% портфеля ниже входа) показал: эти подъёмы
+          // измеренно ВРЕДНЫ для заявок/₽ (holdout economics падает). Поэтому ПРИНИМАЕМ хвост на
+          // ФАКТИЧЕСКИХ уровнях (level-lock на current) → план подъёмов больше НЕ генерится,
+          // defer-all алерты прекращаются. Будущий биддинг НЕ меняется: как только в плане есть
+          // демоуты (apply>0) — ramp-in вводит порциями как сейчас (этот блок не трогается).
+          // Exploration живёт через будущие Байес-вердикты: горелка добирает уверенности → demote
+          // её режет (понижение, не подъём). Один rng()-нейтральный код; write-набор НЕ расширен.
           if (ramp.apply.length === 0 && ramp.deferred.length > 0) {
+            // Лок каждой застрявшей фразы на её ФАКТИЧЕСКИЙ достигнутый уровень (не на промоут-цель).
+            for (const c of ramp.deferred) {
+              const curTv = currentTvById.get(c.keywordId)
+              if (curTv != null && curTv > 0) nextLevels.set(c.keywordId, { verdict: c.verdict, tv: curTv })
+            }
+            // Отчёт: хвост НЕ «застрял», а ПРИНЯТ — не показываем как остаток.
+            reportData.portfolioRampIn = undefined
+            // Никакого повторяющегося critical-алерта. Один раз в день — тихая ИНФО-запись в трассу
+            // (тип hold, НЕ alert): для «Борис, почему», без Telegram-спама владельцу.
             try {
-              const alreadyToday = await snapshotPayloadForDay('rampin_deferall_alert', dayStart)
+              const alreadyToday = await snapshotPayloadForDay('rampin_tail_accepted', dayStart)
               if (!alreadyToday) {
-                const stopped: CbStoppedChange[] = ramp.deferred.map((c) => ({
-                  keyText: keyTextOf(c.keywordId),
-                  fromMicro: c.fromMicro,
-                  toMicro: c.toMicro,
-                  verdict: c.verdict,
-                }))
-                anomalies.push({
-                  severity: 'critical',
-                  kind: 'circuit_breaker',
-                  text:
-                    `Ввод портфеля застрял: применено 0 из ${ramp.deferred.length} правок — ${deferAllReason}.\n` +
-                    formatCbStoppedPlan({ changes: stopped }),
-                })
                 decisions.push({
-                  type: 'alert',
+                  type: 'hold',
                   targetType: 'campaign',
                   targetId: String(DIRECT_CAMPAIGN_ID),
-                  summary: `ramp-in defer-all: 0 из ${ramp.deferred.length} (${deferAllReason})`,
-                  reasonCode: 'CIRCUIT_BREAKER',
-                  factors: { deferred: ramp.deferred.length },
+                  summary: `хвост ниже входа принят на текущих уровнях (${ramp.deferred.length} фраз): подъёмы не окупаются по замеру честного полигона — план подъёмов закрыт`,
+                  reasonCode: 'TAIL_MIN_TV',
+                  factors: { accepted: ramp.deferred.length },
                 })
-                await saveSnapshot(dayStart, 'rampin_deferall_alert', { deferred: ramp.deferred.length })
+                await saveSnapshot(dayStart, 'rampin_tail_accepted', { accepted: ramp.deferred.length })
               }
             } catch (err) {
-              console.error('[boris-direct/brain] defer-all алерт не отправлен', err)
+              console.error('[boris-direct/brain] запись принятия хвоста не удалась', err)
             }
           }
 
