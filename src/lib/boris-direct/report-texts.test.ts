@@ -445,7 +445,7 @@ describe('buildWeeklyDataBlock — агрегация кодом', () => {
     const block = buildWeeklyDataBlock(days, { llmSpendUsd: 1.234, llmCalls: 12, proposalsPending: 2 })
     expect(block).toContain('Расход: 3000 ₽')
     expect(block).toContain('Заявок всего: 5, из Директа: 3')
-    expect(block).toContain('Средняя цена заявки: 1000 ₽') // 3000 / 3 — код, не LLM
+    expect(block).toContain('Средняя цена заявки (расход / доставлено из Директа): 1000 ₽') // 3000 / 3 — код, не LLM
     expect(block).toContain('CTR: 5.00%') // 50 кликов / 1000 показов
     expect(block).toContain('- 2026-06-29: расход 1000 ₽')
     expect(block).toContain('- 2026-06-30: расход 2000 ₽')
@@ -458,7 +458,13 @@ describe('buildWeeklyDataBlock — агрегация кодом', () => {
   it('нет данных → блок не падает, заявок 0 → цена заявки «нет данных»', () => {
     const block = buildWeeklyDataBlock([], { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
     expect(block).toContain('данных за неделю нет')
-    expect(block).toContain('Средняя цена заявки: нет данных')
+    expect(block).toContain('Средняя цена заявки (расход / доставлено из Директа): нет данных')
+  })
+
+  it('регресс 13.07: расход 9551 / доставлено из Директа 4 → CPA 2388 ₽ с подписью методики', () => {
+    const days = [day({ dateLabel: '2026-07-06', spendRub: 9551, leadsFromDirect: 4, leadsTotal: 4 })]
+    const block = buildWeeklyDataBlock(days, { llmSpendUsd: 0, llmCalls: 0, proposalsPending: 0 })
+    expect(block).toContain('Средняя цена заявки (расход / доставлено из Директа): 2388 ₽')
   })
 
   it('М3: underspendWeekly → строка недорасхода + оценка упущенного объёма при медиане < 80%', () => {

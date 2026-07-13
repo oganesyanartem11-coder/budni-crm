@@ -554,7 +554,7 @@ export function buildWeeklyDataBlock(days: DailyReportData[], extras: WeeklyRepo
     `- Клики: ${formatCount(clicks)}`,
     `- CTR: ${formatCtr(ctr)}`,
     ...leadsSection,
-    `- Средняя цена заявки: ${formatCplWithValue(costPerLead)}`,
+    `- Средняя цена заявки (расход / доставлено из Директа): ${formatCplWithValue(costPerLead)}`,
     ...(extras.matchTypeShare
       ? [
           `- Доля SYNONYM-трафика: ${extras.matchTypeShare.synonymPct.toFixed(0)}% ` +

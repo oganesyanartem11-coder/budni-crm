@@ -17,6 +17,7 @@ import {
   type LeadForAttribution,
   getLeadsForPeriod,
   splitLeadsByOrigin,
+  dedupeLeadsByPhone,
   toQueryStatRow,
   matchLeadsToTerms,
   computeCostPerLead,
@@ -87,6 +88,46 @@ describe('getLeadsForPeriod', () => {
     // Телефон целиком и другие лишние поля не выбираем.
     expect(args.select.phone).toBeUndefined()
   })
+
+  it('exclusiveTo:true → верхняя граница lt (пограничный лид ровно на границе не двоится)', async () => {
+    const from = new Date('2026-07-05T21:00:00Z')
+    const to = new Date('2026-07-12T21:00:00Z')
+    mockPrisma.landingLead.findMany.mockResolvedValue([])
+    await getLeadsForPeriod(from, to, { exclusiveTo: true })
+    const args = mockPrisma.landingLead.findMany.mock.calls[0][0]
+    expect(args.where).toEqual({ createdAt: { gte: from, lt: to } })
+  })
+})
+
+describe('dedupeLeadsByPhone', () => {
+  it('одинаковый номер в окне → один (первый по порядку), нормализация цифр', () => {
+    const a = makeLead({ id: 'a', phoneDigits: '79991112233' })
+    const b = makeLead({ id: 'b', phoneDigits: '7 (999) 111-22-33' })
+    expect(dedupeLeadsByPhone([a, b]).map((l) => l.id)).toEqual(['a'])
+  })
+
+  it('разные номера → все остаются', () => {
+    const a = makeLead({ id: 'a', phoneDigits: '79990000001' })
+    const b = makeLead({ id: 'b', phoneDigits: '79990000002' })
+    expect(dedupeLeadsByPhone([a, b]).map((l) => l.id)).toEqual(['a', 'b'])
+  })
+
+  it('пустой/нулевой номер не дедупится (каждый уникален)', () => {
+    const a = makeLead({ id: 'a', phoneDigits: null })
+    const b = makeLead({ id: 'b', phoneDigits: '' })
+    expect(dedupeLeadsByPhone([a, b]).map((l) => l.id)).toEqual(['a', 'b'])
+  })
+
+  it('регресс 13.07: 4 рекламных лида (3 yclid + 1 cpc-без-yclid, разные номера) → delivered=4', () => {
+    const leads = [
+      makeLead({ id: 'L2', yclid: '3194', utmSource: 'yandex', utmMedium: 'cpc', phoneDigits: '79990000017' }),
+      makeLead({ id: 'L3', yclid: null, utmSource: 'yandex', utmMedium: 'cpc', phoneDigits: '79990002004' }),
+      makeLead({ id: 'L4', yclid: '9108', utmSource: 'yandex', utmMedium: 'cpc', phoneDigits: '79990005797' }),
+      makeLead({ id: 'L5', yclid: '2521', utmSource: 'yandex', utmMedium: 'cpc', phoneDigits: '79990004779' }),
+    ]
+    const deduped = dedupeLeadsByPhone(leads)
+    expect(splitLeadsByOrigin(deduped).fromDirect).toHaveLength(4)
+  })
 })
 
 describe('splitLeadsByOrigin', () => {
@@ -98,15 +139,21 @@ describe('splitLeadsByOrigin', () => {
     expect(split.unattributed).toEqual([])
   })
 
-  it('utm_source из набора Директа → fromDirect, без учёта регистра', () => {
+  it('голый utm_source=yandex БЕЗ medium=cpc → НЕ fromDirect (органика/Карты/Бизнес) → fromOther', () => {
     for (const src of ['yandex', 'Direct', 'YANDEX-DIRECT', 'yandex_direct']) {
       const split = splitLeadsByOrigin([makeLead({ utmSource: src })])
-      expect(split.fromDirect).toHaveLength(1)
+      expect(split.fromDirect).toHaveLength(0)
+      expect(split.fromOther).toHaveLength(1)
     }
   })
 
   it("utm_medium=cpc + utm_source содержит 'yandex' → fromDirect", () => {
     const lead = makeLead({ utmSource: 'yandex.ru', utmMedium: 'CPC' })
+    expect(splitLeadsByOrigin([lead]).fromDirect).toEqual([lead])
+  })
+
+  it('cpc-лид yandex БЕЗ yclid (yclid потерян, utm сохранился) → fromDirect (кейс #3 13.07)', () => {
+    const lead = makeLead({ utmSource: 'yandex', utmMedium: 'cpc' }) // yclid=null
     expect(splitLeadsByOrigin([lead]).fromDirect).toEqual([lead])
   })
 

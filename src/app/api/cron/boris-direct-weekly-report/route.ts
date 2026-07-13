@@ -28,7 +28,7 @@ import {
   buildSearchQueryReportBody,
   buildMatchTypeShareReportBody,
 } from '@/lib/boris-direct/reports'
-import { toQueryStatRow, getLeadsForPeriod, splitLeadsByOrigin } from '@/lib/boris-direct/attribution'
+import { toQueryStatRow, getLeadsForPeriod, splitLeadsByOrigin, dedupeLeadsByPhone } from '@/lib/boris-direct/attribution'
 import { getWonDeals, aggregateRevenueByPhrase } from '@/lib/boris-direct/deals'
 import { getCohortEffect } from '@/lib/boris-direct/cohorts'
 import { filterOutTestLeads } from '@/lib/boris-direct/test-markers'
@@ -131,8 +131,10 @@ async function buildDaysFromReports(
   // Заявки из БД за период (тест-фильтр), разложенные по дням МСК.
   const leadsByDay = new Map<string, { total: number; fromDirect: number }>()
   try {
-    const rawLeads = await getLeadsForPeriod(from, to)
-    const leads = filterOutTestLeads(rawLeads)
+    // Верхняя граница окна ЭКСКЛюзивна (lt) + дедуп по телефону — чтобы delivered
+    // и подневная сумма не расходились и один номер не считался дважды.
+    const rawLeads = await getLeadsForPeriod(from, to, { exclusiveTo: true })
+    const leads = dedupeLeadsByPhone(filterOutTestLeads(rawLeads))
     for (const lead of leads) {
       const d = mskDay(lead.createdAt)
       const cur = leadsByDay.get(d) ?? { total: 0, fromDirect: 0 }
@@ -243,7 +245,7 @@ async function handler(request: Request) {
   }
   let delivered = 0
   try {
-    const leads = filterOutTestLeads(await getLeadsForPeriod(from, to))
+    const leads = dedupeLeadsByPhone(filterOutTestLeads(await getLeadsForPeriod(from, to, { exclusiveTo: true })))
     delivered = splitLeadsByOrigin(leads).fromDirect.length
   } catch (err) {
     console.error('[boris-direct/weekly] заявки для «Доставлено» недоступны', err)

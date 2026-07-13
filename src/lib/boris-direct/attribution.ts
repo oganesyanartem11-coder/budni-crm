@@ -26,10 +26,19 @@ export interface LeadForAttribution {
   name: string | null
 }
 
-/** Лиды за период по createdAt, старые первыми. */
-export async function getLeadsForPeriod(from: Date, to: Date): Promise<LeadForAttribution[]> {
+/**
+ * Лиды за период по createdAt, старые первыми. По умолчанию верхняя граница
+ * ВКЛючительная (lte) — так зовут внутренние потребители (дневной тик передаёт
+ * `конецДня−1мс`). Недельный отчёт передаёт { exclusiveTo: true } → граница lt,
+ * чтобы `delivered` и подневная сумма не разошлись на пограничном лиде.
+ */
+export async function getLeadsForPeriod(
+  from: Date,
+  to: Date,
+  opts: { exclusiveTo?: boolean } = {},
+): Promise<LeadForAttribution[]> {
   return prisma.landingLead.findMany({
-    where: { createdAt: { gte: from, lte: to } },
+    where: { createdAt: opts.exclusiveTo ? { gte: from, lt: to } : { gte: from, lte: to } },
     select: {
       id: true,
       createdAt: true,
@@ -55,16 +64,16 @@ export interface LeadSplit {
   unattributed: LeadForAttribution[]
 }
 
-/** utm_source, однозначно означающие Яндекс.Директ (сравнение без регистра). */
-const DIRECT_UTM_SOURCES = new Set(['yandex', 'direct', 'yandex-direct', 'yandex_direct'])
-
-/** Признаки Директа: yclid; известный utm_source; medium=cpc + source с 'yandex'. */
+/**
+ * Признаки Директа (новая дефиниция, фикс 13.07): непустой yclid ИЛИ
+ * (utm_medium=cpc И utm_source содержит 'yandex'). Голый utm_source=yandex БЕЗ
+ * medium=cpc рекламным НЕ считаем — это может быть органика/Карты/Бизнес, а не
+ * платный клик Директа. Значения нормализуем trim/lower.
+ */
 function isFromDirect(lead: LeadForAttribution): boolean {
   if (lead.yclid && lead.yclid.trim() !== '') return true
 
   const source = lead.utmSource?.trim().toLowerCase() ?? ''
-  if (source && DIRECT_UTM_SOURCES.has(source)) return true
-
   const medium = lead.utmMedium?.trim().toLowerCase() ?? ''
   if (medium === 'cpc' && source.includes('yandex')) return true
 
@@ -89,6 +98,29 @@ export function splitLeadsByOrigin(leads: LeadForAttribution[]): LeadSplit {
   }
 
   return split
+}
+
+/**
+ * Дедуп лидов по нормализованному номеру (только цифры) в пределах переданного
+ * окна: один и тот же телефон считается ОДИН раз — первый по порядку (вход уже
+ * отсортирован asc по createdAt). Лиды без номера не дедупятся (каждый уникален).
+ * Согласовано с intake-дедупом (тот гасит ПЕРЕСЫЛКУ; здесь чистим ПОДСЧЁТ в отчётах,
+ * интейк не трогаем).
+ */
+export function dedupeLeadsByPhone<T extends { phoneDigits: string | null }>(leads: T[]): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const lead of leads) {
+    const key = (lead.phoneDigits ?? '').replace(/\D/g, '')
+    if (key === '') {
+      out.push(lead)
+      continue
+    }
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(lead)
+  }
+  return out
 }
 
 // ---------- Связка с отчётом Директа по поисковым запросам ----------
