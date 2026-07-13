@@ -66,14 +66,9 @@ async function handler(request: Request) {
         console.log(`[cron:${JOB_LABEL}] предложение ${draft.topicKey} не создано: ${created.reason}`)
         continue
       }
-      // formatProposalSummary для minus_words читает payload.words, драфт мозга
-      // кладёт phrases — подставляем для человекочитаемого имени.
-      const p = draft.payload as Record<string, unknown> | null
-      const summaryPayload =
-        draft.type === 'minus_words' && p && Array.isArray(p.phrases)
-          ? { words: p.phrases }
-          : draft.payload
-      proposalsCreated.push(formatProposalSummary(draft.type, summaryPayload))
+      // formatProposalSummary читает payload.phrases напрямую (единая форма) —
+      // мост phrases→words больше не нужен.
+      proposalsCreated.push(formatProposalSummary(draft.type, draft.payload))
 
       if (draft.type === 'minus_words') {
         // createProposal не возвращает id — берём свежесозданный PENDING по topicKey.

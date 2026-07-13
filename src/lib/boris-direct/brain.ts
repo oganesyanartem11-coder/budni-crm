@@ -143,6 +143,7 @@ import { callBorisDirectLlm } from './llm'
 import { getBorisDirectSystemPrompt, formatMinusClassifierExperience } from './prompts'
 import { getRecentOwnerMinusDecisions } from './learning'
 import { getDoctrineBlock } from './doctrine'
+import { buildDisputedMinusProposalDraft } from './minus-proposal'
 
 // ---------- Время: МСК = UTC+3 ----------
 
@@ -1573,24 +1574,9 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       }
 
       if (disputed.length > 0) {
-        const disputedVerdicts = verdicts.filter((v) => disputed.includes(v.candidate))
-        const argumentParts = disputed.map((phrase) => {
-          const stat = statByQuery.get(phrase)
-          return `«${phrase}» — ${stat?.impressions ?? 0} показов, ${stat?.clicks ?? 0} кликов, 0 заявок`
-        })
-        const triggerValue = disputed.reduce(
-          (acc, phrase) => acc + (statByQuery.get(phrase)?.impressions ?? 0),
-          0
-        )
-        proposalDrafts.push({
-          type: 'minus_words',
-          topicKey: 'minus_words',
-          payload: { phrases: disputed, verdicts: disputedVerdicts },
-          argument: `Запросы с объёмом показов и нулём заявок за период: ${argumentParts.join('; ')}. Минусовка уберёт нецелевой расход — больше заявок на рубль.`,
-          question: 'Занести в минусы?',
-          triggerMetric: 'impressions_no_conversions',
-          triggerValue,
-        })
+        // Единая точка сборки драфта (payload на ключе `phrases`, честный аргумент
+        // от факта расхода) — writer/counter/applier не расходятся формой payload.
+        proposalDrafts.push(buildDisputedMinusProposalDraft(disputed, verdicts, statByQuery))
       }
     }
   } catch (err) {

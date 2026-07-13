@@ -54,6 +54,7 @@ import {
   formatProposalSummary,
   type ProposalInput,
 } from './proposals'
+import { buildDisputedMinusProposalDraft } from './minus-proposal'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -200,7 +201,7 @@ describe('decideProposal — атомарный claim', () => {
     mockFindUnique.mockResolvedValue({
       id: 'p4',
       type: 'minus_words',
-      payload: { words: ['бесплатно'] },
+      payload: { phrases: ['бесплатно'] },
     })
     await decideProposal('p4', 'accept')
     expect(mockRecordOwnerDecision).toHaveBeenCalledWith('p4', true)
@@ -211,7 +212,7 @@ describe('decideProposal — атомарный claim', () => {
     mockFindUnique.mockResolvedValue({
       id: 'p5',
       type: 'minus_words',
-      payload: { words: ['бесплатно'] },
+      payload: { phrases: ['бесплатно'] },
     })
     await decideProposal('p5', 'reject')
     expect(mockRecordOwnerDecision).toHaveBeenCalledWith('p5', false)
@@ -266,8 +267,8 @@ describe('expireStaleProposals', () => {
 describe('getAcceptedUnapplied / markProposalApplied', () => {
   it('возвращает ACCEPTED без payload.applied, отфильтровывает применённые', async () => {
     mockFindMany.mockResolvedValue([
-      { id: 'a1', status: 'ACCEPTED', payload: { words: ['x'] } },
-      { id: 'a2', status: 'ACCEPTED', payload: { words: ['y'], applied: true } },
+      { id: 'a1', status: 'ACCEPTED', payload: { phrases: ['x'] } },
+      { id: 'a2', status: 'ACCEPTED', payload: { phrases: ['y'], applied: true } },
       { id: 'a3', status: 'ACCEPTED', payload: null },
     ])
     const rows = await getAcceptedUnapplied()
@@ -278,12 +279,12 @@ describe('getAcceptedUnapplied / markProposalApplied', () => {
   })
 
   it('markProposalApplied сохраняет payload и ставит applied=true', async () => {
-    mockFindUnique.mockResolvedValue({ id: 'a1', payload: { words: ['x'] } })
+    mockFindUnique.mockResolvedValue({ id: 'a1', payload: { phrases: ['x'] } })
     mockUpdate.mockResolvedValue({})
     await markProposalApplied('a1')
     expect(mockUpdate).toHaveBeenCalledWith({
       where: { id: 'a1' },
-      data: { payload: { words: ['x'], applied: true } },
+      data: { payload: { phrases: ['x'], applied: true } },
     })
   })
 
@@ -296,9 +297,21 @@ describe('getAcceptedUnapplied / markProposalApplied', () => {
 
 describe('formatProposalSummary', () => {
   it('minus_words: количество + первые 5 с многоточием', () => {
-    const words = ['а', 'б', 'в', 'г', 'д', 'е', 'ж']
-    expect(formatProposalSummary('minus_words', { words })).toBe(
+    const phrases = ['а', 'б', 'в', 'г', 'д', 'е', 'ж']
+    expect(formatProposalSummary('minus_words', { phrases })).toBe(
       'Минус-фразы: 7 шт: а, б, в, г, д…'
+    )
+  })
+
+  it('реальный драфт из brain-кода через formatProposalSummary → счётчик = длине phrases', () => {
+    // Не рукописный объект: тот же билдер, что зовёт runProcessTick (единая форма payload).
+    const draft = buildDisputedMinusProposalDraft(
+      ['фабрика обедов павловский посад'],
+      [{ candidate: 'фабрика обедов павловский посад', verdict: 'keep', reason: 'спорный' }],
+      new Map([['фабрика обедов павловский посад', { impressions: 31, clicks: 0, costRub: 0 }]]),
+    )
+    expect(formatProposalSummary(draft.type, draft.payload)).toBe(
+      'Минус-фразы: 1 шт: фабрика обедов павловский посад'
     )
   })
 

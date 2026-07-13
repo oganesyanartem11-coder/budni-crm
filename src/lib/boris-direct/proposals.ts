@@ -53,10 +53,12 @@ export function formatProposalSummary(type: string, payload: unknown): string {
   const p = asRecord(payload)
   switch (type) {
     case 'minus_words': {
-      const words = Array.isArray(p.words) ? p.words.map(String) : []
-      const head = words.slice(0, 5).join(', ')
-      const tail = words.length > 5 ? '…' : ''
-      return `Минус-фразы: ${words.length} шт${head ? `: ${head}${tail}` : ''}`
+      // Ключ payload — `phrases` (единый с писателем brain/minus-proposal, с
+      // apply-accepted и веткой behavioral_minus). Раньше читали `words` → «0 шт».
+      const phrases = Array.isArray(p.phrases) ? p.phrases.map(String) : []
+      const head = phrases.slice(0, 5).join(', ')
+      const tail = phrases.length > 5 ? '…' : ''
+      return `Минус-фразы: ${phrases.length} шт${head ? `: ${head}${tail}` : ''}`
     }
     case 'budget': {
       const rub =
