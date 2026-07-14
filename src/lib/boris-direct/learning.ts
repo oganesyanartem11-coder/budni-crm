@@ -40,6 +40,11 @@ export async function recordVerdicts(
       verdict: d.verdict,
       reason: d.reason,
       proposalId,
+      // matched НЕ ставим в false преждевременно: совпадение с решением владельца
+      // неизвестно, пока он не решил (ownerDecision=null). Явный null — чтобы никакой
+      // дефолт/сериализация не превратили «не решено» в «не совпал» (аудит 14.07:
+      // строка с matched=false при ownerDecision=null читалась как ошибка Бориса).
+      matched: null,
     })),
   })
 }

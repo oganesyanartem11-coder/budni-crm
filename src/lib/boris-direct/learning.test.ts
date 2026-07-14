@@ -71,10 +71,18 @@ describe('recordVerdicts', () => {
           verdict: 'minus',
           reason: 'не наша аудитория',
           proposalId: 'prop1',
+          matched: null,
         },
-        { candidate: 'обед в офис', verdict: 'keep', reason: 'целевой', proposalId: 'prop1' },
+        { candidate: 'обед в офис', verdict: 'keep', reason: 'целевой', proposalId: 'prop1', matched: null },
       ],
     })
+  })
+
+  it('matched на создании — строго null, НЕ false (совпадение неизвестно до решения)', async () => {
+    await recordVerdicts([{ candidate: 'x', verdict: 'minus', reason: 'r' }], null)
+    const arg = mockCreateMany.mock.calls[0][0] as { data: Array<{ matched: unknown }> }
+    expect(arg.data[0].matched).toBeNull()
+    expect(arg.data[0].matched).not.toBe(false)
   })
 
   it('пустой список → БД не трогаем', async () => {

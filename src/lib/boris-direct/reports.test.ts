@@ -99,7 +99,7 @@ describe('buildCriterionHistoryReportBody (backfill истории по ключ
     expect(body.params.Goals).toEqual([String(METRIKA_GOAL_ID)])
   })
 
-  it('поля: Date × CriterionId × Impressions/Clicks/Cost/Conversions/AvgTrafficVolume', () => {
+  it('поля: Date × CriterionId × Impressions/Clicks/Cost/Conversions/AvgTrafficVolume/AvgClickPosition', () => {
     expect(body.params.FieldNames).toEqual([
       'Date',
       'CriterionId',
@@ -108,6 +108,7 @@ describe('buildCriterionHistoryReportBody (backfill истории по ключ
       'Cost',
       'Conversions',
       'AvgTrafficVolume',
+      'AvgClickPosition',
     ])
     expect(body.params.ReportName).toBe('bf-1')
     expect(body.params.Format).toBe('TSV')

@@ -148,7 +148,19 @@ export function buildCriterionHistoryReportBody(
         Filter: campaignFilter(),
       },
       Goals: [String(METRIKA_GOAL_ID)],
-      FieldNames: ['Date', 'CriterionId', 'Impressions', 'Clicks', 'Cost', 'Conversions', 'AvgTrafficVolume'],
+      // AvgClickPosition добавлен (спринт 14.07): позиция клика — «давно копящийся»
+      // сигнал для тренда позиции (аудит вскрыл, что её никто не собирал, хотя API
+      // отдаёт). Поле выверено живым зондом (сосуществует с AvgTrafficVolume).
+      FieldNames: [
+        'Date',
+        'CriterionId',
+        'Impressions',
+        'Clicks',
+        'Cost',
+        'Conversions',
+        'AvgTrafficVolume',
+        'AvgClickPosition',
+      ],
       ReportName: reportName,
       ReportType: 'CUSTOM_REPORT',
       DateRangeType: 'CUSTOM_DATE',
