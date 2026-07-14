@@ -21,7 +21,7 @@ import {
 } from './config'
 import type { RevenueSummary } from './deals'
 import type { CohortEffect, CohortMetrics } from './cohorts'
-import { COHORT_MIN_CLICKS } from './config'
+import { COHORT_MIN_CLICKS, MINUS_PERIOD_DAYS, PRIOR_CR_WINDOW_WORKDAYS } from './config'
 import { callBorisDirectLlm } from './llm'
 import { formatCplWithValue } from './economics'
 import { isRegisteredConverter, converterLessonsForContext } from './converters'
@@ -190,6 +190,9 @@ export function buildDailyDataBlock(input: DailyReportInput): string {
     `Дневной отчёт за ${d.dateLabel}`,
     `Режим: ${input.observe ? 'наблюдение (в Директ не пишу)' : 'боевой'}`,
     `Карантин: ${d.quarantine ? 'да — не оптимизирую, наблюдаю' : 'нет'}`,
+    // Горизонт решений: по одному дню выводов нет, но решения ведутся ОКНАМИ —
+    // чтобы отчёт не читался как «вижу только один день».
+    `Горизонт: по одному дню выводов не делаю — решения веду окнами (минусы по ${MINUS_PERIOD_DAYS} рабочим дням, вердикты ставок по ${PRIOR_CR_WINDOW_WORKDAYS}). День — точка в окне, не приговор.`,
     '',
     'ЦИФРЫ ЗА ВЧЕРА (посчитаны кодом):',
     `- Расход: ${formatRub(d.spendRub)}`,

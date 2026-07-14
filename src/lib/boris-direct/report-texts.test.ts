@@ -121,6 +121,17 @@ describe('М3.5: строка ввода портфеля (ramp-in) в днев�
   })
 })
 
+describe('daily: горизонт решений (окна, а не один день)', () => {
+  it('дневной блок поясняет, что решения ведутся окнами 14/30, а не по одному дню', () => {
+    const block = buildDailyDataBlock(dailyInput())
+    expect(block).toContain('решения веду окнами')
+    expect(block).toContain('14 рабочим')
+    expect(block).toContain('вердикты ставок по 30')
+    // не читается как «вижу только один день»
+    expect(block).toContain('по одному дню выводов не делаю')
+  })
+})
+
 describe('М5: строка прогноз/факт в дневном блоке', () => {
   it('forecastLine задан → строка «Прогноз/факт: …»', () => {
     const block = buildDailyDataBlock(
