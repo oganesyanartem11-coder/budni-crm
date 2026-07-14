@@ -18,6 +18,7 @@ const {
   mockFindRecentLeadCandidates,
   mockMarkDealWon,
   mockCancelDeal,
+  mockAnswerDirectFreeText,
 } = vi.hoisted(() => {
   // Регистрация scope 'bdir' происходит ПРИ ИМПОРТЕ модуля — сохраняем handler
   // в замыкании, т.к. vi.clearAllMocks() в beforeEach стирает mock.calls.
@@ -44,6 +45,7 @@ const {
     mockFindRecentLeadCandidates: vi.fn(),
     mockMarkDealWon: vi.fn(),
     mockCancelDeal: vi.fn(),
+    mockAnswerDirectFreeText: vi.fn(),
   }
 })
 
@@ -78,6 +80,9 @@ vi.mock('./lessons', () => ({
 }))
 vi.mock('./explain', () => ({
   explainPhrase: mockExplainPhrase,
+}))
+vi.mock('./chat-reply', () => ({
+  answerDirectFreeText: mockAnswerDirectFreeText,
 }))
 // Чистые функции deals (parseDealCommand/findLeadMatches) — РЕАЛЬНЫЕ; мокаем только I/O.
 vi.mock('./deals', async (importActual) => {
@@ -132,6 +137,7 @@ beforeEach(() => {
   mockFindRecentLeadCandidates.mockResolvedValue([])
   mockMarkDealWon.mockResolvedValue(undefined)
   mockCancelDeal.mockResolvedValue(undefined)
+  mockAnswerDirectFreeText.mockResolvedValue('По кампании: расход у нормы, синонимы по запросам не размечены — покажу пофразный расход.')
 })
 
 describe('sendToDirectChat', () => {
@@ -194,12 +200,14 @@ describe('handleDirectChatMessage — команды владельца', () => 
     expect(mockSetDirectFrozen).not.toHaveBeenCalled()
   })
 
-  it('«Борис, почему» без фразы → next() (обычный Борис), explainPhrase не зовём', async () => {
+  it('«Борис, почему» без фразы → доменный ответ роли (не команда «почему»), explainPhrase не зовём', async () => {
     const ctx = makeCtx(-100777, 'Борис, почему')
     const next = vi.fn().mockResolvedValue(undefined)
     await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).toHaveBeenCalledOnce()
+    expect(next).not.toHaveBeenCalled()
     expect(mockExplainPhrase).not.toHaveBeenCalled()
+    expect(mockAnswerDirectFreeText).toHaveBeenCalledOnce()
+    expect(ctx.reply).toHaveBeenCalled()
   })
 
   it('«Борис, стоп» → setDirectFrozen(true) + ответ + лог freeze.change', async () => {
@@ -317,21 +325,53 @@ describe('handleDirectChatMessage — команды владельца', () => 
     expect(mockGetActiveLessonsReport).toHaveBeenCalledTimes(2)
   })
 
-  it('«Борис, что ты думаешь» — НЕ команда уроков → next()', async () => {
+  it('«Борис, что ты думаешь» — НЕ команда уроков → доменный ответ роли (не next)', async () => {
     const ctx = makeCtx(-100777, 'Борис, что ты думаешь')
     const next = vi.fn().mockResolvedValue(undefined)
     await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).toHaveBeenCalledOnce()
-    expect(mockGetActiveLessonsReport).not.toHaveBeenCalled()
-    expect(ctx.reply).not.toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
+    expect(mockGetActiveLessonsReport).not.toHaveBeenCalled() // не команда «что понял»
+    expect(mockAnswerDirectFreeText).toHaveBeenCalledWith('Борис, что ты думаешь')
+    expect(ctx.reply).toHaveBeenCalledWith(
+      'По кампании: расход у нормы, синонимы по запросам не размечены — покажу пофразный расход.',
+      { parse_mode: 'HTML' }
+    )
   })
 
-  it('«Борис, привет» — не команда роли → next()', async () => {
+  it('«Борис, привет» — не команда роли → доменный ответ роли (не next)', async () => {
     const ctx = makeCtx(-100777, 'Борис, привет')
     const next = vi.fn().mockResolvedValue(undefined)
     await handleDirectChatMessage(asCtx(ctx), next)
+    expect(next).not.toHaveBeenCalled()
+    expect(mockAnswerDirectFreeText).toHaveBeenCalledOnce()
+    expect(ctx.reply).toHaveBeenCalled()
+  })
+
+  it('живой кейс: «Борис, Да, готовь предложение по чистке синонимов…» → доменный путь (raw в LLM)', async () => {
+    const text = 'Борис, Да, готовь предложение по чистке синонимов, там 78% кликов'
+    const ctx = makeCtx(-100777, text)
+    const next = vi.fn().mockResolvedValue(undefined)
+    await handleDirectChatMessage(asCtx(ctx), next)
+    expect(next).not.toHaveBeenCalled()
+    expect(mockAnswerDirectFreeText).toHaveBeenCalledWith(text)
+    expect(ctx.reply).toHaveBeenCalled()
+  })
+
+  it('чат Директа, БЕЗ обращения «Борис/Боря» → next() (свободный контур не наш)', async () => {
+    const ctx = makeCtx(-100777, 'просто сообщение в чате без обращения')
+    const next = vi.fn().mockResolvedValue(undefined)
+    await handleDirectChatMessage(asCtx(ctx), next)
     expect(next).toHaveBeenCalledOnce()
+    expect(mockAnswerDirectFreeText).not.toHaveBeenCalled()
     expect(ctx.reply).not.toHaveBeenCalled()
+  })
+
+  it('НЕ чат Директа + обращённый свободный текст → next(), доменный путь НЕ трогаем', async () => {
+    const ctx = makeCtx(-555, 'Борис, что по кампании?')
+    const next = vi.fn().mockResolvedValue(undefined)
+    await handleDirectChatMessage(asCtx(ctx), next)
+    expect(next).toHaveBeenCalledOnce()
+    expect(mockAnswerDirectFreeText).not.toHaveBeenCalled()
   })
 
   it('сообщение без текста → next()', async () => {

@@ -33,6 +33,7 @@ import { revertLastAction } from './rollback'
 import { decideProposal } from './proposals'
 import { getActiveLessonsReport } from './lessons'
 import { explainPhrase } from './explain'
+import { answerDirectFreeText } from './chat-reply'
 import {
   parseDealCommand,
   findLeadMatches,
@@ -270,8 +271,12 @@ export async function handleDirectChatMessage(
         reply = await getActiveLessonsReport()
         break
       default:
-        // Не команда роли — пусть отвечает обычный Борис.
-        return next()
+        // Обращённый свободный текст (не жёсткая команда) в чате Директа →
+        // READ-ONLY доменный ответ РОЛЬЮ трафика (личность общая, домен по чату).
+        // НИКАКИХ действий/write — только текст (см. chat-reply.ts). Раньше здесь
+        // был next() → общий контур заказов без домена («это не по моей части»).
+        reply = await answerDirectFreeText(raw)
+        break
     }
   } catch (err) {
     console.error(`[boris-direct/telegram] команда владельца «${command}» упала`, err)
