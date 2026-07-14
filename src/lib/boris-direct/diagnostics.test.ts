@@ -10,10 +10,41 @@ import {
   buildDemoSegments,
   diagnoseDeviceSkew,
   diagnoseScheduleWaste,
+  hasRealSchedule,
   diagnoseAudienceWaste,
   diagnoseGroupMinusGap,
   type DeviceRow,
 } from './diagnostics'
+
+// ---------- hasRealSchedule (воскрешение SCHEDULE_WASTE, спринт 14.07) ----------
+// ИНВАРИАНТ ПОЛИГОНА: sim-фейк отдаёт TimeTargeting либо undefined, либо
+// { Schedule: { Items: [] } }. Оба случая должны давать ТОТ ЖЕ результат, что
+// старый `!!TimeTargeting` (undefined→false, {Items:[]}→true), иначе полигон
+// дрогнет. 24/7-фикс срабатывает ТОЛЬКО на непустых all-100 Items (прод).
+describe('hasRealSchedule', () => {
+  const allHundred = (weekday: number) => `${weekday},` + Array(24).fill('100').join(',')
+
+  it('нет TimeTargeting → false (расписания нет)', () => {
+    expect(hasRealSchedule(undefined)).toBe(false)
+    expect(hasRealSchedule(null)).toBe(false)
+  })
+
+  it('ИНВАРИАНТ sim: пустые Items → true (как старый !!TimeTargeting)', () => {
+    expect(hasRealSchedule({ Schedule: { Items: [] } })).toBe(true)
+    expect(hasRealSchedule({ Schedule: {} })).toBe(true)
+    expect(hasRealSchedule({})).toBe(true)
+  })
+
+  it('ПРОД-ФИКС: все часы = 100 (24/7) → false (реального расписания нет)', () => {
+    const items = [1, 2, 3, 4, 5, 6, 7].map(allHundred)
+    expect(hasRealSchedule({ Schedule: { Items: items } })).toBe(false)
+  })
+
+  it('есть ограничение (хоть один час < 100) → true', () => {
+    const items = ['1,100,100,0,0,' + Array(20).fill('100').join(','), allHundred(2)]
+    expect(hasRealSchedule({ Schedule: { Items: items } })).toBe(true)
+  })
+})
 
 // ---------- Общие хелперы ----------
 

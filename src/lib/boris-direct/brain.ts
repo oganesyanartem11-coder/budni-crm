@@ -48,6 +48,7 @@ import {
 import {
   diagnoseDeviceSkew,
   diagnoseScheduleWaste,
+  hasRealSchedule,
   diagnoseAudienceWaste,
   diagnoseGroupMinusGap,
   normalizeDevice,
@@ -332,6 +333,9 @@ async function fetchCumulativeCampaignClicks(
  *  читает первые 3 поля; позиция копится для будущего анализа позиция×CPL. */
 interface CriterionDayStatBackfill extends CriterionDayStat {
   avgTrafficVolume: number
+  /** Средняя позиция клика за день по ключу (спринт 14.07) — для тренда позиции.
+   *  loadCriterionWindow игнорирует (читает только clicks/conversions). */
+  avgClickPosition: number
 }
 
 /**
@@ -428,11 +432,13 @@ export async function backfillCriterionHistory(
     const criterionId = parseCriterionId(raw.CriterionId)
     if (criterionId == null) continue // автотаргет-строки без числового id/пусто — мимо
     const acc = byDay.get(day) ?? new Map<number, CriterionDayStatBackfill>()
-    const cur = acc.get(criterionId) ?? { criterionId, clicks: 0, conversions: 0, avgTrafficVolume: 0 }
+    const cur =
+      acc.get(criterionId) ?? { criterionId, clicks: 0, conversions: 0, avgTrafficVolume: 0, avgClickPosition: 0 }
     cur.clicks += tsvNumber(raw.Clicks)
     cur.conversions += readReportConversions(raw)
     // Date×CriterionId — одна строка на (день, ключ): позиция берётся как есть.
     cur.avgTrafficVolume = tsvNumber(raw.AvgTrafficVolume)
+    cur.avgClickPosition = tsvNumber(raw.AvgClickPosition)
     acc.set(criterionId, cur)
     byDay.set(day, acc)
   }
@@ -2086,7 +2092,11 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
       weekendConversions: weekendConv,
       weekendDays: weekendDays.size,
       weekdayConversions: weekdayConv,
-      hasSchedule: !!settings?.TimeTargeting,
+      // РЕАЛЬНОЕ расписание, а не «есть объект TimeTargeting»: Директ отдаёт его
+      // всегда (24/7 = все часы 100), из-за чего диагноз был мёртв с рождения
+      // (аудит 14.07). hasRealSchedule сохраняет полигон байт-в-байт (пусто/undefined
+      // из sim-фейка → тот же результат, что старый !!), а на проде оживляет диагноз.
+      hasSchedule: hasRealSchedule(settings?.TimeTargeting),
     })
     if (schedule) {
       decisions.push(schedule.decision)

@@ -232,6 +232,43 @@ export function diagnoseDeviceSkew(
 
 // ---------- 2. SCHEDULE_WASTE ----------
 
+/** Форма TimeTargeting из campaigns.get (только нужные для разбора поля). */
+export interface TimeTargetingLike {
+  Schedule?: { Items?: string[] } | null
+}
+
+/**
+ * Есть ли РЕАЛЬНОЕ расписание показов (ограничение времени), а не «крутимся 24/7».
+ *
+ * Директ ВСЕГДА отдаёт TimeTargeting у активной кампании, поэтому старое
+ * `!!TimeTargeting` считало расписание настроенным ВСЕГДА и SCHEDULE_WASTE был
+ * мёртв с рождения (аудит 14.07: выходные съедали ~4.6 т.₽/2 уикенда при 0 заявок,
+ * а диагноз молчал). Реальное расписание = хотя бы один час с коэффициентом < 100
+ * (показ ограничен). Формат Items: "<день>,<ч0>,<ч1>,…,<ч23>" (25 значений).
+ *
+ * ИНВАРИАНТ ПОЛИГОНА (byte-identical): sim-фейк отдаёт либо undefined, либо
+ * { Schedule: { Items: [] } }. Правило «24/7 ⇔ Items НЕПУСТЫ И все часы = 100»
+ * сохраняет оба случая идентично старому `!!TimeTargeting`:
+ *  - undefined → false (как !!undefined);
+ *  - пустые Items → true (как !!{…}); 24/7-фикс их не трогает.
+ * Только НЕПУСТЫЕ all-100 Items (реальный кабинет) дают false — оживление диагноза.
+ */
+export function hasRealSchedule(tt: TimeTargetingLike | null | undefined): boolean {
+  if (!tt) return false
+  const items = tt.Schedule?.Items ?? []
+  if (items.length === 0) return true // пусто → как старый !!TimeTargeting (полигон)
+  // Все часы во всех строках = 100 → 24/7, реального ограничения нет → false.
+  for (const item of items) {
+    const parts = item.split(',')
+    // parts[0] — день недели; часы — со второго значения.
+    for (let i = 1; i < parts.length; i++) {
+      const v = Number(parts[i].trim())
+      if (Number.isFinite(v) && v !== 100) return true // ограничение есть
+    }
+  }
+  return false // все 100 → круглосуточно, расписания фактически нет
+}
+
 export interface ScheduleInput {
   weekendSpendRub: number
   weekendConversions: number
