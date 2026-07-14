@@ -20,6 +20,7 @@ import { getLlmSpendForPeriod } from '@/lib/boris-direct/llm'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
 import { generateWeeklyReportText } from '@/lib/boris-direct/report-texts'
 import { generateWeeklyConsilium } from '@/lib/boris-direct/consilium'
+import { persistConsilium } from '@/lib/boris-direct/questions'
 import { getActiveLessonsReport } from '@/lib/boris-direct/lessons'
 import {
   pollReport,
@@ -338,6 +339,16 @@ async function handler(request: Request) {
     matchTypeShare,
     lessonsDigest,
   })
+
+  // Память вопросов: гипотезы консилиума персистим (kind='consilium', статус open),
+  // чтобы Борис мог вернуться к ним и проверить (фундамент рассуждающего контура —
+  // аудит 14.07: выход консилиума нигде не хранился → петли гипотеза→проверка не было).
+  // Fail-safe: сбой персиста не мешает отправке отчёта.
+  try {
+    await persistConsilium({ text: consilium, from: fromDay, to: toDay })
+  } catch (err) {
+    console.error('[boris-direct/weekly] персист консилиума не удался (не критично)', err)
+  }
 
   const fullText = consilium ? `${text}\n\n${consilium}` : text
   const sent = await sendToDirectChat(fullText)
