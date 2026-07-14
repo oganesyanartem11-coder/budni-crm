@@ -18,7 +18,11 @@ import {
   createQuestion,
   updateQuestion,
   getActiveQuestions,
+  getLatestQuestions,
+  isTopicOnCooldown,
+  type AnalystQuestion,
 } from './questions'
+import { ANALYST_QUESTIONS_KEEP } from './config'
 
 /** Перехватываем последний созданный снапшот вида kind. */
 function lastCreatedPayload(kind: string): unknown {
@@ -123,5 +127,91 @@ describe('getActiveQuestions', () => {
 
   it('нет снапшота → пустой список', async () => {
     expect(await getActiveQuestions()).toEqual([])
+  })
+})
+
+// ---------- Спринт «Аналитик»: topicKey + checkSpec, полный список, cooldown, прунинг ----------
+
+describe('createQuestion (аналитик): topicKey + checkSpec', () => {
+  it('сохраняет topicKey и машинную спецификацию проверки', async () => {
+    await createQuestion({
+      question: 'Клик→заявка обвалился 09.07: серия нулей при живых визитах?',
+      check: 'серия цели Метрики по дням за окно',
+      topicKey: 'funnel_zero_series',
+      checkSpec: { key: 'metrika_goal_series', params: { windowDays: 14 } },
+      now: new Date('2026-07-14T07:30:00Z'),
+    })
+    const arr = lastCreatedPayload('analyst_questions') as Array<Record<string, unknown>>
+    expect(arr[0].topicKey).toBe('funnel_zero_series')
+    expect(arr[0].checkSpec).toEqual({ key: 'metrika_goal_series', params: { windowDays: 14 } })
+  })
+})
+
+describe('getLatestQuestions', () => {
+  it('возвращает ВЕСЬ последний список, включая закрытые (для cooldown/скана)', async () => {
+    setLatestQuestions([
+      { id: 'q1', question: 'a', status: 'open', check: 'c', result: null, createdMsk: 'x', updatedMsk: 'x' },
+      { id: 'q3', question: 'c', status: 'confirmed', check: 'c', result: 'r', createdMsk: 'x', updatedMsk: 'x' },
+    ])
+    const all = await getLatestQuestions()
+    expect(all.map((q) => q.id)).toEqual(['q1', 'q3'])
+  })
+
+  it('нет снапшота → пустой список', async () => {
+    expect(await getLatestQuestions()).toEqual([])
+  })
+})
+
+describe('createQuestion: прунинг памяти вопросов', () => {
+  it(`держит последние ${ANALYST_QUESTIONS_KEEP}, отбрасывая самые старые`, async () => {
+    const existing = Array.from({ length: ANALYST_QUESTIONS_KEEP }, (_, i) => ({
+      id: `old_${i}`,
+      question: `q${i}`,
+      status: 'confirmed' as const,
+      check: 'c',
+      result: 'r',
+      createdMsk: '2026-07-01',
+      updatedMsk: '2026-07-01',
+    }))
+    setLatestQuestions(existing)
+    await createQuestion({ question: 'новейший', check: 'c', now: new Date('2026-07-14T07:30:00Z') })
+    const arr = lastCreatedPayload('analyst_questions') as Array<Record<string, unknown>>
+    expect(arr).toHaveLength(ANALYST_QUESTIONS_KEEP)
+    // Старейший (old_0) вытеснен, новейший на месте.
+    expect(arr.map((q) => q.id)).not.toContain('old_0')
+    expect(arr[arr.length - 1].question).toBe('новейший')
+  })
+})
+
+describe('isTopicOnCooldown', () => {
+  const q = (topicKey: string, createdMsk: string): AnalystQuestion => ({
+    id: `q_${topicKey}_${createdMsk}`,
+    question: 'q',
+    status: 'refuted',
+    check: 'c',
+    result: 'r',
+    createdMsk,
+    updatedMsk: createdMsk,
+    topicKey,
+  })
+
+  it('тема поднята < N дней назад → на cooldown', () => {
+    const list = [q('funnel_zero_series', '2026-07-12')]
+    expect(isTopicOnCooldown(list, 'funnel_zero_series', '2026-07-14', 3)).toBe(true)
+  })
+
+  it('тема поднята ровно N дней назад → уже можно (граница исключительна)', () => {
+    const list = [q('funnel_zero_series', '2026-07-11')]
+    expect(isTopicOnCooldown(list, 'funnel_zero_series', '2026-07-14', 3)).toBe(false)
+  })
+
+  it('другая тема на cooldown не влияет', () => {
+    const list = [q('cpc_leak', '2026-07-14')]
+    expect(isTopicOnCooldown(list, 'funnel_zero_series', '2026-07-14', 3)).toBe(false)
+  })
+
+  it('пустой topicKey (без темы) никогда не на cooldown', () => {
+    const list = [q('funnel_zero_series', '2026-07-14')]
+    expect(isTopicOnCooldown(list, '', '2026-07-14', 3)).toBe(false)
   })
 })

@@ -34,6 +34,7 @@ import { sendToDirectChat } from '@/lib/boris-direct/telegram'
 import { formatAnomalyMessage } from '@/lib/boris-direct/report-texts'
 import { runForecastCycle } from '@/lib/boris-direct/forecast'
 import { runDetectorCycle } from '@/lib/boris-direct/detector-cycle'
+import { runAnalystCycleProd } from '@/lib/boris-direct/analyst-cycle'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -187,10 +188,22 @@ async function handler(request: Request) {
   // --- Контур №0: детерминированные детекторы (воронка/засуха/CPC/дрейф лесенки). ---
   // READ-ONLY: читает снапшоты + один read-отчёт, шлёт алерты. После markRanToday
   // (см. выше) — длинный поллинг отчёта не может пересоздать мутации тика.
+  let detectorAlerts: string[] = []
   try {
-    await runDetectorCycle()
+    const det = await runDetectorCycle()
+    detectorAlerts = det.alerts
   } catch (err) {
     console.error(`[cron:${JOB_LABEL}] контур детекторов упал (не критично)`, err)
+  }
+
+  // --- Рассуждающий контур (Аналитик): heavy 1×/день, вопросы+проверки, БЕЗ write в
+  // кабинет. READ-ONLY. Фичефлаг ANALYST_ENABLED (по умолчанию выкл → тихий скип).
+  // После markRanToday: сбой/таймаут не повторяет мутаций тика. Fail-safe внутри.
+  // Дашборду отдаём алерты детекторов дня (замыкание петли гипотез).
+  try {
+    await runAnalystCycleProd(new Date(), { detectorAlerts })
+  } catch (err) {
+    console.error(`[cron:${JOB_LABEL}] рассуждающий контур упал (не критично)`, err)
   }
 
   return NextResponse.json({

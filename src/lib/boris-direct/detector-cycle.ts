@@ -128,6 +128,8 @@ async function loadMetrikaWindow(fromTick: Date, toTick: Date): Promise<
 export interface DetectorCycleResult {
   alertsSent: number
   ran: string[]
+  /** Тексты алертов дня (для дашборда аналитика — рассуждающий контур читает их). */
+  alerts: string[]
 }
 
 /**
@@ -298,5 +300,5 @@ export async function runDetectorCycle(now: Date = new Date()): Promise<Detector
     }
   }
 
-  return { alertsSent, ran }
+  return { alertsSent, ran, alerts: toSend }
 }

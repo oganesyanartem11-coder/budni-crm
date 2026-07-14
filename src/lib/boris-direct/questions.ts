@@ -17,11 +17,23 @@
 
 import { prisma } from '@/lib/db/prisma'
 import type { Prisma } from '@prisma/client'
+import { ANALYST_QUESTIONS_KEEP } from './config'
 
 const CONSILIUM_KIND = 'consilium'
 const QUESTIONS_KIND = 'analyst_questions'
 
 export type QuestionStatus = 'open' | 'checking' | 'confirmed' | 'refuted'
+
+/**
+ * Машинная спецификация проверки из БЕЛОГО СПИСКА (спринт «Аналитик»): следующий
+ * process-тик читает её и исполняет соответствующую read-only функцию. Ключ обязан
+ * быть из реестра (analyst-checks.ts) — иначе исполнитель тихо пропускает. Хранится
+ * как opaque-форма, чтобы questions.ts не зависел от реестра проверок.
+ */
+export interface AnalystCheckSpec {
+  key: string
+  params: Record<string, unknown>
+}
 
 export interface AnalystQuestion {
   id: string
@@ -34,6 +46,12 @@ export interface AnalystQuestion {
   result: string | null
   createdMsk: string
   updatedMsk: string
+  /** Тема (антизацикливание: одну тему не поднимаем повторно ANALYST_QUESTION_COOLDOWN_DAYS дней). */
+  topicKey?: string
+  /** Машинная проверка для следующего тика (белый список). Нет — вопрос без проверки. */
+  checkSpec?: AnalystCheckSpec
+  /** МСК-день, когда вопрос эскалирован владельцу (защита от повторной эскалации). */
+  escalatedMsk?: string
 }
 
 /** Дата → МСК-день 'YYYY-MM-DD' (UTC+3). Локальный, чтобы не тянуть brain.ts. */
@@ -95,11 +113,14 @@ export interface CreateQuestionInput {
   question: string
   check: string
   now?: Date
+  topicKey?: string
+  checkSpec?: AnalystCheckSpec
 }
 
 /**
  * Добавить вопрос-гипотезу (статус open). Дописывает к последнему снапшоту, не
- * теряя прежние. id детерминирован по дню+индексу (без Date.now/random).
+ * теряя прежние; держит последние ANALYST_QUESTIONS_KEEP (прунинг документа-снапшота,
+ * старейшие вытесняются). id детерминирован по дню+индексу (без Date.now/random).
  */
 export async function createQuestion(input: CreateQuestionInput): Promise<void> {
   const now = input.now ?? new Date()
@@ -113,8 +134,12 @@ export async function createQuestion(input: CreateQuestionInput): Promise<void> 
     result: null,
     createdMsk: day,
     updatedMsk: day,
+    ...(input.topicKey ? { topicKey: input.topicKey } : {}),
+    ...(input.checkSpec ? { checkSpec: input.checkSpec } : {}),
   }
-  await saveSnapshot(QUESTIONS_KIND, now, [...existing, q])
+  const next = [...existing, q]
+  const pruned = next.length > ANALYST_QUESTIONS_KEEP ? next.slice(next.length - ANALYST_QUESTIONS_KEEP) : next
+  await saveSnapshot(QUESTIONS_KIND, now, pruned)
 }
 
 /**
@@ -123,7 +148,7 @@ export async function createQuestion(input: CreateQuestionInput): Promise<void> 
  */
 export async function updateQuestion(
   id: string,
-  patch: { status?: QuestionStatus; result?: string },
+  patch: { status?: QuestionStatus; result?: string; escalatedMsk?: string },
   now: Date = new Date()
 ): Promise<void> {
   const existing = (await latestPayload<AnalystQuestion[]>(QUESTIONS_KIND)) ?? []
@@ -136,6 +161,7 @@ export async function updateQuestion(
           ...q,
           status: patch.status ?? q.status,
           result: patch.result !== undefined ? patch.result : q.result,
+          ...(patch.escalatedMsk !== undefined ? { escalatedMsk: patch.escalatedMsk } : {}),
           updatedMsk: day,
         }
       : q
@@ -147,4 +173,40 @@ export async function updateQuestion(
 export async function getActiveQuestions(): Promise<AnalystQuestion[]> {
   const existing = (await latestPayload<AnalystQuestion[]>(QUESTIONS_KIND)) ?? []
   return existing.filter(isActive)
+}
+
+/**
+ * ВЕСЬ последний список вопросов, включая закрытые (confirmed/refuted). Нужен для
+ * cooldown тем (учитывает и отклонённые темы) и для скана назначенных проверок.
+ */
+export async function getLatestQuestions(): Promise<AnalystQuestion[]> {
+  return (await latestPayload<AnalystQuestion[]>(QUESTIONS_KIND)) ?? []
+}
+
+/** Разница в целых МСК-днях между двумя 'YYYY-MM-DD' (b − a). */
+function dayDiff(a: string, b: string): number {
+  const ad = Date.parse(`${a}T00:00:00Z`)
+  const bd = Date.parse(`${b}T00:00:00Z`)
+  if (!Number.isFinite(ad) || !Number.isFinite(bd)) return Number.POSITIVE_INFINITY
+  return Math.round((bd - ad) / (24 * 60 * 60 * 1000))
+}
+
+/**
+ * Тема на антизацикливающем cooldown? Чистая: тема считается «занятой», если ЛЮБОЙ
+ * вопрос с таким topicKey создан менее чем `days` дней назад (граница days —
+ * исключительна: ровно N дней назад уже можно). Пустой topicKey — никогда не на
+ * cooldown (вопрос без темы). Как cooldown отказов предложений (PROPOSAL_COOLDOWN_DAYS).
+ */
+export function isTopicOnCooldown(
+  questions: AnalystQuestion[],
+  topicKey: string,
+  todayMsk: string,
+  days: number
+): boolean {
+  if (!topicKey) return false
+  for (const q of questions) {
+    if (q.topicKey !== topicKey) continue
+    if (dayDiff(q.createdMsk, todayMsk) < days) return true
+  }
+  return false
 }
