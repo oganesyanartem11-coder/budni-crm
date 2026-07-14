@@ -33,6 +33,7 @@ import { getDirectRoleState } from '@/lib/boris-direct/state'
 import { sendToDirectChat } from '@/lib/boris-direct/telegram'
 import { formatAnomalyMessage } from '@/lib/boris-direct/report-texts'
 import { runForecastCycle } from '@/lib/boris-direct/forecast'
+import { runDetectorCycle } from '@/lib/boris-direct/detector-cycle'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -156,15 +157,15 @@ async function handler(request: Request) {
     await sendToDirectChat(alert)
   }
 
-  // --- М5: суточный цикл прогноза (детект слома за вчера + прогноз на сегодня). ---
-  // Живёт в РОУТЕ, не в мозг-тике: daily_totals за вчера уже записан выше, а полигон
-  // роут не исполняет → на sim-скоринг не влияет. Fail-safe внутри (тик не роняет).
-  try {
-    await runForecastCycle()
-  } catch (err) {
-    console.error(`[cron:${JOB_LABEL}] цикл прогноза упал (не критично)`, err)
-  }
-
+  // ВАЖНО (идемпотентность): markRanToday ставим ДО read-only циклов ниже. Мутации
+  // тика (предложения, вердикты, снапшот daily_result, применение принятого) уже
+  // совершены выше; циклы прогноза/детекторов — READ-ONLY видимость (алерты в чат),
+  // но детектор поллит внешний отчёт Директа до ~40 с. Если такой поллинг упрётся в
+  // maxDuration=60 с, Vercel жёстко убьёт функцию МИМО try/catch — и без раннего
+  // markRanToday следующая попытка крона прошла бы гейт alreadyRanToday и ПОВТОРИЛА
+  // бы мутации (дубли вердиктов createMany без unique / второй daily_result). Ставя
+  // гейт здесь, мы гарантируем: мутации ровно один раз; таймаут циклов ниже лишь
+  // пропускает алерты на этот день (best-effort), тик считается выполненным.
   await markRanToday(JOB_LABEL, {
     status: result.status,
     applied: acceptedApplied.length,
@@ -173,6 +174,24 @@ async function handler(request: Request) {
     autonomous: result.appliedSummaries.length,
     anomalies: result.anomalies.length,
   })
+
+  // --- М5: суточный цикл прогноза (детект слома за вчера + прогноз на сегодня). ---
+  // READ-ONLY, в РОУТЕ (полигон не исполняет → sim-нейтрально). После markRanToday:
+  // сбой/таймаут не приводит к повтору мутаций тика. Fail-safe внутри.
+  try {
+    await runForecastCycle()
+  } catch (err) {
+    console.error(`[cron:${JOB_LABEL}] цикл прогноза упал (не критично)`, err)
+  }
+
+  // --- Контур №0: детерминированные детекторы (воронка/засуха/CPC/дрейф лесенки). ---
+  // READ-ONLY: читает снапшоты + один read-отчёт, шлёт алерты. После markRanToday
+  // (см. выше) — длинный поллинг отчёта не может пересоздать мутации тика.
+  try {
+    await runDetectorCycle()
+  } catch (err) {
+    console.error(`[cron:${JOB_LABEL}] контур детекторов упал (не критично)`, err)
+  }
 
   return NextResponse.json({
     ok: true,
