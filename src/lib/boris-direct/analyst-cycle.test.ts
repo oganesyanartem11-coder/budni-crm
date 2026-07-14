@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { runAnalystCycle, type AnalystCycleDeps } from './analyst-cycle'
+import { runAnalystCycle, type AnalystCycleDeps, type AnalystDailyRecord } from './analyst-cycle'
 import type { AnalystQuestion } from './questions'
-import type { AnalystPassResult } from './analyst'
+import { filterAnalystDrafts, type AnalystPassResult } from './analyst'
 
 const NOW = new Date('2026-07-14T07:30:00Z') // МСК-день 2026-07-14
 
@@ -32,6 +32,7 @@ function baseDeps(over: Partial<AnalystCycleDeps> = {}): AnalystCycleDeps {
     runPass: vi.fn(async () => emptyPass),
     escalate: vi.fn(async () => {}),
     notify: vi.fn(async () => {}),
+    persistDaily: vi.fn(async () => {}),
     ...over,
   }
 }
@@ -151,5 +152,49 @@ describe('runAnalystCycle: постановка новых вопросов', ()
     const deps = baseDeps()
     await runAnalystCycle(deps)
     expect(deps.notify).not.toHaveBeenCalled()
+  })
+})
+
+describe('runAnalystCycle: наблюдательный снапшот analyst_daily', () => {
+  it('персистит дашборд-токены, kept-вопросы и стоимость каждый проход', async () => {
+    const d = { topicKey: 'funnel_zero_series', question: '0 заявок?', check: 'серия цели', checkSpec: { key: 'metrika_goal_series', params: { windowDays: 14 } } }
+    const persisted: AnalystDailyRecord[] = []
+    const deps = baseDeps({
+      buildDashboard: vi.fn(async () => 'ДАШБОРД со многими символами для токенов ' + 'x'.repeat(200)),
+      runPass: vi.fn(async () => ({ kept: [d], dropped: [], raw: 'x', costUsd: 0.031, ok: true })),
+      persistDaily: vi.fn(async (r: AnalystDailyRecord) => { persisted.push(r) }),
+    })
+    await runAnalystCycle(deps)
+    expect(persisted).toHaveLength(1)
+    expect(persisted[0].day).toBe('2026-07-14')
+    expect(persisted[0].dashboardTokens).toBeGreaterThan(0)
+    expect(persisted[0].costUsd).toBe(0.031)
+    expect(persisted[0].kept[0]).toMatchObject({ topicKey: 'funnel_zero_series', checkKey: 'metrika_goal_series' })
+    expect(persisted[0].asked).toBe(1)
+  })
+
+  it('НАМЕРЕННО незаземлённое число → dropped С ПРИЧИНОЙ, видно в снапшоте (не только console)', async () => {
+    // Реальный валидатор заземления: «340 ₽» нет в дашборде → дроп ungrounded.
+    const dashboard = 'ДНИ:\n- 2026-07-13: 780 ₽ / 10 / 0 / —'
+    const bad = { topicKey: 'cpl', question: 'CPL взлетел до 340 ₽ — режь', check: 'сравнить окна', checkSpec: { key: 'compare_query_windows', params: {} } }
+    const filtered = filterAnalystDrafts([bad], dashboard, 3) // НАСТОЯЩИЙ дроп
+    const persisted: AnalystDailyRecord[] = []
+    const deps = baseDeps({
+      buildDashboard: vi.fn(async () => dashboard),
+      runPass: vi.fn(async () => ({ kept: filtered.kept, dropped: filtered.dropped, raw: JSON.stringify([bad]), costUsd: 0.02, ok: true })),
+      persistDaily: vi.fn(async (r: AnalystDailyRecord) => { persisted.push(r) }),
+    })
+    await runAnalystCycle(deps)
+    expect(persisted[0].kept).toHaveLength(0)
+    expect(persisted[0].dropped).toHaveLength(1)
+    expect(persisted[0].dropped[0].reason).toBe('ungrounded')
+    expect(persisted[0].dropped[0].detail).toMatch(/340/)
+    expect(persisted[0].dropped[0].question).toMatch(/340/)
+  })
+
+  it('флаг выключен → снапшот НЕ пишем (аналитик спит)', async () => {
+    const deps = baseDeps({ isEnabled: () => false })
+    await runAnalystCycle(deps)
+    expect(deps.persistDaily).not.toHaveBeenCalled()
   })
 })

@@ -49,6 +49,7 @@ import {
 } from './analyst-checks'
 import {
   buildAnalystDashboard,
+  estimateTokens,
   type AnalystDashboardInput,
   type AnalystWindowDay,
 } from './analyst-dashboard'
@@ -65,6 +66,32 @@ import { getDirectRoleState } from './state'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 // ---------- Оркестратор под DI (TDD) ----------
+
+/**
+ * Наблюдательная запись прохода аналитика (снапшот kind='analyst_daily'). READ-ONLY
+ * к кабинету — только для того, чтобы владелец МОГ ПОСМОТРЕТЬ, что аналитик собрал и
+ * решил на живой БД: дашборд (текст+токены), поставленные вопросы (с цепочками и
+ * назначенными проверками), ОТБРОШЕННЫЕ валидатором заземления вопросы С ПРИЧИНОЙ
+ * (не только console.log), стоимость heavy. На решения/ставки/минусы не влияет.
+ */
+export interface AnalystDailyRecord {
+  day: string
+  /** Собранный дашборд целиком (для инспекции секций). */
+  dashboard: string
+  dashboardChars: number
+  dashboardTokens: number
+  /** heavy-проход состоялся без ошибки (LLM ответил). */
+  ok: boolean
+  costUsd: number
+  checksRun: number
+  confirmed: number
+  escalated: number
+  asked: number
+  /** Вопросы, прошедшие валидатор (белый список + заземление). */
+  kept: Array<{ topicKey: string; question: string; check: string; checkKey: string }>
+  /** Отброшенные драфты С ПРИЧИНОЙ дропа (whitelist / ungrounded + detail). */
+  dropped: Array<{ topicKey: string; question: string; reason: string; detail: string }>
+}
 
 export interface AnalystCycleDeps {
   isEnabled(): boolean
@@ -90,6 +117,8 @@ export interface AnalystCycleDeps {
   escalate(text: string): Promise<void>
   /** Секция «Аналитик: вопросы дня» владельцу (тишина — не зовём). */
   notify(text: string): Promise<void>
+  /** Наблюдательный снапшот прохода (kind='analyst_daily'). Read-only к кабинету. */
+  persistDaily(record: AnalystDailyRecord): Promise<void>
 }
 
 export interface AnalystCycleResult {
@@ -158,10 +187,11 @@ export async function runAnalystCycle(deps: AnalystCycleDeps): Promise<AnalystCy
   }
 
   // --- 2) Собрать дашборд → heavy-проход → новые вопросы дня ---
+  let dashboardText = ''
   let pass: AnalystPassResult
   try {
-    const dashboard = await deps.buildDashboard()
-    pass = await deps.runPass(dashboard)
+    dashboardText = await deps.buildDashboard()
+    pass = await deps.runPass(dashboardText)
   } catch (err) {
     console.error('[boris-direct/analyst-cycle] сбор дашборда/проход аналитика упал', err)
     return res
@@ -200,6 +230,38 @@ export async function runAnalystCycle(deps: AnalystCycleDeps): Promise<AnalystCy
     } catch (err) {
       console.error('[boris-direct/analyst-cycle] секция вопросов дня не ушла', err)
     }
+  }
+
+  // --- Наблюдательный снапшот прохода (analyst_daily): дашборд/kept/dropped/стоимость.
+  // Read-only к кабинету, чтобы владелец видел ПОЛНУЮ картину прохода (в т.ч. дропы
+  // валидатора заземления, а не только console.log). Сбой персиста не роняет петлю. ---
+  try {
+    await deps.persistDaily({
+      day: today,
+      dashboard: dashboardText,
+      dashboardChars: dashboardText.length,
+      dashboardTokens: estimateTokens(dashboardText),
+      ok: pass.ok,
+      costUsd: pass.costUsd,
+      checksRun: res.checksRun,
+      confirmed: res.confirmed,
+      escalated: res.escalated,
+      asked: res.asked,
+      kept: pass.kept.map((d) => ({
+        topicKey: d.topicKey,
+        question: d.question,
+        check: d.check,
+        checkKey: d.checkSpec.key,
+      })),
+      dropped: pass.dropped.map((d) => ({
+        topicKey: d.draft.topicKey,
+        question: d.draft.question,
+        reason: d.reason,
+        detail: d.detail,
+      })),
+    })
+  } catch (err) {
+    console.error('[boris-direct/analyst-cycle] персист analyst_daily не удался (не критично)', err)
   }
 
   return res
@@ -516,6 +578,15 @@ export async function runAnalystCycleProd(
     },
     notify: async (text) => {
       await sendToDirectChat(text)
+    },
+    persistDaily: async (record) => {
+      await prisma.borisDirectSnapshot.create({
+        data: {
+          tickDate: mskDayStartUtc(record.day),
+          kind: 'analyst_daily',
+          payload: JSON.parse(JSON.stringify(record)),
+        },
+      })
     },
   })
 }
