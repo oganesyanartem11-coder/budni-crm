@@ -20,7 +20,7 @@ vi.mock('./reports', async (importActual) => {
   return { ...actual, pollReport: mockPoll }
 })
 
-import { runDetectorCycle } from './detector-cycle'
+import { runDetectorCycle, loadMetrikaWindow } from './detector-cycle'
 import { METRIKA_GOAL_ID, MICRO } from './config'
 
 const GOAL_COL = `Conversions_${METRIKA_GOAL_ID}_LSCCD`
@@ -87,6 +87,42 @@ beforeEach(() => {
   })
   mockPoll.mockResolvedValue({ status: 'ready', tsv: outageTsv() })
   mockSend.mockResolvedValue(undefined)
+})
+
+describe('loadMetrikaWindow — ДЕДУП дублей снапшотов metrika_goal (приёмка перед включением флага)', () => {
+  it('4 ДУБЛЯ за 2026-07-02 (payload идентичный, visits 16) → визиты 16, НЕ 64', async () => {
+    // Наследие таймаут-повтора тика до фикса markRanToday: один день записан 4 раза.
+    const dup = { payload: [{ date: '2026-07-02', visits: 16, goalReaches: 1 }] }
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValueOnce([
+      { ...dup, createdAt: new Date('2026-07-02T07:00:00Z') },
+      { ...dup, createdAt: new Date('2026-07-02T07:05:00Z') },
+      { ...dup, createdAt: new Date('2026-07-02T07:10:00Z') },
+      { ...dup, createdAt: new Date('2026-07-02T07:15:00Z') },
+    ])
+    const series = await loadMetrikaWindow(new Date('2026-07-01'), new Date('2026-07-03'))
+    expect(series).toHaveLength(1) // один день, не четыре
+    expect(series[0]).toEqual({ day: '2026-07-02', visits: 16, goalReaches: 1 })
+    // ЯВНО: НЕ задвоено/зачетверено.
+    expect(series[0].visits).not.toBe(64)
+  })
+
+  it('дубли с РАЗНЫМ payload → побеждает самый свежий (orderBy createdAt asc, Map.set перезапись)', async () => {
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValueOnce([
+      { payload: [{ date: '2026-07-02', visits: 10, goalReaches: 0 }], createdAt: new Date('2026-07-02T07:00:00Z') },
+      { payload: [{ date: '2026-07-02', visits: 16, goalReaches: 1 }], createdAt: new Date('2026-07-02T09:00:00Z') }, // свежее
+    ])
+    const series = await loadMetrikaWindow(new Date('2026-07-01'), new Date('2026-07-03'))
+    expect(series[0].visits).toBe(16) // последний по createdAt, не сумма (26) и не первый (10)
+  })
+
+  it('разные дни не схлопываются в один', async () => {
+    mockPrisma.borisDirectSnapshot.findMany.mockResolvedValueOnce([
+      { payload: [{ date: '2026-07-02', visits: 16, goalReaches: 1 }] },
+      { payload: [{ date: '2026-07-03', visits: 20, goalReaches: 2 }] },
+    ])
+    const series = await loadMetrikaWindow(new Date('2026-07-01'), new Date('2026-07-04'))
+    expect(series.map((r) => `${r.day}:${r.visits}`)).toEqual(['2026-07-02:16', '2026-07-03:20'])
+  })
 })
 
 describe('runDetectorCycle — РЕПЛЕЙ окна 09–13.07', () => {

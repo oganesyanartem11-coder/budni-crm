@@ -104,8 +104,14 @@ async function snapshotPayload<T>(kind: string, atOrBefore?: Date): Promise<T | 
   return snap ? (snap.payload as unknown as T) : null
 }
 
-/** Окно снапшотов metrika_goal → ряд {day, visits, goalReaches} (дедуп по дню). */
-async function loadMetrikaWindow(fromTick: Date, toTick: Date): Promise<
+/**
+ * Окно снапшотов metrika_goal → ряд {day, visits, goalReaches} (ДЕДУП ПО ДНЮ).
+ * Дубли снапшотов одного дня (наследие таймаут-повтора тика до фикса markRanToday)
+ * НЕ задваиваются: byDay.set(date, …) ПЕРЕЗАПИСЫВАЕТ (не суммирует), а orderBy
+ * createdAt asc → побеждает самый свежий снапшот дня. Экспортируется для приёмки
+ * дедупа (additive, поведение не меняется).
+ */
+export async function loadMetrikaWindow(fromTick: Date, toTick: Date): Promise<
   Array<{ day: string; visits: number; goalReaches: number }>
 > {
   const snaps = await prisma.borisDirectSnapshot.findMany({

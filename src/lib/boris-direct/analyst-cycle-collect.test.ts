@@ -163,6 +163,28 @@ describe('collectAnalystDashboard на прод-формных снапшота�
     expect(tokens).toBeLessThan(4000)
   })
 
+  it('ДЕДУП окна: 4 дубля daily_totals за один день → клики НЕ учетверяются', async () => {
+    // Тот же таймаут-повтор тика мог задвоить и daily_totals. loadDailyTotals дедупит
+    // по дню (byDay.set — перезапись, orderBy createdAt asc → свежий побеждает).
+    const dup = { date: '2026-07-13', spendRub: 780, clicks: 10, impressions: 360 }
+    mockPrisma.borisDirectSnapshot.findMany.mockImplementation(async (args: { where: { kind: string } }) =>
+      args.where.kind === 'daily_totals'
+        ? [
+            { payload: dup, tickDate: new Date('2026-07-13T07:00:00Z') },
+            { payload: dup, tickDate: new Date('2026-07-13T07:05:00Z') },
+            { payload: dup, tickDate: new Date('2026-07-13T07:10:00Z') },
+            { payload: dup, tickDate: new Date('2026-07-13T07:15:00Z') },
+          ]
+        : []
+    )
+    const text = await collectAnalystDashboard(NOW, {})
+    const dayLines = text.split('\n').filter((l) => /^\- 2026-07-13:/.test(l))
+    expect(dayLines).toHaveLength(1) // один день в окне, не четыре
+    // клики 10 (не 40), расход 780 ₽ (не 3120 ₽).
+    expect(dayLines[0]).toMatch(/780 ₽ \/ 10 \//)
+    expect(dayLines[0]).not.toMatch(/40 \//)
+  })
+
   it('деградация: пустая БД (все снапшоты null) — не падает, печатает шапку+пустое окно', async () => {
     mockPrisma.borisDirectSnapshot.findMany.mockResolvedValue([])
     mockPrisma.borisDirectSnapshot.findFirst.mockResolvedValue(null)
