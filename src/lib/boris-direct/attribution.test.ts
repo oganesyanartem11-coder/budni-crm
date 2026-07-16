@@ -18,11 +18,13 @@ import {
   getLeadsForPeriod,
   splitLeadsByOrigin,
   dedupeLeadsByPhone,
+  filterOutCallLeads,
   toQueryStatRow,
   matchLeadsToTerms,
   computeCostPerLead,
   type QueryStatRow,
 } from './attribution'
+import { CALL_FORM_TYPE } from './config'
 
 /** Лид-заготовка: все поля пустые, нужное переопределяем в тесте. */
 function makeLead(overrides: Partial<LeadForAttribution> = {}): LeadForAttribution {
@@ -38,9 +40,33 @@ function makeLead(overrides: Partial<LeadForAttribution> = {}): LeadForAttributi
     source: null,
     phoneDigits: null,
     name: null,
+    formType: 'popup',
     ...overrides,
   }
 }
+
+describe('гардрейлы звонков (спринт 16.07)', () => {
+  it('phone_call НЕ Директ: нет yclid/cpc → не в fromDirect (не в CPA-знаменателе)', () => {
+    const call = makeLead({ formType: CALL_FORM_TYPE, yclid: null, utmSource: null, utmMedium: null, phoneDigits: '79990001122' })
+    const split = splitLeadsByOrigin([call])
+    expect(split.fromDirect).toHaveLength(0)
+  })
+
+  it('filterOutCallLeads убирает phone_call, формы (popup/quiz/null) оставляет', () => {
+    const leads = [
+      makeLead({ id: 'form1', formType: 'popup' }),
+      makeLead({ id: 'call1', formType: CALL_FORM_TYPE }),
+      makeLead({ id: 'quiz1', formType: 'quiz' }),
+      makeLead({ id: 'nullft', formType: null }),
+    ]
+    expect(filterOutCallLeads(leads).map((l) => l.id)).toEqual(['form1', 'quiz1', 'nullft'])
+  })
+
+  it('звонок с yclid-подобным мусором в utm всё равно не Директ, если yclid пуст и medium≠cpc', () => {
+    const call = makeLead({ formType: CALL_FORM_TYPE, utmSource: 'yandex', utmMedium: null })
+    expect(splitLeadsByOrigin([call]).fromDirect).toHaveLength(0)
+  })
+})
 
 function makeRow(overrides: Partial<QueryStatRow> = {}): QueryStatRow {
   return {

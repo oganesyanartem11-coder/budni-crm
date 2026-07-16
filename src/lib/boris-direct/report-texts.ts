@@ -304,6 +304,8 @@ export interface WeeklyReportExtras {
     delivered: number
     /** Дата, до которой БД LandingLead была слепа (persist не существовал), МСК. */
     deliveredBlindBefore?: string
+    /** Спринт 16.07: ручные ЗВОНКИ (formType='phone_call') — вне рекламной атрибуции. */
+    calls?: number
   }
   /**
    * М2: доля SYNONYM-трафика (синонимные подстановки Директа к ключам) — видимость,
@@ -442,6 +444,11 @@ function leadCountsLines(lc: NonNullable<WeeklyReportExtras['leadCounts']>): str
     `- Метрика (достижения цели 575665118): ${lc.metrika}`,
     `- Доставлено (в чат/БД LandingLead): ${lc.delivered}`,
   ]
+  // Спринт 16.07: звонки — отдельный канал (форма молчала, звонили). Вне рекламной
+  // атрибуции (нет yclid) — показываем отдельной строкой для полной картины лидов.
+  if (lc.calls && lc.calls > 0) {
+    lines.push(`- Звонки (ручной приём): ${lc.calls} (вне рекламной атрибуции)`)
+  }
   // Полстроки о различиях: почему счётчики не сходятся.
   const diffs: string[] = []
   if (lc.metrika > lc.delivered) diffs.push('Метрика > Доставлено — часть достижений могла быть фантомами до фикса фронта либо потеряна фронтом')

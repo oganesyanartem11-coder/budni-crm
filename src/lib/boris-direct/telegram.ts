@@ -42,6 +42,7 @@ import {
   cancelDeal,
   type DealLeadCandidate,
 } from './deals'
+import { handleCallCommand } from './calls'
 
 // ---------- Отправка в чат Директа ----------
 
@@ -208,6 +209,21 @@ export async function handleDirectChatMessage(
       explanation = 'Не получилось объяснить, смотри логи'
     }
     await ctx.reply(explanation, { parse_mode: 'HTML' })
+    return
+  }
+
+  // Спринт 16.07: «Борис, звонок <телефон> [время] [коммент]» — ручной приём звонка как
+  // лида (formType='phone_call', источник null) + подсказка «с какого запроса» по времени
+  // (Метрика, гипотеза). Пишем LandingLead, штатную пересылку заявки НЕ триггерим.
+  if (command === 'звонок' || command.startsWith('звонок ')) {
+    let reply: string
+    try {
+      reply = await handleCallCommand(command)
+    } catch (err) {
+      console.error('[boris-direct/telegram] команда «звонок» упала', err)
+      reply = 'Не получилось записать звонок, смотри логи'
+    }
+    await ctx.reply(reply, { parse_mode: 'HTML' })
     return
   }
 
