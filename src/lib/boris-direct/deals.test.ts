@@ -13,6 +13,21 @@ import {
   type WonDeal,
 } from './deals'
 
+describe('ШАГ 3 (спринт 16.07): «сделка» находит лид-ЗВОНОК по телефону', () => {
+  it('phone_call-лид матчится по суффиксу телефона (formType не фильтруется)', () => {
+    const callLead: DealLeadCandidate = {
+      id: 'call1',
+      phoneDigits: '79991234567',
+      phone: '79991234567',
+      name: null,
+      createdAt: new Date('2026-07-16T08:28:00Z'),
+      utmTerm: null, // звонок без атрибуции — сделка всё равно вешается
+    }
+    const formLead: DealLeadCandidate = { id: 'form1', phoneDigits: '79990009999', phone: '79990009999', name: null, createdAt: new Date() }
+    expect(findLeadMatches('1234567', [callLead, formLead]).map((m) => m.id)).toEqual(['call1'])
+  })
+})
+
 describe('parseDealCommand: «сделка <телефон> <сумма>» / «... отмена»', () => {
   it('телефон + сумма → set', () => {
     const r = parseDealCommand('сделка 79991234567 150000')

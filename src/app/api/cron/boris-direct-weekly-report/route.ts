@@ -41,6 +41,7 @@ import {
   UPLIFT_COHORT_RAISE_DAY,
   COHORT_MIN_CLICKS,
   PHRASE_ECON_WINDOW_WORKDAYS,
+  CALL_FORM_TYPE,
 } from '@/lib/boris-direct/config'
 
 export const dynamic = 'force-dynamic'
@@ -245,9 +246,12 @@ async function handler(request: Request) {
     console.error('[boris-direct/weekly] Метрика по дням недоступна', err)
   }
   let delivered = 0
+  let calls = 0
   try {
     const leads = dedupeLeadsByPhone(filterOutTestLeads(await getLeadsForPeriod(from, to, { exclusiveTo: true })))
     delivered = splitLeadsByOrigin(leads).fromDirect.length
+    // Спринт 16.07: звонки (formType='phone_call') — отдельный канал вне рекламной атрибуции.
+    calls = leads.filter((l) => l.formType === CALL_FORM_TYPE).length
   } catch (err) {
     console.error('[boris-direct/weekly] заявки для «Доставлено» недоступны', err)
   }
@@ -308,7 +312,7 @@ async function handler(request: Request) {
     llmCalls: llmSpend.calls,
     proposalsPending,
     period: { from: fromDay, to: toDay },
-    leadCounts: { directAttrib, metrika, delivered, deliveredBlindBefore: DB_BLIND_BEFORE_MSK },
+    leadCounts: { directAttrib, metrika, delivered, deliveredBlindBefore: DB_BLIND_BEFORE_MSK, calls },
     matchTypeShare,
     underspendWeekly,
     revenue,

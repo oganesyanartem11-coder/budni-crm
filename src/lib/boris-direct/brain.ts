@@ -63,6 +63,7 @@ import {
   getLeadsForPeriod,
   splitLeadsByOrigin,
   dedupeLeadsByPhone,
+  filterOutCallLeads,
   matchLeadsToTerms,
   toQueryStatRow,
   computeCostPerLead,
@@ -696,15 +697,17 @@ export async function runCollectTick(now: Date = new Date()): Promise<CollectRes
 
     // MINOR-2: считаем заявки БЕЗ тестовых (как process/weekly) — иначе тестовая
     // «Тестик» глушит leads_zero (день с 0 реальных + 1 тестовой выглядел как «1»).
-    const leadsYesterday = filterOutTestLeads(
-      await getLeadsForPeriod(tickYesterday, new Date(tickToday.getTime() - 1))
+    // Спринт 16.07: ЗВОНКИ (filterOutCallLeads) тоже вон — leads_zero про слом ФОРМЫ,
+    // а звонок не доказывает, что форма жива (иначе звонок глушил бы детектор формы).
+    const leadsYesterday = filterOutCallLeads(
+      filterOutTestLeads(await getLeadsForPeriod(tickYesterday, new Date(tickToday.getTime() - 1)))
     ).length
     // М3: средний поток заявок для leads_zero — по РАБОЧИМ дням (B2B живёт по будням;
     // выходные с 0 заявок не должны занижать «норму»). Окно — до дня перед вчера.
     const dayBeforeYesterday = mskDay(new Date(tickYesterday.getTime() - DAY_MS))
     const leadsWindowStart = workdayWindowStartUtc(dayBeforeYesterday, LEADS_ZERO_AVG_WORKDAYS)
-    const leadsWindow = filterOutTestLeads(
-      await getLeadsForPeriod(leadsWindowStart, new Date(tickYesterday.getTime() - 1))
+    const leadsWindow = filterOutCallLeads(
+      filterOutTestLeads(await getLeadsForPeriod(leadsWindowStart, new Date(tickYesterday.getTime() - 1)))
     ).length
 
     anomalies = detectAnomalies({

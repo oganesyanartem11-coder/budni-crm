@@ -5,7 +5,7 @@
 // сверяем по yclid/UTM-меткам и utm_term против отчёта по поисковым запросам.
 
 import { prisma } from '@/lib/db/prisma'
-import { METRIKA_GOAL_ID } from './config'
+import { METRIKA_GOAL_ID, CALL_FORM_TYPE } from './config'
 
 // ---------- Лиды за период ----------
 
@@ -24,6 +24,18 @@ export interface LeadForAttribution {
   phoneDigits: string | null
   /** Имя — ТОЛЬКО для тест-фильтра (isTestLead), в отчёты/репо не выносим. */
   name: string | null
+  /** Тип формы ('popup'|'quiz'|'phone_call'…) — для изоляции звонков от детекторов формы. */
+  formType: string | null
+}
+
+/**
+ * Отфильтровать лиды-ЗВОНКИ (formType='phone_call', ручной приём). Звонок — отдельный
+ * канал: его наличие НЕ доказывает, что ФОРМА жива, поэтому детекторы «формы»
+ * (leads_zero и т.п.) должны считать заявки БЕЗ звонков (спринт 16.07). formType, не
+ * равный CALL_FORM_TYPE (в т.ч. null/undefined у форм) — оставляем. Чистая.
+ */
+export function filterOutCallLeads<T extends { formType?: string | null }>(leads: T[]): T[] {
+  return leads.filter((l) => l.formType !== CALL_FORM_TYPE)
 }
 
 /**
@@ -51,6 +63,7 @@ export async function getLeadsForPeriod(
       source: true,
       phoneDigits: true,
       name: true,
+      formType: true,
     },
     orderBy: { createdAt: 'asc' },
   })

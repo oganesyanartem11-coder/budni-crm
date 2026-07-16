@@ -7,7 +7,7 @@
 //   до активации владельцем (см. JSDoc uploadOfflineConversions).
 
 import { readYandexMetricaToken } from './env'
-import { METRIKA_COUNTER_ID, METRIKA_GOAL_ID } from './config'
+import { METRIKA_COUNTER_ID, METRIKA_GOAL_ID, MSK_TIMEZONE_PARAM } from './config'
 
 const METRIKA_API_BASE = 'https://api-metrika.yandex.net'
 
@@ -219,6 +219,33 @@ export async function getGoalStatsByDemographics(
     age: row.dimensions[1]?.name ?? '',
     visits: row.metrics[0] ?? 0,
     goalReaches: row.metrics[1] ?? 0,
+  }))
+}
+
+/**
+ * Рекламные визиты по ПОИСКОВОЙ ФРАЗЕ Директа × ЧАСУ за день (спринт 16.07: подсказка
+ * «с какого запроса пришёл звонок» по времени). Фильтр 'ad' = наша кампания (одна в
+ * аккаунте; при Волне 2 нужна изоляция по кампании). Час — в МСК: пинуем timezone=+03:00
+ * (счётчик и так МСК, но пин снимает зависимость от настройки — час совпадает со
+ * временем звонка). ТОЛЬКО чтение (/stat/v1/data), OAuth. Это ГИПОТЕЗА по времени, не
+ * атрибуция (визит↔звонок по времени не доказуем).
+ */
+export async function getAdVisitsByPhraseHour(
+  day: string
+): Promise<Array<{ phrase: string; hour: number; visits: number }>> {
+  const resp = await metrikaStat({
+    dimensions: 'ym:s:lastDirectSearchPhrase,ym:s:hour',
+    metrics: 'ym:s:visits',
+    date1: day,
+    date2: day,
+    filters: AD_TRAFFIC_FILTER,
+    limit: '1000',
+    timezone: MSK_TIMEZONE_PARAM,
+  })
+  return resp.data.map((row) => ({
+    phrase: row.dimensions[0]?.name ?? '',
+    hour: Number(row.dimensions[1]?.name ?? -1),
+    visits: row.metrics[0] ?? 0,
   }))
 }
 
