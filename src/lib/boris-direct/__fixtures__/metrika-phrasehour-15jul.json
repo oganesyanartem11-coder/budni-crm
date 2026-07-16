@@ -1,0 +1,16 @@
+{
+  "_comment": "СЫРОЙ ответ Метрики /stat/v1/data (зеркало, спринт 16.07): dimensions='ym:s:lastDirectSearchPhrase,ym:s:hour', metrics='ym:s:visits', filters=ad, date=2026-07-15, timezone=+03:00. КЛЮЧЕВОЕ: имя часа приходит как 'ЧЧ:00' (не 'ЧЧ') — Number('14:00')=NaN был корнем тихого ложного нуля.",
+  "data": [
+    { "dimensions": [{ "name": "rjvgktrcysq j tls yf pfrfp d cthge jdt" }, { "name": "12:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "бизнес ланч мытищи с доставкой" }, { "name": "11:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "заказ еды порционно офис" }, { "name": "14:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "заказать питание в организацию домодедово" }, { "name": "14:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "комплексные обеды серпухов" }, { "name": "12:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "комплексные обеды стоимоть" }, { "name": "13:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "комплесные обеды в офис москва румянцево" }, { "name": "15:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "майкоп комплексные обеды" }, { "name": "20:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "организация питания работников предприятия московская область" }, { "name": "16:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "питание для вахтовиков" }, { "name": "15:00" }], "metrics": [1] },
+    { "dimensions": [{ "name": "что заказать на др в офис из еды" }, { "name": "15:00" }], "metrics": [1] }
+  ]
+}

@@ -87,12 +87,21 @@ export function parseCallCommand(command: string, now: Date): ParsedCallCommand 
   const tokens = rest.split(/\s+/).filter(Boolean)
   if (tokens.length === 0) return { kind: 'invalid', error: 'нужно: «звонок <телефон> [время] [коммент]»' }
 
-  const phoneRaw = tokens[0]
+  // ШАГ 7 (16.07): человеческие форматы телефона могут быть МНОГО-ТОКЕННЫМИ
+  // («+7 (966) 374-87-06», «8 966 374 87 06»). Съедаем ведущие ТЕЛЕФОННЫЕ токены
+  // (только + - ( ) и цифры, БЕЗ точки/двоеточия/букв — чтобы не проглотить дату
+  // «16.07», время «11:28» или комментарий) и вычищаем не-цифры ДО позиционного
+  // разбора. Дата/время/коммент — уже с не-телефонного токена.
+  const isPhoneToken = (t: string) => /^[+()\d-]+$/.test(t) && /\d/.test(t)
+  let i = 0
+  while (i < tokens.length && isPhoneToken(tokens[i])) i++
+  const phoneTokens = tokens.slice(0, i)
+  const phoneRaw = phoneTokens.join(' ')
   const phoneDigits = digitsOf(phoneRaw)
   if (phoneDigits.length < 4) {
     return { kind: 'invalid', error: 'не понял телефон (нужно ≥4 цифр — можно последние 4)' }
   }
-  const after = tokens.slice(1)
+  const after = tokens.slice(i)
 
   // МСК-«сейчас» (компоненты) из now.
   const mskNow = new Date(now.getTime() + MSK_OFFSET_MS)
@@ -155,6 +164,10 @@ export interface PhraseHourVisit {
   visits: number
 }
 
+/** Статус часового среза: ok (есть визиты) / empty_window (час пуст, но данные видны) /
+ *  unavailable (часовой срез НЕ прочитан при непустом дне — НЕ ноль, а «не смотрел»). */
+export type CallHintStatus = 'ok' | 'empty_window' | 'unavailable'
+
 export interface CallHintMeta {
   channel: 'phone_call'
   callHourMsk: number
@@ -162,6 +175,7 @@ export interface CallHintMeta {
   windowVisits: number
   windowPhrases: string[]
   dayVisits: number
+  status: CallHintStatus
   note: string
 }
 
@@ -170,7 +184,13 @@ const HINT_NOTE = 'гипотеза по времени, не атрибуция
 /**
  * Подсказка «с какого запроса пришёл» по ВРЕМЕНИ: рекламные визиты в окне ±радиус
  * часов от часа звонка (первично) + контекст дня. СТРОГО гипотеза, дисклеймер всегда.
- * Чистая: rows уже собраны из Метрики (ad-фильтр, phrase×hour, МСК). 0 в окне — честно.
+ *
+ * ГЛАВНОЕ ПРАВИЛО (баг 16.07 «тихий ложный ноль»): отличаем «визитов не было» от «не
+ * смогли посмотреть». Если ни одной строки с ВАЛИДНЫМ часом (0..23), А за день визиты
+ * ЕСТЬ (dayVisits>0) — часовой срез НЕ ПРОЧИТАН (сломан парс/формат): НИКОГДА не подаём
+ * это как ноль, честно говорим «часовой срез недоступен». Иначе окно 0 при валидных
+ * строках — реальный ноль (в этот час не было, за день были в другие часы).
+ * Чистая: rows уже из Метрики (ad-фильтр, phrase×hour, МСК). hour=NaN → строка невалидна.
  */
 export function buildCallHint(
   rows: PhraseHourVisit[],
@@ -181,14 +201,18 @@ export function buildCallHint(
   for (let h = opts.callHourMsk - radius; h <= opts.callHourMsk + radius; h++) {
     if (h >= 0 && h <= 23) windowHours.push(h)
   }
-  const inWindow = rows.filter((r) => windowHours.includes(r.hour))
+  // ВАЛИДНЫЕ строки — с распознанным часом. Пусто при dayVisits>0 = «не смотрели».
+  const usable = rows.filter((r) => Number.isInteger(r.hour) && r.hour >= 0 && r.hour <= 23)
+  const inWindow = usable.filter((r) => windowHours.includes(r.hour))
 
-  // Свернуть по фразе (фраза может быть в нескольких часах окна), сортировать по визитам.
   const byPhrase = new Map<string, number>()
   for (const r of inWindow) byPhrase.set(r.phrase, (byPhrase.get(r.phrase) ?? 0) + r.visits)
   const phrasesSorted = [...byPhrase.entries()].sort((a, b) => b[1] - a[1])
   const windowVisits = inWindow.reduce((s, r) => s + r.visits, 0)
   const windowPhrases = phrasesSorted.map(([p]) => p)
+
+  const status: CallHintStatus =
+    usable.length === 0 && opts.dayVisits > 0 ? 'unavailable' : windowVisits === 0 ? 'empty_window' : 'ok'
 
   const meta: CallHintMeta = {
     channel: 'phone_call',
@@ -197,15 +221,21 @@ export function buildCallHint(
     windowVisits,
     windowPhrases,
     dayVisits: opts.dayVisits,
+    status,
     note: HINT_NOTE,
   }
 
   const hh = String(opts.callHourMsk).padStart(2, '0')
   let text: string
-  if (windowVisits === 0) {
+  if (status === 'unavailable') {
+    // НЕ ноль как факт: часовой срез не прочитан при визитах за день.
     text =
-      `В час звонка (±${radius}ч, ~${hh}:00) рекламных визитов нет (0). ` +
-      `За день ${opts.dayVisits} рекл. визитов. Это ${HINT_NOTE}.`
+      `Часовой срез недоступен (не смог посмотреть) при ${opts.dayVisits} рекл. визитах за день — ` +
+      `подсказку по времени не даю, чтобы не путать «не смотрел» с «не было».`
+  } else if (status === 'empty_window') {
+    text =
+      `В час звонка (±${radius}ч, ~${hh}:00) рекламных визитов не было; за день ${opts.dayVisits} в другие часы. ` +
+      `Это ${HINT_NOTE}.`
   } else {
     const list = phrasesSorted.map(([p, v]) => `«${p}»${v > 1 ? ` (${v})` : ''}`).join('; ')
     text =
