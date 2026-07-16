@@ -10,6 +10,7 @@ import {
   buildDemoSegments,
   diagnoseDeviceSkew,
   diagnoseScheduleWaste,
+  aggregateWeekendStats,
   hasRealSchedule,
   diagnoseAudienceWaste,
   diagnoseGroupMinusGap,
@@ -125,6 +126,47 @@ describe('diagnoseDeviceSkew', () => {
 })
 
 // ---------- SCHEDULE_WASTE ----------
+
+describe('aggregateWeekendStats — ФАКТ-приоритет доставленных заявок (BUG 2, 16.07)', () => {
+  it('выходной с доставленной заявкой, но отчёт 0 → день сконвертил (диагноз не горит ложно)', () => {
+    const rows = [
+      { day: '2026-07-04', costRub: 2000, conversions: 0 }, // сб
+      { day: '2026-07-05', costRub: 2634.35, conversions: 0 }, // вс — отчёт 0, но заявка была
+    ]
+    const agg = aggregateWeekendStats(rows, new Map([['2026-07-05', 1]]))
+    expect(agg.weekendConversions).toBe(1) // из доставленной заявки, НЕ 0
+    expect(agg.weekendDays).toBe(2)
+    expect(Math.round(agg.weekendSpendRub)).toBe(4634)
+    // Диагноз с этим счётом НЕ горит (заявка была).
+    expect(diagnoseScheduleWaste({ ...agg, weekdayConversions: 5, hasSchedule: false })).toBeNull()
+  })
+
+  it('пустой deliveredByDay → как раньше (только отчёт): полигон-нейтрально', () => {
+    const rows = [
+      { day: '2026-07-04', costRub: 2000, conversions: 0 },
+      { day: '2026-07-05', costRub: 2634.35, conversions: 0 },
+    ]
+    const agg = aggregateWeekendStats(rows, new Map())
+    expect(agg.weekendConversions).toBe(0) // без доставленных заявок — прежнее поведение
+  })
+
+  it('заявки БУДНЕЙ не влияют на weekendConversions', () => {
+    const agg = aggregateWeekendStats(
+      [{ day: '2026-07-06', costRub: 1000, conversions: 2 }], // пн
+      new Map([['2026-07-06', 5]])
+    )
+    expect(agg.weekendConversions).toBe(0)
+    expect(agg.weekdayConversions).toBe(2)
+  })
+
+  it('max(отчёт, доставленные): отчёт уже посчитал → не задваиваем', () => {
+    const agg = aggregateWeekendStats(
+      [{ day: '2026-07-05', costRub: 500, conversions: 1 }],
+      new Map([['2026-07-05', 1]])
+    )
+    expect(agg.weekendConversions).toBe(1) // max(1,1)=1, не 2
+  })
+})
 
 describe('diagnoseScheduleWaste', () => {
   const base = {

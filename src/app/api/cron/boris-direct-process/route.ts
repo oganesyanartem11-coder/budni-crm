@@ -22,6 +22,7 @@ import {
   expireStaleProposals,
   formatProposalSummary,
 } from '@/lib/boris-direct/proposals'
+import { allPhrasesAlreadyMinused } from '@/lib/boris-direct/minus-proposal'
 import {
   recordVerdicts,
   getLearningStats,
@@ -58,10 +59,37 @@ async function handler(request: Request) {
   }
 
   // --- Предложения владельцу (до вердиктов: нужна связка verdicts↔proposal). ---
+  // ШАГ 2 (аудит 16.07): живой минус-список кампании — чтобы НЕ пере-предлагать
+  // владельцу с кнопками фразу, УЖЕ занесённую в минусы (иначе шум и подрыв доверия:
+  // «фабрика обедов павловский посад» применена 14.07, но кандидат её не вычитает —
+  // BUG 1 root). Гейт на ГРАНИЦЕ предложений (в роуте), НЕ в мозг-тике → полигон
+  // байт-в-байт. Минус-список из campaign_settings-снапшота (пишет collect, без
+  // API/юнитов). Полный вычет из КАНДИДАТОВ (мозг) — отдельным заходом под полигон-гейт.
+  let liveNegatives: string[] = []
+  try {
+    const negSnap = await prisma.borisDirectSnapshot.findFirst({
+      where: { kind: 'campaign_settings' },
+      orderBy: [{ tickDate: 'desc' }, { createdAt: 'desc' }],
+      select: { payload: true },
+    })
+    const items = (negSnap?.payload as { NegativeKeywords?: { Items?: string[] } } | null)?.NegativeKeywords?.Items
+    liveNegatives = Array.isArray(items) ? items : []
+  } catch (err) {
+    console.error(`[cron:${JOB_LABEL}] живой минус-список для гейта пере-предложений недоступен`, err)
+  }
+
   const proposalsCreated: string[] = []
   let minusProposalId: string | null = null
   for (const draft of result.proposalDrafts) {
     try {
+      // Пере-предложение уже занесённой фразы (все фразы драфта уже в минусах) — скип.
+      if (draft.type === 'minus_words') {
+        const phrases = (draft.payload as { phrases?: string[] })?.phrases ?? []
+        if (allPhrasesAlreadyMinused(phrases, liveNegatives)) {
+          console.log(`[cron:${JOB_LABEL}] minus_words пропущено: все фразы уже в минусах кабинета (не пере-предлагаем)`)
+          continue
+        }
+      }
       const created = await createProposal(draft)
       if (!created.created) {
         // Дедуп по PENDING или cooldown после отказа — штатно, просто лог.
