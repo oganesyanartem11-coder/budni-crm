@@ -48,6 +48,7 @@ import {
 import {
   diagnoseDeviceSkew,
   diagnoseScheduleWaste,
+  aggregateWeekendStats,
   hasRealSchedule,
   diagnoseAudienceWaste,
   diagnoseGroupMinusGap,
@@ -61,6 +62,7 @@ import {
 import {
   getLeadsForPeriod,
   splitLeadsByOrigin,
+  dedupeLeadsByPhone,
   matchLeadsToTerms,
   toQueryStatRow,
   computeCostPerLead,
@@ -2071,27 +2073,32 @@ export async function runProcessTick(now: Date = new Date()): Promise<ProcessRes
     const settings = await latestSnapshotPayload<CampaignSettings>('campaign_settings')
     const bidmods = (await latestSnapshotPayload<BidModifierRecord[]>('bidmodifiers')) ?? []
 
-    // (а) SCHEDULE_WASTE — будни/выходные по расходу и заявкам.
-    const weekendDays = new Set<string>()
-    let weekendSpend = 0
-    let weekendConv = 0
-    let weekdayConv = 0
-    for (const s of windowStats) {
-      const day = mskDay(s.date)
-      const costRub = Number(s.costRub) // costRub — Prisma Decimal
-      if (isWeekend(day)) {
-        weekendSpend += costRub
-        weekendConv += s.conversions
-        if (costRub > 0) weekendDays.add(day)
-      } else {
-        weekdayConv += s.conversions
+    // (а) SCHEDULE_WASTE — будни/выходные по расходу и заявкам. Счёт заявок ВЫХОДНОГО
+    // дня — max(Директ-отчёт, ФАКТ доставленных Директ-заявок): отчётные конверсии
+    // дня заморожены на момент collect и могли отставать из-за лага атрибуции (BUG 2,
+    // аудит 16.07: вс 05.07 — доставленный Директ-лид, а отчётные конверсии дня = 0,
+    // из-за чего диагноз ложно горел «выходные 0 заявок»). Порог/гейт НЕ трогаем —
+    // чиним только ИСТОЧНИК ДАННЫХ (счёт заявок). Пусто (нет доставленных выходных
+    // заявок, как в полигоне) → счёт как раньше → байт-в-байт.
+    const deliveredByDay = new Map<string, number>()
+    try {
+      const winTo = new Date(dayStart.getTime() + DAY_MS)
+      const leads = dedupeLeadsByPhone(
+        filterOutTestLeads(await getLeadsForPeriod(windowStart, winTo, { exclusiveTo: true }))
+      )
+      for (const l of splitLeadsByOrigin(leads).fromDirect) {
+        const d = mskDay(l.createdAt)
+        deliveredByDay.set(d, (deliveredByDay.get(d) ?? 0) + 1)
       }
+    } catch (err) {
+      console.error('[boris-direct/brain] окно доставленных заявок для SCHEDULE_WASTE недоступно', err)
     }
+    const weekendAgg = aggregateWeekendStats(
+      windowStats.map((s) => ({ day: mskDay(s.date), costRub: Number(s.costRub), conversions: s.conversions })),
+      deliveredByDay
+    )
     const schedule = diagnoseScheduleWaste({
-      weekendSpendRub: weekendSpend,
-      weekendConversions: weekendConv,
-      weekendDays: weekendDays.size,
-      weekdayConversions: weekdayConv,
+      ...weekendAgg,
       // РЕАЛЬНОЕ расписание, а не «есть объект TimeTargeting»: Директ отдаёт его
       // всегда (24/7 = все часы 100), из-за чего диагноз был мёртв с рождения
       // (аудит 14.07). hasRealSchedule сохраняет полигон байт-в-байт (пусто/undefined

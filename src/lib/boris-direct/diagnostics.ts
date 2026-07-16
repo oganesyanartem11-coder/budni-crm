@@ -269,6 +269,54 @@ export function hasRealSchedule(tt: TimeTargetingLike | null | undefined): boole
   return false // все 100 → круглосуточно, расписания фактически нет
 }
 
+export interface WeekendAggRow {
+  /** МСК-день 'YYYY-MM-DD'. */
+  day: string
+  costRub: number
+  /** Конверсии Директ-отчёта (readReportConversions) — заморожены на момент collect. */
+  conversions: number
+}
+
+/**
+ * Агрегат будни/выходные для SCHEDULE_WASTE. Конверсии ВЫХОДНОГО дня = МАКСИМУМ из
+ * двух источников: заморожённые конверсии Директ-отчёта (могли отставать из-за лага
+ * атрибуции на момент collect) И ФАКТИЧЕСКИ доставленные Директ-заявки (LandingLead
+ * fromDirect — ground truth, по МСК-дню заявки). Если в выходной пришла заявка, но
+ * отчёт её ещё не отразил — день считается сконвертившим, диагноз не горит ложно
+ * (BUG 2, аудит 16.07: вс 05.07 — доставленный лид, а отчётные конверсии дня = 0).
+ *
+ * ПУСТОЙ deliveredByDay → поведение как раньше (только отчёт): для полигона нейтрально,
+ * когда в мире нет доставленных ВЫХОДНЫХ Директ-заявок в днях с расходом. Порог/гейт
+ * диагноза НЕ трогаем — чиним только СЧЁТ заявок (источник данных).
+ */
+export function aggregateWeekendStats(
+  rows: WeekendAggRow[],
+  deliveredByDay: ReadonlyMap<string, number>
+): { weekendSpendRub: number; weekendConversions: number; weekendDays: number; weekdayConversions: number } {
+  const byDay = new Map<string, { spend: number; conv: number }>()
+  for (const r of rows) {
+    const cur = byDay.get(r.day) ?? { spend: 0, conv: 0 }
+    cur.spend += r.costRub
+    cur.conv += r.conversions
+    byDay.set(r.day, cur)
+  }
+  let weekendSpendRub = 0
+  let weekendConversions = 0
+  let weekendDays = 0
+  let weekdayConversions = 0
+  for (const [day, agg] of byDay) {
+    if (isWeekend(day)) {
+      weekendSpendRub += agg.spend
+      // ФАКТ-приоритет: max(отчёт, доставленные) — заявка была → день сконвертил.
+      weekendConversions += Math.max(agg.conv, deliveredByDay.get(day) ?? 0)
+      if (agg.spend > 0) weekendDays++
+    } else {
+      weekdayConversions += agg.conv
+    }
+  }
+  return { weekendSpendRub, weekendConversions, weekendDays, weekdayConversions }
+}
+
 export interface ScheduleInput {
   weekendSpendRub: number
   weekendConversions: number
