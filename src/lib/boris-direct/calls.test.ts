@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseCallCommand, buildCallHint, type PhraseHourVisit } from './calls'
+import { parsePhraseHourResponse, type MetrikaStatResponse } from './metrika-client'
+import phraseHour15jul from './__fixtures__/metrika-phrasehour-15jul.json'
 
 // Фиксированный «сейчас»: 2026-07-16 12:00 МСК (09:00 UTC).
 const NOW = new Date('2026-07-16T09:00:00Z')
@@ -58,6 +60,28 @@ describe('parseCallCommand — разбор «звонок <телефон> [в�
   it('битое время → invalid', () => {
     expect(parseCallCommand('звонок 1234 16.07 25:61', NOW).kind).toBe('invalid')
   })
+
+  // ШАГ 7: человеческие форматы телефона (много-токенные) → чистые цифры.
+  it.each([
+    ['звонок +7 (966) 374-87-06', '79663748706'],
+    ['звонок 8 966 374 87 06', '89663748706'],
+    ['звонок +7-966-374-87-06', '79663748706'],
+    ['звонок 8(966)374-87-06 16.07 11:28 стройка', '89663748706'],
+  ])('телефон «%s» → %s', (cmd, digits) => {
+    const r = parseCallCommand(cmd, NOW)
+    expect(r.kind).toBe('ok')
+    if (r.kind !== 'ok') return
+    expect(r.phoneDigits).toBe(digits)
+  })
+
+  it('много-токенный телефон + дата/время/коммент разделяются верно', () => {
+    const r = parseCallCommand('звонок 8 966 374 87 06 16.07 11:28 перезвон по стройке', NOW)
+    expect(r.kind).toBe('ok')
+    if (r.kind !== 'ok') return
+    expect(r.phoneDigits).toBe('89663748706')
+    expect(r.atMskLabel).toBe('16.07 11:28')
+    expect(r.comment).toBe('перезвон по стройке')
+  })
 })
 
 describe('buildCallHint — подсказка по времени (гипотеза, не атрибуция)', () => {
@@ -81,10 +105,46 @@ describe('buildCallHint — подсказка по времени (гипоте
     expect(meta.note).toMatch(/гипотеза/i)
   })
 
-  it('0 визитов в окне → честно «нет», дисклеймер сохраняется', () => {
-    const { text, meta } = buildCallHint(rows, { callHourMsk: 5, dayVisits: 9 })
-    expect(text).toMatch(/нет|0 реклам/i)
+  it('окно пусто, НО данные видны (валидные часы) → «не было в этот час», НЕ «недоступен»', () => {
+    const { text, meta } = buildCallHint(rows, { callHourMsk: 5, dayVisits: 9 }) // окно [4,5,6] — визитов нет
+    expect(meta.status).toBe('empty_window')
+    expect(text).toMatch(/не было/i)
+    expect(text).toMatch(/9/) // за день были в другие часы
     expect(text).toMatch(/гипотеза по времени, не атрибуция/i)
     expect(meta.windowVisits).toBe(0)
+  })
+
+  // ШАГ 6 ГЛАВНОЕ ПРАВИЛО: «не смотрел» ≠ «не было». Час не распознан (NaN) при dayVisits>0.
+  it('часовой срез не прочитан (все hour=NaN) при dayVisits>0 → «недоступен», НИКОГДА не «0»', () => {
+    const broken: PhraseHourVisit[] = [
+      { phrase: 'a', hour: NaN, visits: 6 },
+      { phrase: 'b', hour: NaN, visits: 5 },
+    ]
+    const { text, meta } = buildCallHint(broken, { callHourMsk: 14, dayVisits: 11 })
+    expect(meta.status).toBe('unavailable')
+    expect(text).toMatch(/недоступен|не смог посмотреть/i)
+    expect(text).not.toMatch(/визитов нет \(0\)/) // НЕ подаём ноль как факт
+    expect(text).toMatch(/11/) // называем дневные, чтобы владелец видел «данные есть, срез — нет»
+  })
+})
+
+describe('РЕГРЕССИЯ бага «тихий ложный ноль» (16.07): фикстура сырого ответа Метрики', () => {
+  it('parsePhraseHourResponse парсит час «ЧЧ:00» верно (не NaN)', () => {
+    const rows = parsePhraseHourResponse(phraseHour15jul as unknown as MetrikaStatResponse)
+    expect(rows).toHaveLength(11)
+    expect(rows.every((r) => Number.isInteger(r.hour))).toBe(true) // раньше все были NaN
+    expect(rows.filter((r) => r.hour === 15)).toHaveLength(3) // ч15 — три фразы
+  })
+
+  it('РЕАЛЬНЫЙ КЕЙС 15.07 14:49 → окно ч13–15 НЕПУСТО (6 визитов), а не ложный ноль', () => {
+    const rows = parsePhraseHourResponse(phraseHour15jul as unknown as MetrikaStatResponse)
+    const dayVisits = rows.reduce((s, r) => s + r.visits, 0)
+    const { text, meta } = buildCallHint(rows, { callHourMsk: 14, dayVisits })
+    expect(dayVisits).toBe(11)
+    expect(meta.status).toBe('ok')
+    expect(meta.windowVisits).toBe(6) // ч13(1)+ч14(2)+ч15(3)
+    expect(meta.windowPhrases).toContain('заказ еды порционно офис')
+    expect(meta.windowPhrases).toContain('питание для вахтовиков')
+    expect(text).toMatch(/6 рекл/)
   })
 })

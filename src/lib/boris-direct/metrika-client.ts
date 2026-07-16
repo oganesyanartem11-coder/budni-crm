@@ -230,9 +230,37 @@ export async function getGoalStatsByDemographics(
  * временем звонка). ТОЛЬКО чтение (/stat/v1/data), OAuth. Это ГИПОТЕЗА по времени, не
  * атрибуция (визит↔звонок по времени не доказуем).
  */
-export async function getAdVisitsByPhraseHour(
-  day: string
-): Promise<Array<{ phrase: string; hour: number; visits: number }>> {
+export interface PhraseHourRow {
+  phrase: string
+  hour: number
+  visits: number
+}
+
+/**
+ * Час из измерения ym:s:hour. КОРЕНЬ БАГА 16.07: имя приходит как «ЧЧ:00» (строка
+ * времени, напр. «14:00»), а НЕ «14». Number('14:00')=NaN — оконный фильтр молча не
+ * ловил ни одной строки → тихий ложный ноль при непустых данных. parseInt берёт часть
+ * ДО «:». Нераспознанное → NaN (потребитель отличит «не смотрел» от «не было»).
+ */
+export function parseMetrikaHour(name: string | null | undefined): number {
+  const h = parseInt(String(name ?? ''), 10)
+  return Number.isInteger(h) ? h : NaN
+}
+
+/**
+ * ЧИСТЫЙ разбор ответа phrase×hour (зеркалит metrikaStat) — тестируется фикстурой
+ * сырого ответа API (правило проекта). Отделён от сетевого вызова, чтобы парс часа
+ * покрывался юнитом на реальной форме «ЧЧ:00».
+ */
+export function parsePhraseHourResponse(resp: MetrikaStatResponse): PhraseHourRow[] {
+  return resp.data.map((row) => ({
+    phrase: row.dimensions[0]?.name ?? '',
+    hour: parseMetrikaHour(row.dimensions[1]?.name),
+    visits: row.metrics[0] ?? 0,
+  }))
+}
+
+export async function getAdVisitsByPhraseHour(day: string): Promise<PhraseHourRow[]> {
   const resp = await metrikaStat({
     dimensions: 'ym:s:lastDirectSearchPhrase,ym:s:hour',
     metrics: 'ym:s:visits',
@@ -242,11 +270,7 @@ export async function getAdVisitsByPhraseHour(
     limit: '1000',
     timezone: MSK_TIMEZONE_PARAM,
   })
-  return resp.data.map((row) => ({
-    phrase: row.dimensions[0]?.name ?? '',
-    hour: Number(row.dimensions[1]?.name ?? -1),
-    visits: row.metrics[0] ?? 0,
-  }))
+  return parsePhraseHourResponse(resp)
 }
 
 /** Заявки/визиты по часу суток (0..23) — вторичный сигнал мёртвых часов. */
