@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildDisputedMinusProposalDraft, type MinusCandidateStat } from './minus-proposal'
+import { buildDisputedMinusProposalDraft, allPhrasesAlreadyMinused, type MinusCandidateStat } from './minus-proposal'
 import type { MinusVerdictDraft } from './brain'
 
 function stat(over: Partial<MinusCandidateStat> = {}): MinusCandidateStat {
@@ -62,5 +62,24 @@ describe('buildDisputedMinusProposalDraft', () => {
     expect(draft.argument).toContain('Показы без интереса (0 кликов) — чистим релевантность')
     expect(draft.argument).not.toContain('уберёт нецелевой расход')
     expect(draft.argument).not.toMatch(/Съел .* ₽/)
+  })
+})
+
+describe('allPhrasesAlreadyMinused — гейт границы предложений (BUG 2 re-proposal, 16.07)', () => {
+  it('фраза уже в минусах точным совпадением → true (не пере-предлагаем)', () => {
+    expect(allPhrasesAlreadyMinused(['фабрика обедов павловский посад'], ['фабрика обедов павловский посад'])).toBe(true)
+  })
+  it('минус-подстрока блокирует запрос (все слова минуса в запросе) → true', () => {
+    expect(allPhrasesAlreadyMinused(['фабрика обедов павловский посад'], ['павловский посад'])).toBe(true)
+  })
+  it('фраза НЕ заблокирована → false (предлагаем)', () => {
+    expect(allPhrasesAlreadyMinused(['доставка обедов москва'], ['казань'])).toBe(false)
+  })
+  it('частичный драфт (одна старая, одна новая) → false (не гейтим весь драфт)', () => {
+    expect(allPhrasesAlreadyMinused(['старая фраза', 'новая фраза'], ['старая фраза'])).toBe(false)
+  })
+  it('пустые списки → false (нечего гейтить)', () => {
+    expect(allPhrasesAlreadyMinused([], ['x'])).toBe(false)
+    expect(allPhrasesAlreadyMinused(['x'], [])).toBe(false)
   })
 })

@@ -14,6 +14,21 @@
  * type-only из brain (стираются при компиляции — рантайм-цикла нет).
  */
 import type { ProposalDraft, MinusVerdictDraft } from './brain'
+import { minusPhraseBlocksQuery } from './diagnostics'
+
+/**
+ * Все фразы кандидата УЖЕ заблокированы живым минус-списком кампании? Гейт границы
+ * ПРЕДЛОЖЕНИЙ (зовётся в cron-роуте, НЕ в мозг-тике → полигон не трогаем): не
+ * пере-предлагаем владельцу с кнопками фразу, которая давно в минусах кабинета
+ * (BUG 2 re-proposal, аудит 16.07). Семантика блокировки — как в Директе
+ * (minusPhraseBlocksQuery: все слова минус-фразы присутствуют в запросе). Гейтим
+ * ТОЛЬКО когда ВСЕ фразы драфта уже минусованы (частичный драфт с новой фразой —
+ * пропускаем как есть). Пустые списки → false (нечего гейтить).
+ */
+export function allPhrasesAlreadyMinused(phrases: string[], negatives: string[]): boolean {
+  if (phrases.length === 0 || negatives.length === 0) return false
+  return phrases.every((p) => negatives.some((neg) => minusPhraseBlocksQuery(neg, p)))
+}
 
 /** Минимум статистики кандидата для аргумента (структурно совместим с QueryStatRow). */
 export interface MinusCandidateStat {
