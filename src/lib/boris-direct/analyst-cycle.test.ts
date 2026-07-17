@@ -106,6 +106,25 @@ describe('runAnalystCycle: исполнение назначенных пров�
     await runAnalystCycle(deps)
     expect(deps.executeSpec).not.toHaveBeenCalled()
   })
+
+  // Спринт 17.07: «Аналитик подтвердил» тоже шёл через short(q.question,140).
+  it('«Аналитик подтвердил» уходит ЦЕЛИКОМ: полный вопрос + вывод проверки, без «…»', async () => {
+    const longQ =
+      'Что изменилось: серия из 3 дней с нулём заявок 09–11.07 при живых кликах и расходе. ' +
+      'Что предложу: чинить форму сайта, конвертящие фразы не трогать — это вывод-предложение, не действие.'
+    const escalate = vi.fn(async (_text: string) => {})
+    const deps = baseDeps({
+      getActive: vi.fn(async () => [q({ id: 'qA', question: longQ, checkSpec: { key: 'metrika_goal_series', params: {} } })]),
+      executeSpec: vi.fn(async () => ({ status: 'confirmed' as const, result: 'подтверждено: 3 дня нулей, потеря ≈ 20000 ₽', effectRub: 20000 })),
+      escalate,
+    })
+    await runAnalystCycle(deps)
+    expect(longQ.length).toBeGreaterThan(140)
+    const sent = escalate.mock.calls.map((c) => c[0] as string).join('\n')
+    expect(sent).not.toContain('…')
+    expect(sent).toContain('конвертящие фразы не трогать') // хвост вопроса на месте
+    expect(sent).toContain('потеря ≈ 20000 ₽') // вывод проверки на месте
+  })
 })
 
 describe('runAnalystCycle: постановка новых вопросов', () => {
@@ -152,6 +171,34 @@ describe('runAnalystCycle: постановка новых вопросов', ()
     const deps = baseDeps()
     await runAnalystCycle(deps)
     expect(deps.notify).not.toHaveBeenCalled()
+  })
+
+  // Спринт 17.07 БАГ обрезки: вопрос дня уходил через short(text,140) → владелец видел
+  // ~140 символов + «…», без хвоста цепочки и без назначенной проверки.
+  it('вопрос дня уходит ЦЕЛИКОМ: полная цепочка + назначенная проверка, без «…»', async () => {
+    const longChain =
+      'Что изменилось: за 3 дня 0 заявок при 43 кликах и расходе 4600 ₽. ' +
+      'Что это может объяснять: возможно сломана форма сайта или ставки протухли и клики стали нецелевыми. ' +
+      'Как дёшево проверить: сравнить серию достижений цели Метрики за 14 дней. ' +
+      'Что предложу владельцу: если серия нулей подтвердится — чинить форму, а НЕ резать конвертящие фразы.'
+    const longDraft = {
+      topicKey: 'funnel_zero_series',
+      question: longChain,
+      check: 'серия достижений цели Метрики за 14 дней (metrika_goal_series)',
+      checkSpec: { key: 'metrika_goal_series', params: { windowDays: 14 } },
+    }
+    const notify = vi.fn(async (_t: string) => {})
+    const deps = baseDeps({
+      runPass: vi.fn(async () => ({ kept: [longDraft], dropped: [], raw: 'x', costUsd: 0, ok: true })),
+      notify,
+    })
+    await runAnalystCycle(deps)
+    expect(longChain.length).toBeGreaterThan(200) // заведомо длиннее старого кэпа 140
+    const sent = notify.mock.calls.map((c) => c[0] as string).join('\n')
+    expect(sent).not.toContain('…') // ничего не обрезано
+    expect(sent).toContain('Что предложу владельцу') // хвост цепочки (за 140-м символом) на месте
+    expect(sent).toContain('НЕ резать конвертящие фразы') // предложение дошло
+    expect(sent).toContain('серия достижений цели Метрики за 14 дней') // назначенная проверка дошла
   })
 })
 

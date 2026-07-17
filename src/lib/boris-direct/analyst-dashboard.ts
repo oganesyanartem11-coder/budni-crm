@@ -29,6 +29,12 @@ export interface AnalystDashboardInput {
   frozen: boolean
   /** Блок 1: окно дневных итогов (ANALYST_DASHBOARD_WINDOW_DAYS дней). */
   window: { days: AnalystWindowDay[] }
+  /**
+   * Блок 1b: ЗВОНКИ (ручной приём, formType='phone_call') за окно — лиды БЕЗ рекламной
+   * разметки, в дневной CPL/fromDirect не входят. Контекст против ложного нуля формы
+   * («0 заявок» ≠ «нет лидов»). НЕ атрибуция: фразам не приписываются, в CPA не идут.
+   */
+  calls?: { windowCount: number }
   /** Блок 2: прогноз vs факт (готовая строка renderForecastLine) + последний слом. */
   forecast?: { line: string | null; lastBreak?: string }
   /** Блок 3: лесенка — медиана входа, доля ниже входа, дрейф за окно. */
@@ -91,6 +97,16 @@ export function buildAnalystDashboard(input: AnalystDashboardInput): string {
     const cpl = d.cplRub == null ? '—' : `${fmt(d.cplRub)} ₽`
     const spend = d.spendRub == null ? '?' : `${fmt(d.spendRub)} ₽`
     out.push(`- ${d.date}: ${spend} / ${d.clicks} / ${d.leads} / ${cpl}`)
+  }
+
+  // --- Блок 1b: звонки (ручной приём, вне рекламной атрибуции) ---
+  // Печатаем ТОЛЬКО при наличии (>0): «0 заявок по форме» + эта строка = сигнал
+  // «лиды идут звонками, а не формой». НЕ приписывать фразам, НЕ считать в CPA.
+  if (input.calls && input.calls.windowCount > 0) {
+    out.push(
+      '',
+      `ЗВОНКИ (ручной приём, вне атрибуции; НЕ в CPA/фразы): ${input.calls.windowCount} за окно.`
+    )
   }
 
   // --- Блок 2: прогноз ---

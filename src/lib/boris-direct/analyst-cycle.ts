@@ -16,9 +16,10 @@
  */
 
 import { prisma } from '@/lib/db/prisma'
+import { escapeHtml } from '@/lib/telegram/notify'
 import { mskDay, mskDayStartUtc } from './brain'
 import { isWorkday, workdayWindowStartUtc } from './workdays'
-import { sendToDirectChat } from './telegram'
+import { sendToDirectChatChunked } from './telegram'
 import {
   isAnalystEnabled,
   ANALYST_ESCALATE_MIN_RUB,
@@ -26,6 +27,7 @@ import {
   ANALYST_DASHBOARD_WINDOW_DAYS,
   LADDER_DRIFT_WORKDAYS,
   UPLIFT_COHORT_RAISE_DAY,
+  CALL_FORM_TYPE,
 } from './config'
 import {
   getActiveQuestions,
@@ -130,10 +132,18 @@ export interface AnalystCycleResult {
   dropped: number
 }
 
-/** Короткая обрезка текста вопроса для сводок. */
-function short(text: string, max = 140): string {
-  const t = text.replace(/\s+/g, ' ').trim()
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t
+/**
+ * Блок одного вопроса дня для владельца: ПОЛНАЯ каузальная цепочка (что изменилось →
+ * что объясняет → как проверить → ЧТО ПРЕДЛОЖУ) + назначенная проверка. Никаких
+ * обрезок «…» (спринт 17.07: обрезка на 140 съедала цепочку и проверку). Текст
+ * экранируем — в цепочке аналитика бывают «CPL < 200 ₽», «доля > 30%», иначе стрелка
+ * ломает HTML-разбор Telegram и владелец не увидит СОВСЕМ ничего.
+ */
+function renderAskedBlock(n: number, draft: { question: string; check: string }): string {
+  const q = escapeHtml(draft.question.trim())
+  const check = draft.check?.trim()
+  const checkLine = check ? `\n🔬 <b>Проверю:</b> ${escapeHtml(check)}` : ''
+  return `<b>${n})</b> ${q}${checkLine}`
 }
 
 export async function runAnalystCycle(deps: AnalystCycleDeps): Promise<AnalystCycleResult> {
@@ -176,7 +186,7 @@ export async function runAnalystCycle(deps: AnalystCycleDeps): Promise<AnalystCy
     if (doEscalate) {
       try {
         await deps.escalate(
-          `🔎 <b>Аналитик подтвердил</b>: ${short(q.question)}\n${outcome.result}\n` +
+          `🔎 <b>Аналитик подтвердил</b>: ${escapeHtml(q.question)}\n${escapeHtml(outcome.result)}\n` +
             `Предлагаю обсудить шаг (это вывод-предложение, не действие — в кабинет ничего не менял).`
         )
         res.escalated++
@@ -203,7 +213,7 @@ export async function runAnalystCycle(deps: AnalystCycleDeps): Promise<AnalystCy
 
   const latest = await deps.getLatest()
   const askedTopics = new Set<string>()
-  const askedLines: string[] = []
+  const askedBlocks: string[] = []
   for (const draft of pass.kept) {
     const topic = draft.topicKey
     if (askedTopics.has(topic)) continue // дубль темы в одном проходе
@@ -217,16 +227,18 @@ export async function runAnalystCycle(deps: AnalystCycleDeps): Promise<AnalystCy
         checkSpec: draft.checkSpec,
         now: deps.now,
       })
-      askedLines.push(`• ${short(draft.question)}`)
+      askedBlocks.push(renderAskedBlock(askedBlocks.length + 1, draft))
       res.asked++
     } catch (err) {
       console.error(`[boris-direct/analyst-cycle] создание вопроса (${topic}) упало`, err)
     }
   }
 
-  if (askedLines.length > 0) {
+  if (askedBlocks.length > 0) {
     try {
-      await deps.notify(`🔍 <b>Аналитик: вопросы дня</b> (${today})\n${askedLines.join('\n')}`)
+      // Полные блоки (цепочка+проверка) через двойной перенос; deps.notify сам разобьёт
+      // на несколько сообщений, если суммарно >4096 (splitForTelegram), смысл не режем.
+      await deps.notify(`🔍 <b>Аналитик: вопросы дня</b> (${today})\n\n${askedBlocks.join('\n\n')}`)
     } catch (err) {
       console.error('[boris-direct/analyst-cycle] секция вопросов дня не ушла', err)
     }
@@ -337,6 +349,12 @@ export async function collectAnalystDashboard(now: Date, opts: CollectAnalystDas
         const d = mskDay(l.createdAt)
         leadsByDay.set(d, (leadsByDay.get(d) ?? 0) + 1)
       }
+      // Дыра данных (спринт 17.07): ЗВОНКИ (formType='phone_call', ручной приём) — лиды
+      // БЕЗ рекламной разметки → в fromDirect (и в CPL по дням) не попадают. Считаем их
+      // ТОЧНО как weekly (тот же deduped-набор) и показываем аналитику отдельной строкой
+      // как КОНТЕКСТ: «ноль по форме ≠ отсутствие лидов». В фразовую экономику/CPA не идут.
+      const callCount = leads.filter((l) => l.formType === CALL_FORM_TYPE).length
+      if (callCount > 0) input.calls = { windowCount: callCount }
     } catch (err) {
       console.error('[boris-direct/analyst-cycle] заявки по дням недоступны', err)
     }
@@ -574,10 +592,10 @@ export async function runAnalystCycleProd(
     buildDashboard: () => collectAnalystDashboard(now, opts),
     runPass: runAnalystPass,
     escalate: async (text) => {
-      await sendToDirectChat(text)
+      await sendToDirectChatChunked(text)
     },
     notify: async (text) => {
-      await sendToDirectChat(text)
+      await sendToDirectChatChunked(text)
     },
     persistDaily: async (record) => {
       await prisma.borisDirectSnapshot.create({

@@ -1,6 +1,48 @@
 import { GrammyError, type InlineKeyboard } from 'grammy'
 import { getTelegramBot } from './bot'
 
+/** Жёсткий лимит длины одного сообщения Telegram Bot API. */
+export const TELEGRAM_MAX_LEN = 4096
+
+/**
+ * Разбить длинный текст на части ≤ maxLen для отправки в Telegram. В ОТЛИЧИЕ от обрезки
+ * «…» — смысл не теряем: режем по границам СТРОК (\n), пакуя жадно. Склейка частей тем же
+ * \n даёт исходный текст байт-в-байт. Единственная строка длиннее лимита (патология) —
+ * режется жёстко по символам, но без потери контента. text ≤ maxLen → [text] как есть.
+ */
+export function splitForTelegram(text: string, maxLen: number = TELEGRAM_MAX_LEN): string[] {
+  if (text.length <= maxLen) return [text]
+  const parts: string[] = []
+  let cur = ''
+  const flush = (): void => {
+    if (cur !== '') {
+      parts.push(cur)
+      cur = ''
+    }
+  }
+  for (const rawLine of text.split('\n')) {
+    const pieces = rawLine.length <= maxLen ? [rawLine] : hardSlice(rawLine, maxLen)
+    for (const piece of pieces) {
+      const candidate = cur === '' ? piece : `${cur}\n${piece}`
+      if (candidate.length <= maxLen) {
+        cur = candidate
+      } else {
+        flush()
+        cur = piece // piece гарантированно ≤ maxLen (hardSlice)
+      }
+    }
+  }
+  flush()
+  return parts
+}
+
+/** Нарезать одну сверхдлинную строку на куски ≤ maxLen (последнее средство). */
+function hardSlice(s: string, maxLen: number): string[] {
+  const out: string[] = []
+  for (let i = 0; i < s.length; i += maxLen) out.push(s.slice(i, i + maxLen))
+  return out
+}
+
 export interface SendTelegramMessageOptions {
   parseMode?: 'HTML' | 'MarkdownV2'
   replyMarkup?: InlineKeyboard

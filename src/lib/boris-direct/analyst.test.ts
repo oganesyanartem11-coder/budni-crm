@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseAnalystOutput, filterAnalystDrafts, buildAnalystUserText, ANALYST_MAX_QUESTIONS_HINT } from './analyst'
+import { parseAnalystOutput, filterAnalystDrafts, buildAnalystUserText, ANALYST_MAX_QUESTIONS_HINT, ANALYST_INSTRUCTION } from './analyst'
 
 describe('parseAnalystOutput', () => {
   const item = {
@@ -89,5 +89,16 @@ describe('buildAnalystUserText', () => {
     expect(t).toMatch(/JSON/)
     // запрет выдумывать числа и обещать действия — в инструкции
     expect(t).toMatch(/не выдумыв|только из данных/i)
+  })
+})
+
+// Спринт 17.07 (дыра данных): звонки — лиды без рекламной разметки. Правило защищает
+// конвертящие фразы от предложения «резать» при ложном нуле формы.
+describe('ANALYST_INSTRUCTION: правило про звонки', () => {
+  it('явно объясняет: звонки вне атрибуции, НЕ в CPA/фразы, спроси почему форма молчит', () => {
+    expect(ANALYST_INSTRUCTION).toMatch(/звонк/i)
+    expect(ANALYST_INSTRUCTION).toMatch(/CPA|цен[уе] заявки/i)
+    expect(ANALYST_INSTRUCTION).toMatch(/не приписыв|не режь/i)
+    expect(ANALYST_INSTRUCTION).toMatch(/почему.*звонк|звонк.*а не форм/i)
   })
 })

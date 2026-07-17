@@ -19,6 +19,38 @@ function baseInput(over: Partial<AnalystDashboardInput> = {}): AnalystDashboardI
   }
 }
 
+// Спринт 17.07 (дыра данных): звонки — лиды БЕЗ рекламной разметки (phone_call), в
+// окно fromDirect не попадают. Аналитик рассуждал «дорогие клики без конверсий», не
+// видя, что лиды идут ЗВОНКАМИ → мог предложить резать конвертящие фразы.
+describe('buildAnalystDashboard: строка ЗВОНКОВ (ручной приём, вне атрибуции)', () => {
+  it('0 форменных заявок И N звонков → в дашборде ОБЕ цифры', () => {
+    const text = buildAnalystDashboard(
+      baseInput({
+        window: {
+          days: [
+            { date: '2026-07-15', spendRub: 4600, clicks: 43, leads: 0, cplRub: null },
+            { date: '2026-07-16', spendRub: 3200, clicks: 30, leads: 0, cplRub: null },
+          ],
+        },
+        calls: { windowCount: 3 },
+      })
+    )
+    // Форменные заявки = 0 (в днях) видны:
+    expect(text).toMatch(/2026-07-15: 4600 ₽ \/ 43 \/ 0 \//)
+    // И звонки = 3 видны отдельной строкой, помеченной «вне атрибуции»:
+    expect(text).toMatch(/ЗВОНКИ.*вне атрибуции.*3/i)
+  })
+
+  it('звонков нет (0) → строки ЗВОНКОВ нет (секция только при наличии данных)', () => {
+    const text = buildAnalystDashboard(baseInput({ calls: { windowCount: 0 } }))
+    expect(text).not.toMatch(/ЗВОНКИ/i)
+  })
+
+  it('calls не передан → строки ЗВОНКОВ нет (обратная совместимость)', () => {
+    expect(buildAnalystDashboard(baseInput())).not.toMatch(/ЗВОНКИ/i)
+  })
+})
+
 describe('buildAnalystDashboard', () => {
   it('шапка: день, режим, заморозка', () => {
     const text = buildAnalystDashboard(baseInput())

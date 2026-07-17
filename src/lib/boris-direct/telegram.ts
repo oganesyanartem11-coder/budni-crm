@@ -20,7 +20,7 @@ import type { Context } from 'grammy'
 import type { InlineKeyboard } from 'grammy'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
-import { sendTelegramMessage, type SendTelegramMessageResult } from '@/lib/telegram/send'
+import { sendTelegramMessage, splitForTelegram, type SendTelegramMessageResult } from '@/lib/telegram/send'
 import { readDirectChatId } from '@/lib/telegram/env'
 import { registerCallbackHandler } from '@/lib/telegram/callback-router'
 import {
@@ -67,6 +67,21 @@ export async function sendToDirectChat(
     parseMode: 'HTML',
     replyMarkup: opts?.replyMarkup,
   })
+}
+
+/**
+ * Отправка длинного текста в чат Директа с разбивкой на части ≤ 4096 (лимит Telegram)
+ * по границам строк — смысл НЕ режем (в отличие от старой обрезки «…»). Части шлём по
+ * порядку; возвращаем первый сбой либо { ok:true }. Для сообщений аналитика (полная
+ * каузальная цепочка + проверка + предложение), которые могут перерасти один месседж.
+ */
+export async function sendToDirectChatChunked(text: string): Promise<SendTelegramMessageResult> {
+  let firstError: SendTelegramMessageResult | null = null
+  for (const part of splitForTelegram(text)) {
+    const res = await sendToDirectChat(part)
+    if (!res.ok && firstError === null) firstError = res
+  }
+  return firstError ?? { ok: true }
 }
 
 /** Короткое описание лида для подтверждения (без утечки полного телефона). */
