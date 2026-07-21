@@ -220,7 +220,7 @@ function DeliveryCard({
 
   if (isOptimistic) return null
 
-  const mapsUrl = `https://maps.google.com/?q=${encodeURIComponent(stop.locationAddress)}`
+  const mapsUrl = `https://yandex.ru/maps/?text=${encodeURIComponent(stop.locationAddress)}`
   const isLateState = windowState === 'late'
   const hasWindow = !!(stop.deliveryWindowFrom || stop.deliveryWindowTo)
 
