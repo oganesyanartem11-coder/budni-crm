@@ -387,14 +387,6 @@ export async function editOrderPortionsCore(
   const afterCutoff = isPastCutoff(order.deliveryDate)
   const totalPrice = portions * Number(order.pricePerPortion)
 
-  const updExists = await prisma.updDocumentOrder.findFirst({
-    where: { orderId },
-    select: { id: true },
-  })
-  if (updExists) {
-    return { ok: false, error: 'Нельзя изменить: по заказу выпущена УПД. Сначала сторнируйте УПД.' }
-  }
-
   await prisma.order.update({
     where: { id: orderId },
     data: {
@@ -513,14 +505,6 @@ export async function cancelOrderCore(
   if (order.status === 'DELIVERED') return { ok: false, error: 'Доставленный заказ нельзя отменить' }
 
   const afterCutoff = isPastCutoff(order.deliveryDate)
-
-  const updExists = await prisma.updDocumentOrder.findFirst({
-    where: { orderId },
-    select: { id: true },
-  })
-  if (updExists) {
-    return { ok: false, error: 'Нельзя изменить: по заказу выпущена УПД. Сначала сторнируйте УПД.' }
-  }
 
   await prisma.order.update({
     where: { id: orderId },
@@ -646,14 +630,6 @@ export async function rescheduleOrderCore(
   // Перенос считается «после cut-off», если ИСХОДНАЯ дата уже за чертой
   // (правки уже могли уйти на кухню/курьеру).
   const afterCutoff = isPastCutoff(order.deliveryDate)
-
-  const updExists = await prisma.updDocumentOrder.findFirst({
-    where: { orderId },
-    select: { id: true },
-  })
-  if (updExists) {
-    return { ok: false, error: 'Нельзя изменить: по заказу выпущена УПД. Сначала сторнируйте УПД.' }
-  }
 
   await prisma.order.update({
     where: { id: orderId },

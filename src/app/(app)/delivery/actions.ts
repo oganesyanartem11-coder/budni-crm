@@ -405,20 +405,6 @@ export async function undoStopDelivered(orderIds: string[]): Promise<ActionResul
     }
   }
 
-  // MEGA-AUDIT-FIX-1 C2 (D-5): если по любому из заказов уже выпущена УПД —
-  // откат запрещён (документ ушёл клиенту, изменение статуса разрушит
-  // отчётность). Блок A покрывает orders/actions.ts; здесь — undo доставки.
-  const updExists = await prisma.updDocumentOrder.findFirst({
-    where: { orderId: { in: orderIds } },
-    select: { id: true },
-  })
-  if (updExists) {
-    return {
-      ok: false,
-      error: 'Нельзя откатить: по заказу уже выпущена УПД',
-    }
-  }
-
   const updates = await prisma.$transaction(async (tx) => {
     let count = 0
     for (const o of orders) {
