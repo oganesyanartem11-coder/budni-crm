@@ -21,25 +21,59 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const idParam = url.searchParams.get('id')
   const dateParam = url.searchParams.get('date')
+  const clientIdParam = url.searchParams.get('clientId')
   const disposition =
     url.searchParams.get('disposition') === 'inline' ? 'inline' : 'attachment'
 
   let dateYmd: string | null = null
 
+  // Границы календарного дня строго по UTC — ТЕМ ЖЕ способом, что и ветка ?date=
+  // (UpdDocument.deliveryDate = @db.Date, Prisma отдаёт UTC midnight). Единый
+  // хелпер для веток ?date= и ?clientId=&date=, чтобы не было off-by-one.
+  const parseDay = (raw: string): { ymd: string; from: Date; to: Date } | null => {
+    const m = /^(\d{4}-\d{2}-\d{2})/.exec(raw)
+    if (!m) return null
+    const ymd = m[1]
+    return {
+      ymd,
+      from: new Date(ymd + 'T00:00:00.000Z'),
+      to: new Date(ymd + 'T23:59:59.999Z'),
+    }
+  }
+
   let docs: Awaited<ReturnType<typeof prisma.updDocument.findMany>> = []
   if (idParam) {
     const d = await prisma.updDocument.findUnique({ where: { id: idParam } })
     if (d) docs = [d]
-  } else if (dateParam) {
-    const m = /^(\d{4}-\d{2}-\d{2})/.exec(dateParam)
-    if (!m) {
+  } else if (clientIdParam && dateParam) {
+    // Печать всех УПД одного клиента за выбранный день (вход из раздела Заказы).
+    const day = parseDay(dateParam)
+    if (!day) {
       return new NextResponse('Неверная дата', { status: 400 })
     }
-    dateYmd = m[1]
-    const from = new Date(dateYmd + 'T00:00:00.000Z')
-    const to = new Date(dateYmd + 'T23:59:59.999Z')
+    dateYmd = day.ymd
     docs = await prisma.updDocument.findMany({
-      where: { deliveryDate: { gte: from, lte: to } },
+      where: {
+        clientId: clientIdParam,
+        deliveryDate: { gte: day.from, lte: day.to },
+      },
+      orderBy: [{ documentNumber: 'asc' }],
+    })
+    if (docs.length === 0) {
+      // Читаемый ответ, НЕ 400/404: у клиента может просто не быть УПД за день.
+      return new NextResponse(
+        'За выбранный день у клиента нет выпущенных УПД. Сформируйте их в разделе Печать → УПД.',
+        { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } },
+      )
+    }
+  } else if (dateParam) {
+    const day = parseDay(dateParam)
+    if (!day) {
+      return new NextResponse('Неверная дата', { status: 400 })
+    }
+    dateYmd = day.ymd
+    docs = await prisma.updDocument.findMany({
+      where: { deliveryDate: { gte: day.from, lte: day.to } },
       orderBy: [{ documentNumber: 'asc' }],
     })
   } else {

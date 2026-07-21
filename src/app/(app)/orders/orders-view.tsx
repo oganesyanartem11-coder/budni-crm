@@ -183,6 +183,7 @@ export function OrdersView({
           orders={listOrders}
           clients={clients}
           filters={filters}
+          selectedDateIso={selectedDateIso}
           onFilterChange={(patch) => updateParams(patch)}
           isPending={isPending}
         />

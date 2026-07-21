@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, X, Edit2, Check, AlertTriangle, Filter, ChevronDown, ChevronUp } from 'lucide-react'
+import { Search, X, Edit2, Check, AlertTriangle, Filter, ChevronDown, ChevronUp, FileText } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
@@ -34,8 +34,31 @@ interface Props {
     status: string
     search: string
   }
+  selectedDateIso: string
   onFilterChange: (patch: Record<string, string | null>) => void
   isPending: boolean
+}
+
+// Компактная кнопка «печать УПД клиента за показанный день». Дата — та же,
+// что показывает страница заказов (selectedDateIso, срез YYYY-MM-DD в UTC —
+// совпадает с UTC-границами @db.Date, по которым PDF-роут выбирает документы).
+// Открывается в новой вкладке; если у клиента нет УПД за день — роут отдаёт
+// читаемое сообщение (не ошибку). stopPropagation, чтобы не сработал переход
+// по строке в карточку заказа.
+function UpdClientButton({ clientId, dateYmd }: { clientId: string; dateYmd: string }) {
+  return (
+    <a
+      href={`/production/print/upd/pdf?clientId=${encodeURIComponent(clientId)}&date=${encodeURIComponent(dateYmd)}&disposition=inline`}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title="Печать УПД клиента за этот день"
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-pill border border-border bg-surface text-fg-muted hover:text-fg hover:bg-surface-2 text-xs font-medium transition-colors [touch-action:manipulation]"
+    >
+      <FileText className="w-3 h-3" />
+      УПД
+    </a>
+  )
 }
 
 const ALL_STATUSES: OrderStatus[] = [
@@ -71,8 +94,10 @@ function isOrderLive(order: SerializedOrder): boolean {
   return toMskDateString(new Date(order.deliveryDate)) === toMskDateString(new Date())
 }
 
-export function OrdersList({ orders, clients, filters, onFilterChange, isPending }: Props) {
+export function OrdersList({ orders, clients, filters, selectedDateIso, onFilterChange, isPending }: Props) {
   const router = useRouter()
+  // YYYY-MM-DD показанного дня (UTC-срез ISO) для ссылки печати УПД клиента.
+  const dateYmd = selectedDateIso.slice(0, 10)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const activeFilterCount =
     (filters.clientId ? 1 : 0) +
@@ -263,6 +288,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                               <AlertTriangle className="w-3.5 h-3.5" />
                             </span>
                           )}
+                          <UpdClientButton clientId={order.client.id} dateYmd={dateYmd} />
                         </span>
                         <div className="text-xs text-fg-muted truncate">{order.location.name}</div>
                       </td>
@@ -354,6 +380,7 @@ export function OrdersList({ orders, clients, filters, onFilterChange, isPending
                             <AlertTriangle className="w-3.5 h-3.5" />
                           </span>
                         )}
+                        <UpdClientButton clientId={order.client.id} dateYmd={dateYmd} />
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
