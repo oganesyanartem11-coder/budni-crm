@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { Prisma } from '@prisma/client'
 import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
@@ -365,4 +366,38 @@ export async function listGeneratedUpd(filter: {
   }))
 
   return { ok: true, data: { items, truncated } }
+}
+
+/**
+ * Аннулирование (сторно) УПД — ФИЗИЧЕСКОЕ удаление записи.
+ * Владелец подтвердил: валовая идёт из 1С, след аннулированного документа
+ * в CRM не хранится. onDelete: Cascade на UpdDocumentOrder → связи с заказами
+ * удаляются автоматически, one_upd_per_order снимается, заказ снова редактируем.
+ * Роль — та же, что у генерации УПД (ADMIN/MANAGER).
+ */
+export async function stornoUpd(
+  updDocumentId: string
+): Promise<ActionResult<{ documentNumber: string }>> {
+  await requireRole(['ADMIN', 'MANAGER'])
+
+  try {
+    const deleted = await prisma.updDocument.delete({
+      where: { id: updDocumentId },
+      select: { documentNumber: true },
+    })
+    // Список выписанных — чтобы аннулированная строка исчезла; /orders —
+    // на случай кеша (заказы снова без привязки к УПД).
+    revalidatePath('/production/print/upd/list')
+    revalidatePath('/orders')
+    return { ok: true, data: { documentNumber: deleted.documentNumber } }
+  } catch (err) {
+    // P2025 — запись не найдена (уже аннулирована / неверный id): мягкая ошибка.
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2025'
+    ) {
+      return { ok: false, error: 'УПД не найдена — возможно, уже аннулирована.' }
+    }
+    throw err
+  }
 }

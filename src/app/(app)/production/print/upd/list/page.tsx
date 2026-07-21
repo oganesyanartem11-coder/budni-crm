@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db/prisma'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
 import { listGeneratedUpd } from '../actions'
+import { StornoButton } from '../storno-button'
 import { formatDateNumeric, formatMoney } from '@/lib/utils/format'
 
 interface PageProps {
@@ -142,13 +143,16 @@ export default async function UpdListPage({ searchParams }: PageProps) {
                     {formatMoney(it.totalAmount, { withKopecks: true })}
                   </td>
                   <td className="p-3 text-right">
-                    <Link
-                      href={`/production/print/upd/pdf?id=${it.id}`}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      Печать
-                    </Link>
+                    <div className="inline-flex items-center justify-end gap-1.5">
+                      <Link
+                        href={`/production/print/upd/pdf?id=${it.id}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-pill bg-accent text-accent-fg text-xs font-medium hover:opacity-90"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        Печать
+                      </Link>
+                      <StornoButton updDocumentId={it.id} documentNumber={it.documentNumber} />
+                    </div>
                   </td>
                 </tr>
               ))}
