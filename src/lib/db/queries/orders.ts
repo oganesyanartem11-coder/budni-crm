@@ -48,7 +48,9 @@ export async function listOrders(filter: OrderListFilter, limit = 200) {
     ],
     include: {
       client: { select: { id: true, name: true } },
-      location: { select: { id: true, name: true, address: true } },
+      // deliveryFee (Decimal?) — для сводки «Доставка»/«Общая сумма» в шапке
+      // списка. serialize() в page.tsx конвертирует Decimal → number|null.
+      location: { select: { id: true, name: true, address: true, deliveryFee: true } },
       delivery: { select: { issueReportedAt: true } },
     },
   })

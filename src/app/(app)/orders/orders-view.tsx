@@ -21,7 +21,9 @@ type SerializedListOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRa
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
-  location: Pick<ClientLocation, 'id' | 'name' | 'address'>
+  // deliveryFee — Decimal? в Prisma; serialize() отдаёт number|null. Берём через
+  // явный тип, а НЕ Pick, чтобы в клиент не утёк Decimal.
+  location: Pick<ClientLocation, 'id' | 'name' | 'address'> & { deliveryFee: number | null }
   delivery: { issueReportedAt: Date | string | null } | null
 }
 

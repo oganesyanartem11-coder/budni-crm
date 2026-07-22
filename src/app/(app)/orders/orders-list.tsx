@@ -21,7 +21,8 @@ type SerializedOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'>
   pricePerPortion: number
   totalPrice: number
   client: Pick<Client, 'id' | 'name'>
-  location: Pick<ClientLocation, 'id' | 'name' | 'address'>
+  // deliveryFee — Decimal? в Prisma; serialize() отдаёт number|null.
+  location: Pick<ClientLocation, 'id' | 'name' | 'address'> & { deliveryFee: number | null }
   delivery: { issueReportedAt: Date | string | null } | null
 }
 
@@ -95,7 +96,6 @@ function isOrderLive(order: SerializedOrder): boolean {
 }
 
 export function OrdersList({ orders, clients, filters, selectedDateIso, onFilterChange, isPending }: Props) {
-  const router = useRouter()
   // YYYY-MM-DD показанного дня (UTC-срез ISO) для ссылки печати УПД клиента.
   const dateYmd = selectedDateIso.slice(0, 10)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -110,13 +110,33 @@ export function OrdersList({ orders, clients, filters, selectedDateIso, onFilter
     onFilterChange({ clientId: null, mealType: null, status: null, search: null })
   }
 
-  // Агрегаты по статусам для шапки
-  const totalPortions = orders
-    .filter((o) => o.status !== 'CANCELLED')
-    .reduce((sum, o) => sum + o.portions, 0)
-  const totalRevenue = orders
-    .filter((o) => o.status !== 'CANCELLED')
-    .reduce((sum, o) => sum + o.totalPrice, 0)
+  // Разделяем активные и отменённые. Если пользователь ЯВНО фильтрует по
+  // CANCELLED — показываем всё одним списком (mainOrders === orders), без
+  // свёрнутого блока.
+  const isCancelledFilter = filters.status === 'CANCELLED'
+  const mainOrders = isCancelledFilter ? orders : orders.filter((o) => o.status !== 'CANCELLED')
+  const cancelledOrders = isCancelledFilter ? [] : orders.filter((o) => o.status === 'CANCELLED')
+
+  // Агрегаты — только по НЕ-отменённым заказам.
+  const activeOrders = orders.filter((o) => o.status !== 'CANCELLED')
+  const totalPortions = activeOrders.reduce((sum, o) => sum + o.portions, 0)
+  const totalRevenue = activeOrders.reduce((sum, o) => sum + o.totalPrice, 0)
+  // Доставка: одна плата на (локация, день) среди не-отменённых, где deliveryFee > 0
+  // — как в delivery-revenue.ts (раз на локацию-день, НЕ на каждый заказ).
+  const deliveryTotal = (() => {
+    const seen = new Set<string>()
+    let sum = 0
+    for (const o of activeOrders) {
+      const fee = o.location.deliveryFee
+      if (!fee || fee <= 0) continue
+      const key = `${o.location.id}|${new Date(o.deliveryDate).toISOString().slice(0, 10)}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      sum += fee
+    }
+    return sum
+  })()
+  const grandTotal = totalRevenue + deliveryTotal
 
   return (
     <div className="space-y-4">
@@ -212,12 +232,15 @@ export function OrdersList({ orders, clients, filters, selectedDateIso, onFilter
         </div>
       )}
 
-      {/* Агрегаты */}
+      {/* Агрегаты: 5 боксов. «Заказов» — без отменённых (согласовано с «Порций»
+          и «Суммой»). «Общая сумма» = питание + доставка. */}
       {orders.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 lg:gap-3">
-          <AggregateCard label="Заказов" value={orders.length.toString()} />
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 lg:gap-3">
+          <AggregateCard label="Заказов" value={activeOrders.length.toString()} />
           <AggregateCard label="Порций" value={totalPortions.toString()} />
-          <AggregateCard label="Сумма" value={formatMoney(totalRevenue)} />
+          <AggregateCard label="Сумма за питание" value={formatMoney(totalRevenue)} />
+          <AggregateCard label="Доставка" value={formatMoney(deliveryTotal)} />
+          <AggregateCard label="Общая сумма" value={formatMoney(grandTotal)} />
         </div>
       )}
 
@@ -237,195 +260,237 @@ export function OrdersList({ orders, clients, filters, selectedDateIso, onFilter
           )}
         </div>
       ) : (
-        <div className={cn('transition-opacity', isPending && 'opacity-50 pointer-events-none')}>
-          {/* lg+ : таблица */}
-          <div className="hidden lg:block rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-surface-2/60 text-xs uppercase tracking-wider text-fg-muted">
-                  <tr>
-                    <th className="text-left px-4 py-3 font-medium">Клиент / Точка</th>
-                    <th className="text-left px-3 py-3 font-medium">Тип</th>
-                    <th className="text-center px-3 py-3 font-medium">Порций</th>
-                    <th className="text-right px-3 py-3 font-medium">Цена</th>
-                    <th className="text-right px-3 py-3 font-medium">Сумма</th>
-                    <th className="text-left px-3 py-3 font-medium">Статус</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {orders.map((order) => (
-                    <tr
-                      key={order.id}
-                      className="group hover:bg-surface-2/40 transition-colors cursor-pointer align-middle"
-                      onClick={(e) => {
-                        // Не переходим если кликнули по интерактивному элементу внутри строки
-                        const target = e.target as HTMLElement
-                        if (target.closest('a, button, input')) return
-                        router.push(`/orders/${order.id}`)
-                      }}
-                    >
-                      <td className="px-4 py-3 align-middle">
-                        <span className="flex items-center gap-2">
-                          <Link
-                            href={`/clients/${order.client.id}`}
-                            className="hover:underline font-medium text-base break-words"
-                          >
-                            {order.client.name}
-                          </Link>
-                          {order.source === 'BORIS' && (
-                            <span
-                              className="shrink-0 text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
-                              title="Создано Борей"
-                            >
-                              Боря
-                            </span>
-                          )}
-                          {!order.ourLegalEntityId && (
-                            <span
-                              title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
-                              className="shrink-0 inline-flex items-center text-warning-fg"
-                            >
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                            </span>
-                          )}
-                          <UpdClientButton clientId={order.client.id} dateYmd={dateYmd} />
-                        </span>
-                        <div className="text-xs text-fg-muted truncate">{order.location.name}</div>
-                      </td>
-                      <td className="px-3 py-3 text-fg-muted text-sm align-middle whitespace-nowrap">
-                        {MEAL_TYPE_LABELS[order.mealType]}
-                      </td>
-                      <td className="px-3 py-3 text-center tabular-nums font-medium text-sm align-middle">
-                        <PortionsCell order={order} />
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-fg-muted whitespace-nowrap align-middle">
-                        {formatMoney(order.pricePerPortion)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap text-sm align-middle">
-                        {formatMoney(order.totalPrice)}
-                      </td>
-                      <td className="px-3 py-3 align-middle">
-                        <div className="flex items-center gap-1.5">
-                          <OrderStatusBadge status={order.status} />
-                          {order.delivery?.issueReportedAt && (
-                            <AlertTriangle
-                              className="w-3.5 h-3.5 text-danger-fg shrink-0"
-                              aria-label="Курьер сообщил о проблеме"
-                            >
-                              <title>Курьер сообщил о проблеме</title>
-                            </AlertTriangle>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className={cn('space-y-3 transition-opacity', isPending && 'opacity-50 pointer-events-none')}>
+          {/* Основной список — активные (или все, если явно фильтр по CANCELLED) */}
+          {mainOrders.length > 0 ? (
+            <>
+              <OrdersTable orders={mainOrders} dateYmd={dateYmd} />
+              <OrdersCards orders={mainOrders} dateYmd={dateYmd} />
+            </>
+          ) : (
+            <div className="rounded-xl bg-surface border border-border p-8 text-center text-fg-muted" style={{ boxShadow: 'var(--shadow-card)' }}>
+              Активных заказов на эту дату нет
             </div>
-          </div>
+          )}
 
-          {/* <lg : карточки */}
-          <div className="lg:hidden space-y-3">
-            {orders.map((order) => {
-              const live = isOrderLive(order)
-              return (
-                <div
-                  key={order.id}
-                  role="link"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    const target = e.target as HTMLElement
-                    if (target.closest('a, button, input')) return
-                    router.push(`/orders/${order.id}`)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const target = e.target as HTMLElement
-                      if (target.closest('a, button, input')) return
-                      router.push(`/orders/${order.id}`)
-                    }
-                  }}
-                  className="group rounded-xl border border-border bg-surface p-4 flex flex-col gap-3 cursor-pointer transition-colors hover:bg-surface-2/40 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
-                  style={{ boxShadow: 'var(--shadow-card)' }}
-                >
-                  {/* header: имя клиента + статус */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2 flex-wrap">
-                        {live && (
-                          <span
-                            className={cn('inline-block w-2 h-2 rounded-full shrink-0 animate-pulse motion-reduce:animate-none', statusDotClass(order.status))}
-                            aria-hidden="true"
-                          />
-                        )}
-                        <Link
-                          href={`/clients/${order.client.id}`}
-                          className="hover:underline font-semibold text-base break-words"
-                        >
-                          {order.client.name}
-                        </Link>
-                        {order.source === 'BORIS' && (
-                          <span
-                            className="shrink-0 text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
-                            title="Создано Борей"
-                          >
-                            Боря
-                          </span>
-                        )}
-                        {!order.ourLegalEntityId && (
-                          <span
-                            title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
-                            className="shrink-0 inline-flex items-center text-warning-fg"
-                          >
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                          </span>
-                        )}
-                        <UpdClientButton clientId={order.client.id} dateYmd={dateYmd} />
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <OrderStatusBadge status={order.status} />
-                      {order.delivery?.issueReportedAt && (
-                        <AlertTriangle
-                          className="w-3.5 h-3.5 text-danger-fg shrink-0"
-                          aria-label="Курьер сообщил о проблеме"
-                        >
-                          <title>Курьер сообщил о проблеме</title>
-                        </AlertTriangle>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* тип питания */}
-                  <div className="text-sm text-fg-muted">
-                    {MEAL_TYPE_LABELS[order.mealType]}
-                  </div>
-
-                  {/* порции (инлайн-ввод) + сумма */}
-                  <div className="flex items-center justify-between gap-3 border-t border-border-subtle pt-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-xs uppercase tracking-wider text-fg-subtle shrink-0">Порций</span>
-                      {/* отступ справа под absolute-кнопку редактирования (44px) */}
-                      <div className="tabular-nums font-medium text-base pr-12">
-                        <PortionsCell order={order} />
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-xs text-fg-muted tabular-nums">{formatMoney(order.pricePerPortion)} / порц.</div>
-                      <div className="font-semibold tabular-nums text-base">{formatMoney(order.totalPrice)}</div>
-                    </div>
-                  </div>
-
-                  {/* точка доставки */}
-                  <div className="text-xs text-fg-muted truncate">
-                    {order.location.name}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+          {/* Отменённые — свёрнутый блок, по умолчанию ЗАКРЫТ (нет атрибута open).
+              Не показывается, если пользователь сам фильтрует по «Отменён»
+              (тогда они уже в основном списке). Отдельная таблица/карточки —
+              details нельзя класть внутрь table. */}
+          {cancelledOrders.length > 0 && (
+            <details className="group">
+              <summary className="flex items-center justify-between gap-2 cursor-pointer list-none select-none rounded-xl bg-surface border border-border px-4 py-3 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30" style={{ boxShadow: 'var(--shadow-card)' }}>
+                <span className="text-sm font-medium text-fg-muted">Отменённые ({cancelledOrders.length})</span>
+                <span className="text-fg-subtle text-xs transition-transform group-open:rotate-180" aria-hidden>▾</span>
+              </summary>
+              <div className="mt-3">
+                <OrdersTable orders={cancelledOrders} dateYmd={dateYmd} />
+                <OrdersCards orders={cancelledOrders} dateYmd={dateYmd} />
+              </div>
+            </details>
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Десктоп-таблица заказов. Вынесена, чтобы переиспользовать её и в основном
+// списке, и внутри свёрнутого блока «Отменённые» (details нельзя класть внутрь
+// table, поэтому отменённые рендерятся ОТДЕЛЬНОЙ таблицей той же структуры).
+function OrdersTable({ orders, dateYmd }: { orders: SerializedOrder[]; dateYmd: string }) {
+  const router = useRouter()
+  return (
+    <div className="hidden lg:block rounded-xl bg-surface border border-border overflow-hidden" style={{ boxShadow: 'var(--shadow-card)' }}>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-surface-2/60 text-xs uppercase tracking-wider text-fg-muted">
+            <tr>
+              <th className="text-left px-4 py-3 font-medium">Клиент / Точка</th>
+              <th className="text-left px-3 py-3 font-medium">Тип</th>
+              <th className="text-center px-3 py-3 font-medium">Порций</th>
+              <th className="text-right px-3 py-3 font-medium">Цена</th>
+              <th className="text-right px-3 py-3 font-medium">Сумма</th>
+              <th className="text-left px-3 py-3 font-medium">Статус</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {orders.map((order) => (
+              <tr
+                key={order.id}
+                className="group hover:bg-surface-2/40 transition-colors cursor-pointer align-middle"
+                onClick={(e) => {
+                  // Не переходим если кликнули по интерактивному элементу внутри строки
+                  const target = e.target as HTMLElement
+                  if (target.closest('a, button, input')) return
+                  router.push(`/orders/${order.id}`)
+                }}
+              >
+                <td className="px-4 py-3 align-middle">
+                  <span className="flex items-center gap-2">
+                    <Link
+                      href={`/clients/${order.client.id}`}
+                      className="hover:underline font-medium text-base break-words"
+                    >
+                      {order.client.name}
+                    </Link>
+                    {order.source === 'BORIS' && (
+                      <span
+                        className="shrink-0 text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
+                        title="Создано Борей"
+                      >
+                        Боря
+                      </span>
+                    )}
+                    {!order.ourLegalEntityId && (
+                      <span
+                        title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
+                        className="shrink-0 inline-flex items-center text-warning-fg"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                    <UpdClientButton clientId={order.client.id} dateYmd={dateYmd} />
+                  </span>
+                  <div className="text-xs text-fg-muted truncate">{order.location.name}</div>
+                </td>
+                <td className="px-3 py-3 text-fg-muted text-sm align-middle whitespace-nowrap">
+                  {MEAL_TYPE_LABELS[order.mealType]}
+                </td>
+                <td className="px-3 py-3 text-center tabular-nums font-medium text-sm align-middle">
+                  <PortionsCell order={order} />
+                </td>
+                <td className="px-3 py-3 text-right tabular-nums text-fg-muted whitespace-nowrap align-middle">
+                  {formatMoney(order.pricePerPortion)}
+                </td>
+                <td className="px-3 py-3 text-right tabular-nums font-semibold whitespace-nowrap text-sm align-middle">
+                  {formatMoney(order.totalPrice)}
+                </td>
+                <td className="px-3 py-3 align-middle">
+                  <div className="flex items-center gap-1.5">
+                    <OrderStatusBadge status={order.status} />
+                    {order.delivery?.issueReportedAt && (
+                      <AlertTriangle
+                        className="w-3.5 h-3.5 text-danger-fg shrink-0"
+                        aria-label="Курьер сообщил о проблеме"
+                      >
+                        <title>Курьер сообщил о проблеме</title>
+                      </AlertTriangle>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// Мобильные карточки заказов (та же разметка, что была инлайн). Переиспользуются
+// основным списком и блоком «Отменённые».
+function OrdersCards({ orders, dateYmd }: { orders: SerializedOrder[]; dateYmd: string }) {
+  const router = useRouter()
+  return (
+    <div className="lg:hidden space-y-3">
+      {orders.map((order) => {
+        const live = isOrderLive(order)
+        return (
+          <div
+            key={order.id}
+            role="link"
+            tabIndex={0}
+            onClick={(e) => {
+              const target = e.target as HTMLElement
+              if (target.closest('a, button, input')) return
+              router.push(`/orders/${order.id}`)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const target = e.target as HTMLElement
+                if (target.closest('a, button, input')) return
+                router.push(`/orders/${order.id}`)
+              }
+            }}
+            className="group rounded-xl border border-border bg-surface p-4 flex flex-col gap-3 cursor-pointer transition-colors hover:bg-surface-2/40 [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
+            style={{ boxShadow: 'var(--shadow-card)' }}
+          >
+            {/* header: имя клиента + статус */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <span className="flex items-center gap-2 flex-wrap">
+                  {live && (
+                    <span
+                      className={cn('inline-block w-2 h-2 rounded-full shrink-0 animate-pulse motion-reduce:animate-none', statusDotClass(order.status))}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <Link
+                    href={`/clients/${order.client.id}`}
+                    className="hover:underline font-semibold text-base break-words"
+                  >
+                    {order.client.name}
+                  </Link>
+                  {order.source === 'BORIS' && (
+                    <span
+                      className="shrink-0 text-xs px-2 py-0.5 rounded-pill bg-info-bg text-info-fg font-medium"
+                      title="Создано Борей"
+                    >
+                      Боря
+                    </span>
+                  )}
+                  {!order.ourLegalEntityId && (
+                    <span
+                      title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
+                      className="shrink-0 inline-flex items-center text-warning-fg"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                  <UpdClientButton clientId={order.client.id} dateYmd={dateYmd} />
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <OrderStatusBadge status={order.status} />
+                {order.delivery?.issueReportedAt && (
+                  <AlertTriangle
+                    className="w-3.5 h-3.5 text-danger-fg shrink-0"
+                    aria-label="Курьер сообщил о проблеме"
+                  >
+                    <title>Курьер сообщил о проблеме</title>
+                  </AlertTriangle>
+                )}
+              </div>
+            </div>
+
+            {/* тип питания */}
+            <div className="text-sm text-fg-muted">
+              {MEAL_TYPE_LABELS[order.mealType]}
+            </div>
+
+            {/* порции (инлайн-ввод) + сумма */}
+            <div className="flex items-center justify-between gap-3 border-t border-border-subtle pt-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xs uppercase tracking-wider text-fg-subtle shrink-0">Порций</span>
+                {/* отступ справа под absolute-кнопку редактирования (44px) */}
+                <div className="tabular-nums font-medium text-base pr-12">
+                  <PortionsCell order={order} />
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-xs text-fg-muted tabular-nums">{formatMoney(order.pricePerPortion)} / порц.</div>
+                <div className="font-semibold tabular-nums text-base">{formatMoney(order.totalPrice)}</div>
+              </div>
+            </div>
+
+            {/* точка доставки */}
+            <div className="text-xs text-fg-muted truncate">
+              {order.location.name}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
