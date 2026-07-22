@@ -3,10 +3,12 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import type { MealType } from '@prisma/client'
+import type { MealType, OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { startOfTodayMsk, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
+import { notifyProductionChannel, escapeHtml } from '@/lib/telegram/notify'
+import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import {
   validateInn,
   validateOgrn,
@@ -14,6 +16,13 @@ import {
   validateAccount,
   validateCorrAccount,
 } from '@/lib/validation/russian-requisites'
+
+// Формат даты заказа для сообщений производству. deliveryDate — @db.Date
+// (UTC-полночь календарного дня), поэтому форматируем в UTC → ДД.ММ.
+const orderDateFmt = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: '2-digit', month: '2-digit' })
+function fmtOrderDate(d: Date): string {
+  return orderDateFmt.format(d)
+}
 
 const clientSchema = z
   .object({
@@ -381,7 +390,7 @@ export async function updateClient(
   return { ok: true, data: undefined }
 }
 
-export async function archiveClient(id: string): Promise<ActionResult> {
+export async function archiveClient(id: string): Promise<ActionResult<{ cancelledCount: number }>> {
   // MEGA-AUDIT-FIX-1 B3 (E-3): только ADMIN/ADMIN_PRO. MANAGER не может архивировать
   // клиента, у которого могут быть будущие заказы и активные конфиги.
   const user = await requireRole(['ADMIN'])
@@ -398,23 +407,33 @@ export async function archiveClient(id: string): Promise<ActionResult> {
   const willArchive = current.isActive
   const todayMsk = startOfTodayMsk()
 
+  // Статусы будущих заказов, отменяемых при архивации. LOCKED включён — такие
+  // заказы уже переданы производству, о них дополнительно уведомляем канал
+  // производства (после транзакции).
+  const CANCELLABLE_ON_ARCHIVE: OrderStatus[] = ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT', 'LOCKED']
+
+  let cancelledCount = 0
+  let lockedCancelled: Array<{ deliveryDate: Date; mealType: MealType; portions: number }> = []
+
   if (willArchive) {
-    // Пред-подсчёт счётчиков, чтобы положить их в payload ActivityLog внутри
-    // той же массив-транзакции (interactive-form через pgbouncer падает).
-    // Гонка минимальна: окно между count и updateMany — миллисекунды; даже
-    // если разойдётся на 1-2 заказа, это аудит-метка, не учёт.
-    const [cancellablePreCount, configsPreCount] = await Promise.all([
-      prisma.order.count({
+    // ДО транзакции — снимок будущих заказов-кандидатов (вкл. LOCKED): для
+    // счётчика в тосте, уведомления производству и аудит-payload. Гонка с
+    // updateMany минимальна (миллисекунды) — это аудит-метка, не учёт.
+    const [candidates, configsPreCount] = await Promise.all([
+      prisma.order.findMany({
         where: {
           clientId: id,
-          status: { in: ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT'] },
+          status: { in: CANCELLABLE_ON_ARCHIVE },
           deliveryDate: { gte: todayMsk },
         },
+        select: { id: true, deliveryDate: true, mealType: true, portions: true, status: true },
       }),
       prisma.clientMealConfig.count({
         where: { clientId: id, isActive: true },
       }),
     ])
+    cancelledCount = candidates.length
+    lockedCancelled = candidates.filter((o) => o.status === 'LOCKED')
 
     await prisma.$transaction([
       prisma.client.update({
@@ -424,7 +443,7 @@ export async function archiveClient(id: string): Promise<ActionResult> {
       prisma.order.updateMany({
         where: {
           clientId: id,
-          status: { in: ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT'] },
+          status: { in: CANCELLABLE_ON_ARCHIVE },
           deliveryDate: { gte: todayMsk },
         },
         data: { status: 'CANCELLED' },
@@ -442,7 +461,7 @@ export async function archiveClient(id: string): Promise<ActionResult> {
           entityId: id,
           payload: {
             name: current.name,
-            cancelledOrders: cancellablePreCount,
+            cancelledOrders: cancelledCount,
             deactivatedConfigs: configsPreCount,
           },
         },
@@ -467,9 +486,27 @@ export async function archiveClient(id: string): Promise<ActionResult> {
     ])
   }
 
+  // Уведомление производству о снятых LOCKED-заказах — через существующий
+  // notifyProductionChannel (тот же канал, что и сводка производства).
+  // try/catch: провал уведомления НЕ должен ронять архивацию.
+  if (lockedCancelled.length > 0) {
+    try {
+      const lines = lockedCancelled
+        .map((o) => `${fmtOrderDate(o.deliveryDate)} · ${MEAL_TYPE_LABELS[o.mealType]} · ${o.portions} порц.`)
+        .join('\n')
+      await notifyProductionChannel(
+        `⚠️ Клиент ${escapeHtml(current.name)} архивирован. Отменено ${cancelledCount} будущих заказов, ` +
+          `из них ${lockedCancelled.length} уже переданы производству:\n${lines}`,
+        { parseMode: 'HTML' },
+      )
+    } catch (e) {
+      console.error('[archiveClient] production notify failed', e)
+    }
+  }
+
   revalidatePath('/clients')
   revalidatePath(`/clients/${id}`)
-  return { ok: true, data: undefined }
+  return { ok: true, data: { cancelledCount } }
 }
 
 // LOCATION ==========================================================
@@ -884,18 +921,67 @@ export async function cascadePriceToFutureOrders(params: {
   return { ok: true, affectedCount: orders.length, oldPrice, newPrice: newPriceNum }
 }
 
-export async function deleteMealConfig(id: string): Promise<ActionResult> {
+export async function deleteMealConfig(id: string): Promise<ActionResult<{ cancelledCount: number }>> {
   await requireRole(['ADMIN', 'MANAGER'])
   const config = await prisma.clientMealConfig.findUnique({ where: { id } })
   if (!config) return { ok: false, error: 'Питание не найдено' }
 
-  await prisma.clientMealConfig.update({
-    where: { id },
-    data: { isActive: !config.isActive },
+  // Реактивация (false → true): только тоггл, заказы не трогаем.
+  if (!config.isActive) {
+    await prisma.clientMealConfig.update({ where: { id }, data: { isActive: true } })
+    revalidatePath(`/clients/${config.clientId}`)
+    return { ok: true, data: { cancelledCount: 0 } }
+  }
+
+  // Деактивация (true → false): в одной транзакции с тогглом отменяем будущие
+  // заказы ИМЕННО этого питания (client + location + mealType), включая LOCKED.
+  const todayMsk = startOfTodayMsk()
+  const CANCELLABLE_ON_ARCHIVE: OrderStatus[] = ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT', 'LOCKED']
+  const candidateWhere: Prisma.OrderWhereInput = {
+    clientId: config.clientId,
+    locationId: config.locationId,
+    mealType: config.mealType,
+    status: { in: CANCELLABLE_ON_ARCHIVE },
+    deliveryDate: { gte: todayMsk },
+  }
+
+  const candidates = await prisma.order.findMany({
+    where: candidateWhere,
+    select: { deliveryDate: true, mealType: true, portions: true, status: true },
   })
+  const cancelledCount = candidates.length
+  const lockedCancelled = candidates.filter((o) => o.status === 'LOCKED')
+
+  await prisma.$transaction([
+    prisma.clientMealConfig.update({ where: { id }, data: { isActive: false } }),
+    prisma.order.updateMany({ where: candidateWhere, data: { status: 'CANCELLED' } }),
+  ])
 
   revalidatePath(`/clients/${config.clientId}`)
-  return { ok: true, data: undefined }
+  revalidatePath('/orders')
+
+  // Уведомление производству, если среди отменённых были LOCKED. try/catch —
+  // провал уведомления не роняет действие.
+  if (lockedCancelled.length > 0) {
+    try {
+      const client = await prisma.client.findUnique({
+        where: { id: config.clientId },
+        select: { name: true },
+      })
+      const lines = lockedCancelled
+        .map((o) => `${fmtOrderDate(o.deliveryDate)} · ${MEAL_TYPE_LABELS[o.mealType]} · ${o.portions} порц.`)
+        .join('\n')
+      await notifyProductionChannel(
+        `⚠️ Питание ${MEAL_TYPE_LABELS[config.mealType]} клиента ${escapeHtml(client?.name ?? '—')} архивировано. ` +
+          `Отменено ${cancelledCount} будущих заказов, из них ${lockedCancelled.length} уже переданы производству:\n${lines}`,
+        { parseMode: 'HTML' },
+      )
+    } catch (e) {
+      console.error('[deleteMealConfig] production notify failed', e)
+    }
+  }
+
+  return { ok: true, data: { cancelledCount } }
 }
 
 const mealConfigBulkSchema = z.object({

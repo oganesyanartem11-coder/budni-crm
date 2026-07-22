@@ -60,11 +60,14 @@ export async function createOrder(
   // Проверяем что точка принадлежит этому клиенту, и берём её packaging
   const location = await prisma.clientLocation.findFirst({
     where: { id: data.locationId, clientId: data.clientId, isActive: true },
-    select: { id: true, packaging: true },
+    select: { id: true, packaging: true, client: { select: { isActive: true } } },
   })
 
   if (!location) {
     return { ok: false, error: 'Точка не найдена или не принадлежит клиенту' }
+  }
+  if (!location.client.isActive) {
+    return { ok: false, error: 'Клиент в архиве — создание заказов недоступно' }
   }
 
   const totalPrice = data.portions * data.pricePerPortion
@@ -781,11 +784,15 @@ export async function restoreOrderCore(
       status: true,
       deliveryDate: true,
       editedAfterLockAt: true,
+      client: { select: { isActive: true } },
     },
   })
   if (!order) return { ok: false, error: 'Заказ не найден' }
   if (order.status !== 'CANCELLED') {
     return { ok: false, error: 'Заказ не в статусе CANCELLED — нечего восстанавливать' }
+  }
+  if (!order.client.isActive) {
+    return { ok: false, error: 'Клиент в архиве — восстановление заказа недоступно' }
   }
 
   const afterCutoff = isPastCutoff(order.deliveryDate)
@@ -961,6 +968,9 @@ export async function createOneTimeOrderCore(
     select: { id: true, isActive: true },
   })
   if (!client) return { ok: false, error: 'Клиент не найден' }
+  if (!client.isActive) {
+    return { ok: false, error: 'Клиент в архиве — создание заказов недоступно' }
+  }
 
   const location = await prisma.clientLocation.findUnique({
     where: { id: data.locationId },

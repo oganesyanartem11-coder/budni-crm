@@ -89,10 +89,24 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
   const activeLocations = client.locations.filter((l) => l.isActive)
 
   function handleArchiveClient() {
+    // Архивация (client.isActive === true) отменяет будущие заказы — подтверждаем.
+    if (
+      client.isActive &&
+      !window.confirm(
+        'Архивировать клиента? Все будущие заказы клиента будут отменены (включая уже переданные производству), а типы питания — деактивированы.',
+      )
+    ) {
+      return
+    }
     startTransition(async () => {
       const result = await archiveClient(client.id)
       if (result.ok) {
-        toast.success(client.isActive ? 'Клиент в архиве' : 'Клиент восстановлен')
+        if (client.isActive) {
+          const n = result.data.cancelledCount
+          toast.success(n > 0 ? `Клиент в архиве, отменено ${n} будущих заказов` : 'Клиент в архиве')
+        } else {
+          toast.success('Клиент восстановлен')
+        }
         router.refresh()
       } else {
         toast.error(result.error)
@@ -126,10 +140,24 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
   }
 
   function handleArchiveConfig(id: string, isActive: boolean) {
+    // Деактивация (isActive === true) отменяет будущие заказы этого питания — подтверждаем.
+    if (
+      isActive &&
+      !window.confirm(
+        'Архивировать питание? Все будущие заказы этого питания будут отменены (включая уже переданные производству).',
+      )
+    ) {
+      return
+    }
     startTransition(async () => {
       const result = await deleteMealConfig(id)
       if (result.ok) {
-        toast.success(isActive ? 'Питание отключено' : 'Питание восстановлено')
+        if (isActive) {
+          const n = result.data.cancelledCount
+          toast.success(n > 0 ? `Питание архивировано, отменено ${n} будущих заказов` : 'Питание архивировано')
+        } else {
+          toast.success('Питание восстановлено')
+        }
         router.refresh()
       } else {
         toast.error(result.error)
