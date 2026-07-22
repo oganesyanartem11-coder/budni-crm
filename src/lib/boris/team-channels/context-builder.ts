@@ -14,10 +14,10 @@
 import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
-import { ACTIVE_ORDER_STATUSES } from '@/lib/constants/order'
+import { ACTIVE_ORDER_STATUSES, REVENUE_STATUSES } from '@/lib/constants/order'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
 import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
-import { getFinancialWeek, getPreviousFinancialWeek } from '@/lib/utils/week'
+import { getFinancialWeek, getFinancialWeekForDbDate } from '@/lib/utils/week'
 import type {
   ClientOrderAggregate,
   DayContext,
@@ -187,24 +187,36 @@ export async function buildDayContext(now: Date = new Date()): Promise<DayContex
  * Параллельная неделя минус 1 нужна для сравнения «лучше/хуже прошлой».
  */
 export async function buildWeekContext(now: Date = new Date()): Promise<WeekContext> {
+  // DateTime-поля (BorisEventLog.eventDate, тон по BotMessage.createdAt) —
+  // обычные МСК-инстанты: сырой getFinancialWeek (Postgres не усекает DateTime).
   const { from: weekFrom, to: weekTo } = getFinancialWeek(now)
-  const { from: prevFrom, to: prevTo } = getPreviousFinancialWeek(now)
 
-  // Для запросов по @db.Date Order.deliveryDate границы должны быть МСК-полуночами;
-  // getFinancialWeek уже возвращает корректные MSK-полночи как UTC-точки.
-  // Волна 4: верхняя граница для delivery-хелпера полу-открытая [from, to) —
-  // прибавляем сутки к weekTo (МСК-полночь последнего дня), чтобы включить его.
-  const weekToExclusive = new Date(weekTo.getTime() + DAY_MS)
+  // @db.Date Order.deliveryDate: нижняя граница должна быть UTC-полночью МСК-дня,
+  // иначе gte втягивает пятницу прошлой фин-недели (class-of-bug «Два midnight»).
+  // Эти границы идут во ВСЕ deliveryDate-запросы недели (выручка, порции,
+  // материалы, доставка, «новые клиенты»). Тот же хелпер, что на дашборде.
+  const { from: weekFromDb, to: weekToDb } = getFinancialWeekForDbDate(now)
+  const { from: prevFromDb, to: prevToDb } = getFinancialWeekForDbDate(new Date(now.getTime() - 7 * DAY_MS))
+
+  // Верхняя граница delivery-хелпера полу-открытая [from, to) — прибавляем сутки
+  // к weekToDb (МСК-полночь последнего дня), чтобы включить пятницу.
+  const weekToExclusive = new Date(weekToDb.getTime() + DAY_MS)
 
   const [weekAgg, weekOrders, prevWeekAgg, materialCostWeek, events, tones, deliveryWeek] =
     await Promise.all([
     prisma.order.aggregate({
-      where: { deliveryDate: { gte: weekFrom, lte: weekTo }, status: { in: TODAY_STATUSES } },
-      _sum: { totalPrice: true, portions: true },
-      _count: { _all: true },
+      // Волна 1: ВЫРУЧКА недели — REVENUE_STATUSES (без PENDING_CONFIRMATION),
+      // как на дашборде. Окно deliveryDate — ForDbDate. Считаем ТОЛЬКО totalPrice:
+      // порции и число заказов берём из weekOrders (TODAY_STATUSES), чтобы
+      // заголовок «порций/заказов недели» совпадал со своей разбивкой
+      // (peakDay/topClients), а не расходился на PENDING_CONFIRMATION.
+      where: { deliveryDate: { gte: weekFromDb, lte: weekToDb }, status: { in: REVENUE_STATUSES } },
+      _sum: { totalPrice: true },
     }),
     prisma.order.findMany({
-      where: { deliveryDate: { gte: weekFrom, lte: weekTo }, status: { in: TODAY_STATUSES } },
+      // Операционные порции/клиенты недели — TODAY_STATUSES (как было), но окно
+      // deliveryDate тоже ForDbDate.
+      where: { deliveryDate: { gte: weekFromDb, lte: weekToDb }, status: { in: TODAY_STATUSES } },
       select: {
         portions: true,
         clientId: true,
@@ -213,17 +225,19 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
       },
     }),
     prisma.order.aggregate({
-      where: { deliveryDate: { gte: prevFrom, lte: prevTo }, status: { in: TODAY_STATUSES } },
+      // Прошлая неделя для WoW-сравнения — те же REVENUE_STATUSES и ForDbDate,
+      // чтобы дельта была симметрична текущей неделе.
+      where: { deliveryDate: { gte: prevFromDb, lte: prevToDb }, status: { in: REVENUE_STATUSES } },
       _sum: { totalPrice: true, portions: true },
     }),
-    getMaterialCostForRange(weekFrom, weekTo, TODAY_STATUSES),
+    getMaterialCostForRange(weekFromDb, weekToDb, TODAY_STATUSES),
     prisma.borisEventLog.findMany({
       where: { eventDate: { gte: weekFrom, lte: weekTo } },
       orderBy: { createdAt: 'asc' },
     }),
     getToneSummary(weekFrom, weekTo),
     // Волна 4: сервисная выручка (доставка) за неделю — отдельно от food.
-    sumDeliveryRevenue({ from: weekFrom, to: weekToExclusive }),
+    sumDeliveryRevenue({ from: weekFromDb, to: weekToExclusive }),
   ])
 
   const weekRevenueRub = Number(weekAgg._sum.totalPrice ?? 0)
@@ -262,7 +276,7 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
   )
   const newClientIds = new Set(
     earliestPerClient
-      .filter((x) => x.earliest && x.earliest >= weekFrom && x.earliest <= weekTo)
+      .filter((x) => x.earliest && x.earliest >= weekFromDb && x.earliest <= weekToDb)
       .map((x) => x.clientId),
   )
   const newClients = byClientAgg.filter((c) => newClientIds.has(c.clientId))
@@ -270,14 +284,16 @@ export async function buildWeekContext(now: Date = new Date()): Promise<WeekCont
   return {
     weekFrom,
     weekTo,
-    portionsTotal: weekAgg._sum.portions ?? 0,
+    // Операционные порции/заказы недели — из weekOrders (TODAY_STATUSES),
+    // согласовано с peakDay/topClients (та же выборка).
+    portionsTotal: weekOrders.reduce((s, o) => s + o.portions, 0),
     revenueRub: weekRevenueRub,
     foodRevenueRub: weekRevenueRub,
     deliveryRevenueRub: deliveryRevenueWeek,
     totalRevenueRub: weekRevenueRub + deliveryRevenueWeek,
     materialCostRub: materialCostWeek.totalCost,
     daysWithoutMenu: materialCostWeek.daysWithoutMenu,
-    ordersCount: weekAgg._count._all,
+    ordersCount: weekOrders.length,
     topClients,
     peakDay,
     newClients,
