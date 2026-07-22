@@ -171,7 +171,7 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
           <p className="text-[11px] font-bold uppercase tracking-widest text-data-revenue-ink">Выручка</p>
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-display text-4xl font-bold tabular-nums text-fg-strong sm:text-5xl">
-              {formatMoney(data.thisPeriod.totalRevenue)}
+              {formatMoney(data.thisPeriod.grandTotalRevenue)}
             </span>
             {hasWow && (
               <span
@@ -195,13 +195,9 @@ export function FinanceWeekBlock({ data, margin, preset, customFrom, customTo, i
               </span>
             )}
           </div>
-          {/* Волна 4: сервисная выручка (доставка) — ненавязчивой строкой, только если > 0.
-              food-выручка выше не меняется; это отдельный поток, в маржу не входит. */}
-          {data.thisPeriod.deliveryRevenue > 0 && (
-            <p className="mt-1.5 text-xs text-data-revenue-ink/80">
-              Сервисная выручка (доставка): {formatMoney(data.thisPeriod.deliveryRevenue)}
-            </p>
-          )}
+          {/* Волна 1: доставка теперь ВХОДИТ в главную цифру выручки (grand =
+              еда + доставка). Отдельная строка «Сервисная выручка» убрана.
+              Маржа считается по-прежнему только от еды (см. блок «Маржа»). */}
         </div>
 
         {/* 2. МАРЖА — только admin-like. MANAGER НЕ видит. */}

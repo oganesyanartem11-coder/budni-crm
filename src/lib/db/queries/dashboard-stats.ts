@@ -242,8 +242,12 @@ export async function getAdminDashboardData(
       ? Number(thisAggUpToCutoff._sum.totalPrice ?? 0)
       : totalRevenue
 
-    const changePct = comparePrevRevenue > 0
-      ? Math.round(((thisRevenueProrated - comparePrevRevenue) / comparePrevRevenue) * 1000) / 10
+    // Волна 1: дельта по ОБЩЕЙ выручке (еда + доставка) — как и главная цифра
+    // дашборда. Доставка берётся симметрично для обоих окон (this/prev).
+    const thisGrandProrated = thisRevenueProrated + Number(thisDeliveryUpToCutoff)
+    const comparePrevGrand = comparePrevRevenue + Number(compareDelivery)
+    const changePct = comparePrevGrand > 0
+      ? Math.round(((thisGrandProrated - comparePrevGrand) / comparePrevGrand) * 1000) / 10
       : null
 
     wow = {
