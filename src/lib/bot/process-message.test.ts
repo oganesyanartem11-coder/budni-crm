@@ -606,3 +606,135 @@ describe('process-message П3 — текстовый приём изменени
     expect(mockNotifyManagerOrderChange).toHaveBeenCalledOnce()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────
+// Волна 2 (баг A/B): дата из ТЕКСТА приоритетнее даты «висящей» беседы.
+// extractDeliveryDateFromText использует замоканный parseChangeIntent; regex-гейт
+// реальный (сообщения с признаком даты доходят до мока, «10» — нет).
+// ─────────────────────────────────────────────────────────────────────────
+describe('process-message — дата из текста приоритетнее беседы (Волна 2, баг A/B)', () => {
+  it('висящая беседа на прошедшей дате + «На 6 июля 5 обедов» → заказ на 6 июля, без лекции 16:00', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    // Беседа «висит» на прошедшей дате (11 июня).
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 6, 11),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 5 }],
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [{ locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 5 }],
+    })
+    // Дата из текста: 6 июля (валидна, будущая относительно «сегодня» = 1 июля).
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      date: '2026-07-06',
+      portions: 5,
+      mealType: null,
+      confidence: 0.99,
+      reason: 'ok',
+    })
+    // 1 июля 11:00 МСК = 08:00 UTC.
+    vi.setSystemTime(new Date(Date.UTC(2026, 6, 1, 8, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'На 6 июля 5 обедов' })
+
+    // Баг A: заказ сохранён на 6 июля (из текста), а НЕ на 11 июня (из беседы).
+    expect(mockSave).toHaveBeenCalledTimes(1)
+    const saveArg = mockSave.mock.calls[0][0] as { deliveryDate: Date }
+    expect(saveArg.deliveryDate.getTime()).toBe(Date.UTC(2026, 6, 6))
+    // Дата 6 июля фигурирует в уведомлении производству (а не 11 июня).
+    expect(mockNotifyProduction).toHaveBeenCalled()
+    expect(mockNotifyProduction.mock.calls[0][0] as string).toContain('6 июля')
+    expect(mockNotifyProduction.mock.calls[0][0] as string).not.toContain('июня')
+    // Баг B: приём до cutoff (11:00 про будущий день) → без лекции про 16:00.
+    expect(res.action).toBe('saved')
+    expect(res.reply).toContain('Принято')
+    expect(res.reply).not.toContain('16:00')
+    expect(res.reply).not.toMatch(/сложнее/i)
+  })
+
+  it('11:00 МСК, беседа висит на СЕГОДНЯ, «на завтра 8» → afterCutoff=false, ответ без лекции', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    // Беседа на СЕГОДНЯ (4 июля) — раньше это давало ложный afterCutoff в 11:00.
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 7, 4),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 8 }],
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [{ locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 8 }],
+    })
+    // «на завтра» = 5 июля (относительно 4 июля).
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      date: '2026-07-05',
+      portions: 8,
+      mealType: null,
+      confidence: 0.99,
+      reason: 'ok',
+    })
+    // 4 июля 11:00 МСК = 08:00 UTC.
+    vi.setSystemTime(new Date(Date.UTC(2026, 6, 4, 8, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'на завтра 8' })
+
+    // Отсечка считается от 5 июля (завтра) → сегодня 16:00 ещё впереди → без лекции.
+    expect(res.action).toBe('saved')
+    expect(res.reply).toContain('Принято')
+    expect(res.reply).not.toContain('16:00')
+    expect(res.reply).not.toMatch(/сложнее/i)
+    // Заказ сохранён на 5 июля (завтра), а не на сегодня.
+    const saveArg = mockSave.mock.calls[0][0] as { deliveryDate: Date }
+    expect(saveArg.deliveryDate.getTime()).toBe(Date.UTC(2026, 6, 5))
+  })
+
+  it('17:00 МСК, «на завтра 8» → afterCutoff=true, лекция про 16:00 уходит законно', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 7, 4),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 8 }],
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [{ locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 8 }],
+    })
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      date: '2026-07-05',
+      portions: 8,
+      mealType: null,
+      confidence: 0.99,
+      reason: 'ok',
+    })
+    // 4 июля 17:00 МСК = 14:00 UTC (после 16:00 отсечки для доставки завтра).
+    vi.setSystemTime(new Date(Date.UTC(2026, 6, 4, 14, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'на завтра 8' })
+
+    expect(res.action).toBe('post_cutoff')
+    expect(res.reply).toContain('Принято')
+    expect(res.reply).toContain('16:00')
+    expect(res.reply).toContain('5 июля')
+  })
+})

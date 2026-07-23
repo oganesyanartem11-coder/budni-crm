@@ -25,12 +25,13 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
 import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
-import { toMskDateString } from '@/lib/utils/msk-window'
+import { toMskDateString, startOfTodayMsk } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
 import { sendTelegramMessage } from '@/lib/telegram/send'
 import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
 import { formatMskDayMonth } from '@/lib/utils/format'
 import { parseChangeIntent } from '@/lib/bot/parse-change-intent'
+import { extractDeliveryDateFromText } from './extract-delivery-date'
 import { resolveOrderChangeTarget } from '@/lib/order-changes/resolve-target'
 import { createPendingChange } from '@/lib/order-changes/actions'
 import { findActiveOrder } from '@/lib/db/queries/orders'
@@ -278,6 +279,13 @@ async function handleBotResponse(
     toneLabel: parsed.toneLabel,
   })
 
+  // Волна 2 (баг A/B): дата из ТЕКСТА приоритетнее даты «висящей» беседы.
+  // extractDeliveryDateFromText вернёт null, если в тексте нет признака даты
+  // (обычный числовой ответ DYNAMIC-клиента вроде «8») — тогда падаем на
+  // conv.deliveryDate, прежнее поведение не меняется.
+  const dateFromText = await extractDeliveryDateFromText(text, new Date())
+  const effectiveDeliveryDate = dateFromText ?? conv.deliveryDate
+
   // 7.16.C.1 hotfix: parseClientResponse даёт неточный tone для нецифровых
   // ответов (Haiku парсер сфокусирован на цифрах, tone — побочное правило).
   // Для не-numeric — переклассифицируем через dedicated classifyMessageTone,
@@ -487,6 +495,42 @@ async function handleBotResponse(
     return { reply: null, action: 'inbox', inboxItemId: inbox.id }
   }
 
+  // Волна 2 (ШАГ 3): запрет записи в прошлое. Если эффективная дата раньше
+  // сегодняшнего МСК-дня — заказ НЕ сохраняем, а эскалируем менеджеру (как КЕЙС D).
+  // Основная защита — от порчи данных «висящей» беседой со старой deliveryDate.
+  // NB: явную прошлую дату ИЗ ТЕКСТА сюда обычно не пропускает уже parseChangeIntent
+  // (он возвращает NONE на past_date), поэтому такой запрос падает на
+  // conv.deliveryDate — если та валидна, заказ уходит на неё; если тоже прошлая —
+  // ловится здесь. Отдельную эскалацию «клиент назвал прошедший день» вводить позже.
+  if (effectiveDeliveryDate.getTime() < startOfTodayMsk().getTime()) {
+    if (conv.status !== 'AWAITING_MANAGER') {
+      await prisma.botConversation.update({
+        where: { id: conv.id },
+        data: { status: 'AWAITING_MANAGER' },
+      })
+    }
+    const inbox = await createInboxItem({
+      clientId: client.id,
+      conversationId: conv.id,
+      reason: 'NON_NUMERIC',
+      humanReason: 'Сообщение относится к прошедшей дате — уточните, на какой день заказ',
+      priority: 'NORMAL',
+      clientMessage: text,
+      parsedJson: parsed as unknown as Prisma.InputJsonValue,
+    })
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: text,
+      inboxItemId: inbox.id,
+      tone: alertTone,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => {
+      console.error('[bot] notifyClientSignal failed (past-date):', e)
+    })
+    return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+  }
+
   // Парсер вернул число и аномалий нет — сохраняем заказ.
   const activeMealConfigsByLocation: Record<
     string,
@@ -503,7 +547,7 @@ async function handleBotResponse(
   const save = await saveBotOrders({
     clientId: client.id,
     conversationId: conv.id,
-    deliveryDate: conv.deliveryDate,
+    deliveryDate: effectiveDeliveryDate,
     items: parsed.items,
     activeMealConfigsByLocation,
     clientMessage: text,
@@ -537,7 +581,7 @@ async function handleBotResponse(
   // от другой точки клиента. Среди локаций заказа выбираем same-day с самым
   // ранним cut-off (ближайший дедлайн для клиента); если same-day среди
   // заказа нет — первую локацию заказа (даст обычный 16:00).
-  const deliveryIsToday = toMskDateString(conv.deliveryDate) === toMskDateString(now)
+  const deliveryIsToday = toMskDateString(effectiveDeliveryDate) === toMskDateString(now)
   const orderLocations = save.savedItems
     .map((s) => client.locations.find((l) => l.id === s.locationId))
     .filter((l): l is NonNullable<typeof l> => Boolean(l))
@@ -555,7 +599,7 @@ async function handleBotResponse(
       : (orderLocations[0] ?? null)
   const cutoff = getClientCutoffForDate({
     client,
-    deliveryDate: conv.deliveryDate,
+    deliveryDate: effectiveDeliveryDate,
     locationId: cutoffLocation?.id ?? null,
     now,
   })
@@ -564,7 +608,7 @@ async function handleBotResponse(
     !!cutoffLocation?.sameDayDelivery &&
     cutoffLocation.isActive !== false
   const cutoffMoment = getCutoffMoment(
-    conv.deliveryDate,
+    effectiveDeliveryDate,
     cutoff.hour,
     cutoff.minute,
     isSameDayCutoff
@@ -580,7 +624,7 @@ async function handleBotResponse(
 
   if (afterCutoff) {
     // КЕЙС C — после cutoff МСК. Заказ уже создан/обновлён saveBotOrders выше
-    // (на conv.deliveryDate). InboxItem c POST_CUTOFF — пометка менеджеру.
+    // (на effectiveDeliveryDate). InboxItem c POST_CUTOFF — пометка менеджеру.
     if (conv.status !== 'CONFIRMED') {
       await prisma.botConversation.update({
         where: { id: conv.id },
@@ -594,7 +638,7 @@ async function handleBotResponse(
     // через POST_CUTOFF inbox.
     let postCutoffReply: string
     if (save.savedItems.length > 0) {
-      const dateStr = formatMskDayMonth(conv.deliveryDate)
+      const dateStr = formatMskDayMonth(effectiveDeliveryDate)
       const itemsStr = save.savedItems
         .map((s) => `${s.locationName} — ${s.portions}`)
         .join(', ')
@@ -671,7 +715,7 @@ async function handleBotResponse(
     // поэтому добираем order по бизнес-ключу (clientId+locationId+mealType+date).
     // Дедуп по (orderId, день) — повторный CONFIRMED того же заказа не плодит пост.
     const sameDayNow = new Date()
-    const sameDayYyyymmdd = toMskDateString(conv.deliveryDate)
+    const sameDayYyyymmdd = toMskDateString(effectiveDeliveryDate)
     for (const item of save.savedItems) {
       const location = client.locations.find((l) => l.id === item.locationId)
       if (!location?.sameDayDelivery) continue
@@ -681,7 +725,7 @@ async function handleBotResponse(
             clientId: client.id,
             locationId: item.locationId,
             mealType: item.mealType,
-            deliveryDate: conv.deliveryDate,
+            deliveryDate: effectiveDeliveryDate,
             status: { notIn: ['CANCELLED'] },
           },
           select: { id: true },
@@ -721,7 +765,7 @@ async function handleBotResponse(
     // канал (TELEGRAM_PRODUCTION_CHAT_ID), fire-and-forget. Идемпотентность — за
     // счёт wasFirstAnswer (single-shot на переходе PENDING→CONFIRMED).
     if (save.savedItems.length > 0) {
-      const dateStr = formatMskDayMonth(conv.deliveryDate)
+      const dateStr = formatMskDayMonth(effectiveDeliveryDate)
       const clientNameHtml = escapeHtml(client.name)
       let prodText: string
       if (save.savedItems.length === 1) {
@@ -790,7 +834,7 @@ async function handleBotResponse(
   // Сигналим по ВСЕМ savedItems (update'ы и новые локации), без дедупа —
   // лучше пере-уведомить, чем потерять изменение. fire-and-forget, как CASE A.
   {
-    const dateStr = formatMskDayMonth(conv.deliveryDate)
+    const dateStr = formatMskDayMonth(effectiveDeliveryDate)
     const clientNameHtml = escapeHtml(client.name)
     let prodText: string
     if (save.savedItems.length === 1) {
