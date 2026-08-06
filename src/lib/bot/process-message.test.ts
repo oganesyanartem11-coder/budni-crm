@@ -31,6 +31,9 @@ const {
   mockFindActiveOrder,
   mockNotifyManagerOrderChange,
   mockNotifyProduction,
+  mockCreateOrReuseAnomaly,
+  mockEnsureAnomalyInbox,
+  mockNotifyManagersAnomaly,
 } = vi.hoisted(() => ({
   mockPrisma: {
     user: { findMany: vi.fn() },
@@ -38,6 +41,7 @@ const {
     botConversation: { update: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
     inboxItem: { findFirst: vi.fn(), update: vi.fn() },
     order: { findFirst: vi.fn() },
+    clientPortionBaseline: { updateMany: vi.fn() },
     botMessage: { findFirst: vi.fn() },
     clientMaxUser: {
       findFirst: vi.fn(),
@@ -65,6 +69,9 @@ const {
   mockFindActiveOrder: vi.fn(),
   mockNotifyManagerOrderChange: vi.fn(),
   mockNotifyProduction: vi.fn(),
+  mockCreateOrReuseAnomaly: vi.fn(),
+  mockEnsureAnomalyInbox: vi.fn(),
+  mockNotifyManagersAnomaly: vi.fn(),
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
@@ -104,6 +111,13 @@ vi.mock('@/lib/db/queries/orders', () => ({ findActiveOrder: mockFindActiveOrder
 vi.mock('@/lib/telegram/handlers/order-change', () => ({
   notifyManagerAboutOrderChange: mockNotifyManagerOrderChange,
 }))
+vi.mock('@/lib/orders/anomaly-confirmations', () => ({
+  createOrReusePendingAnomalyConfirmation: mockCreateOrReuseAnomaly,
+  ensurePendingAnomalyInbox: mockEnsureAnomalyInbox,
+}))
+vi.mock('@/lib/telegram/handlers/anomaly-confirmation', () => ({
+  notifyManagersAboutAnomaly: mockNotifyManagersAnomaly,
+}))
 // #3: спай на notifyProductionChannel (post-cutoff уведомление производства),
 // escapeHtml оставляем реальным через importActual — иначе сломается HTML-форматирование.
 vi.mock('@/lib/telegram/notify', async (importOriginal) => {
@@ -137,6 +151,20 @@ function makeClient(opts: { sameDay?: boolean; cutoffHour?: number; cutoffMinute
         mealConfigs: [{ mealType: 'LUNCH', pricePerPortion: '300', isActive: true }],
       },
     ],
+  }
+}
+
+function makeMultiMealClient() {
+  const client = makeClient()
+  return {
+    ...client,
+    locations: client.locations.map((location) => ({
+      ...location,
+      mealConfigs: [
+        { mealType: 'LUNCH', pricePerPortion: '300', isActive: true },
+        { mealType: 'DINNER', pricePerPortion: '350', isActive: true },
+      ],
+    })),
   }
 }
 
@@ -182,6 +210,13 @@ beforeEach(() => {
   mockFindActiveOrder.mockResolvedValue(null)
   mockCreatePendingChange.mockResolvedValue({ id: 'pending_1' })
   mockNotifyManagerOrderChange.mockResolvedValue(undefined)
+  mockCreateOrReuseAnomaly.mockResolvedValue({
+    confirmation: { id: 'anom_1', status: 'PENDING' },
+    reused: false,
+  })
+  mockEnsureAnomalyInbox.mockResolvedValue({ id: 'inbox_anom_1' })
+  mockNotifyManagersAnomaly.mockResolvedValue(undefined)
+  mockPrisma.clientPortionBaseline.updateMany.mockResolvedValue({ count: 0 })
   // Для spontaneous-ветки: conv не найдена → create новую AWAITING_MANAGER.
   mockPrisma.botConversation.findFirst.mockResolvedValue(null)
   mockPrisma.botConversation.create.mockResolvedValue({
@@ -736,5 +771,318 @@ describe('process-message — дата из текста приоритетне�
     expect(res.reply).toContain('Принято')
     expect(res.reply).toContain('16:00')
     expect(res.reply).toContain('5 июля')
+  })
+})
+
+describe('process-message — подтверждение аномалии порций', () => {
+  it('baseline=30, proposed=28 → штатно сохраняет и drift обновляет только существующий baseline', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 28 }],
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: false,
+      reason: null,
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [
+        { locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 28 },
+      ],
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: '28' })
+
+    expect(result.action).toBe('saved')
+    expect(mockSave).toHaveBeenCalledOnce()
+    expect(mockPrisma.clientPortionBaseline.updateMany).toHaveBeenCalledWith({
+      where: { clientId: 'client_1', locationId: 'loc_1' },
+      data: { portions: 28, updatedById: null },
+    })
+    expect(mockCreateOrReuseAnomaly).not.toHaveBeenCalled()
+  })
+
+  it('baseline=30, proposed=5 → Order не создаётся, PENDING + holding reply + TG-кнопки', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 6),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 5 }],
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE',
+      date: '2026-08-08',
+      portions: 5,
+      mealType: null,
+      confidence: 0.99,
+      reason: 'ok',
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({
+      maxChatId: 'max_1',
+      text: 'на 8 августа 5',
+    })
+
+    const effectiveDate = new Date('2026-08-08T00:00:00.000Z')
+    expect(mockDetectPortionAnomaly).toHaveBeenCalledWith(
+      expect.objectContaining({ deliveryDate: effectiveDate, proposedPortions: 5 }),
+      mockPrisma,
+    )
+    expect(mockGetStats).toHaveBeenCalledWith('client_1', effectiveDate.getUTCDay())
+    expect(mockCreateOrReuseAnomaly).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      locationId: 'loc_1',
+      mealType: 'LUNCH',
+      deliveryDate: effectiveDate,
+      proposedPortions: 5,
+      conversationId: 'conv_1',
+    })
+    expect(mockNotifyManagersAnomaly).toHaveBeenCalledWith(expect.objectContaining({
+      confirmationId: 'anom_1',
+      clientName: 'Тест Клиент',
+      locationName: 'Офис',
+      deliveryDate: effectiveDate,
+      proposedPortions: 5,
+      comparisonSource: 'baseline',
+      reason: 'below_threshold',
+    }))
+    expect(mockPrisma.botConversation.update).toHaveBeenCalledWith({
+      where: { id: 'conv_1' },
+      data: { status: 'AWAITING_MANAGER' },
+    })
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockSendBotMessage).toHaveBeenCalledWith(
+      'max_1',
+      'Принято, уточняем по вашему заказу — вернёмся.',
+    )
+    expect(result).toEqual({
+      reply: 'Принято, уточняем по вашему заказу — вернёмся.',
+      action: 'pending_anomaly_confirmation',
+      pendingId: 'anom_1',
+    })
+  })
+
+  it('ошибка Telegram не роняет MAX-flow: pending остаётся, создаётся один inbox fallback', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    mockNotifyManagersAnomaly.mockRejectedValue(new Error('telegram unavailable'))
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: '10' })
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockEnsureAnomalyInbox).toHaveBeenCalledOnce()
+    expect(mockEnsureAnomalyInbox).toHaveBeenCalledWith(expect.objectContaining({
+      confirmationId: 'anom_1',
+      clientId: 'client_1',
+      conversationId: 'conv_1',
+    }))
+    expect(result).toEqual({
+      reply: 'Принято, уточняем по вашему заказу — вернёмся.',
+      action: 'pending_anomaly_confirmation',
+      pendingId: 'anom_1',
+      inboxItemId: 'inbox_anom_1',
+    })
+  })
+
+  it('два active config: конкретный DINNER из parsed item не заменяется первым LUNCH', async () => {
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 5, mealType: 'DINNER' }],
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: 'на ужин 5' })
+
+    expect(mockParse.mock.calls[0][0].locations).toEqual([
+      expect.objectContaining({ id: 'loc_1', mealTypes: ['LUNCH', 'DINNER'] }),
+    ])
+    expect(mockCreateOrReuseAnomaly).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      locationId: 'loc_1',
+      mealType: 'DINNER',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+      proposedPortions: 5,
+      conversationId: 'conv_1',
+    })
+    expect(mockNotifyManagersAnomaly).toHaveBeenCalledWith(
+      expect.objectContaining({ mealType: 'DINNER' }),
+    )
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(result.pendingId).toBe('anom_1')
+  })
+
+  it('два active config без mealType: не выдумывает тип, переиспользует inbox и не обещает заказ', async () => {
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 5 }],
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    mockPrisma.inboxItem.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'inbox_ambiguous', reason: 'ANOMALY_HISTORICAL' })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const first = await processClientMessage({ maxChatId: 'max_1', text: '5 порций' })
+    const second = await processClientMessage({ maxChatId: 'max_1', text: '5 порций' })
+
+    expect(mockCreateOrReuseAnomaly).not.toHaveBeenCalled()
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockCreateInbox).toHaveBeenCalledOnce()
+    expect(mockCreateInbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client_1',
+        conversationId: 'conv_1',
+        reason: 'ANOMALY_HISTORICAL',
+        humanReason: expect.stringContaining('не удалось определить тип питания'),
+      }),
+    )
+    expect(mockSendBotMessage).not.toHaveBeenCalled()
+    expect(first).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_1' })
+    expect(second).toEqual({
+      reply: null,
+      action: 'inbox',
+      inboxItemId: 'inbox_ambiguous',
+    })
+  })
+
+  it('несколько конкретных meal items создают отдельные pending со своими mealType', async () => {
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [
+        { locationId: 'loc_1', portions: 5, mealType: 'LUNCH' },
+        { locationId: 'loc_1', portions: 7, mealType: 'DINNER' },
+      ],
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    mockCreateOrReuseAnomaly
+      .mockResolvedValueOnce({ confirmation: { id: 'anom_lunch' }, reused: false })
+      .mockResolvedValueOnce({ confirmation: { id: 'anom_dinner' }, reused: false })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({
+      maxChatId: 'max_1',
+      text: 'на обед 5, на ужин 7',
+    })
+
+    expect(mockCreateOrReuseAnomaly).toHaveBeenCalledTimes(2)
+    expect(mockCreateOrReuseAnomaly.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({ mealType: 'LUNCH', proposedPortions: 5, conversationId: 'conv_1' }),
+      expect.objectContaining({ mealType: 'DINNER', proposedPortions: 7, conversationId: 'conv_1' }),
+    ])
+    expect(mockNotifyManagersAnomaly).toHaveBeenCalledTimes(2)
+    expect(mockSendBotMessage).toHaveBeenCalledOnce()
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      reply: 'Принято, уточняем по вашему заказу — вернёмся.',
+      action: 'pending_anomaly_confirmation',
+      pendingId: 'anom_lunch',
+    })
+  })
+
+  it('повторная обработка использует тот же PENDING вместо второго create', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'AWAITING_MANAGER',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    mockCreateOrReuseAnomaly.mockResolvedValue({
+      confirmation: { id: 'anom_existing', status: 'PENDING' },
+      reused: true,
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const first = await processClientMessage({ maxChatId: 'max_1', text: '10' })
+    const second = await processClientMessage({ maxChatId: 'max_1', text: '10' })
+
+    expect(first.pendingId).toBe('anom_existing')
+    expect(second.pendingId).toBe('anom_existing')
+    expect(mockCreateOrReuseAnomaly).toHaveBeenCalledTimes(2)
+    expect(mockSave).not.toHaveBeenCalled()
   })
 })

@@ -93,3 +93,10 @@ export function orderChangeButtons(changeId: string): InlineKeyboard {
     .text('✅ Подтвердить', `poc:confirm:${changeId}`)
     .text('❌ Отклонить', `poc:reject:${changeId}`)
 }
+
+/** Отдельный scope для ручной проверки аномального количества порций. */
+export function anomalyConfirmationButtons(confirmationId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✅ Да', `anom:ok:${confirmationId}`)
+    .text('❌ Нет', `anom:no:${confirmationId}`)
+}

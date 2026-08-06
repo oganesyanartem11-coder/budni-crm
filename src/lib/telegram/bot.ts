@@ -12,6 +12,8 @@ import '@/lib/telegram/handlers/weekly-submission'
 // Side-effect import: регистрирует callback-handler scope 'poc'
 // (подтверждение/отклонение запроса клиента на изменение заказа). См. handlers/order-change.ts.
 import '@/lib/telegram/handlers/order-change'
+// Side-effect import: отдельный callback scope 'anom' для ручной проверки порций.
+import '@/lib/telegram/handlers/anomaly-confirmation'
 // Борис-Директ: импорт регистрирует callback-scope 'bdir' (кнопки предложений),
 // а handleDirectChatMessage перехватывает команды владельца в чате Директа
 // («Борис, стоп/продолжай/боевой/наблюдение/откати последнее/статус»).

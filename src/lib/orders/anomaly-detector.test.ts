@@ -23,9 +23,16 @@ function pastFriday(weeksAgo: number): Date {
   return new Date(THURSDAY.getTime() + 24 * 60 * 60 * 1000 - weeksAgo * 7 * 24 * 60 * 60 * 1000)
 }
 
-function makePrisma(orders: Array<{ portions: number; deliveryDate: Date }>): PrismaClient {
+function makePrisma(
+  orders: Array<{ portions: number; deliveryDate: Date }>,
+  baseline: { portions: number } | null = null,
+): PrismaClient {
   const findMany = vi.fn().mockResolvedValue(orders)
-  return { order: { findMany } } as unknown as PrismaClient
+  const findUnique = vi.fn().mockResolvedValue(baseline)
+  return {
+    order: { findMany },
+    clientPortionBaseline: { findUnique },
+  } as unknown as PrismaClient
 }
 
 const ctxBase = {
@@ -33,6 +40,54 @@ const ctxBase = {
   locationId: 'loc_1',
   deliveryDate: THURSDAY,
 }
+
+describe('detectPortionAnomaly — подтверждённый baseline', () => {
+  it('baseline=30, proposed=28 → НЕ аномалия и история не запрашивается', async () => {
+    const prisma = makePrisma([], { portions: 30 })
+
+    const res = await detectPortionAnomaly({ ...ctxBase, proposedPortions: 28 }, prisma)
+
+    expect(res).toEqual({
+      isAnomaly: false,
+      reason: null,
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+    expect(prisma.order.findMany).not.toHaveBeenCalled()
+  })
+
+  it('baseline=30, proposed=5 → below_threshold с диагностикой baseline', async () => {
+    const prisma = makePrisma([], { portions: 30 })
+
+    const res = await detectPortionAnomaly({ ...ctxBase, proposedPortions: 5 }, prisma)
+
+    expect(res).toEqual({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 15, max: 60, average: 30, samples: 1 },
+      source: 'baseline',
+    })
+  })
+
+  it('без baseline сохраняет прежний исторический результат', async () => {
+    const orders = [
+      { portions: 10, deliveryDate: pastThursday(1) },
+      { portions: 10, deliveryDate: pastThursday(2) },
+      { portions: 10, deliveryDate: pastThursday(3) },
+    ]
+
+    const res = await detectPortionAnomaly(
+      { ...ctxBase, proposedPortions: 25 },
+      makePrisma(orders),
+    )
+
+    expect(res).toEqual({
+      isAnomaly: true,
+      reason: 'above_threshold',
+      expected: { min: 5, max: 20, average: 10, samples: 3 },
+    })
+  })
+})
 
 describe('detectPortionAnomaly — cold-start (samples < 3)', () => {
   it('0 заказов → no_history, НЕ аномалия даже при proposed=1000', async () => {
@@ -178,7 +233,10 @@ describe('detectPortionAnomaly — фильтр locationId', () => {
 
   it('locationId задан → findMany фильтрует по локации', async () => {
     const findMany = vi.fn().mockResolvedValue([])
-    const prisma = { order: { findMany } } as unknown as PrismaClient
+    const prisma = {
+      order: { findMany },
+      clientPortionBaseline: { findUnique: vi.fn().mockResolvedValue(null) },
+    } as unknown as PrismaClient
     await detectPortionAnomaly(
       { clientId: 'c1', locationId: 'loc_42', deliveryDate: THURSDAY, proposedPortions: 5 },
       prisma,

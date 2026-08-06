@@ -347,6 +347,8 @@ model User {
   // Курьер видит свои точки + непривязанные. ADMIN/MANAGER — всё.
   assignedLocations ClientLocation[]  @relation("CourierLocations")
   maxInvitesCreated ClientMaxInvite[] @relation("ClientMaxInviteCreator")
+  portionBaselinesUpdated ClientPortionBaseline[] @relation("PortionBaselineUpdatedBy")
+  anomalyConfirmationsResolved PendingAnomalyConfirmation[] @relation("AnomalyConfirmationResolvedBy")
 
   @@index([role, isActive])
 }
@@ -438,6 +440,8 @@ model Client {
   borisEvents         BorisEventLog[]
   weeklySubmissions   WeeklyOrderSubmission[]
   pendingOrderChanges PendingOrderChange[]
+  portionBaselines ClientPortionBaseline[]
+  pendingAnomalyConfirmations PendingAnomalyConfirmation[]
   contacts            ClientContact[]
   maxUsers            ClientMaxUser[]
   maxInvites          ClientMaxInvite[]
@@ -535,6 +539,8 @@ model ClientLocation {
   orders              Order[]
   updDocuments        UpdDocument[]
   pendingOrderChanges PendingOrderChange[]
+  portionBaselines ClientPortionBaseline[]
+  pendingAnomalyConfirmations PendingAnomalyConfirmation[]
 
   @@index([clientId, isActive])
   @@index([assignedCourierId])
@@ -573,6 +579,47 @@ model PendingOrderChange {
   @@index([clientId, deliveryDate])
   @@index([status, expiresAt])
   @@index([createdAt])
+}
+
+model ClientPortionBaseline {
+  id          String         @id @default(cuid())
+  clientId    String
+  client      Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationId  String
+  location    ClientLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  portions    Int
+  updatedAt   DateTime       @updatedAt
+  updatedById String?
+  updatedBy   User?          @relation("PortionBaselineUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([clientId, locationId])
+  @@index([locationId])
+  @@index([updatedById])
+}
+
+model PendingAnomalyConfirmation {
+  id               String         @id @default(cuid())
+  clientId         String
+  client           Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationId       String
+  location         ClientLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  mealType         MealType
+  deliveryDate     DateTime       @db.Date
+  proposedPortions Int
+  status           String         @default("PENDING")
+  processingAt     DateTime?
+  conversationId   String?
+  conversation     BotConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  createdAt        DateTime       @default(now())
+  resolvedAt       DateTime?
+  resolvedById     String?
+  resolvedBy       User?          @relation("AnomalyConfirmationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([clientId, locationId, deliveryDate])
+  @@index([status, createdAt])
+  @@index([status, processingAt])
+  @@index([conversationId])
+  @@index([resolvedById])
 }
 
 // Конфигурация питания клиента/точки: что заказывает, по какому графику, по какой цене
@@ -1057,6 +1104,7 @@ model BotConversation {
   messages   BotMessage[]
   inboxItems InboxItem[]
   orders     Order[]
+  pendingAnomalyConfirmations PendingAnomalyConfirmation[]
 
   @@unique([clientId, deliveryDate])
   @@index([deliveryDate])

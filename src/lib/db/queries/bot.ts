@@ -55,7 +55,9 @@ const FIND_CONV_LOOKBACK_DAYS = 30
  * Статусы: PENDING (вопрос задан, ответа нет) или CONFIRMED (ответ принят, но
  * клиент может ответить ещё раз — это кейс B в 5.7b).
  *
- * AWAITING_MANAGER исключаем — это «спонтанный» поток без cron-вопроса.
+ * AWAITING_MANAGER обычно исключаем — это «спонтанный» поток без cron-вопроса.
+ * Узкое исключение: active PENDING anomaly confirmation, чтобы повтор webhook
+ * дошёл до exact-key reuse вместо создания нового spontaneous thread.
  * CANCELLED исключаем — мёртвая ветка.
  *
  * СЕГОДНЯШНЮЮ EXPIRED включаем СПЕЦИАЛЬНО (late-ответ): cron cutoff-notice
@@ -82,6 +84,12 @@ export async function findLatestBotConv(clientId: string) {
       createdAt: { gte: since },
       OR: [
         { status: { in: ['PENDING', 'CONFIRMED'] } },
+        // Аномалия порций держит conversation в AWAITING_MANAGER, но повторная
+        // доставка того же ответа должна снова пройти точный pending-dedup flow.
+        {
+          status: 'AWAITING_MANAGER',
+          pendingAnomalyConfirmations: { some: { status: 'PENDING' } },
+        },
         // Late-ответ: сегодняшняя EXPIRED (помечена cutoff-notice в 16:00).
         { status: 'EXPIRED', createdAt: { gte: todayMskMidnight } },
       ],

@@ -49,6 +49,15 @@ describe('findLatestBotConv — late-ответ ловит сегодняшню�
     )
   })
 
+  it('повтор anomaly-ответа видит AWAITING_MANAGER только при активном PENDING confirmation', async () => {
+    await findLatestBotConv('client1')
+    const arg = mockPrisma.botConversation.findFirst.mock.calls[0][0]
+    expect(arg.where.OR).toContainEqual({
+      status: 'AWAITING_MANAGER',
+      pendingAnomalyConfirmations: { some: { status: 'PENDING' } },
+    })
+  })
+
   it('граница EXPIRED берётся из mskMidnightUtc(now, 0) — старые EXPIRED отсекаются', async () => {
     await findLatestBotConv('client1')
     expect(mockMsk).toHaveBeenCalledWith(expect.any(Date), 0)

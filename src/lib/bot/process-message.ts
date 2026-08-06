@@ -36,7 +36,12 @@ import { resolveOrderChangeTarget } from '@/lib/order-changes/resolve-target'
 import { createPendingChange } from '@/lib/order-changes/actions'
 import { findActiveOrder } from '@/lib/db/queries/orders'
 import { notifyManagerAboutOrderChange } from '@/lib/telegram/handlers/order-change'
-import type { BotConversation, MealType, Prisma, InboxItemReason } from '@prisma/client'
+import {
+  createOrReusePendingAnomalyConfirmation,
+  ensurePendingAnomalyInbox,
+} from '@/lib/orders/anomaly-confirmations'
+import { notifyManagersAboutAnomaly } from '@/lib/telegram/handlers/anomaly-confirmation'
+import type { BotConversation, MealType, Prisma } from '@prisma/client'
 
 // П3 (MEGA-4b): маппинг enum MealType → русское название для parseChangeIntent
 // (он принимает availableMealTypes как 'ЗАВТРАК'|'ОБЕД'|'УЖИН') и обратно.
@@ -79,6 +84,7 @@ export type ProcessAction =
   | 'unknown_client'
   | 'empty_message'
   | 'pending_order_change'
+  | 'pending_anomaly_confirmation'
   | 'noop'
 
 export interface ProcessMessageResult {
@@ -242,11 +248,19 @@ async function handleBotResponse(
   // 7.55: chatId отправителя — отвечаем именно тому, кто написал (multi-user).
   senderChatId: string
 ): Promise<ProcessMessageResult> {
-  const dayOfWeek = conv.deliveryDate.getUTCDay()
+  // Дата, явно указанная клиентом, определяет и статистику/аномалию, и запись
+  // заказа. Без даты в тексте сохраняется прежний fallback на дату беседы.
+  const dateFromText = await extractDeliveryDateFromText(text, new Date())
+  const effectiveDeliveryDate = dateFromText ?? conv.deliveryDate
+  const dayOfWeek = effectiveDeliveryDate.getUTCDay()
   const stats = await getClientStats(client.id, dayOfWeek)
 
-  const firstMealType = client.locations[0]?.mealConfigs[0]?.mealType ?? 'LUNCH'
-  const mealTypeRu = MEAL_TYPE_RU[firstMealType] ?? 'обеда'
+  const activeMealTypes = Array.from(new Set(
+    client.locations.flatMap((location) => location.mealConfigs.map((config) => config.mealType)),
+  ))
+  const mealTypeRu = activeMealTypes.length > 0
+    ? activeMealTypes.map((mealType) => MEAL_TYPE_RU[mealType]).join(' или ')
+    : 'приёма пищи'
 
   const locationAliases = (client.locationAliases ?? {}) as Record<string, string[]>
 
@@ -258,6 +272,7 @@ async function handleBotResponse(
       id: l.id,
       name: l.name,
       aliases: locationAliases[l.id] ?? [],
+      mealTypes: l.mealConfigs.map((config) => config.mealType),
     })),
     recentOrders: stats.recentOrders.map((o) => ({
       date: o.date.toISOString().slice(0, 10),
@@ -278,13 +293,6 @@ async function handleBotResponse(
     llmReason: parsed.reason,
     toneLabel: parsed.toneLabel,
   })
-
-  // Волна 2 (баг A/B): дата из ТЕКСТА приоритетнее даты «висящей» беседы.
-  // extractDeliveryDateFromText вернёт null, если в тексте нет признака даты
-  // (обычный числовой ответ DYNAMIC-клиента вроде «8») — тогда падаем на
-  // conv.deliveryDate, прежнее поведение не меняется.
-  const dateFromText = await extractDeliveryDateFromText(text, new Date())
-  const effectiveDeliveryDate = dateFromText ?? conv.deliveryDate
 
   // 7.16.C.1 hotfix: parseClientResponse даёт неточный tone для нецифровых
   // ответов (Haiku парсер сфокусирован на цифрах, tone — побочное правило).
@@ -420,41 +428,186 @@ async function handleBotResponse(
 
   // MEGA-4a (П10): «цифра вне нормы» — динамический порог 50–200% от истории
   // клиента по дню недели за 90 дней (вместо глобального MIN=10). Проверяем
-  // каждую позицию числового ответа; первая выпавшая → inbox. cold-start
+  // каждую позицию числового ответа; каждая выпавшая → ручное TG-подтверждение.
+  // При недоставке Telegram используется дедуплицированный inbox fallback. cold-start
   // (samples<3) и числа в норме НЕ алёртят. detectAnomalies (тон/cutoff/отмена/
   // новый клиент) имеет приоритет — если он уже пометил, портин-чек пропускаем.
-  let portionAnomaly: {
-    reason: InboxItemReason
+  const portionAnomalies: Array<{
+    item: { locationId: string; portions: number; mealType?: MealType }
+    location: ClientWithBotContext['locations'][number] | null
+    mealType: MealType | null
+    result: {
+      reason: 'below_threshold' | 'above_threshold'
+      expected: { min: number; max: number; average: number; samples: number }
+      source?: 'baseline'
+    }
     humanReason: string
-  } | null = null
+  }> = []
   if (!anomaly.isAnomaly && parsed.type === 'numeric') {
     for (const item of parsed.items) {
       const res = await detectPortionAnomaly(
         {
           clientId: client.id,
           locationId: item.locationId,
-          deliveryDate: conv.deliveryDate,
+          deliveryDate: effectiveDeliveryDate,
           proposedPortions: item.portions,
         },
         prisma,
       )
       if (res.isAnomaly && res.expected) {
+        const location = client.locations.find((candidate) => candidate.id === item.locationId) ?? null
+        const locationMealTypes = location
+          ? Array.from(new Set(location.mealConfigs.map((config) => config.mealType)))
+          : []
+        const mealType = item.mealType
+          ? (locationMealTypes.includes(item.mealType) ? item.mealType : null)
+          : (locationMealTypes.length === 1 ? locationMealTypes[0] : null)
         const { average, min, max } = res.expected
-        portionAnomaly = {
-          reason: 'ANOMALY_HISTORICAL',
-          humanReason: `Цифра вне обычного: предложено ${item.portions}, обычно для этой локации в эти дни около ${average} (${min}–${max} по истории за 90 дней).`,
-        }
-        break
+        const comparison = res.source === 'baseline'
+          ? 'подтверждённого уровня'
+          : 'истории за 90 дней'
+        portionAnomalies.push({
+          item,
+          location,
+          mealType,
+          result: {
+            reason: res.reason as 'below_threshold' | 'above_threshold',
+            expected: res.expected,
+            source: res.source,
+          },
+          humanReason: `Цифра вне обычного: предложено ${item.portions}, база ${comparison} — ${average} (${min}–${max}).`,
+        })
       }
     }
   }
 
+  if (!anomaly.isAnomaly && portionAnomalies.length > 0 && parsed.type === 'numeric') {
+    const ambiguous = portionAnomalies.filter((entry) => !entry.location || !entry.mealType)
+    if (ambiguous.length > 0) {
+      if (conv.status !== 'AWAITING_MANAGER') {
+        await prisma.botConversation.update({
+          where: { id: conv.id },
+          data: { status: 'AWAITING_MANAGER' },
+        })
+      }
+
+      const ambiguityReason =
+        'не удалось определить тип питания для аномальной позиции; ' +
+        'заказ и подтверждение автоматически не создавались.'
+      const existingInbox = await prisma.inboxItem.findFirst({
+        where: {
+          conversationId: conv.id,
+          reason: 'ANOMALY_HISTORICAL',
+          resolvedAt: null,
+          humanReason: { contains: 'не удалось определить тип питания' },
+        },
+        orderBy: { createdAt: 'desc' },
+      })
+      const inbox = existingInbox ?? await createInboxItem({
+        clientId: client.id,
+        conversationId: conv.id,
+        reason: 'ANOMALY_HISTORICAL',
+        humanReason: ambiguityReason,
+        priority: 'NORMAL',
+        clientMessage: text,
+        parsedJson: parsed as unknown as Prisma.InputJsonValue,
+        clientStatsSnapshot: {
+          averageByDayOfWeek: stats.averageByDayOfWeek,
+          typicalRange: stats.typicalRange,
+          sampleSize: stats.sampleSize,
+        } as Prisma.InputJsonValue,
+      })
+
+      await notifyClientSignal({
+        clientId: client.id,
+        messageText: text,
+        inboxItemId: inbox.id,
+        tone: alertTone,
+        reason: inbox.reason,
+        priority: inbox.priority,
+      }).catch((error) => {
+        console.error('[bot] notifyClientSignal failed (ambiguous mealType):', error)
+      })
+
+      return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+    }
+
+    if (conv.status !== 'AWAITING_MANAGER') {
+      await prisma.botConversation.update({
+        where: { id: conv.id },
+        data: { status: 'AWAITING_MANAGER' },
+      })
+    }
+
+    const confirmations: Array<{ id: string }> = []
+    let inboxItemId: string | undefined
+    for (const portionAnomaly of portionAnomalies) {
+      const location = portionAnomaly.location as ClientWithBotContext['locations'][number]
+      const mealType = portionAnomaly.mealType as MealType
+      const { confirmation } = await createOrReusePendingAnomalyConfirmation({
+        clientId: client.id,
+        locationId: location.id,
+        mealType,
+        deliveryDate: effectiveDeliveryDate,
+        proposedPortions: portionAnomaly.item.portions,
+        conversationId: conv.id,
+      })
+      confirmations.push(confirmation)
+      try {
+        await notifyManagersAboutAnomaly({
+          confirmationId: confirmation.id,
+          clientName: client.name,
+          locationName: location.name,
+          deliveryDate: effectiveDeliveryDate,
+          mealType,
+          proposedPortions: portionAnomaly.item.portions,
+          comparisonSource: portionAnomaly.result.source === 'baseline' ? 'baseline' : 'history',
+          expected: portionAnomaly.result.expected,
+          reason: portionAnomaly.result.reason,
+        })
+      } catch (error) {
+        console.error('[bot] anomaly manager notification failed; fallback to inbox', error)
+        const inbox = await ensurePendingAnomalyInbox({
+          confirmationId: confirmation.id,
+          clientId: client.id,
+          conversationId: conv.id,
+          humanReason: `${portionAnomaly.humanReason} Telegram-уведомление не доставлено.`,
+          clientMessage: text,
+          parsedJson: parsed as unknown as Prisma.InputJsonValue,
+          clientStatsSnapshot: {
+            averageByDayOfWeek: stats.averageByDayOfWeek,
+            typicalRange: stats.typicalRange,
+            sampleSize: stats.sampleSize,
+          } as Prisma.InputJsonValue,
+        })
+        inboxItemId ??= inbox.id
+      }
+    }
+
+    const holdingReply = 'Принято, уточняем по вашему заказу — вернёмся.'
+    await sendBotMessage(senderChatId, holdingReply)
+    await logBotMessage({
+      clientId: client.id,
+      conversationId: conv.id,
+      direction: 'OUT',
+      text: holdingReply,
+    })
+
+    return {
+      reply: holdingReply,
+      action: 'pending_anomaly_confirmation',
+      pendingId: confirmations[0].id,
+      ...(inboxItemId ? { inboxItemId } : {}),
+    }
+  }
+
+  const portionAnomaly = portionAnomalies[0] ?? null
   const isNotNumeric = parsed.type !== 'numeric'
   if (anomaly.isAnomaly || portionAnomaly || isNotNumeric) {
     // КЕЙС D — парсер не понял или аномалия по содержанию. Заказ НЕ сохраняем.
     const reason = anomaly.isAnomaly
       ? (anomaly.reason ?? 'NON_NUMERIC')
-      : (portionAnomaly?.reason ?? 'NON_NUMERIC')
+      : (portionAnomaly ? 'ANOMALY_HISTORICAL' : 'NON_NUMERIC')
     const humanReason = anomaly.isAnomaly
       ? anomaly.humanReason || (parsed.reason || 'Не цифровой ответ')
       : portionAnomaly?.humanReason || (parsed.reason || 'Не цифровой ответ')
@@ -552,6 +705,20 @@ async function handleBotResponse(
     activeMealConfigsByLocation,
     clientMessage: text,
   })
+
+  // A6: только уже существующие baseline плавно следуют за фактически
+  // сохранёнными значениями. updateMany не создаёт baseline автоматически.
+  for (const savedItem of save.savedItems) {
+    try {
+      await prisma.clientPortionBaseline.updateMany({
+        where: { clientId: client.id, locationId: savedItem.locationId },
+        data: { portions: savedItem.portions, updatedById: null },
+      })
+    } catch (error) {
+      // Order уже успешно сохранён: не выдаём клиенту ложный отказ.
+      console.error('[bot] baseline drift failed after successful order save', error)
+    }
+  }
 
   // 7.55: клиент реально ответил по заказу (content-bearing) → делаем отправителя
   // активным пользователем клиента. Идемпотентно (если уже активный — no-op).

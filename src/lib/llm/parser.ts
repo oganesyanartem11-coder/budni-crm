@@ -1,5 +1,6 @@
 import { getAnthropicClient } from './client'
 import { getInboxModel } from '@/lib/ai/models'
+import type { MealType } from '@prisma/client'
 
 export type ParsedResponseType = 'numeric' | 'cancellation_intent' | 'question' | 'noise'
 
@@ -9,6 +10,7 @@ export interface ParsedItem {
   locationId: string
   locationName: string
   portions: number
+  mealType?: MealType
 }
 
 export interface ParsedResponse {
@@ -29,6 +31,7 @@ export interface ParseInput {
     id: string
     name: string
     aliases: string[]
+    mealTypes?: readonly MealType[]
   }>
   recentOrders: Array<{
     date: string
@@ -39,6 +42,7 @@ export interface ParseInput {
 
 const VALID_TYPES: ParsedResponseType[] = ['numeric', 'cancellation_intent', 'question', 'noise']
 const VALID_TONES: ToneLabel[] = ['neutral', 'rude', 'thanks', 'urgent']
+const VALID_MEAL_TYPES: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
 
 /**
  * Пре-LLM эвристика «КРИК ЗАГЛАВНЫМИ» как намёк на rude tone (7.11/F-2).
@@ -72,11 +76,12 @@ export async function parseClientResponse(input: ParseInput): Promise<ParsedResp
 5. Confidence 0..1: 1 — полная уверенность, ниже 0.8 — есть сомнения.
 6. Reason — короткое объяснение что распознал и почему такой confidence (НЕ повторяй сам ответ).
 7. ToneLabel — оценка тона клиента: "rude" (грубо), "thanks" (благодарность), "urgent" (срочно), "neutral" (нейтрально).
+8. Если клиент явно назвал приём пищи, верни mealType из BREAKFAST|LUNCH|DINNER. Если определить его нельзя — не выдумывай и не добавляй mealType.
 
 Формат ответа:
 {
   "type": "numeric" | "cancellation_intent" | "question" | "noise",
-  "items": [{"locationId": "...", "locationName": "...", "portions": число}],
+  "items": [{"locationId": "...", "locationName": "...", "portions": число, "mealType": "DINNER"}],
   "confidence": 0.0-1.0,
   "reason": "...",
   "toneLabel": "neutral" | "rude" | "thanks" | "urgent"
@@ -91,7 +96,7 @@ ${input.locations
     (l) =>
       `- id="${l.id}", название="${l.name}"${
         l.aliases.length > 0 ? `, синонимы: ${l.aliases.join(', ')}` : ''
-      }`
+      }, активные mealType: ${l.mealTypes?.join(', ') || '(не переданы)'}`
   )
   .join('\n')}
 
@@ -163,10 +168,14 @@ ${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — 
   const items: ParsedItem[] = rawItems.flatMap((raw) => {
     const i = raw as Record<string, unknown>
     if (typeof i.locationId === 'string' && typeof i.portions === 'number' && i.portions >= 0) {
+      const mealType = VALID_MEAL_TYPES.includes(i.mealType as MealType)
+        ? (i.mealType as MealType)
+        : undefined
       return [{
         locationId: i.locationId,
         locationName: typeof i.locationName === 'string' ? i.locationName : '',
         portions: i.portions,
+        ...(mealType ? { mealType } : {}),
       }]
     }
     return []

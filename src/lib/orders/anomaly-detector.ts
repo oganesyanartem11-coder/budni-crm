@@ -124,6 +124,29 @@ export interface AnomalyResultPortion {
   isAnomaly: boolean
   reason: 'no_history' | 'below_threshold' | 'above_threshold' | null
   expected?: { min: number; max: number; average: number; samples: number }
+  /** Присутствует только для нового override-пути; legacy history-ответ не меняется. */
+  source?: 'baseline'
+}
+
+function evaluatePortionReference(
+  proposedPortions: number,
+  average: number,
+  samples: number,
+  source?: 'baseline',
+): AnomalyResultPortion {
+  const min = Math.round(average * LOWER_FACTOR)
+  const max = Math.round(average * UPPER_FACTOR)
+  const expected = { min, max, average: Math.round(average), samples }
+  const sourceResult = source === undefined ? {} : { source }
+
+  if (proposedPortions < average * LOWER_FACTOR) {
+    return { isAnomaly: true, reason: 'below_threshold', expected, ...sourceResult }
+  }
+  if (proposedPortions > average * UPPER_FACTOR) {
+    return { isAnomaly: true, reason: 'above_threshold', expected, ...sourceResult }
+  }
+
+  return { isAnomaly: false, reason: null, expected, ...sourceResult }
 }
 
 /**
@@ -148,6 +171,22 @@ export async function detectPortionAnomaly(
   ctx: AnomalyContext,
   prisma: PrismaClient
 ): Promise<AnomalyResultPortion> {
+  if (ctx.locationId !== null) {
+    const baseline = await prisma.clientPortionBaseline.findUnique({
+      where: {
+        clientId_locationId: {
+          clientId: ctx.clientId,
+          locationId: ctx.locationId,
+        },
+      },
+      select: { portions: true },
+    })
+
+    if (baseline) {
+      return evaluatePortionReference(ctx.proposedPortions, baseline.portions, 1, 'baseline')
+    }
+  }
+
   const targetDow = mskDayOfWeek(ctx.deliveryDate)
   const ninetyDaysAgo = new Date(ctx.deliveryDate.getTime() - NINETY_DAYS_MS)
 
@@ -170,16 +209,5 @@ export async function detectPortionAnomaly(
   }
 
   const average = sameDow.reduce((sum, o) => sum + o.portions, 0) / samples
-  const min = Math.round(average * LOWER_FACTOR)
-  const max = Math.round(average * UPPER_FACTOR)
-  const expected = { min, max, average: Math.round(average), samples }
-
-  if (ctx.proposedPortions < average * LOWER_FACTOR) {
-    return { isAnomaly: true, reason: 'below_threshold', expected }
-  }
-  if (ctx.proposedPortions > average * UPPER_FACTOR) {
-    return { isAnomaly: true, reason: 'above_threshold', expected }
-  }
-
-  return { isAnomaly: false, reason: null, expected }
+  return evaluatePortionReference(ctx.proposedPortions, average, samples)
 }
