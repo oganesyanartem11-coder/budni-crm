@@ -21,6 +21,7 @@ const { mockPrisma } = vi.hoisted(() => ({
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 
 import {
+  getCourierAssignmentOrders,
   getOrdersWithoutCourierTomorrow,
   getOrdersForHourBeforeWindow,
   markCourierNotified,
@@ -43,20 +44,38 @@ function dbRow(over: Partial<{
   windowFrom: string | null
   windowTo: string | null
   assignedCourierId: string | null
+  assignedCourier: {
+    id: string
+    name: string
+    role: string
+    isActive: boolean
+  } | null
 }> = {}) {
   return {
     id: over.id ?? 'o1',
+    clientId: 'client_1',
+    locationId: 'loc_1',
     mealType: over.mealType ?? 'LUNCH',
+    status: 'CONFIRMED',
     portions: over.portions ?? 20,
     totalPrice: decimal(over.totalPrice ?? 10000),
-    client: { name: over.clientName ?? 'Кафе', contactPhone: over.contactPhone ?? '+7900' },
+    notes: 'Позвонить заранее',
+    client: {
+      name: over.clientName ?? 'Кафе',
+      contactName: 'Запасной контакт',
+      contactPhone: 'contactPhone' in over ? (over.contactPhone ?? null) : '+7900',
+      contacts: [] as { name: string | null; phone: string }[],
+    },
     location: {
       name: over.locationName ?? 'Точка',
       address: over.address ?? 'ул. Ленина 1',
+      packaging: 'INDIVIDUAL',
+      tags: ['термосумка'],
       // 'windowFrom' in over → уважаем явный null; иначе дефолт '12:00'.
       deliveryWindowFrom: 'windowFrom' in over ? (over.windowFrom ?? null) : '12:00',
       deliveryWindowTo: 'windowTo' in over ? (over.windowTo ?? null) : '13:00',
       assignedCourierId: over.assignedCourierId ?? null,
+      assignedCourier: over.assignedCourier ?? null,
     },
   }
 }
@@ -79,7 +98,9 @@ describe('getOrdersWithoutCourierTomorrow', () => {
     await getOrdersWithoutCourierTomorrow()
 
     const arg = mockPrisma.order.findMany.mock.calls[0][0]
-    expect(arg.where.status).toEqual({ in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION'] })
+    expect(arg.where.status).toEqual({
+      in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'],
+    })
     expect(arg.where.courierMissingNotifiedAt).toBeNull()
     expect(arg.where.location).toEqual({ assignedCourierId: null })
     expect(arg.where.deliveryDate).toEqual(new Date('2026-06-05T00:00:00.000Z'))
@@ -157,7 +178,9 @@ describe('getOrdersForHourBeforeWindow', () => {
 
     const arg = mockPrisma.order.findMany.mock.calls[0][0]
     expect(arg.where.deliveryDate).toEqual(new Date('2026-06-04T00:00:00.000Z'))
-    expect(arg.where.status).toEqual({ in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION'] })
+    expect(arg.where.status).toEqual({
+      in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'],
+    })
     expect(arg.where.courierMissingNotifiedAt).toBeNull()
     expect(arg.where.location).toEqual({
       assignedCourierId: null,
@@ -204,6 +227,66 @@ describe('getOrdersForHourBeforeWindow', () => {
     ])
     const res = await getOrdersForHourBeforeWindow(NOW)
     expect(res.map((r) => r.orderId).sort()).toEqual(['in1', 'in2'])
+  })
+})
+
+describe('getCourierAssignmentOrders', () => {
+  const DELIVERY_DATE = new Date('2026-08-07T00:00:00.000Z')
+
+  it('использует exact @db.Date и только ClientLocation.assignedCourier', async () => {
+    const assignedCourier = {
+      id: 'courier_1',
+      name: 'Анна Курьер',
+      role: 'COURIER',
+      isActive: true,
+    }
+    const row = dbRow({ assignedCourierId: 'courier_1', assignedCourier })
+    row.client.contacts = [{ name: 'Приоритетный', phone: '+79991112233' }]
+    mockPrisma.order.findMany.mockResolvedValue([row])
+
+    const result = await getCourierAssignmentOrders(DELIVERY_DATE)
+
+    const query = mockPrisma.order.findMany.mock.calls[0][0]
+    expect(query.where).toEqual({
+      deliveryDate: DELIVERY_DATE,
+      status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
+    })
+    expect(query.select.location.select.assignedCourier).toEqual({
+      select: { id: true, name: true, role: true, isActive: true },
+    })
+    expect(query.select.delivery).toBeUndefined()
+    expect(result[0]).toEqual(expect.objectContaining({
+      orderId: 'o1',
+      clientId: 'client_1',
+      clientName: 'Кафе',
+      clientContactPhone: '+79991112233',
+      locationId: 'loc_1',
+      assignedCourierId: 'courier_1',
+      assignedCourier: { id: 'courier_1', name: 'Анна Курьер' },
+      courierLabel: 'Анна Курьер',
+      status: 'CONFIRMED',
+      packaging: 'INDIVIDUAL',
+      tags: ['термосумка'],
+      notes: 'Позвонить заранее',
+    }))
+  })
+
+  it.each([
+    { role: 'MANAGER', isActive: true },
+    { role: 'COURIER', isActive: false },
+  ])('не считает назначением неактивного/не-COURIER пользователя: %o', async (user) => {
+    mockPrisma.order.findMany.mockResolvedValue([
+      dbRow({
+        assignedCourierId: 'user_1',
+        assignedCourier: { id: 'user_1', name: 'Не курьер', ...user },
+      }),
+    ])
+
+    const result = await getCourierAssignmentOrders(DELIVERY_DATE)
+
+    expect(result[0].assignedCourierId).toBe('user_1')
+    expect(result[0].assignedCourier).toBeNull()
+    expect(result[0].courierLabel).toBe('InDrive')
   })
 })
 

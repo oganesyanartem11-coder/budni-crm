@@ -338,19 +338,29 @@ export async function notifyLeads(text: string, opts?: NotifyOptions): Promise<N
  * поэтому основная проверка — result.ok. try/catch оставлен как страховка от
  * неожиданного throw (напр. отсутствие бот-токена в getTelegramBot).
  */
-export async function notifyProductionChannel(text: string, opts?: NotifyOptions): Promise<void> {
+export type NotifyProductionChannelResult =
+  | { ok: true; destination: 'production' | 'admin_pro' }
+  | { ok: false; destination: null; error: string }
+
+export async function notifyProductionChannel(
+  text: string,
+  opts?: NotifyOptions,
+): Promise<NotifyProductionChannelResult> {
   const productionChatId = readProductionChatId()
+  let productionError = productionChatId ? 'unknown_error' : 'production_chat_not_configured'
   if (productionChatId) {
     try {
       const result = await sendTelegramMessage(productionChatId, text, {
         parseMode: opts?.parseMode ?? DEFAULT_PARSE_MODE,
         replyMarkup: opts?.replyMarkup,
       })
-      if (result.ok) return
+      if (result.ok) return { ok: true, destination: 'production' }
+      productionError = result.error
       console.warn(
         `[notify-production] send to production chat failed (${result.error}), falling back to ADMIN_PRO direct`
       )
     } catch (error) {
+      productionError = error instanceof Error ? error.message : String(error)
       console.warn(
         '[notify-production] send to production chat threw, falling back to ADMIN_PRO direct',
         error
@@ -358,7 +368,15 @@ export async function notifyProductionChannel(text: string, opts?: NotifyOptions
     }
   }
   // ENV не задан / отправка упала → фолбэк в личку всем ADMIN_PRO.
-  await notifyAllAdminProDirect(text, opts)
+  const fallback = await notifyAllAdminProDirect(text, opts)
+  if (fallback.sentTo > 0) return { ok: true, destination: 'admin_pro' }
+
+  const error =
+    `Сообщение не доставлено в production channel и ADMIN_PRO ` +
+    `(production=${productionError}, failed=${fallback.failed}, ` +
+    `skippedNoTelegram=${fallback.skippedNoTelegram})`
+  console.error(`[notify-production] ${error}`)
+  return { ok: false, destination: null, error }
 }
 
 /**

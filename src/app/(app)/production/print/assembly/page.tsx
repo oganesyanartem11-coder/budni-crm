@@ -4,6 +4,7 @@ import { requireRole } from '@/lib/auth/current-user'
 import { getAssemblyOrders } from '@/lib/db/queries/production'
 import { formatDateLong, formatDateTimeMsk, formatDeliveryWindow, formatOrders, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
+import { getMskCalendarDayUtc, toMskDateString } from '@/lib/utils/msk-window'
 import { PrintButton } from '../print-button'
 
 interface PageProps {
@@ -14,15 +15,12 @@ export default async function AssemblyPrintPage({ searchParams }: PageProps) {
   await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
 
   const params = await searchParams
-  const targetDate = params.date ? new Date(params.date) : (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    return d
-  })()
-  targetDate.setHours(0, 0, 0, 0)
+  const targetDate = params.date
+    ? new Date(`${params.date}T00:00:00.000Z`)
+    : getMskCalendarDayUtc(new Date(), 1)
 
   const orders = await getAssemblyOrders(targetDate)
-  const dateStr = params.date ?? targetDate.toISOString().slice(0, 10)
+  const dateStr = params.date ?? toMskDateString(targetDate)
 
   const totalPortions = orders.reduce((s, o) => s + o.portions, 0)
 
@@ -49,10 +47,11 @@ export default async function AssemblyPrintPage({ searchParams }: PageProps) {
           {orders.length === 0 ? (
             <p className="text-fg-muted">На эту дату нет активных заказов.</p>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full border-separate border-spacing-x-2 border-spacing-y-0 text-xs">
               <thead>
                 <tr>
                   <th className="text-left">Окно</th>
+                  <th className="w-20 text-left">Курьер</th>
                   <th className="text-left">Клиент</th>
                   <th className="text-left">Точка</th>
                   <th className="text-left">Тип</th>
@@ -67,6 +66,9 @@ export default async function AssemblyPrintPage({ searchParams }: PageProps) {
                   <tr key={o.orderId}>
                     <td className="whitespace-nowrap">
                       {formatDeliveryWindow(o.deliveryWindowFrom, o.deliveryWindowTo) || '—'}
+                    </td>
+                    <td className="w-20 max-w-20 whitespace-normal break-words font-medium">
+                      {o.courierLabel}
                     </td>
                     <td className="font-medium">{o.clientName}</td>
                     <td className="text-fg-muted">{o.locationName}</td>

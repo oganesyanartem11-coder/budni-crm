@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
+import { getCourierAssignmentOrders } from '@/lib/orders/courier-queries'
 import type { MealType, OrderStatus } from '@prisma/client'
 
 const PRODUCTION_STATUSES: OrderStatus[] = [
@@ -376,6 +377,9 @@ export interface AssemblyOrder {
   deliveryWindowFrom: string | null
   deliveryWindowTo: string | null
   status: OrderStatus
+  assignedCourierId: string | null
+  courierName: string | null
+  courierLabel: string
 }
 
 /**
@@ -383,47 +387,27 @@ export interface AssemblyOrder {
  * Сортировка по окну доставки (раннее окно — раньше едет).
  */
 export async function getAssemblyOrders(targetDate: Date): Promise<AssemblyOrder[]> {
-  const date = new Date(targetDate)
-  date.setHours(0, 0, 0, 0)
-  const dayEnd = new Date(date)
-  dayEnd.setHours(23, 59, 59, 999)
-
-  const orders = await prisma.order.findMany({
-    where: {
-      deliveryDate: { gte: date, lte: dayEnd },
-      status: { in: PRODUCTION_STATUSES },
-    },
-    include: {
-      client: { select: { name: true, contactPhone: true } },
-      location: {
-        select: {
-          name: true,
-          address: true,
-          packaging: true,
-          tags: true,
-          deliveryWindowFrom: true,
-          deliveryWindowTo: true,
-        },
-      },
-    },
-  })
+  const orders = await getCourierAssignmentOrders(targetDate)
 
   // Сортируем: сначала по окну доставки (от раннего к позднему), потом по клиенту
   return orders
     .map((o) => ({
-      orderId: o.id,
-      clientName: o.client.name,
-      clientContactPhone: o.client.contactPhone,
-      locationName: o.location.name,
-      locationAddress: o.location.address,
+      orderId: o.orderId,
+      clientName: o.clientName,
+      clientContactPhone: o.clientContactPhone,
+      locationName: o.locationName,
+      locationAddress: o.locationAddress,
       mealType: o.mealType,
       portions: o.portions,
-      packaging: o.location.packaging,
-      tags: o.location.tags,
+      packaging: o.packaging,
+      tags: o.tags,
       notes: o.notes,
-      deliveryWindowFrom: o.location.deliveryWindowFrom,
-      deliveryWindowTo: o.location.deliveryWindowTo,
+      deliveryWindowFrom: o.deliveryWindowFrom,
+      deliveryWindowTo: o.deliveryWindowTo,
       status: o.status,
+      assignedCourierId: o.assignedCourierId,
+      courierName: o.assignedCourier?.name ?? null,
+      courierLabel: o.courierLabel,
     }))
     .sort((a, b) => {
       const aFrom = a.deliveryWindowFrom ?? '99:99'

@@ -44,7 +44,7 @@ export interface BuildRouteSheetOptions {
  * Резолв контакта клиента: первый ClientContact по sortOrder (затем по
  * createdAt для стабильности), fallback на Client.contactName/contactPhone.
  */
-function resolveContact(client: {
+export function resolveContact(client: {
   contactName: string | null
   contactPhone: string | null
   contacts: { name: string | null; phone: string }[]
