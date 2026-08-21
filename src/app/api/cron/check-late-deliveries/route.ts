@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { evaluateDeliveryLate } from '@/lib/delivery/delivery-late'
+import { ensureCourierRouteStopsForDate } from '@/lib/delivery/route-materializer'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { formatDeliveryWindow } from '@/lib/utils/format'
@@ -90,6 +91,8 @@ export async function handler(_request: Request): Promise<NextResponse> {
     })
     return NextResponse.json({ ok: true, skipped: true, reason: 'flag' })
   }
+
+  await ensureCourierRouteStopsForDate(deliveryDate, now)
 
   const staleBefore = new Date(
     now.getTime() - LATE_ALERT_CLAIM_STALE_MINUTES * 60_000,

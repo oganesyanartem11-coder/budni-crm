@@ -5,6 +5,8 @@ import {
   getOwnCourierRouteDay,
   getOwnCourierRouteStop,
 } from '@/lib/delivery/courier-route-read-model'
+import { ensureCourierRouteStopsForDate } from '@/lib/delivery/route-materializer'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { CourierStopScreen } from '../../_components/courier-stop-screen'
 
 interface PageProps {
@@ -15,6 +17,8 @@ export default async function CourierStopPage({ params }: PageProps) {
   const actor = await requireRole(['COURIER'])
   const { stopId } = await params
   const now = new Date()
+  const today = getMskCalendarDayUtc(now)
+  await ensureCourierRouteStopsForDate(today, now)
 
   let stop
   try {

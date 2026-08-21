@@ -1,16 +1,18 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   mockRequireRole,
   mockGetLegacyDeliveries,
+  mockEnsure,
   mockGetOwnRoute,
   mockGetOwnStop,
   mockNotFound,
 } = vi.hoisted(() => ({
   mockRequireRole: vi.fn(),
   mockGetLegacyDeliveries: vi.fn(),
+  mockEnsure: vi.fn(),
   mockGetOwnRoute: vi.fn(),
   mockGetOwnStop: vi.fn(),
   mockNotFound: vi.fn(() => { throw new Error('NEXT_NOT_FOUND') }),
@@ -18,6 +20,9 @@ const {
 
 vi.mock('@/lib/auth/current-user', () => ({ requireRole: mockRequireRole }))
 vi.mock('@/lib/db/queries/deliveries', () => ({ getDeliveriesForDate: mockGetLegacyDeliveries }))
+vi.mock('@/lib/delivery/route-materializer', () => ({
+  ensureCourierRouteStopsForDate: mockEnsure,
+}))
 vi.mock('@/lib/delivery/courier-route-read-model', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/delivery/courier-route-read-model')>()
   return {
@@ -54,11 +59,20 @@ import DeliveryPage from './page'
 import CourierStopPage from './stops/[stopId]/page'
 import { CourierRouteReadAccessError } from '@/lib/delivery/courier-route-read-model'
 
+const NOW = new Date('2026-08-21T15:25:00.000Z')
+
 describe('delivery courier pages', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
     vi.clearAllMocks()
     mockGetLegacyDeliveries.mockResolvedValue([])
+    mockEnsure.mockResolvedValue({})
     mockGetOwnRoute.mockResolvedValue(null)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders the read-only own route for a courier and skips the legacy query', async () => {
@@ -69,6 +83,13 @@ describe('delivery courier pages', () => {
     const html = renderToStaticMarkup(await DeliveryPage({ searchParams: Promise.resolve({}) }))
 
     expect(mockGetOwnRoute).toHaveBeenCalledWith(courier, expect.any(Date), expect.any(Date))
+    expect(mockEnsure).toHaveBeenCalledWith(
+      new Date('2026-08-21T00:00:00.000Z'),
+      NOW,
+    )
+    expect(mockEnsure.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetOwnRoute.mock.invocationCallOrder[0],
+    )
     expect(mockGetLegacyDeliveries).not.toHaveBeenCalled()
     expect(html).toContain('data-view="courier-route"')
     expect(html).toContain('route-1')
@@ -80,6 +101,7 @@ describe('delivery courier pages', () => {
     const html = renderToStaticMarkup(await DeliveryPage({ searchParams: Promise.resolve({}) }))
 
     expect(mockGetLegacyDeliveries).toHaveBeenCalledOnce()
+    expect(mockEnsure).not.toHaveBeenCalled()
     expect(mockGetOwnRoute).not.toHaveBeenCalled()
     expect(html).toContain('data-view="legacy-delivery"')
   })
@@ -104,6 +126,13 @@ describe('delivery courier pages', () => {
       params: Promise.resolve({ stopId: 'stop-current' }),
     }))
 
+    expect(mockEnsure).toHaveBeenCalledWith(
+      new Date('2026-08-21T00:00:00.000Z'),
+      NOW,
+    )
+    expect(mockEnsure.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetOwnStop.mock.invocationCallOrder[0],
+    )
     expect(mockGetOwnStop).toHaveBeenCalledWith(courier, 'stop-current', expect.any(Date))
     expect(html).toContain('data-view="courier-stop"')
     expect(html).toContain('stop-current:stop-next')

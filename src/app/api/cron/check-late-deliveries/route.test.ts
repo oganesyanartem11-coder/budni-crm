@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   mockActivityCreate,
+  mockEnsure,
   mockFindMany,
   mockNotifyGroup,
   mockUpdateMany,
 } = vi.hoisted(() => ({
   mockActivityCreate: vi.fn(),
+  mockEnsure: vi.fn(),
   mockFindMany: vi.fn(),
   mockNotifyGroup: vi.fn(),
   mockUpdateMany: vi.fn(),
@@ -20,6 +22,9 @@ vi.mock('@/lib/db/prisma', () => ({
     },
     activityLog: { create: mockActivityCreate },
   },
+}))
+vi.mock('@/lib/delivery/route-materializer', () => ({
+  ensureCourierRouteStopsForDate: mockEnsure,
 }))
 vi.mock('@/lib/telegram/notify', () => ({
   notifyGroup: mockNotifyGroup,
@@ -64,6 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   delete process.env.DELIVERY_LATE_ALERTS_ENABLED
   mockFindMany.mockResolvedValue([candidate()])
+  mockEnsure.mockResolvedValue({})
   mockUpdateMany.mockResolvedValue({ count: 1 })
   mockNotifyGroup.mockResolvedValue({ ok: true })
   mockActivityCreate.mockResolvedValue({ id: 'log-1' })
@@ -79,6 +85,13 @@ describe('check-late-deliveries CourierRouteStop cron', () => {
     const body = await response.json()
 
     expect(body).toEqual({ ok: true, sent: 1, errors: [] })
+    expect(mockEnsure).toHaveBeenCalledWith(
+      new Date('2026-08-21T00:00:00.000Z'),
+      NOW,
+    )
+    expect(mockEnsure.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFindMany.mock.invocationCallOrder[0],
+    )
     expect(mockFindMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         deliveryDate: new Date('2026-08-21T00:00:00.000Z'),

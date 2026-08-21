@@ -5,6 +5,7 @@ import { CourierRouteScreen } from './_components/courier-route-screen'
 import { requireRole } from '@/lib/auth/current-user'
 import { getDeliveriesForDate } from '@/lib/db/queries/deliveries'
 import { getOwnCourierRouteDay } from '@/lib/delivery/courier-route-read-model'
+import { ensureCourierRouteStopsForDate } from '@/lib/delivery/route-materializer'
 import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { serialize } from '@/lib/utils/serialize'
 
@@ -18,6 +19,7 @@ export default async function DeliveryPage({ searchParams }: PageProps) {
 
   if (user.role === 'COURIER') {
     const today = getMskCalendarDayUtc(now, 0)
+    await ensureCourierRouteStopsForDate(today, now)
     const route = await getOwnCourierRouteDay(user, today, now)
     return <CourierRouteScreen route={route} />
   }
