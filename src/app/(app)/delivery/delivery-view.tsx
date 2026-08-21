@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils/cn'
 import { PhoneLink } from '@/components/ui/phone-link'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS } from '@/lib/constants/client'
 import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
+import { isDeliveryDelayLate } from '@/lib/delivery/delivery-late'
 import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { EmptyState } from '@/components/ui/empty-state'
 import type { DeliveryStop } from '@/lib/db/queries/deliveries'
@@ -267,15 +268,36 @@ function DeliveryCard({
         <span className="flex-1">{stop.locationAddress}</span>
       </a>
 
-      {stop.clientContactPhone && (
-        <div className="flex flex-wrap gap-2 text-xs">
-          <PhoneLink
-            phone={stop.clientContactPhone}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-pill bg-bg text-info-fg"
-          >
-            <Phone className="w-3 h-3" />
-            {stop.clientContactPhone}
-          </PhoneLink>
+      {(stop.clientContactName || stop.clientContactPhone || stop.clientContactNotes) && (
+        <div className="rounded-xl bg-surface-2 px-3 py-2 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <Phone className="w-3.5 h-3.5 text-fg-muted shrink-0" />
+            {stop.clientContactName && (
+              <span className="font-medium text-fg">{stop.clientContactName}</span>
+            )}
+            {stop.clientContactPhone && (
+              <PhoneLink
+                phone={stop.clientContactPhone}
+                className="text-info-fg"
+              >
+                {stop.clientContactPhone}
+              </PhoneLink>
+            )}
+          </div>
+          {stop.clientContactNotes && (
+            <p className="text-xs text-fg-muted whitespace-pre-line">
+              {stop.clientContactNotes}
+            </p>
+          )}
+        </div>
+      )}
+
+      {stop.deliveryInstructions && (
+        <div className="rounded-xl bg-info-bg border border-border px-3 py-2 flex items-start gap-2">
+          <MapPin className="w-4 h-4 text-info-fg shrink-0 mt-0.5" />
+          <p className="text-xs text-info-fg whitespace-pre-line flex-1">
+            {stop.deliveryInstructions}
+          </p>
         </div>
       )}
 
@@ -447,10 +469,14 @@ function computeWindowState(fromHHmm: string | null, toHHmm: string | null): Win
   // Окно задано в МСК. Браузер пользователя где угодно — пересчитываем в МСК через хелпер.
   const fromMins = fromHHmm ? hhmmToMinutes(fromHHmm) : null
   const toMins = toHHmm ? hhmmToMinutes(toHHmm) : null
-  const { hours, minutes } = getMskHoursMinutes()
-  const nowMins = hours * 60 + minutes
+  const now = new Date()
+  const { hours, minutes } = getMskHoursMinutes(now)
+  const nowMins = hours * 60
+    + minutes
+    + now.getUTCSeconds() / 60
+    + now.getUTCMilliseconds() / 60_000
   if (fromMins !== null && nowMins < fromMins) return 'before'
-  if (toMins !== null && nowMins > toMins + 30) return 'late'
+  if (toMins !== null && isDeliveryDelayLate(nowMins - toMins)) return 'late'
   if (toMins !== null && nowMins > toMins) return 'after'
   return 'in'
 }
@@ -495,7 +521,7 @@ function DeliveredRow({
   const lateMinutes = deliveredAt && windowEnd
     ? Math.round((deliveredAt.getTime() - windowEnd.getTime()) / 60_000)
     : 0
-  const isLate = lateMinutes >= 1
+  const isLate = isDeliveryDelayLate(lateMinutes)
   const deliveredText = deliveredAt ? `Доставлено в ${formatTime(deliveredAt)}` : null
 
   return (

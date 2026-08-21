@@ -100,3 +100,11 @@ export function anomalyConfirmationButtons(confirmationId: string): InlineKeyboa
     .text('✅ Да', `anom:ok:${confirmationId}`)
     .text('❌ Нет', `anom:no:${confirmationId}`)
 }
+
+/** Manager decision for a persisted Delivery 2.0 override request. */
+export function deliveryOverrideButtons(requestId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✅ Подтвердить доставку', `dovr:approve:${requestId}`)
+    .row()
+    .text('❌ Отклонить', `dovr:reject:${requestId}`)
+}

@@ -3,10 +3,16 @@ import {
   type Prisma,
   type MealType,
   type PackagingType,
+  type CourierAssignmentMode,
 } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
-import { resolveContact } from '@/lib/route-sheet/build-rows'
+import {
+  resolveDeliveryContact,
+  type DeliveryContactCandidate,
+} from '@/lib/delivery/contact-resolver'
+import { ensureCourierRouteStopsForDate } from '@/lib/delivery/route-materializer'
+import { normalizeMskDeliveryDate } from '@/lib/delivery/route-domain'
 
 /**
  * П5: выборки заказов БЕЗ назначенного курьера для cron'ов
@@ -50,10 +56,32 @@ export interface OrderWithoutCourier {
 /** Общий include для обеих выборок — поля клиента и точки. */
 const COURIER_QUERY_SELECT = {
   id: true,
+  clientId: true,
+  locationId: true,
   mealType: true,
   portions: true,
   totalPrice: true,
-  client: { select: { name: true, contactPhone: true } },
+  client: {
+    select: {
+      name: true,
+      contactName: true,
+      contactPhone: true,
+      contacts: {
+        select: {
+          id: true,
+          clientId: true,
+          locationId: true,
+          isPrimaryForDelivery: true,
+          name: true,
+          phone: true,
+          notes: true,
+          sortOrder: true,
+          createdAt: true,
+        },
+        orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
+      },
+    },
+  },
   location: {
     select: {
       name: true,
@@ -67,10 +95,17 @@ const COURIER_QUERY_SELECT = {
 
 type CourierQueryRow = {
   id: string
+  clientId: string
+  locationId: string
   mealType: MealType
   portions: number
   totalPrice: { toNumber: () => number }
-  client: { name: string; contactPhone: string | null }
+  client: {
+    name: string
+    contactName: string | null
+    contactPhone: string | null
+    contacts: DeliveryContactCandidate[]
+  }
   location: {
     name: string
     address: string
@@ -81,10 +116,20 @@ type CourierQueryRow = {
 }
 
 function toDto(row: CourierQueryRow): OrderWithoutCourier {
+  const contact = resolveDeliveryContact({
+    clientId: row.clientId,
+    locationId: row.locationId,
+    contacts: row.client.contacts,
+    legacy: {
+      name: row.client.contactName,
+      phone: row.client.contactPhone,
+    },
+  })
+
   return {
     orderId: row.id,
     clientName: row.client.name,
-    clientContactPhone: row.client.contactPhone,
+    clientContactPhone: contact?.phone ?? null,
     locationName: row.location.name,
     locationAddress: row.location.address,
     deliveryWindowFrom: row.location.deliveryWindowFrom,
@@ -103,12 +148,15 @@ function toDto(row: CourierQueryRow): OrderWithoutCourier {
  */
 export async function getOrdersWithoutCourierTomorrow(): Promise<OrderWithoutCourier[]> {
   const tomorrowMsk = mskMidnightUtc(new Date(), 1)
+  await ensureCourierRouteStopsForDate(tomorrowMsk)
   const rows = (await prisma.order.findMany({
     where: {
       deliveryDate: tomorrowMsk,
       status: { in: COURIER_ASSIGNMENT_STATUSES },
       courierMissingNotifiedAt: null,
-      location: { assignedCourierId: null },
+      routeStop: {
+        assignmentMode: { in: ['EXTERNAL', 'UNASSIGNED'] },
+      },
     },
     select: COURIER_QUERY_SELECT,
   })) as unknown as CourierQueryRow[]
@@ -124,12 +172,16 @@ export async function getOrdersWithoutCourierTomorrow(): Promise<OrderWithoutCou
  */
 export async function getOrdersForHourBeforeWindow(now: Date): Promise<OrderWithoutCourier[]> {
   const todayMsk = mskMidnightUtc(now, 0)
+  await ensureCourierRouteStopsForDate(todayMsk)
   const rows = (await prisma.order.findMany({
     where: {
       deliveryDate: todayMsk,
       status: { in: COURIER_ASSIGNMENT_STATUSES },
       courierMissingNotifiedAt: null,
-      location: { assignedCourierId: null, deliveryWindowFrom: { not: null } },
+      routeStop: {
+        assignmentMode: { in: ['EXTERNAL', 'UNASSIGNED'] },
+      },
+      location: { deliveryWindowFrom: { not: null } },
     },
     select: COURIER_QUERY_SELECT,
   })) as unknown as CourierQueryRow[]
@@ -177,6 +229,7 @@ export interface CourierAssignmentOrder {
   status: OrderStatus
   assignedCourierId: string | null
   assignedCourier: { id: string; name: string } | null
+  assignmentMode: CourierAssignmentMode
   courierLabel: string
   packaging: PackagingType
   tags: string[]
@@ -191,29 +244,27 @@ const COURIER_ASSIGNMENT_SELECT = {
   portions: true,
   status: true,
   notes: true,
-  client: {
-    select: {
-      name: true,
-      contactName: true,
-      contactPhone: true,
-      contacts: {
-        select: { name: true, phone: true },
-        orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
-        take: 1,
-      },
-    },
-  },
   location: {
     select: {
-      name: true,
-      address: true,
       packaging: true,
       tags: true,
-      deliveryWindowFrom: true,
-      deliveryWindowTo: true,
-      assignedCourierId: true,
-      assignedCourier: {
-        select: { id: true, name: true, role: true, isActive: true },
+    },
+  },
+  routeStop: {
+    select: {
+      assignmentMode: true,
+      clientNameSnapshot: true,
+      locationNameSnapshot: true,
+      locationAddressSnapshot: true,
+      contactNameSnapshot: true,
+      contactPhoneSnapshot: true,
+      deliveryWindowFromSnapshot: true,
+      deliveryWindowToSnapshot: true,
+      routeDay: {
+        select: {
+          courierId: true,
+          courierNameSnapshot: true,
+        },
       },
     },
   },
@@ -227,27 +278,24 @@ type CourierAssignmentQueryRow = {
   portions: number
   status: OrderStatus
   notes: string | null
-  client: {
-    name: string
-    contactName: string | null
-    contactPhone: string | null
-    contacts: { name: string | null; phone: string }[]
-  }
   location: {
-    name: string
-    address: string
     packaging: PackagingType
     tags: string[]
-    deliveryWindowFrom: string | null
-    deliveryWindowTo: string | null
-    assignedCourierId: string | null
-    assignedCourier: {
-      id: string
-      name: string
-      role: string
-      isActive: boolean
-    } | null
   }
+  routeStop: {
+    assignmentMode: CourierAssignmentMode
+    clientNameSnapshot: string
+    locationNameSnapshot: string
+    locationAddressSnapshot: string
+    contactNameSnapshot: string | null
+    contactPhoneSnapshot: string | null
+    deliveryWindowFromSnapshot: string | null
+    deliveryWindowToSnapshot: string | null
+    routeDay: {
+      courierId: string
+      courierNameSnapshot: string
+    } | null
+  } | null
 }
 
 /**
@@ -258,38 +306,50 @@ type CourierAssignmentQueryRow = {
 export async function getCourierAssignmentOrders(
   deliveryDate: Date,
 ): Promise<CourierAssignmentOrder[]> {
+  const exactDeliveryDate = normalizeMskDeliveryDate(deliveryDate)
+  await ensureCourierRouteStopsForDate(exactDeliveryDate)
   const rows = (await prisma.order.findMany({
     where: {
-      deliveryDate,
+      deliveryDate: exactDeliveryDate,
       status: { in: COURIER_ASSIGNMENT_STATUSES },
     },
     select: COURIER_ASSIGNMENT_SELECT,
   })) as unknown as CourierAssignmentQueryRow[]
 
   return rows.map((row) => {
-    const contact = resolveContact(row.client)
-    const courier = row.location.assignedCourier
-    const assignedCourier = courier?.role === 'COURIER' && courier.isActive
-      ? { id: courier.id, name: courier.name }
-      : null
+    const stop = row.routeStop
+    if (!stop) {
+      throw new Error(`Order ${row.id} has no route stop after materialization`)
+    }
+    const assignedCourier =
+      stop.assignmentMode === 'IN_HOUSE' && stop.routeDay
+        ? {
+            id: stop.routeDay.courierId,
+            name: stop.routeDay.courierNameSnapshot,
+          }
+        : null
+    const courierLabel = assignedCourier?.name ?? (
+      stop.assignmentMode === 'EXTERNAL' ? 'InDrive' : 'Не назначено'
+    )
 
     return {
       orderId: row.id,
       clientId: row.clientId,
-      clientName: row.client.name,
-      clientContactName: contact.contactName,
-      clientContactPhone: contact.contactPhone,
+      clientName: stop.clientNameSnapshot,
+      clientContactName: stop.contactNameSnapshot,
+      clientContactPhone: stop.contactPhoneSnapshot,
       locationId: row.locationId,
-      locationName: row.location.name,
-      locationAddress: row.location.address,
-      deliveryWindowFrom: row.location.deliveryWindowFrom,
-      deliveryWindowTo: row.location.deliveryWindowTo,
+      locationName: stop.locationNameSnapshot,
+      locationAddress: stop.locationAddressSnapshot,
+      deliveryWindowFrom: stop.deliveryWindowFromSnapshot,
+      deliveryWindowTo: stop.deliveryWindowToSnapshot,
       mealType: row.mealType,
       portions: row.portions,
       status: row.status,
-      assignedCourierId: row.location.assignedCourierId,
+      assignedCourierId: assignedCourier?.id ?? null,
       assignedCourier,
-      courierLabel: assignedCourier?.name ?? 'InDrive',
+      assignmentMode: stop.assignmentMode,
+      courierLabel,
       packaging: row.location.packaging,
       tags: row.location.tags,
       notes: row.notes,

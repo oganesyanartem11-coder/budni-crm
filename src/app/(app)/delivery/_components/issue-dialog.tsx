@@ -61,7 +61,7 @@ export function IssueDialog({ open, orderIds, initialReason, initialComment, onC
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent>
+      <DialogContent className="[&>button]:min-h-11 [&>button]:min-w-11">
         <DialogHeader>
           <DialogTitle>Не удалось доставить</DialogTitle>
           <DialogDescription>
@@ -71,9 +71,12 @@ export function IssueDialog({ open, orderIds, initialReason, initialComment, onC
 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Причина</label>
+            <label htmlFor="delivery-issue-reason" className="text-sm font-medium">Причина</label>
             <Select value={reason} onValueChange={(v) => setReason(v as DeliveryIssueReason)}>
-              <SelectTrigger className="w-full !h-auto px-3 py-2.5 rounded-xl bg-bg border-border focus-visible:border-accent focus-visible:ring-0 transition-colors data-placeholder:text-fg-muted">
+              <SelectTrigger
+                id="delivery-issue-reason"
+                className="min-h-11 w-full cursor-pointer rounded-xl border-border bg-bg px-3 py-2.5 transition-colors data-placeholder:text-fg-muted focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 motion-reduce:transition-none"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -85,16 +88,17 @@ export function IssueDialog({ open, orderIds, initialReason, initialComment, onC
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">
-              Комментарий <span className="text-fg-subtle font-normal">(опционально, до 200 символов)</span>
+            <label htmlFor="delivery-issue-comment" className="text-sm font-medium">
+              Комментарий <span className="text-fg-muted font-normal">(опционально, до 200 символов)</span>
             </label>
             <textarea
+              id="delivery-issue-comment"
               rows={3}
               value={comment}
               maxLength={200}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Например: «закрыто, охранник просит звонок»"
-              className="w-full px-3 py-2 rounded-xl bg-bg border border-border focus:outline-none focus:border-accent transition-colors resize-none text-sm"
+              className="min-h-11 w-full resize-none rounded-xl border border-border bg-bg px-3 py-2 text-base transition-colors focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 motion-reduce:transition-none"
             />
           </div>
         </div>
@@ -104,7 +108,7 @@ export function IssueDialog({ open, orderIds, initialReason, initialComment, onC
             type="button"
             onClick={onClose}
             disabled={isPending}
-            className="px-5 py-2.5 rounded-pill border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-bg transition-colors disabled:opacity-50"
+            className="min-h-11 cursor-pointer rounded-pill border border-border-strong bg-surface px-5 py-2.5 text-sm font-medium text-fg transition-colors hover:bg-bg disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
           >
             Отмена
           </button>
@@ -112,7 +116,7 @@ export function IssueDialog({ open, orderIds, initialReason, initialComment, onC
             type="button"
             onClick={handleSubmit}
             disabled={isPending}
-            className="px-5 py-2.5 rounded-pill bg-danger text-accent-fg font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+            className="min-h-11 cursor-pointer rounded-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
           >
             {isPending ? 'Отправляем…' : 'Сообщить менеджеру'}
           </button>

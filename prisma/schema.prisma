@@ -119,6 +119,43 @@ enum DeliveryStatus {
   FAILED // Не доставлено (с комментарием)
 }
 
+enum CourierAssignmentMode {
+  IN_HOUSE
+  EXTERNAL
+  UNASSIGNED
+}
+
+enum CourierAssignmentSource {
+  LOCATION_DEFAULT
+  MANAGER
+}
+
+enum CourierStopCompletionMethod {
+  GEOFENCE
+  COURIER_DIRECT
+  MANAGER_DIRECT
+  MANAGER_OVERRIDE
+}
+
+enum DeliveryGeoResult {
+  ALLOWED
+  OUTSIDE_GEOFENCE
+  LOW_ACCURACY
+  STALE_POSITION
+  FUTURE_POSITION
+  INVALID_POSITION
+  POSITION_UNAVAILABLE
+  TARGET_UNAVAILABLE
+  GEOFENCE_NOT_REQUIRED
+}
+
+enum DeliveryOverrideStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
 enum DishCategory {
   SOUP // Суп
   MAIN // Горячее блюдо
@@ -344,10 +381,15 @@ model User {
   borisMetrics BorisMetrics[] @relation("BorisMetricsUser")
 
   // MEGA-BACKEND блок B: курьер опционально привязан к точкам клиента.
-  // Курьер видит свои точки + непривязанные. ADMIN/MANAGER — всё.
-  assignedLocations ClientLocation[]  @relation("CourierLocations")
-  maxInvitesCreated ClientMaxInvite[] @relation("ClientMaxInviteCreator")
-  portionBaselinesUpdated ClientPortionBaseline[] @relation("PortionBaselineUpdatedBy")
+  // В Delivery 2.0 это только дефолт точки; фактическое назначение живёт в stop.
+  assignedLocations            ClientLocation[]             @relation("CourierLocations")
+  deliveryCoordinatesUpdated   ClientLocation[]             @relation("LocationCoordinatesUpdatedBy")
+  courierRouteDays             CourierRouteDay[]            @relation("CourierRouteDays")
+  deliveryGeoAttempts          DeliveryGeoAttempt[]         @relation("DeliveryGeoAttemptCourier")
+  deliveryOverridesRequested   DeliveryOverrideRequest[]    @relation("DeliveryOverrideCourier")
+  deliveryOverridesResolved    DeliveryOverrideRequest[]    @relation("DeliveryOverrideResolver")
+  maxInvitesCreated            ClientMaxInvite[]            @relation("ClientMaxInviteCreator")
+  portionBaselinesUpdated      ClientPortionBaseline[]      @relation("PortionBaselineUpdatedBy")
   anomalyConfirmationsResolved PendingAnomalyConfirmation[] @relation("AnomalyConfirmationResolvedBy")
 
   @@index([role, isActive])
@@ -428,23 +470,24 @@ model Client {
   defaultOurLegalEntityId String?
   defaultOurLegalEntity   OurLegalEntity? @relation("ClientDefaultLegalEntity", fields: [defaultOurLegalEntityId], references: [id], onDelete: SetNull)
 
-  locations           ClientLocation[]
-  mealConfigs         ClientMealConfig[]
-  orders              Order[]
-  botConversations    BotConversation[]
-  botMessages         BotMessage[]
-  inboxItems          InboxItem[]
-  updDocuments        UpdDocument[]
-  toneAlerts          ToneAlertLog[]
-  clientAlerts        ClientAlertLog[]
-  borisEvents         BorisEventLog[]
-  weeklySubmissions   WeeklyOrderSubmission[]
-  pendingOrderChanges PendingOrderChange[]
-  portionBaselines ClientPortionBaseline[]
+  locations                   ClientLocation[]
+  mealConfigs                 ClientMealConfig[]
+  orders                      Order[]
+  botConversations            BotConversation[]
+  botMessages                 BotMessage[]
+  inboxItems                  InboxItem[]
+  updDocuments                UpdDocument[]
+  toneAlerts                  ToneAlertLog[]
+  clientAlerts                ClientAlertLog[]
+  borisEvents                 BorisEventLog[]
+  weeklySubmissions           WeeklyOrderSubmission[]
+  pendingOrderChanges         PendingOrderChange[]
+  portionBaselines            ClientPortionBaseline[]
   pendingAnomalyConfirmations PendingAnomalyConfirmation[]
-  contacts            ClientContact[]
-  maxUsers            ClientMaxUser[]
-  maxInvites          ClientMaxInvite[]
+  contacts                    ClientContact[]
+  courierRouteStops           CourierRouteStop[]
+  maxUsers                    ClientMaxUser[]
+  maxInvites                  ClientMaxInvite[]
 
   @@index([isActive])
   @@index([name])
@@ -490,60 +533,79 @@ model ClientMaxInvite {
 }
 
 model ClientContact {
-  id        String   @id @default(cuid())
-  clientId  String
-  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name      String?
-  role      String? // "прораб", "бухгалтер"
-  phone     String
-  email     String?
-  notes     String?
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                   String          @id @default(cuid())
+  clientId             String
+  client               Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationId           String?
+  location             ClientLocation? @relation("LocationDeliveryContacts", fields: [locationId], references: [id], onDelete: Cascade)
+  isPrimaryForDelivery Boolean         @default(false)
+  name                 String?
+  role                 String? // "прораб", "бухгалтер"
+  phone                String
+  email                String?
+  notes                String?
+  sortOrder            Int             @default(0)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
 
   @@index([clientId])
+  @@index([clientId, locationId, sortOrder])
 }
 
 model ClientLocation {
-  id                 String        @id @default(cuid())
-  clientId           String
-  client             Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name               String // Например, "Офис на Ленина" или "Стройка №3"
-  address            String
-  deliveryWindowFrom String? // Формат "HH:mm", например "11:30"
-  deliveryWindowTo   String? // Формат "HH:mm", например "12:00"
-  packaging          PackagingType @default(INDIVIDUAL)
-  tags               String[]      @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
+  id                     String                 @id @default(cuid())
+  clientId               String
+  client                 Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name                   String // Например, "Офис на Ленина" или "Стройка №3"
+  address                String
+  deliveryWindowFrom     String? // Формат "HH:mm", например "11:30"
+  deliveryWindowTo       String? // Формат "HH:mm", например "12:00"
+  packaging              PackagingType          @default(INDIVIDUAL)
+  tags                   String[]               @default([]) // Свободные пометки: "аллергия на цитрус", "без лука"
   // 7.39: same-day delivery для «утреннего клиента». Если true → заказ
   // создаётся на сегодня (не на завтра), вопрос шлётся в 07:40 МСК,
   // cut-off индивидуальный (cutoffHourMsk:cutoffMinuteMsk).
-  sameDayDelivery    Boolean       @default(false)
+  sameDayDelivery        Boolean                @default(false)
   // 7.39: индивидуальный cut-off для same-day заказов. null → fallback на глобальный CUTOFF_HOUR_MSK (16).
-  cutoffHourMsk      Int?
+  cutoffHourMsk          Int?
   // 7.39: минута cut-off. null → 0.
-  cutoffMinuteMsk    Int?
+  cutoffMinuteMsk        Int?
   // MEGA-BACKEND блок B: опциональная привязка точки к курьеру.
   // SetNull при удалении курьера — точка остаётся, становится «непривязанной».
-  assignedCourierId  String?
-  assignedCourier    User?         @relation("CourierLocations", fields: [assignedCourierId], references: [id], onDelete: SetNull)
-  isActive           Boolean       @default(true)
+  assignedCourierId      String?
+  assignedCourier        User?                  @relation("CourierLocations", fields: [assignedCourierId], references: [id], onDelete: SetNull)
+  // Delivery 2.0: явный дефолт. null сохраняет legacy resolution:
+  // assignedCourierId != null → IN_HOUSE, иначе → EXTERNAL.
+  defaultDeliveryMode    CourierAssignmentMode?
+  deliveryInstructions   String?
+  latitude               Decimal?               @db.Decimal(10, 7)
+  longitude              Decimal?               @db.Decimal(10, 7)
+  geofenceRadiusM        Int                    @default(1000)
+  geofenceEnabled        Boolean                @default(false)
+  coordinatesSource      String?
+  coordinatesUpdatedAt   DateTime?
+  coordinatesUpdatedById String?
+  coordinatesUpdatedBy   User?                  @relation("LocationCoordinatesUpdatedBy", fields: [coordinatesUpdatedById], references: [id], onDelete: SetNull)
+  isActive               Boolean                @default(true)
   // Волна 4: «сервисная выручка» — стоимость доставки в эту точку за день.
   // Опционально. null/0 → доставка бесплатная, фин-показатели не меняются.
   // Считается ОДИН раз на (локация, день-с-доставкой), не на каждый заказ.
-  deliveryFee        Decimal?      @db.Decimal(10, 2)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  deliveryFee            Decimal?               @db.Decimal(10, 2)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
 
-  mealConfigs         ClientMealConfig[]
-  orders              Order[]
-  updDocuments        UpdDocument[]
-  pendingOrderChanges PendingOrderChange[]
-  portionBaselines ClientPortionBaseline[]
+  mealConfigs                 ClientMealConfig[]
+  orders                      Order[]
+  updDocuments                UpdDocument[]
+  pendingOrderChanges         PendingOrderChange[]
+  portionBaselines            ClientPortionBaseline[]
   pendingAnomalyConfirmations PendingAnomalyConfirmation[]
+  deliveryContacts            ClientContact[]              @relation("LocationDeliveryContacts")
+  courierRouteStops           CourierRouteStop[]
 
   @@index([clientId, isActive])
   @@index([assignedCourierId])
+  @@index([coordinatesUpdatedById])
 }
 
 // П3 (MEGA-4b): pending-изменение заказа, инициированное клиентом в MAX.
@@ -598,22 +660,22 @@ model ClientPortionBaseline {
 }
 
 model PendingAnomalyConfirmation {
-  id               String         @id @default(cuid())
+  id               String           @id @default(cuid())
   clientId         String
-  client           Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client           Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   locationId       String
-  location         ClientLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  location         ClientLocation   @relation(fields: [locationId], references: [id], onDelete: Cascade)
   mealType         MealType
-  deliveryDate     DateTime       @db.Date
+  deliveryDate     DateTime         @db.Date
   proposedPortions Int
-  status           String         @default("PENDING")
+  status           String           @default("PENDING")
   processingAt     DateTime?
   conversationId   String?
   conversation     BotConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-  createdAt        DateTime       @default(now())
+  createdAt        DateTime         @default(now())
   resolvedAt       DateTime?
   resolvedById     String?
-  resolvedBy       User?          @relation("AnomalyConfirmationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedBy       User?            @relation("AnomalyConfirmationResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   @@index([clientId, locationId, deliveryDate])
   @@index([status, createdAt])
@@ -905,6 +967,11 @@ model Order {
 
   delivery Delivery?
 
+  // Delivery 2.0: дневная остановка объединяет все mealType одной точки.
+  // Nullable для безопасного rollout и legacy-заказов до materializer.
+  routeStopId String?
+  routeStop   CourierRouteStop? @relation(fields: [routeStopId], references: [id], onDelete: SetNull)
+
   // 6.4: антидубль для cron'а check-late-deliveries.
   // Ставится при отправке алёрта в групповой Telegram (опоздание > 30 мин).
   lateAlertSentAt DateTime?
@@ -937,6 +1004,7 @@ model Order {
   @@index([ourLegalEntityId])
   @@index([clientId, locationId, mealType, deliveryDate])
   @@index([weeklySubmissionId])
+  @@index([routeStopId])
 }
 
 // Недельный заказ (Спринт «Недельный заказ»): одна заявка клиента на 5-7 дней
@@ -998,6 +1066,138 @@ model Delivery {
 
   @@index([status])
   @@index([issueReportedAt])
+}
+
+// Delivery 2.0: маршрут одного курьера на один календарный день доставки.
+// Статус не хранится enum-ом: NOT_STARTED / IN_PROGRESS / COMPLETED выводятся
+// из startedAt/completedAt в route-domain.ts.
+model CourierRouteDay {
+  id                  String    @id @default(cuid())
+  courierId           String
+  courier             User      @relation("CourierRouteDays", fields: [courierId], references: [id], onDelete: Restrict)
+  deliveryDate        DateTime  @db.Date
+  courierNameSnapshot String
+  startedAt           DateTime?
+  completedAt         DateTime?
+  routeChangedAt      DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  stops CourierRouteStop[]
+
+  @@unique([courierId, deliveryDate])
+  @@index([deliveryDate, startedAt])
+  @@index([deliveryDate, completedAt])
+}
+
+// Delivery 2.0: одна физическая точка клиента в один deliveryDate независимо
+// от количества mealType. NEW/LATE/PLANNED вычисляются, а не сохраняются.
+model CourierRouteStop {
+  id           String           @id @default(cuid())
+  deliveryDate DateTime         @db.Date
+  clientId     String
+  client       Client           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  locationId   String
+  location     ClientLocation   @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  routeDayId   String?
+  routeDay     CourierRouteDay? @relation(fields: [routeDayId], references: [id], onDelete: Restrict)
+
+  assignmentMode   CourierAssignmentMode
+  assignmentSource CourierAssignmentSource
+
+  clientNameSnapshot           String
+  locationNameSnapshot         String
+  locationAddressSnapshot      String
+  contactNameSnapshot          String?
+  contactPhoneSnapshot         String?
+  contactNotesSnapshot         String?
+  deliveryWindowFromSnapshot   String?
+  deliveryWindowToSnapshot     String?
+  deliveryInstructionsSnapshot String?
+  latitudeSnapshot             Decimal? @db.Decimal(10, 7)
+  longitudeSnapshot            Decimal? @db.Decimal(10, 7)
+  geofenceRadiusMSnapshot      Int      @default(1000)
+  geofenceEnabledSnapshot      Boolean  @default(false)
+
+  assignedAt         DateTime
+  deliveredAt        DateTime?
+  completionMethod   CourierStopCompletionMethod?
+  cancelledAt        DateTime?
+  version            Int                          @default(1)
+  lateAlertClaimedAt DateTime?
+  lateAlertSentAt    DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  orders                   Order[]
+  deliveryGeoAttempts      DeliveryGeoAttempt[]
+  deliveryOverrideRequests DeliveryOverrideRequest[]
+
+  @@unique([deliveryDate, clientId, locationId])
+  @@index([routeDayId, deliveredAt, cancelledAt])
+  @@index([deliveryDate, deliveredAt, cancelledAt])
+  @@index([deliveryDate, assignmentMode, cancelledAt])
+  @@index([clientId])
+  @@index([locationId])
+  @@index([deliveryDate, lateAlertSentAt, lateAlertClaimedAt])
+}
+
+// Delivery 2.0: серверная проверка одной GPS-позиции при явном действии
+// «Подтвердить доставку». Постоянного трекинга нет; raw coordinates очищаются
+// через 60 дней, а результат/точность/расстояние и audit остаются.
+model DeliveryGeoAttempt {
+  id                      String            @id @default(cuid())
+  stopId                  String
+  stop                    CourierRouteStop  @relation(fields: [stopId], references: [id], onDelete: Restrict)
+  courierId               String
+  courier                 User              @relation("DeliveryGeoAttemptCourier", fields: [courierId], references: [id], onDelete: Restrict)
+  requestId               String
+  courierNameSnapshot     String
+  courierLatitude         Decimal?          @db.Decimal(10, 7)
+  courierLongitude        Decimal?          @db.Decimal(10, 7)
+  accuracyM               Decimal?          @db.Decimal(8, 2)
+  targetLatitudeSnapshot  Decimal?          @db.Decimal(10, 7)
+  targetLongitudeSnapshot Decimal?          @db.Decimal(10, 7)
+  targetRadiusMSnapshot   Int
+  capturedAt              DateTime?
+  receivedAt              DateTime
+  distanceM               Decimal?          @db.Decimal(10, 2)
+  result                  DeliveryGeoResult
+  purgedAt                DateTime?
+  createdAt               DateTime          @default(now())
+
+  overrideRequest DeliveryOverrideRequest?
+
+  @@unique([stopId, requestId])
+  @@index([stopId, createdAt])
+  @@index([courierId, capturedAt])
+}
+
+// Источник истины для manager override. Telegram отправляется только после
+// commit этой записи. Partial unique «один PENDING на stop» добавлен raw SQL.
+model DeliveryOverrideRequest {
+  id                     String                 @id @default(cuid())
+  stopId                 String
+  stop                   CourierRouteStop       @relation(fields: [stopId], references: [id], onDelete: Restrict)
+  geoAttemptId           String                 @unique
+  geoAttempt             DeliveryGeoAttempt     @relation(fields: [geoAttemptId], references: [id], onDelete: Restrict)
+  courierId              String
+  courier                User                   @relation("DeliveryOverrideCourier", fields: [courierId], references: [id], onDelete: Restrict)
+  courierNameSnapshot    String
+  comment                String
+  status                 DeliveryOverrideStatus @default(PENDING)
+  expiresAt              DateTime
+  resolvedById           String?
+  resolvedBy             User?                  @relation("DeliveryOverrideResolver", fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedByNameSnapshot String?
+  resolvedAt             DateTime?
+  resolutionComment      String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  @@index([stopId, status, expiresAt])
+  @@index([courierId, createdAt])
+  @@index([resolvedById])
 }
 
 // ============================================================
@@ -1101,9 +1301,9 @@ model BotConversation {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
-  messages   BotMessage[]
-  inboxItems InboxItem[]
-  orders     Order[]
+  messages                    BotMessage[]
+  inboxItems                  InboxItem[]
+  orders                      Order[]
   pendingAnomalyConfirmations PendingAnomalyConfirmation[]
 
   @@unique([clientId, deliveryDate])

@@ -28,6 +28,8 @@ import {
 
 interface DbRowOpts {
   id?: string
+  clientId?: string
+  locationId?: string
   status?: string
   mealType?: string
   portions?: number
@@ -37,7 +39,17 @@ interface DbRowOpts {
   clientName?: string
   contactName?: string | null
   contactPhone?: string | null
-  contacts?: { name: string | null; phone: string }[]
+  contacts?: {
+    id?: string
+    clientId?: string
+    locationId?: string | null
+    isPrimaryForDelivery?: boolean
+    name: string | null
+    phone: string
+    notes?: string | null
+    sortOrder?: number
+    createdAt?: Date
+  }[]
   locationName?: string
   address?: string
   windowFrom?: string | null
@@ -45,8 +57,12 @@ interface DbRowOpts {
 }
 
 function dbRow(o: DbRowOpts = {}) {
+  const clientId = o.clientId ?? 'client-1'
+  const locationId = o.locationId ?? 'location-1'
   return {
     id: o.id ?? 'o1',
+    clientId,
+    locationId,
     mealType: o.mealType ?? 'LUNCH',
     portions: o.portions ?? 20,
     packaging: o.packaging ?? 'INDIVIDUAL',
@@ -56,7 +72,17 @@ function dbRow(o: DbRowOpts = {}) {
       name: o.clientName ?? 'Кафе',
       contactName: o.contactName ?? null,
       contactPhone: o.contactPhone ?? null,
-      contacts: o.contacts ?? [],
+      contacts: (o.contacts ?? []).map((contact, index) => ({
+        id: contact.id ?? `contact-${index + 1}`,
+        clientId: contact.clientId ?? clientId,
+        locationId: contact.locationId ?? null,
+        isPrimaryForDelivery: contact.isPrimaryForDelivery ?? false,
+        name: contact.name,
+        phone: contact.phone,
+        notes: contact.notes ?? null,
+        sortOrder: contact.sortOrder ?? index,
+        createdAt: contact.createdAt ?? new Date('2026-06-01T09:00:00.000Z'),
+      })),
     },
     location: {
       name: o.locationName ?? 'Точка',
@@ -103,7 +129,38 @@ describe('buildRouteSheetRows — where-фильтры', () => {
 })
 
 describe('buildRouteSheetRows — резолв контакта', () => {
-  it('берёт первый ClientContact (по sortOrder, take:1 в запросе) — name+phone', async () => {
+  it('предпочитает primary-контакт целевой точки общему контакту клиента', async () => {
+    mockPrisma.order.findMany.mockResolvedValue([
+      dbRow({
+        contacts: [
+          {
+            id: 'client-wide',
+            locationId: null,
+            name: 'Общий контакт',
+            phone: '+70000000001',
+            sortOrder: 0,
+          },
+          {
+            id: 'location-primary',
+            locationId: 'location-1',
+            isPrimaryForDelivery: true,
+            name: 'Контакт точки',
+            phone: '+70000000002',
+            sortOrder: 20,
+          },
+        ],
+      }),
+    ])
+
+    const rows = await buildRouteSheetRows(DATE)
+
+    expect(rows[0]).toMatchObject({
+      contactName: 'Контакт точки',
+      contactPhone: '+70000000002',
+    })
+  })
+
+  it('использует общий контакт клиента, если у точки нет контактов', async () => {
     mockPrisma.order.findMany.mockResolvedValue([
       dbRow({
         contactName: 'Старое имя',
@@ -125,7 +182,7 @@ describe('buildRouteSheetRows — резолв контакта', () => {
     expect(rows[0].contactPhone).toBe('+70001112222')
   })
 
-  it('ClientContact без name → fallback имени на Client.contactName, но phone из контакта', async () => {
+  it('не смешивает legacy-имя с выбранным нормализованным контактом без имени', async () => {
     mockPrisma.order.findMany.mockResolvedValue([
       dbRow({
         contactName: 'Имя клиента',
@@ -134,17 +191,28 @@ describe('buildRouteSheetRows — резолв контакта', () => {
       }),
     ])
     const rows = await buildRouteSheetRows(DATE)
-    expect(rows[0].contactName).toBe('Имя клиента')
+    expect(rows[0].contactName).toBeNull()
     expect(rows[0].contactPhone).toBe('+79995554433')
   })
 
-  it('проверяет, что запрос контактов идёт по sortOrder asc и take:1', async () => {
+  it('загружает полный candidate shape без take:1 для location precedence', async () => {
     mockPrisma.order.findMany.mockResolvedValue([])
     await buildRouteSheetRows(DATE)
     const select = mockPrisma.order.findMany.mock.calls[0][0].select
     const contacts = select.client.select.contacts
-    expect(contacts.take).toBe(1)
+    expect(contacts.take).toBeUndefined()
     expect(contacts.orderBy).toEqual([{ sortOrder: 'asc' }, { createdAt: 'asc' }])
+    expect(contacts.select).toEqual({
+      id: true,
+      clientId: true,
+      locationId: true,
+      isPrimaryForDelivery: true,
+      name: true,
+      phone: true,
+      notes: true,
+      sortOrder: true,
+      createdAt: true,
+    })
   })
 })
 

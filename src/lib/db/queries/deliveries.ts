@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
+import { resolveDeliveryContact } from '@/lib/delivery/contact-resolver'
 import type { OrderStatus, MealType, PackagingType, UserRole } from '@prisma/client'
 
 const DELIVERY_STATUSES: OrderStatus[] = [
@@ -17,10 +18,13 @@ export interface DeliveryOrderItem {
 export interface DeliveryStop {
   clientId: string
   clientName: string
+  clientContactName: string | null
   clientContactPhone: string | null
+  clientContactNotes: string | null
   locationId: string
   locationName: string
   locationAddress: string
+  deliveryInstructions: string | null
   deliveryWindowFrom: string | null
   deliveryWindowTo: string | null
   tags: string[]
@@ -44,20 +48,24 @@ export interface DeliveryStop {
 
 export async function getDeliveriesForDate(
   targetDate: Date,
-  viewer?: { role: UserRole; id: string }
+  viewer: { role: UserRole; id: string }
 ): Promise<DeliveryStop[]> {
+  if (!['ADMIN_PRO', 'ADMIN', 'MANAGER', 'COURIER'].includes(viewer.role)) {
+    throw new Error('Остановка недоступна или не найдена')
+  }
+
   const date = new Date(targetDate)
   date.setHours(0, 0, 0, 0)
   const dayEnd = new Date(date)
   dayEnd.setHours(23, 59, 59, 999)
 
-  // MEGA-BACKEND блок B: COURIER видит только свои точки + непривязанные.
-  // ADMIN/MANAGER (или вызов без viewer) — поведение как было, без фильтра по локации.
+  // Курьер видит только явно назначенные ему точки. Непривязанные точки не
+  // являются общим пулом: назначение проверяется по ClientLocation.
   const locationFilter =
-    viewer?.role === 'COURIER'
+    viewer.role === 'COURIER'
       ? {
           location: {
-            OR: [{ assignedCourierId: viewer.id }, { assignedCourierId: null }],
+            assignedCourierId: viewer.id,
           },
         }
       : {}
@@ -69,12 +77,32 @@ export async function getDeliveriesForDate(
       ...locationFilter,
     },
     include: {
-      client: { select: { id: true, name: true, contactPhone: true } },
+      client: {
+        select: {
+          id: true,
+          name: true,
+          contactName: true,
+          contactPhone: true,
+          contacts: {
+            select: {
+              id: true,
+              clientId: true,
+              locationId: true,
+              isPrimaryForDelivery: true,
+              name: true,
+              phone: true,
+              notes: true,
+              sortOrder: true,
+              createdAt: true,
+            },
+          },
+        },
+      },
       location: {
         select: {
           id: true, name: true, address: true,
           deliveryWindowFrom: true, deliveryWindowTo: true,
-          tags: true,
+          tags: true, deliveryInstructions: true,
         },
       },
       delivery: { select: { deliveredAt: true, issueReportedAt: true, issueReason: true, issueComment: true } },
@@ -89,13 +117,25 @@ export async function getDeliveriesForDate(
     const key = `${o.clientId}|${o.locationId}`
     let stop = stopsMap.get(key)
     if (!stop) {
+      const contact = resolveDeliveryContact({
+        clientId: o.clientId,
+        locationId: o.locationId,
+        contacts: o.client.contacts,
+        legacy: {
+          name: o.client.contactName,
+          phone: o.client.contactPhone,
+        },
+      })
       stop = {
         clientId: o.client.id,
         clientName: o.client.name,
-        clientContactPhone: o.client.contactPhone,
+        clientContactName: contact?.name ?? null,
+        clientContactPhone: contact?.phone ?? null,
+        clientContactNotes: contact?.notes ?? null,
         locationId: o.location.id,
         locationName: o.location.name,
         locationAddress: o.location.address,
+        deliveryInstructions: o.location.deliveryInstructions,
         deliveryWindowFrom: o.location.deliveryWindowFrom,
         deliveryWindowTo: o.location.deliveryWindowTo,
         tags: o.location.tags,

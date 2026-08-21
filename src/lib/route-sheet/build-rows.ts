@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
+import { resolveDeliveryContact } from '@/lib/delivery/contact-resolver'
 import type { MealType, OrderStatus, PackagingType } from '@prisma/client'
 
 /** Статусы заказа, попадающие в маршрутный лист (вечерний/основной режим). */
@@ -11,9 +12,9 @@ export interface RouteSheetRow {
   /** Порядковый номер в листе (1-based), проставляется после сортировки. */
   index: number
   clientName: string
-  /** ФИО контактного лица (первый ClientContact по sortOrder, fallback Client.contactName). */
+  /** ФИО контактного лица с location precedence и legacy fallback. */
   contactName: string | null
-  /** Телефон контактного лица (тот же приоритет). */
+  /** Телефон того же выбранного контактного лица. */
   contactPhone: string | null
   locationName: string
   locationAddress: string
@@ -38,25 +39,6 @@ export interface RouteSheetGroup {
 export interface BuildRouteSheetOptions {
   /** true → только location.sameDayDelivery=true и статус строго CONFIRMED. */
   sameDayOnly?: boolean
-}
-
-/**
- * Резолв контакта клиента: первый ClientContact по sortOrder (затем по
- * createdAt для стабильности), fallback на Client.contactName/contactPhone.
- */
-export function resolveContact(client: {
-  contactName: string | null
-  contactPhone: string | null
-  contacts: { name: string | null; phone: string }[]
-}): { contactName: string | null; contactPhone: string | null } {
-  const first = client.contacts[0]
-  if (first) {
-    return {
-      contactName: first.name ?? client.contactName,
-      contactPhone: first.phone,
-    }
-  }
-  return { contactName: client.contactName, contactPhone: client.contactPhone }
 }
 
 /**
@@ -105,6 +87,8 @@ export async function buildRouteSheetRows(
     },
     select: {
       id: true,
+      clientId: true,
+      locationId: true,
       mealType: true,
       portions: true,
       packaging: true,
@@ -116,9 +100,18 @@ export async function buildRouteSheetRows(
           contactName: true,
           contactPhone: true,
           contacts: {
-            select: { name: true, phone: true },
+            select: {
+              id: true,
+              clientId: true,
+              locationId: true,
+              isPrimaryForDelivery: true,
+              name: true,
+              phone: true,
+              notes: true,
+              sortOrder: true,
+              createdAt: true,
+            },
             orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-            take: 1,
           },
         },
       },
@@ -134,11 +127,19 @@ export async function buildRouteSheetRows(
   })
 
   const rows: Omit<RouteSheetRow, 'index'>[] = orders.map((o) => {
-    const { contactName, contactPhone } = resolveContact(o.client)
+    const contact = resolveDeliveryContact({
+      clientId: o.clientId,
+      locationId: o.locationId,
+      contacts: o.client.contacts,
+      legacy: {
+        name: o.client.contactName,
+        phone: o.client.contactPhone,
+      },
+    })
     return {
       clientName: o.client.name,
-      contactName,
-      contactPhone,
+      contactName: contact?.name ?? null,
+      contactPhone: contact?.phone ?? null,
       locationName: o.location.name,
       locationAddress: o.location.address,
       deliveryWindowFrom: o.location.deliveryWindowFrom,

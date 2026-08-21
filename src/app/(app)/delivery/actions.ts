@@ -4,11 +4,10 @@ import { revalidatePath } from 'next/cache'
 import { waitUntil } from '@vercel/functions'
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
+import { prismaDirect } from '@/lib/db/prisma-direct'
 import { requireRole } from '@/lib/auth/current-user'
-import { parseWindowToDate } from '@/lib/utils/msk-window'
 import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
 import { orderDetailButton } from '@/lib/telegram/buttons'
-import { assertOrderUpdatedAt, OptimisticLockError } from '@/lib/db/optimistic-lock'
 import {
   DELIVERY_ISSUE_REASONS,
   DELIVERY_ISSUE_REASON_LABELS,
@@ -16,17 +15,69 @@ import {
 } from '@/lib/constants/delivery'
 import { formatDeliveryWindow } from '@/lib/utils/format'
 import { logBorisEvent, emitLivePost } from '@/lib/boris/team-channels'
+import {
+  DeliveryStopAccessError,
+  DeliveryStopVersionError,
+} from '@/lib/delivery/legacy-stop'
+import {
+  DeliveryUndoTtlError,
+  DeliveryWindowNotStartedError,
+  markLegacyStopDeliveredInTransaction,
+  reportLegacyStopIssueInTransaction,
+  undoLegacyStopDeliveredInTransaction,
+} from '@/lib/delivery/legacy-stop-mutations'
+import { runWithPrismaConflictRetry } from '@/lib/delivery/prisma-transaction-retry'
+import {
+  RouteStopAccessError,
+  RouteStopCancelledError,
+  RouteStopDateError,
+  RouteStopNoActiveOrdersError,
+  RouteStopNotStartedError,
+  RouteStopVersionError,
+  completeRouteStopCore,
+} from '@/lib/delivery/route-completion'
+import {
+  DeliveryOverrideAccessError,
+  DeliveryOverrideCommentError,
+  completeRouteStopAsManagerCore,
+} from '@/lib/delivery/delivery-override'
 
 const markDeliveredSchema = z.object({
   orderIds: z.array(z.string().min(1)).min(1, 'Список заказов пуст'),
-  // 6.8b: optimistic lock — map orderId → updatedAt ISO. Если не передан или
-  // нет ключа для какого-то orderId — для этого id проверка скипается.
+  // API remains optional for an idempotent retry of an already-delivered stop.
+  // The transaction core requires an exact value for every active order.
   expectedUpdatedAts: z.record(z.string(), z.string()).optional(),
 })
 
 export type ActionResult<T = void> =
   | { ok: true; data: T }
   | { ok: false; error: string }
+
+const DELIVERY_TRANSACTION_OPTIONS = {
+  maxWait: 5_000,
+  timeout: 10_000,
+  isolationLevel: 'Serializable' as const,
+}
+
+function expectedDeliveryError(error: unknown): string | null {
+  if (
+    error instanceof DeliveryStopAccessError ||
+    error instanceof DeliveryStopVersionError ||
+    error instanceof DeliveryWindowNotStartedError ||
+    error instanceof DeliveryUndoTtlError ||
+    error instanceof RouteStopAccessError ||
+    error instanceof RouteStopCancelledError ||
+    error instanceof RouteStopDateError ||
+    error instanceof RouteStopNoActiveOrdersError ||
+    error instanceof RouteStopNotStartedError ||
+    error instanceof RouteStopVersionError ||
+    error instanceof DeliveryOverrideAccessError ||
+    error instanceof DeliveryOverrideCommentError
+  ) {
+    return error.message
+  }
+  return null
+}
 
 export async function markStopDelivered(
   formData: z.infer<typeof markDeliveredSchema>
@@ -39,115 +90,92 @@ export async function markStopDelivered(
   }
 
   const { orderIds, expectedUpdatedAts } = parsed.data
-  const now = new Date()
+  let mutation
+  try {
+    const normalizedOrderIds = [...new Set(orderIds)]
+    const linkedOrders = await prisma.order.findMany({
+      where: { id: { in: normalizedOrderIds } },
+      select: {
+        id: true,
+        routeStopId: true,
+        routeStop: {
+          select: { id: true, version: true, assignmentMode: true },
+        },
+      },
+    })
+    const linkedStopIds = new Set(
+      linkedOrders
+        .map((order) => order.routeStopId)
+        .filter((id): id is string => id !== null),
+    )
 
-  // 6.8b: optimistic lock — проверяем каждый Order до начала транзакции.
-  // Если хоть один заказ изменён другим юзером (менеджер успел отменить
-  // пока курьер ехал) — отказываем целиком, чтобы не доставить отменённое.
-  if (expectedUpdatedAts) {
-    try {
-      for (const id of orderIds) {
-        await assertOrderUpdatedAt(id, expectedUpdatedAts[id])
+    if (linkedStopIds.size > 0) {
+      const routeStop = linkedOrders[0]?.routeStop
+      if (
+        linkedOrders.length !== normalizedOrderIds.length
+        || linkedStopIds.size !== 1
+        || linkedOrders.some((order) => order.routeStopId !== routeStop?.id)
+        || !routeStop
+      ) {
+        throw new DeliveryStopAccessError()
       }
-    } catch (e) {
-      if (e instanceof OptimisticLockError) return { ok: false, error: e.message }
-      throw e
-    }
-  }
 
-  const orders = await prisma.order.findMany({
-    where: { id: { in: orderIds } },
-    select: {
-      id: true, status: true, deliveryDate: true,
-      delivery: { select: { id: true } },
-      location: { select: { deliveryWindowFrom: true } },
-    },
-  })
+      const now = new Date()
+      const completed = user.role === 'COURIER'
+        ? await completeRouteStopCore(user, {
+            stopId: routeStop.id,
+            expectedVersion: routeStop.version,
+            requestId: `legacy:${routeStop.id}:${routeStop.version}`,
+            position: null,
+            now,
+          })
+        : await completeRouteStopAsManagerCore(user, {
+            stopId: routeStop.id,
+            expectedVersion: routeStop.version,
+            reason: null,
+            now,
+          })
 
-  if (orders.length === 0) {
-    return { ok: false, error: 'Заказы не найдены' }
-  }
-
-  // MEGA-AUDIT-FIX-1 C1 (D-4): status chain guard. «Доставлено» можно ставить
-  // только из IN_PRODUCTION или OUT_FOR_DELIVERY. NEW/CANCELLED/уже DELIVERED
-  // отсекаются — иначе курьер мог бы «доставить» отменённый или ещё не
-  // собранный заказ.
-  const wrongStatus = orders.find(
-    (o) => !['IN_PRODUCTION', 'OUT_FOR_DELIVERY'].includes(o.status),
-  )
-  if (wrongStatus) {
-    return {
-      ok: false,
-      error: 'Нельзя пометить доставленным: заказ должен быть в производстве или в пути',
-    }
-  }
-
-  // Защита: курьер не должен отмечать «Доставлено» раньше начала окна доставки.
-  // Берём минимум из windowFrom по заказам остановки (одна точка → один from).
-  // ADMIN/MANAGER пропускают проверку — для теста и аварийных правок.
-  if (user.role === 'COURIER') {
-    for (const o of orders) {
-      const windowStart = parseWindowToDate(o.location.deliveryWindowFrom, o.deliveryDate)
-      if (windowStart && now < windowStart) {
+      if (!completed.delivered) {
         return {
           ok: false,
-          error: `Окно доставки ещё не началось (с ${o.location.deliveryWindowFrom})`,
+          error:
+            'Для этой точки требуется проверка геопозиции. ' +
+            'Откройте точку маршрута и подтвердите доставку там.',
         }
       }
+
+      const deliveredOrders = await prisma.order.findMany({
+        where: { routeStopId: routeStop.id, status: 'DELIVERED' },
+        select: { id: true },
+      })
+      mutation = {
+        updated: completed.idempotent ? 0 : deliveredOrders.length,
+        orderIds: deliveredOrders.map((order) => order.id),
+        orders: [],
+      }
+    } else {
+      mutation = await runWithPrismaConflictRetry(() =>
+        prismaDirect.$transaction(
+          (tx) =>
+            markLegacyStopDeliveredInTransaction(tx, {
+              actor: user,
+              orderIds,
+              expectedUpdatedAts,
+              now: new Date(),
+            }),
+          DELIVERY_TRANSACTION_OPTIONS,
+        ),
+      )
     }
+  } catch (error) {
+    const message = expectedDeliveryError(error)
+    if (message) return { ok: false, error: message }
+    throw error
   }
 
-  const updates = await prisma.$transaction(async (tx) => {
-    let count = 0
-    for (const o of orders) {
-      if (o.status === 'DELIVERED') continue
-
-      await tx.order.update({
-        where: { id: o.id },
-        data: { status: 'DELIVERED' },
-      })
-
-      if (o.delivery?.id) {
-        const existing = await tx.delivery.findUnique({
-          where: { id: o.delivery.id },
-          select: { courierName: true },
-        })
-
-        await tx.delivery.update({
-          where: { id: o.delivery.id },
-          data: {
-            status: 'DELIVERED',
-            deliveredAt: now,
-            ...(existing?.courierName ? {} : { courierName: user.name }),
-          },
-        })
-      } else {
-        await tx.delivery.create({
-          data: {
-            orderId: o.id,
-            type: 'IN_HOUSE',
-            status: 'DELIVERED',
-            deliveredAt: now,
-            courierName: user.name,
-          },
-        })
-      }
-      count++
-    }
-    return count
-  })
-
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      userRole: user.role,
-      action: 'STOP_DELIVERED',
-      entityType: 'OrderBatch',
-      entityId: orderIds[0],
-      payload: { orderIds, count: updates, courierName: user.name },
-    },
-  })
-
+  // Reconcile caches and the deduplicated Boris event even after an idempotent
+  // replay. The transaction core has already avoided duplicate writes/audit.
   revalidatePath('/delivery')
   revalidatePath('/orders')
 
@@ -162,7 +190,7 @@ export async function markStopDelivered(
   //      внутри ловит P2002 и возвращает null).
   try {
     const ordersWithClient = await prisma.order.findMany({
-      where: { id: { in: orderIds }, status: 'DELIVERED' },
+      where: { id: { in: mutation.orderIds }, status: 'DELIVERED' },
       select: {
         id: true,
         clientId: true,
@@ -205,7 +233,7 @@ export async function markStopDelivered(
     console.error('[boris-team] first_delivery trigger failed', err)
   }
 
-  return { ok: true, data: { updated: updates } }
+  return { ok: true, data: { updated: mutation.updated } }
 }
 
 const reportIssueSchema = z.object({
@@ -231,73 +259,31 @@ export async function reportDeliveryIssue(
   }
 
   const { orderIds, reason, comment } = parsed.data
-  const now = new Date()
-
-  const orders = await prisma.order.findMany({
-    where: { id: { in: orderIds } },
-    select: {
-      id: true,
-      delivery: { select: { id: true } },
-      client: { select: { name: true } },
-      location: {
-        select: {
-          name: true,
-          deliveryWindowFrom: true,
-          deliveryWindowTo: true,
-        },
-      },
-    },
-  })
-
-  if (orders.length === 0) {
-    return { ok: false, error: 'Заказы не найдены' }
+  const normalizedComment = comment?.trim() || null
+  let mutation
+  try {
+    mutation = await runWithPrismaConflictRetry(() =>
+      prismaDirect.$transaction(
+        (tx) =>
+          reportLegacyStopIssueInTransaction(tx, {
+            actor: user,
+            orderIds,
+            reason,
+            comment: normalizedComment,
+            now: new Date(),
+          }),
+        DELIVERY_TRANSACTION_OPTIONS,
+      ),
+    )
+  } catch (error) {
+    const message = expectedDeliveryError(error)
+    if (message) return { ok: false, error: message }
+    throw error
   }
-
-  // Записываем issue во все Delivery остановки (создаём Delivery если не было).
-  let updated = 0
-  await prisma.$transaction(async (tx) => {
-    for (const o of orders) {
-      if (o.delivery?.id) {
-        await tx.delivery.update({
-          where: { id: o.delivery.id },
-          data: {
-            issueReportedAt: now,
-            issueReason: reason,
-            issueComment: comment?.trim() || null,
-            issueReportedById: user.id,
-          },
-        })
-      } else {
-        await tx.delivery.create({
-          data: {
-            orderId: o.id,
-            type: 'IN_HOUSE',
-            status: 'ASSIGNED',
-            issueReportedAt: now,
-            issueReason: reason,
-            issueComment: comment?.trim() || null,
-            issueReportedById: user.id,
-          },
-        })
-      }
-      updated++
-    }
-  })
-
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      userRole: user.role,
-      action: 'COURIER_REPORTED_DELIVERY_ISSUE',
-      entityType: 'OrderBatch',
-      entityId: orderIds[0],
-      payload: { orderIds, reason, comment: comment ?? null, courierId: user.id },
-    },
-  })
 
   // Push в личку всем MANAGER+ADMIN c Telegram. Метаданные берём с первого
   // заказа остановки — все принадлежат одной location и client.
-  const first = orders[0]
+  const first = mutation.orders[0]
   const windowStr = formatDeliveryWindow(first.location.deliveryWindowFrom, first.location.deliveryWindowTo)
   const lines: string[] = [
     `🚨 <b>Проблема с доставкой</b>`,
@@ -307,19 +293,26 @@ export async function reportDeliveryIssue(
   if (windowStr !== '—') lines.push(`Окно: ${windowStr}`)
   lines.push(``)
   lines.push(`Причина: ${DELIVERY_ISSUE_REASON_LABELS[reason as DeliveryIssueReason]}`)
-  if (comment?.trim()) lines.push(`Курьер: «${escapeHtml(comment.trim())}»`)
+  if (normalizedComment) lines.push(`Курьер: «${escapeHtml(normalizedComment)}»`)
   lines.push(``)
   lines.push(`Сообщил: ${escapeHtml(user.name)}`)
 
-  await notifyAllManagersDirect(lines.join('\n'), {
-    parseMode: 'HTML',
-    replyMarkup: orderDetailButton(first.id),
-  })
+  try {
+    await notifyAllManagersDirect(lines.join('\n'), {
+      parseMode: 'HTML',
+      replyMarkup: orderDetailButton(first.id),
+    })
+  } catch (error) {
+    console.error(
+      '[delivery] issue notification failed after commit:',
+      error instanceof Error ? error.message : 'unknown error',
+    )
+  }
 
   revalidatePath('/delivery')
   revalidatePath('/orders')
   revalidatePath(`/orders/${first.id}`)
-  return { ok: true, data: { updated } }
+  return { ok: true, data: { updated: mutation.updated } }
 }
 
 const clearIssueSchema = z.object({
@@ -382,61 +375,25 @@ export async function undoStopDelivered(orderIds: string[]): Promise<ActionResul
     return { ok: false, error: 'Список заказов пуст' }
   }
 
-  const orders = await prisma.order.findMany({
-    where: { id: { in: orderIds } },
-    select: { id: true, status: true, delivery: { select: { id: true } } },
-  })
-
-  // MEGA-AUDIT-FIX-1 C2 (D-5): откат доставки разрешён только в течение 1 часа
-  // после фактической доставки. Берём самый поздний deliveredAt по остановке —
-  // если хоть один заказ доставлен > 60 мин назад, блокируем целиком.
-  const latestDelivery = await prisma.delivery.findFirst({
-    where: { orderId: { in: orderIds }, deliveredAt: { not: null } },
-    orderBy: { deliveredAt: 'desc' },
-    select: { deliveredAt: true },
-  })
-  if (
-    latestDelivery?.deliveredAt &&
-    Date.now() - latestDelivery.deliveredAt.getTime() > 60 * 60 * 1000
-  ) {
-    return {
-      ok: false,
-      error: 'Откатить можно только в течение часа после доставки',
-    }
+  let mutation
+  try {
+    mutation = await runWithPrismaConflictRetry(() =>
+      prismaDirect.$transaction(
+        (tx) =>
+          undoLegacyStopDeliveredInTransaction(tx, {
+            actor: user,
+            orderIds,
+            now: new Date(),
+          }),
+        DELIVERY_TRANSACTION_OPTIONS,
+      ),
+    )
+  } catch (error) {
+    const message = expectedDeliveryError(error)
+    if (message) return { ok: false, error: message }
+    throw error
   }
 
-  const updates = await prisma.$transaction(async (tx) => {
-    let count = 0
-    for (const o of orders) {
-      if (o.status !== 'DELIVERED') continue
-
-      await tx.order.update({
-        where: { id: o.id },
-        data: { status: 'OUT_FOR_DELIVERY' },
-      })
-
-      if (o.delivery?.id) {
-        await tx.delivery.update({
-          where: { id: o.delivery.id },
-          data: { status: 'EN_ROUTE', deliveredAt: null },
-        })
-      }
-      count++
-    }
-    return count
-  })
-
-  await prisma.activityLog.create({
-    data: {
-      userId: user.id,
-      userRole: user.role,
-      action: 'STOP_DELIVERY_REVERTED',
-      entityType: 'OrderBatch',
-      entityId: orderIds[0],
-      payload: { orderIds, count: updates },
-    },
-  })
-
   revalidatePath('/delivery')
-  return { ok: true, data: { updated: updates } }
+  return { ok: true, data: { updated: mutation.updated } }
 }

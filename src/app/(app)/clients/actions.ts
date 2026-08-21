@@ -7,6 +7,7 @@ import type { MealType, OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { startOfTodayMsk, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
+import { isValidPhone } from '@/lib/utils/format'
 import { notifyProductionChannel, escapeHtml } from '@/lib/telegram/notify'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import {
@@ -160,22 +161,69 @@ const clientSchema = z
     }
   })
 
-const locationSchema = z.object({
-  name: z.string().trim().min(1, 'Название точки обязательно').max(150),
-  address: z.string().trim().min(1, 'Адрес обязателен').max(300),
-  deliveryWindowFrom: z.string().regex(/^\d{2}:\d{2}$/, 'Формат HH:MM').nullable().optional(),
-  deliveryWindowTo: z.string().regex(/^\d{2}:\d{2}$/, 'Формат HH:MM').nullable().optional(),
-  packaging: z.enum(['INDIVIDUAL', 'BULK']),
-  tags: z.array(z.string().max(100)).max(20).default([]),
-  // 7.39: same-day delivery — атрибут локации (per-location cut-off в волне 2).
-  // optional (не .default) — иначе z.infer<locationSchema> делает поле обязательным
-  // и ломает существующие UI-вызовы; дефаулт false проставляется в server action и БД.
-  sameDayDelivery: z.boolean().optional(),
-  cutoffHourMsk: z.number().int().min(0).max(23).nullable().optional(),
-  cutoffMinuteMsk: z.number().int().min(0).max(59).nullable().optional(),
-  // Boris wave 4: стоимость доставки за день (Decimal в БД). null/пусто = бесплатно.
-  deliveryFee: z.number().min(0).nullable().optional(),
+const locationDeliveryContactSchema = z.object({
+  name: z.string().trim().max(100).nullable().optional(),
+  phone: z.string().trim().max(50).nullable().optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
 })
+
+const locationSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Название точки обязательно').max(150),
+    address: z.string().trim().min(1, 'Адрес обязателен').max(300),
+    deliveryWindowFrom: z.string().regex(/^\d{2}:\d{2}$/, 'Формат HH:MM').nullable().optional(),
+    deliveryWindowTo: z.string().regex(/^\d{2}:\d{2}$/, 'Формат HH:MM').nullable().optional(),
+    packaging: z.enum(['INDIVIDUAL', 'BULK']),
+    tags: z.array(z.string().max(100)).max(20).default([]),
+    // 7.39: same-day delivery — атрибут локации (per-location cut-off в волне 2).
+    // optional (не .default) — иначе z.infer<locationSchema> делает поле обязательным
+    // и ломает существующие UI-вызовы; дефаулт false проставляется в server action и БД.
+    sameDayDelivery: z.boolean().optional(),
+    cutoffHourMsk: z.number().int().min(0).max(23).nullable().optional(),
+    cutoffMinuteMsk: z.number().int().min(0).max(59).nullable().optional(),
+    // Boris wave 4: стоимость доставки за день (Decimal в БД). null/пусто = бесплатно.
+    deliveryFee: z.number().min(0).nullable().optional(),
+
+    // Delivery 2.0: all fields stay optional for legacy callers.
+    defaultDeliveryMode: z.enum(['IN_HOUSE', 'EXTERNAL', 'UNASSIGNED']).nullable().optional(),
+    assignedCourierId: z.string().trim().max(100).nullable().optional(),
+    deliveryInstructions: z.string().trim().max(2000).nullable().optional(),
+    deliveryContact: locationDeliveryContactSchema.nullable().optional(),
+    latitude: z.number().finite().min(-90).max(90).nullable().optional(),
+    longitude: z.number().finite().min(-180).max(180).nullable().optional(),
+    geofenceRadiusM: z.number().int().min(100).max(5000).optional(),
+    geofenceEnabled: z.boolean().optional(),
+    coordinatesSource: z.string().trim().nullable().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const latitudeSupplied = data.latitude !== undefined
+    const longitudeSupplied = data.longitude !== undefined
+    const pairHasMixedPresence = latitudeSupplied !== longitudeSupplied
+    const pairHasMixedNullability =
+      latitudeSupplied &&
+      longitudeSupplied &&
+      ((data.latitude === null) !== (data.longitude === null))
+
+    if (pairHasMixedPresence || pairHasMixedNullability) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['latitude'],
+        message: 'Широта и долгота должны быть указаны вместе',
+      })
+    }
+
+    if (data.deliveryContact) {
+      const { name, phone, notes } = data.deliveryContact
+      const isBlank = !name?.trim() && !phone?.trim() && !notes?.trim()
+      if (!isBlank && (!phone || !isValidPhone(phone))) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['deliveryContact', 'phone'],
+          message: 'Укажите корректный телефон контакта',
+        })
+      }
+    }
+  })
 
 const mealConfigSchema = z.object({
   // 5.9b: locationId обязателен. Старые null-конфиги в БД остаются (миграция позже).
@@ -225,6 +273,30 @@ function s(v: string | null | undefined): string | null {
   if (v === undefined || v === null) return null
   const trimmed = v.trim()
   return trimmed === '' ? null : trimmed
+}
+
+function normalizeLocationDeliveryContact(
+  contact: LocationFormData['deliveryContact'],
+): { name: string | null; phone: string; notes: string | null } | null {
+  if (!contact) return null
+
+  const name = s(contact.name)
+  const phone = s(contact.phone)
+  const notes = s(contact.notes)
+  if (!name && !phone && !notes) return null
+
+  // locationSchema.superRefine guarantees that every non-blank contact has
+  // a valid phone. Keeping this helper total makes nested Prisma data simple.
+  if (!phone) return null
+  return { name, phone, notes }
+}
+
+async function isActiveCourier(courierId: string): Promise<boolean> {
+  const courier = await prisma.user.findUnique({
+    where: { id: courierId },
+    select: { role: true, isActive: true },
+  })
+  return courier?.role === 'COURIER' && courier.isActive
 }
 
 /**
@@ -515,7 +587,7 @@ export async function createLocation(
   clientId: string,
   formData: LocationFormData
 ): Promise<ActionResult<{ id: string }>> {
-  await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'MANAGER'])
 
   const parsed = locationSchema.safeParse(formData)
   if (!parsed.success) {
@@ -523,8 +595,33 @@ export async function createLocation(
     return { ok: false, error: firstError?.message ?? 'Неверные данные точки' }
   }
 
-  const location = await prisma.clientLocation.create({
-    data: {
+  const requestedCourierId = s(parsed.data.assignedCourierId)
+  const defaultDeliveryMode =
+    parsed.data.defaultDeliveryMode ?? (requestedCourierId ? 'IN_HOUSE' : 'EXTERNAL')
+  const assignedCourierId = defaultDeliveryMode === 'IN_HOUSE' ? requestedCourierId : null
+
+  if (defaultDeliveryMode === 'IN_HOUSE' && !assignedCourierId) {
+    return { ok: false, error: 'Для доставки своими силами выберите курьера' }
+  }
+
+  const latitude = parsed.data.latitude ?? null
+  const longitude = parsed.data.longitude ?? null
+  const geofenceRadiusM = parsed.data.geofenceRadiusM ?? 1000
+  const geofenceEnabled = parsed.data.geofenceEnabled ?? false
+  if (geofenceEnabled && (latitude === null || longitude === null)) {
+    return { ok: false, error: 'Для геозоны сначала укажите координаты' }
+  }
+
+  const hasCoordinates = latitude !== null && longitude !== null
+  const deliveryContact = normalizeLocationDeliveryContact(parsed.data.deliveryContact)
+
+  let location: { id: string }
+  try {
+    if (assignedCourierId && !(await isActiveCourier(assignedCourierId))) {
+      return { ok: false, error: 'Курьер не найден или неактивен' }
+    }
+
+    const data: Prisma.ClientLocationUncheckedCreateInput = {
       clientId,
       name: parsed.data.name,
       address: parsed.data.address,
@@ -536,8 +633,39 @@ export async function createLocation(
       cutoffHourMsk: parsed.data.cutoffHourMsk ?? null,
       cutoffMinuteMsk: parsed.data.cutoffMinuteMsk ?? null,
       deliveryFee: parsed.data.deliveryFee ?? null,
-    },
-  })
+      defaultDeliveryMode,
+      assignedCourierId,
+      deliveryInstructions: s(parsed.data.deliveryInstructions),
+      latitude,
+      longitude,
+      geofenceRadiusM,
+      geofenceEnabled,
+      coordinatesSource: s(parsed.data.coordinatesSource),
+      ...(hasCoordinates
+        ? {
+            coordinatesUpdatedAt: new Date(),
+            coordinatesUpdatedById: user.id,
+          }
+        : {}),
+      ...(deliveryContact
+        ? {
+            deliveryContacts: {
+              create: {
+                clientId,
+                isPrimaryForDelivery: true,
+                ...deliveryContact,
+              },
+            },
+          }
+        : {}),
+    }
+
+    // Nested contact creation is part of the same database statement.
+    location = await prisma.clientLocation.create({ data, select: { id: true } })
+  } catch (error) {
+    console.error('[createLocation] persistence failed', error)
+    return { ok: false, error: 'Не удалось создать точку' }
+  }
 
   revalidatePath(`/clients/${clientId}`)
   return { ok: true, data: { id: location.id } }
@@ -547,7 +675,7 @@ export async function updateLocation(
   id: string,
   formData: LocationFormData
 ): Promise<ActionResult> {
-  await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'MANAGER'])
 
   const parsed = locationSchema.safeParse(formData)
   if (!parsed.success) {
@@ -555,9 +683,28 @@ export async function updateLocation(
     return { ok: false, error: firstError?.message ?? 'Неверные данные точки' }
   }
 
-  const location = await prisma.clientLocation.update({
-    where: { id },
-    data: {
+  let clientId: string
+  try {
+    const current = await prisma.clientLocation.findUnique({
+      where: { id },
+      select: {
+        clientId: true,
+        defaultDeliveryMode: true,
+        assignedCourierId: true,
+        latitude: true,
+        longitude: true,
+        geofenceRadiusM: true,
+        geofenceEnabled: true,
+        coordinatesSource: true,
+        deliveryContacts: {
+          where: { isPrimaryForDelivery: true },
+          select: { id: true },
+        },
+      },
+    })
+    if (!current) return { ok: false, error: 'Точка не найдена' }
+
+    const data: Prisma.ClientLocationUncheckedUpdateInput = {
       name: parsed.data.name,
       address: parsed.data.address,
       deliveryWindowFrom: parsed.data.deliveryWindowFrom ?? null,
@@ -568,10 +715,140 @@ export async function updateLocation(
       cutoffHourMsk: parsed.data.cutoffHourMsk ?? null,
       cutoffMinuteMsk: parsed.data.cutoffMinuteMsk ?? null,
       deliveryFee: parsed.data.deliveryFee ?? null,
-    },
-  })
+      ...(parsed.data.deliveryInstructions !== undefined
+        ? { deliveryInstructions: s(parsed.data.deliveryInstructions) }
+        : {}),
+    }
 
-  revalidatePath(`/clients/${location.clientId}`)
+    const assignmentTouched =
+      parsed.data.defaultDeliveryMode !== undefined && parsed.data.defaultDeliveryMode !== null
+        ? true
+        : parsed.data.assignedCourierId !== undefined
+    if (assignmentTouched) {
+      const requestedCourierId = s(parsed.data.assignedCourierId)
+      const defaultDeliveryMode =
+        parsed.data.defaultDeliveryMode ?? (requestedCourierId ? 'IN_HOUSE' : 'EXTERNAL')
+      const assignedCourierId = defaultDeliveryMode === 'IN_HOUSE' ? requestedCourierId : null
+
+      if (defaultDeliveryMode === 'IN_HOUSE' && !assignedCourierId) {
+        return { ok: false, error: 'Для доставки своими силами выберите курьера' }
+      }
+      if (assignedCourierId && !(await isActiveCourier(assignedCourierId))) {
+        return { ok: false, error: 'Курьер не найден или неактивен' }
+      }
+
+      data.defaultDeliveryMode = defaultDeliveryMode
+      data.assignedCourierId = assignedCourierId
+    }
+
+    const coordinatePairTouched =
+      parsed.data.latitude !== undefined || parsed.data.longitude !== undefined
+    const currentLatitude = current.latitude === null ? null : Number(current.latitude)
+    const currentLongitude = current.longitude === null ? null : Number(current.longitude)
+    const effectiveLatitude = coordinatePairTouched
+      ? parsed.data.latitude ?? null
+      : currentLatitude
+    const effectiveLongitude = coordinatePairTouched
+      ? parsed.data.longitude ?? null
+      : currentLongitude
+    const effectiveGeofenceEnabled = parsed.data.geofenceEnabled ?? current.geofenceEnabled
+
+    if (
+      effectiveGeofenceEnabled &&
+      (effectiveLatitude === null || effectiveLatitude === undefined ||
+        effectiveLongitude === null || effectiveLongitude === undefined)
+    ) {
+      return { ok: false, error: 'Для геозоны сначала укажите координаты' }
+    }
+
+    const normalizedCoordinatesSource =
+      parsed.data.coordinatesSource === undefined
+        ? current.coordinatesSource
+        : s(parsed.data.coordinatesSource)
+    const coordinateValuesChanged =
+      coordinatePairTouched &&
+      (effectiveLatitude !== currentLatitude || effectiveLongitude !== currentLongitude)
+    const coordinateSourceChanged =
+      parsed.data.coordinatesSource !== undefined &&
+      normalizedCoordinatesSource !== current.coordinatesSource
+    const sourceClearedWithCoordinates =
+      coordinatePairTouched &&
+      effectiveLatitude === null &&
+      parsed.data.coordinatesSource === undefined &&
+      current.coordinatesSource !== null
+    const coordinateProvenanceChanged =
+      coordinateValuesChanged || coordinateSourceChanged || sourceClearedWithCoordinates
+
+    if (coordinatePairTouched) {
+      data.latitude = effectiveLatitude
+      data.longitude = effectiveLongitude
+      if (effectiveLatitude === null && parsed.data.coordinatesSource === undefined) {
+        data.coordinatesSource = null
+      }
+    }
+    if (parsed.data.geofenceRadiusM !== undefined) {
+      data.geofenceRadiusM = parsed.data.geofenceRadiusM
+    }
+    if (parsed.data.geofenceEnabled !== undefined) {
+      data.geofenceEnabled = parsed.data.geofenceEnabled
+    }
+    if (parsed.data.coordinatesSource !== undefined) {
+      data.coordinatesSource = normalizedCoordinatesSource
+    }
+    if (coordinateProvenanceChanged) {
+      data.coordinatesUpdatedAt = new Date()
+      data.coordinatesUpdatedById = user.id
+    }
+
+    if (parsed.data.deliveryContact !== undefined) {
+      const deliveryContact = normalizeLocationDeliveryContact(parsed.data.deliveryContact)
+      const [primaryContact, ...duplicatePrimaryContacts] = current.deliveryContacts
+
+      if (!deliveryContact) {
+        if (current.deliveryContacts.length === 1) {
+          data.deliveryContacts = { delete: { id: primaryContact.id } }
+        } else if (current.deliveryContacts.length > 1) {
+          data.deliveryContacts = {
+            delete: current.deliveryContacts.map((contact) => ({ id: contact.id })),
+          }
+        }
+      } else if (primaryContact) {
+        data.deliveryContacts = {
+          update: {
+            where: { id: primaryContact.id },
+            data: {
+              clientId: current.clientId,
+              isPrimaryForDelivery: true,
+              ...deliveryContact,
+            },
+          },
+          ...(duplicatePrimaryContacts.length > 0
+            ? { delete: duplicatePrimaryContacts.map((contact) => ({ id: contact.id })) }
+            : {}),
+        }
+      } else {
+        data.deliveryContacts = {
+          create: {
+            clientId: current.clientId,
+            isPrimaryForDelivery: true,
+            ...deliveryContact,
+          },
+        }
+      }
+    }
+
+    const location = await prisma.clientLocation.update({
+      where: { id },
+      data,
+      select: { clientId: true },
+    })
+    clientId = location.clientId
+  } catch (error) {
+    console.error('[updateLocation] persistence failed', error)
+    return { ok: false, error: 'Не удалось обновить точку' }
+  }
+
+  revalidatePath(`/clients/${clientId}`)
   return { ok: true, data: undefined }
 }
 
@@ -600,23 +877,27 @@ export async function assignCourierToLocation(
 ): Promise<ActionResult> {
   await requireRole(['ADMIN', 'MANAGER'])
 
-  if (courierId !== null) {
-    const courier = await prisma.user.findUnique({
-      where: { id: courierId },
-      select: { role: true, isActive: true },
-    })
-    if (!courier || courier.role !== 'COURIER' || !courier.isActive) {
+  let clientId: string
+  try {
+    if (courierId !== null && !(await isActiveCourier(courierId))) {
       return { ok: false, error: 'Курьер не найден или неактивен' }
     }
+
+    const loc = await prisma.clientLocation.update({
+      where: { id: locationId },
+      data: {
+        assignedCourierId: courierId,
+        defaultDeliveryMode: courierId === null ? 'EXTERNAL' : 'IN_HOUSE',
+      },
+      select: { clientId: true },
+    })
+    clientId = loc.clientId
+  } catch (error) {
+    console.error('[assignCourierToLocation] persistence failed', error)
+    return { ok: false, error: 'Не удалось обновить курьера точки' }
   }
 
-  const loc = await prisma.clientLocation.update({
-    where: { id: locationId },
-    data: { assignedCourierId: courierId },
-    select: { clientId: true },
-  })
-
-  revalidatePath(`/clients/${loc.clientId}`)
+  revalidatePath(`/clients/${clientId}`)
   return { ok: true, data: undefined }
 }
 

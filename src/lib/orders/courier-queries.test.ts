@@ -12,13 +12,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  * hour-before-window — это пост-обработка в JS, её проверяем на реальных данных.
  */
 
-const { mockPrisma } = vi.hoisted(() => ({
+const { mockPrisma, mockEnsureRouteStops } = vi.hoisted(() => ({
   mockPrisma: {
     order: { findMany: vi.fn(), updateMany: vi.fn() },
   },
+  mockEnsureRouteStops: vi.fn(),
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
+vi.mock('@/lib/delivery/route-materializer', () => ({
+  ensureCourierRouteStopsForDate: mockEnsureRouteStops,
+}))
 
 import {
   getCourierAssignmentOrders,
@@ -34,11 +38,25 @@ function decimal(n: number) {
 
 function dbRow(over: Partial<{
   id: string
+  clientId: string
+  locationId: string
   mealType: string
   portions: number
   totalPrice: number
   clientName: string
+  contactName: string | null
   contactPhone: string | null
+  contacts: {
+    id?: string
+    clientId?: string
+    locationId?: string | null
+    isPrimaryForDelivery?: boolean
+    name: string | null
+    phone: string
+    notes?: string | null
+    sortOrder?: number
+    createdAt?: Date
+  }[]
   locationName: string
   address: string
   windowFrom: string | null
@@ -50,11 +68,27 @@ function dbRow(over: Partial<{
     role: string
     isActive: boolean
   } | null
+  routeStop: {
+    assignmentMode: 'IN_HOUSE' | 'EXTERNAL' | 'UNASSIGNED'
+    clientNameSnapshot: string
+    locationNameSnapshot: string
+    locationAddressSnapshot: string
+    contactNameSnapshot: string | null
+    contactPhoneSnapshot: string | null
+    deliveryWindowFromSnapshot: string | null
+    deliveryWindowToSnapshot: string | null
+    routeDay: {
+      courierId: string
+      courierNameSnapshot: string
+    } | null
+  } | null
 }> = {}) {
+  const clientId = over.clientId ?? 'client_1'
+  const locationId = over.locationId ?? 'loc_1'
   return {
     id: over.id ?? 'o1',
-    clientId: 'client_1',
-    locationId: 'loc_1',
+    clientId,
+    locationId,
     mealType: over.mealType ?? 'LUNCH',
     status: 'CONFIRMED',
     portions: over.portions ?? 20,
@@ -62,9 +96,19 @@ function dbRow(over: Partial<{
     notes: 'Позвонить заранее',
     client: {
       name: over.clientName ?? 'Кафе',
-      contactName: 'Запасной контакт',
+      contactName: 'contactName' in over ? (over.contactName ?? null) : 'Запасной контакт',
       contactPhone: 'contactPhone' in over ? (over.contactPhone ?? null) : '+7900',
-      contacts: [] as { name: string | null; phone: string }[],
+      contacts: (over.contacts ?? []).map((contact, index) => ({
+        id: contact.id ?? `contact-${index + 1}`,
+        clientId: contact.clientId ?? clientId,
+        locationId: contact.locationId ?? null,
+        isPrimaryForDelivery: contact.isPrimaryForDelivery ?? false,
+        name: contact.name,
+        phone: contact.phone,
+        notes: contact.notes ?? null,
+        sortOrder: contact.sortOrder ?? index,
+        createdAt: contact.createdAt ?? new Date('2026-06-01T09:00:00.000Z'),
+      })),
     },
     location: {
       name: over.locationName ?? 'Точка',
@@ -77,6 +121,19 @@ function dbRow(over: Partial<{
       assignedCourierId: over.assignedCourierId ?? null,
       assignedCourier: over.assignedCourier ?? null,
     },
+    routeStop: 'routeStop' in over
+      ? over.routeStop
+      : {
+          assignmentMode: 'EXTERNAL',
+          clientNameSnapshot: over.clientName ?? 'Кафе',
+          locationNameSnapshot: over.locationName ?? 'Точка',
+          locationAddressSnapshot: over.address ?? 'ул. Ленина 1',
+          contactNameSnapshot: null,
+          contactPhoneSnapshot: over.contactPhone ?? '+7900',
+          deliveryWindowFromSnapshot: 'windowFrom' in over ? (over.windowFrom ?? null) : '12:00',
+          deliveryWindowToSnapshot: 'windowTo' in over ? (over.windowTo ?? null) : '13:00',
+          routeDay: null,
+        },
   }
 }
 
@@ -90,7 +147,37 @@ afterEach(() => {
 })
 
 describe('getOrdersWithoutCourierTomorrow', () => {
-  it('where: status активный, нет курьера, не уведомлён; deliveryDate=завтра МСК', async () => {
+  it('uses the primary contact of the order location instead of the legacy phone', async () => {
+    vi.setSystemTime(new Date('2026-06-04T10:00:00.000Z'))
+    mockPrisma.order.findMany.mockResolvedValue([
+      dbRow({
+        contactPhone: '+70000000000',
+        contacts: [
+          {
+            id: 'client-wide',
+            locationId: null,
+            name: 'Общий',
+            phone: '+71111111111',
+            sortOrder: 0,
+          },
+          {
+            id: 'location-primary',
+            locationId: 'loc_1',
+            isPrimaryForDelivery: true,
+            name: 'Контакт точки',
+            phone: '+72222222222',
+            sortOrder: 20,
+          },
+        ],
+      }),
+    ])
+
+    const [result] = await getOrdersWithoutCourierTomorrow()
+
+    expect(result.clientContactPhone).toBe('+72222222222')
+  })
+
+  it('where: status активный, daily EXTERNAL/UNASSIGNED, не уведомлён; deliveryDate=завтра МСК', async () => {
     // 2026-06-04 10:00 UTC = 13:00 МСК. Завтра МСК = 2026-06-05 → UTC-полночь.
     vi.setSystemTime(new Date('2026-06-04T10:00:00.000Z'))
     mockPrisma.order.findMany.mockResolvedValue([dbRow()])
@@ -102,8 +189,13 @@ describe('getOrdersWithoutCourierTomorrow', () => {
       in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'],
     })
     expect(arg.where.courierMissingNotifiedAt).toBeNull()
-    expect(arg.where.location).toEqual({ assignedCourierId: null })
+    expect(arg.where.routeStop).toEqual({
+      assignmentMode: { in: ['EXTERNAL', 'UNASSIGNED'] },
+    })
     expect(arg.where.deliveryDate).toEqual(new Date('2026-06-05T00:00:00.000Z'))
+    expect(mockEnsureRouteStops).toHaveBeenCalledWith(
+      new Date('2026-06-05T00:00:00.000Z'),
+    )
   })
 
   it('маппинг DTO: Decimal totalPrice → Number; поля клиента/точки прокинуты', async () => {
@@ -150,13 +242,13 @@ describe('getOrdersWithoutCourierTomorrow', () => {
     expect(res[0].deliveryWindowFrom).toBeNull()
   })
 
-  it('assignedCourierId=null → попадает; курьер назначен → БД не вернёт (where фильтрует)', async () => {
+  it('daily EXTERNAL/UNASSIGNED попадает; daily IN_HOUSE БД не вернёт', async () => {
     vi.setSystemTime(new Date('2026-06-04T10:00:00.000Z'))
-    // Имитируем поведение БД: заказ без курьера в результате есть.
+    // Имитируем поведение БД: daily external/unassigned в результате есть.
     mockPrisma.order.findMany.mockResolvedValue([dbRow({ assignedCourierId: null })])
     const res1 = await getOrdersWithoutCourierTomorrow()
     expect(res1).toHaveLength(1)
-    // А с назначенным курьером БД отдаёт пусто (where { location: { assignedCourierId: null } }).
+    // А daily IN_HOUSE БД отдаёт пусто по relation-фильтру routeStop.
     mockPrisma.order.findMany.mockResolvedValue([])
     const res2 = await getOrdersWithoutCourierTomorrow()
     expect(res2).toHaveLength(0)
@@ -172,7 +264,7 @@ describe('getOrdersForHourBeforeWindow', () => {
     vi.setSystemTime(NOW)
   })
 
-  it('where: только заказы с deliveryWindowFrom != null, сегодня МСК, без курьера, не уведомлён', async () => {
+  it('where: окно задано, сегодня МСК, daily EXTERNAL/UNASSIGNED, не уведомлён', async () => {
     mockPrisma.order.findMany.mockResolvedValue([])
     await getOrdersForHourBeforeWindow(NOW)
 
@@ -183,9 +275,14 @@ describe('getOrdersForHourBeforeWindow', () => {
     })
     expect(arg.where.courierMissingNotifiedAt).toBeNull()
     expect(arg.where.location).toEqual({
-      assignedCourierId: null,
       deliveryWindowFrom: { not: null },
     })
+    expect(arg.where.routeStop).toEqual({
+      assignmentMode: { in: ['EXTERNAL', 'UNASSIGNED'] },
+    })
+    expect(mockEnsureRouteStops).toHaveBeenCalledWith(
+      new Date('2026-06-04T00:00:00.000Z'),
+    )
   })
 
   it('окно через 70 мин → попадает (now=11:00 МСК, окно 12:10 = +70м)', async () => {
@@ -233,37 +330,72 @@ describe('getOrdersForHourBeforeWindow', () => {
 describe('getCourierAssignmentOrders', () => {
   const DELIVERY_DATE = new Date('2026-08-07T00:00:00.000Z')
 
-  it('использует exact @db.Date и только ClientLocation.assignedCourier', async () => {
-    const assignedCourier = {
-      id: 'courier_1',
-      name: 'Анна Курьер',
-      role: 'COURIER',
-      isActive: true,
-    }
-    const row = dbRow({ assignedCourierId: 'courier_1', assignedCourier })
-    row.client.contacts = [{ name: 'Приоритетный', phone: '+79991112233' }]
+  it('normalizes once and reuses the same exact MSK @db.Date for materialize and read', async () => {
+    const boundaryMoment = new Date('2026-08-10T21:30:00.000Z')
+    const exactDate = new Date('2026-08-11T00:00:00.000Z')
+    mockPrisma.order.findMany.mockResolvedValue([dbRow()])
+
+    await getCourierAssignmentOrders(boundaryMoment)
+
+    expect(mockEnsureRouteStops).toHaveBeenCalledWith(exactDate)
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual(exactDate)
+  })
+
+  it('materializes exact @db.Date and uses only the persisted daily assignment/snapshots', async () => {
+    const row = dbRow({
+      assignedCourierId: 'location-default-courier',
+      assignedCourier: {
+        id: 'location-default-courier',
+        name: 'Не дневной курьер',
+        role: 'COURIER',
+        isActive: true,
+      },
+      routeStop: {
+        assignmentMode: 'IN_HOUSE',
+        clientNameSnapshot: 'Кафе snapshot',
+        locationNameSnapshot: 'Точка snapshot',
+        locationAddressSnapshot: 'Адрес snapshot',
+        contactNameSnapshot: 'Встречающий snapshot',
+        contactPhoneSnapshot: '+79991112233',
+        deliveryWindowFromSnapshot: '09:00',
+        deliveryWindowToSnapshot: '10:00',
+        routeDay: {
+          courierId: 'daily-courier',
+          courierNameSnapshot: 'Анна Дневная',
+        },
+      },
+    })
     mockPrisma.order.findMany.mockResolvedValue([row])
 
     const result = await getCourierAssignmentOrders(DELIVERY_DATE)
 
+    expect(mockEnsureRouteStops).toHaveBeenCalledWith(DELIVERY_DATE)
     const query = mockPrisma.order.findMany.mock.calls[0][0]
     expect(query.where).toEqual({
       deliveryDate: DELIVERY_DATE,
       status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
     })
-    expect(query.select.location.select.assignedCourier).toEqual({
-      select: { id: true, name: true, role: true, isActive: true },
+    expect(query.select.routeStop).toEqual({
+      select: expect.objectContaining({
+        assignmentMode: true,
+        routeDay: {
+          select: { courierId: true, courierNameSnapshot: true },
+        },
+      }),
     })
     expect(query.select.delivery).toBeUndefined()
     expect(result[0]).toEqual(expect.objectContaining({
       orderId: 'o1',
       clientId: 'client_1',
-      clientName: 'Кафе',
+      clientName: 'Кафе snapshot',
+      clientContactName: 'Встречающий snapshot',
       clientContactPhone: '+79991112233',
       locationId: 'loc_1',
-      assignedCourierId: 'courier_1',
-      assignedCourier: { id: 'courier_1', name: 'Анна Курьер' },
-      courierLabel: 'Анна Курьер',
+      locationName: 'Точка snapshot',
+      assignedCourierId: 'daily-courier',
+      assignedCourier: { id: 'daily-courier', name: 'Анна Дневная' },
+      assignmentMode: 'IN_HOUSE',
+      courierLabel: 'Анна Дневная',
       status: 'CONFIRMED',
       packaging: 'INDIVIDUAL',
       tags: ['термосумка'],
@@ -272,21 +404,32 @@ describe('getCourierAssignmentOrders', () => {
   })
 
   it.each([
-    { role: 'MANAGER', isActive: true },
-    { role: 'COURIER', isActive: false },
-  ])('не считает назначением неактивного/не-COURIER пользователя: %o', async (user) => {
+    { mode: 'EXTERNAL' as const, label: 'InDrive' },
+    { mode: 'UNASSIGNED' as const, label: 'Не назначено' },
+  ])('distinguishes daily $mode from location defaults', async ({ mode, label }) => {
     mockPrisma.order.findMany.mockResolvedValue([
       dbRow({
-        assignedCourierId: 'user_1',
-        assignedCourier: { id: 'user_1', name: 'Не курьер', ...user },
+        assignedCourierId: 'location-default-courier',
+        routeStop: {
+          assignmentMode: mode,
+          clientNameSnapshot: 'Кафе',
+          locationNameSnapshot: 'Точка',
+          locationAddressSnapshot: 'Адрес',
+          contactNameSnapshot: null,
+          contactPhoneSnapshot: null,
+          deliveryWindowFromSnapshot: null,
+          deliveryWindowToSnapshot: null,
+          routeDay: null,
+        },
       }),
     ])
 
     const result = await getCourierAssignmentOrders(DELIVERY_DATE)
 
-    expect(result[0].assignedCourierId).toBe('user_1')
+    expect(result[0].assignedCourierId).toBeNull()
     expect(result[0].assignedCourier).toBeNull()
-    expect(result[0].courierLabel).toBe('InDrive')
+    expect(result[0].assignmentMode).toBe(mode)
+    expect(result[0].courierLabel).toBe(label)
   })
 })
 

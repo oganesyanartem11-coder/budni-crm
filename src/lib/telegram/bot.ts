@@ -14,6 +14,8 @@ import '@/lib/telegram/handlers/weekly-submission'
 import '@/lib/telegram/handlers/order-change'
 // Side-effect import: отдельный callback scope 'anom' для ручной проверки порций.
 import '@/lib/telegram/handlers/anomaly-confirmation'
+// Delivery 2.0: approve/reject persisted manager override requests.
+import '@/lib/telegram/handlers/delivery-override'
 // Борис-Директ: импорт регистрирует callback-scope 'bdir' (кнопки предложений),
 // а handleDirectChatMessage перехватывает команды владельца в чате Директа
 // («Борис, стоп/продолжай/боевой/наблюдение/откати последнее/статус»).

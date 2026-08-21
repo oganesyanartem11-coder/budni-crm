@@ -27,6 +27,7 @@ export interface CourierStop {
 
 export interface CourierAssignmentGroup {
   assignedCourier: { id: string; name: string } | null
+  assignmentMode: CourierAssignmentOrder['assignmentMode']
   courierLabel: string
   stops: CourierStop[]
   totalPortions: number
@@ -39,6 +40,7 @@ interface MutableStop extends Omit<CourierStop, 'meals'> {
 
 interface MutableGroup {
   assignedCourier: { id: string; name: string } | null
+  assignmentMode: CourierAssignmentOrder['assignmentMode']
   courierLabel: string
   stopsByLocation: Map<string, MutableStop>
   orderCount: number
@@ -58,12 +60,13 @@ export function groupCourierAssignments(
   const groups = new Map<string, MutableGroup>()
 
   for (const order of orders) {
-    const groupKey = order.assignedCourier?.id ?? '__indrive__'
+    const groupKey = order.assignedCourier?.id ?? `__${order.assignmentMode}`
     let group = groups.get(groupKey)
     if (!group) {
       group = {
         assignedCourier: order.assignedCourier,
-        courierLabel: order.assignedCourier?.name ?? 'InDrive',
+        assignmentMode: order.assignmentMode,
+        courierLabel: order.courierLabel,
         stopsByLocation: new Map(),
         orderCount: 0,
       }
@@ -109,6 +112,7 @@ export function groupCourierAssignments(
 
       return {
         assignedCourier: group.assignedCourier,
+        assignmentMode: group.assignmentMode,
         courierLabel: group.courierLabel,
         stops,
         totalPortions: stops.reduce((sum, stop) => sum + stop.totalPortions, 0),
@@ -118,14 +122,17 @@ export function groupCourierAssignments(
     .sort((a, b) => {
       if (!a.assignedCourier && b.assignedCourier) return 1
       if (a.assignedCourier && !b.assignedCourier) return -1
+      if (!a.assignedCourier && !b.assignedCourier) {
+        const modeRank = { EXTERNAL: 0, UNASSIGNED: 1, IN_HOUSE: 2 }
+        const rankDiff = modeRank[a.assignmentMode] - modeRank[b.assignmentMode]
+        if (rankDiff !== 0) return rankDiff
+      }
       return a.courierLabel.localeCompare(b.courierLabel, 'ru')
     })
 }
 
 function renderGroupHeader(group: CourierAssignmentGroup): string {
-  const label = group.assignedCourier
-    ? escapeHtml(group.assignedCourier.name)
-    : 'InDrive / не назначено'
+  const label = escapeHtml(group.courierLabel)
   return `<b>${label}</b> — ${formatLocations(group.stops.length)}, ${formatPortions(group.totalPortions)}`
 }
 

@@ -22,6 +22,7 @@ function order(over: Partial<CourierAssignmentOrder> = {}): CourierAssignmentOrd
     status: 'CONFIRMED',
     assignedCourierId: 'courier_anna',
     assignedCourier: { id: 'courier_anna', name: 'Анна' },
+    assignmentMode: 'IN_HOUSE',
     courierLabel: 'Анна',
     packaging: 'INDIVIDUAL',
     tags: [],
@@ -39,6 +40,7 @@ describe('groupCourierAssignments', () => {
         locationName: 'Без курьера',
         assignedCourierId: null,
         assignedCourier: null,
+        assignmentMode: 'EXTERNAL',
         courierLabel: 'InDrive',
         portions: 4,
       }),
@@ -53,6 +55,7 @@ describe('groupCourierAssignments', () => {
         locationName: 'Склад',
         assignedCourierId: 'courier_boris',
         assignedCourier: { id: 'courier_boris', name: 'Борис' },
+        assignmentMode: 'IN_HOUSE',
         courierLabel: 'Борис',
         portions: 8,
       }),
@@ -113,6 +116,7 @@ describe('formatCourierAssignmentMessages', () => {
       order({
         assignedCourierId: null,
         assignedCourier: null,
+        assignmentMode: 'EXTERNAL',
         courierLabel: 'InDrive',
         clientContactPhone: null,
       }),
@@ -123,10 +127,39 @@ describe('formatCourierAssignmentMessages', () => {
       new Date('2026-08-07T00:00:00.000Z'),
     )[0]
 
-    expect(text).toContain('<b>InDrive / не назначено</b> — 1 точка, 20 порций')
+    expect(text).toContain('<b>InDrive</b> — 1 точка, 20 порций')
     expect(text).not.toContain('<code></code>')
     expect(text).not.toContain('LUNCH')
     expect(text).not.toContain('**')
+  })
+
+  it('keeps EXTERNAL and UNASSIGNED in separate daily sections', () => {
+    const groups = groupCourierAssignments([
+      order({
+        orderId: 'external',
+        locationId: 'external-location',
+        assignedCourierId: null,
+        assignedCourier: null,
+        assignmentMode: 'EXTERNAL',
+        courierLabel: 'InDrive',
+      }),
+      order({
+        orderId: 'unassigned',
+        locationId: 'unassigned-location',
+        assignedCourierId: null,
+        assignedCourier: null,
+        assignmentMode: 'UNASSIGNED',
+        courierLabel: 'Не назначено',
+      }),
+    ])
+
+    expect(groups.map((group) => group.courierLabel)).toEqual([
+      'InDrive',
+      'Не назначено',
+    ])
+    const text = formatCourierAssignmentMessages(groups, new Date('2026-08-07T00:00:00.000Z'))[0]
+    expect(text).toContain('<b>InDrive</b>')
+    expect(text).toContain('<b>Не назначено</b>')
   })
 
   it('длинный отчёт делит только по stops/sections, не ломая HTML', () => {

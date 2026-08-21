@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User, UtensilsCrossed, Mail, Trash2, Contact } from 'lucide-react'
+import { MapPin, ClipboardList, Plus, Edit2, Archive, ArchiveRestore, Settings, BarChart3, StickyNote, ArrowRight, Phone, AtSign, User, UtensilsCrossed, Mail, Trash2, Contact, Navigation, ShieldCheck, Truck } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 import { toast } from 'sonner'
 import { LocationModal } from './location-modal'
@@ -13,7 +13,7 @@ import type { ClientContactDTO } from './contact-actions'
 import { deleteClientContact } from './contact-actions'
 import { ClientAnalyticsTab } from './client-analytics-tab'
 import type { ClientAnalytics } from '@/lib/db/queries/client-analytics'
-import { archiveClient, archiveLocation, assignCourierToLocation, deleteMealConfig } from '../actions'
+import { archiveClient, archiveLocation, deleteMealConfig } from '../actions'
 import { formatDateMsk } from '@/lib/utils/format'
 import { formatMoney, formatDeliveryWindow, formatOrders } from '@/lib/utils/format'
 import {
@@ -25,10 +25,12 @@ import {
 } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import type { Client, ClientLocation, MealType, OrderType, ScheduleType, DeliveryHorizon, Prisma } from '@prisma/client'
-
-// Boris wave 4: deliveryFee — Decimal в БД, serialize() конвертит в number на границе RSC.
-// Локация на клиенте видит deliveryFee как number | null, остальные поля — как у Prisma.
-type SerializedLocation = Omit<ClientLocation, 'deliveryFee'> & { deliveryFee: number | null }
+import {
+  DELIVERY_MODE_LABELS,
+  resolveLocationDeliveryMode,
+  type SerializedLocation,
+} from './location-types'
+import type { ResolvedDeliveryContact } from '@/lib/delivery/contact-resolver'
 
 interface SerializedConfig {
   id: string
@@ -61,8 +63,8 @@ interface SerializedClientDetail extends Omit<Client, never> {
 interface Props {
   client: SerializedClientDetail
   analytics: ClientAnalytics
-  // MEGA-BACKEND блок B: активные курьеры для селекта «Курьер» у каждой точки.
   couriers: Array<{ id: string; name: string }>
+  deliveryContactsByLocationId: Record<string, ResolvedDeliveryContact | null>
 }
 
 type Tab = 'locations' | 'configs' | 'orders' | 'analytics'
@@ -73,7 +75,12 @@ function isTab(value: string | null): value is Tab {
   return value !== null && (VALID_TABS as readonly string[]).includes(value)
 }
 
-export function ClientDetail({ client, analytics, couriers }: Props) {
+export function ClientDetail({
+  client,
+  analytics,
+  couriers,
+  deliveryContactsByLocationId,
+}: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   // Sprint 7.11 O-7: ?tab=configs из онбординг-чеклиста скроллит и открывает нужный таб.
@@ -215,6 +222,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
         <LocationsTab
           locations={client.locations}
           couriers={couriers}
+          deliveryContactsByLocationId={deliveryContactsByLocationId}
           onAdd={() => setLocModal({ open: true })}
           onEdit={(loc) => setLocModal({ open: true, location: loc })}
           onArchive={handleArchiveLocation}
@@ -270,6 +278,7 @@ export function ClientDetail({ client, analytics, couriers }: Props) {
       <LocationModal
         clientId={client.id}
         location={locModal.location}
+        couriers={couriers}
         open={locModal.open}
         onClose={() => setLocModal({ open: false })}
       />
@@ -411,25 +420,19 @@ function TabButton({ active, onClick, icon: Icon, label, count }: { active: bool
 function LocationsTab({
   locations,
   couriers,
+  deliveryContactsByLocationId,
   onAdd,
   onEdit,
   onArchive,
 }: {
   locations: SerializedLocation[]
-  // MEGA-BACKEND блок B: список активных курьеров для селекта «Курьер».
   couriers: Array<{ id: string; name: string }>
+  deliveryContactsByLocationId: Record<string, ResolvedDeliveryContact | null>
   onAdd: () => void
   onEdit: (loc: SerializedLocation) => void
   onArchive: (id: string, name: string, isActive: boolean) => void
 }) {
-  const [, startTransition] = useTransition()
-
-  function handleAssignCourier(locationId: string, courierId: string | null) {
-    startTransition(async () => {
-      const r = await assignCourierToLocation(locationId, courierId)
-      if (!r.ok) toast.error(r.error)
-    })
-  }
+  const courierNames = new Map(couriers.map((courier) => [courier.id, courier.name]))
 
   return (
     <div className="space-y-3">
@@ -447,62 +450,109 @@ function LocationsTab({
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {locations.map((loc) => (
-            <div
-              key={loc.id}
-              className={cn(
-                'rounded-2xl bg-surface border p-5',
-                loc.isActive ? 'border-border' : 'border-border opacity-60'
-              )}
-              style={{ boxShadow: 'var(--shadow-card)' }}
-            >
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold truncate">{loc.name}</h3>
-                  <p className="text-sm text-fg-muted">{loc.address}</p>
+          {locations.map((loc) => {
+            const mode = resolveLocationDeliveryMode(
+              loc.defaultDeliveryMode,
+              loc.assignedCourierId,
+            )
+            const courierName = loc.assignedCourierId
+              ? courierNames.get(loc.assignedCourierId)
+              : null
+            const contact = deliveryContactsByLocationId[loc.id] ?? null
+            const inheritedContact =
+              contact?.source === 'CLIENT' || contact?.source === 'LEGACY'
+
+            return (
+              <div
+                key={loc.id}
+                className={cn(
+                  'rounded-2xl bg-surface border p-5',
+                  loc.isActive ? 'border-border' : 'border-border opacity-60'
+                )}
+                style={{ boxShadow: 'var(--shadow-card)' }}
+              >
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold truncate">{loc.name}</h3>
+                    <p className="text-sm text-fg-muted">{loc.address}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button type="button" onClick={() => onEdit(loc)} aria-label={`Редактировать точку ${loc.name}`} className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button type="button" onClick={() => onArchive(loc.id, loc.name, loc.isActive)} aria-label={loc.isActive ? 'В архив' : 'Восстановить'} className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      {loc.isActive ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button type="button" onClick={() => onEdit(loc)} aria-label="Редактировать" className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button type="button" onClick={() => onArchive(loc.id, loc.name, loc.isActive)} aria-label={loc.isActive ? 'В архив' : 'Восстановить'} className="min-w-[44px] min-h-[44px] rounded-full hover:bg-bg flex items-center justify-center text-fg-muted hover:text-fg transition-colors [touch-action:manipulation]">
-                    {loc.isActive ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
-                  </button>
+
+                <div className="flex flex-wrap gap-2 text-xs text-fg-muted mt-3">
+                  <span className="px-2 py-0.5 rounded-pill bg-bg">
+                    {formatDeliveryWindow(loc.deliveryWindowFrom, loc.deliveryWindowTo)}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-pill bg-bg">
+                    {PACKAGING_LABELS[loc.packaging]}
+                  </span>
+                  <span
+                    className={cn(
+                      'px-2 py-0.5 rounded-pill font-medium',
+                      mode === 'IN_HOUSE' && 'bg-data-orders-bg text-data-orders-ink',
+                      mode === 'EXTERNAL' && 'bg-data-revenue-bg text-data-revenue-ink',
+                      mode === 'UNASSIGNED' && 'bg-neutral-bg text-neutral-fg',
+                    )}
+                  >
+                    {DELIVERY_MODE_LABELS[mode]}
+                  </span>
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs text-fg-muted mt-3">
-                <span className="px-2 py-0.5 rounded-pill bg-bg">
-                  {formatDeliveryWindow(loc.deliveryWindowFrom, loc.deliveryWindowTo)}
-                </span>
-                <span className="px-2 py-0.5 rounded-pill bg-bg">
-                  {PACKAGING_LABELS[loc.packaging]}
-                </span>
-              </div>
-              {loc.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {loc.tags.map((t) => (
-                    <span key={t} className="text-xs px-2 py-0.5 rounded-pill bg-warning-bg text-warning-fg font-medium">
-                      {t}
-                    </span>
-                  ))}
+
+                <div className="mt-3 space-y-2 text-sm text-fg-muted">
+                  {mode === 'IN_HOUSE' && (
+                    <p className="flex items-center gap-2">
+                      <Truck className="w-4 h-4 text-fg-subtle shrink-0" />
+                      {courierName ?? 'Курьер не выбран'}
+                    </p>
+                  )}
+                  {contact && (
+                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <Phone className="w-4 h-4 text-fg-subtle shrink-0" />
+                      <span>{contact.name ? `${contact.name} · ` : ''}{contact.phone ?? 'без телефона'}</span>
+                      {inheritedContact && (
+                        <span className="px-2 py-0.5 rounded-pill bg-neutral-bg text-neutral-fg text-xs">
+                          общий контакт
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {loc.geofenceEnabled && loc.latitude != null && loc.longitude != null ? (
+                    <p className="flex items-center gap-2 text-data-orders-ink">
+                      <ShieldCheck className="w-4 h-4 shrink-0" />
+                      Геозона {loc.geofenceRadiusM.toLocaleString('ru-RU')} м
+                    </p>
+                  ) : loc.latitude != null && loc.longitude != null ? (
+                    <p className="flex items-center gap-2">
+                      <Navigation className="w-4 h-4 text-fg-subtle shrink-0" />
+                      Координаты сохранены
+                    </p>
+                  ) : null}
+                  {loc.deliveryInstructions && (
+                    <p className="line-clamp-2 whitespace-pre-line text-fg">
+                      {loc.deliveryInstructions}
+                    </p>
+                  )}
                 </div>
-              )}
-              {/* MEGA-BACKEND блок B: назначение курьера на точку. Пустое значение = «не назначен» (точку видят все курьеры). */}
-              <div className="mt-3 flex items-center gap-2">
-                <label className="text-xs text-fg-muted shrink-0">Курьер:</label>
-                <select
-                  value={loc.assignedCourierId ?? ''}
-                  onChange={(e) => handleAssignCourier(loc.id, e.target.value || null)}
-                  className="flex-1 min-w-0 text-sm px-3 py-1.5 rounded-pill bg-bg border border-border text-fg focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <option value="">Не назначен</option>
-                  {couriers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+
+                {loc.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    {loc.tags.map((t) => (
+                      <span key={t} className="text-xs px-2 py-0.5 rounded-pill bg-warning-bg text-warning-fg font-medium">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

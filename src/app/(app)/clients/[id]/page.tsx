@@ -9,19 +9,44 @@ import { prisma } from '@/lib/db/prisma'
 import { serialize } from '@/lib/utils/serialize'
 import { getClientAnalytics } from '@/lib/db/queries/client-analytics'
 import { MAX_BOT_USERNAME } from '@/lib/bot/onboarding'
+import { resolveDeliveryContact } from '@/lib/delivery/contact-resolver'
 
 export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole(['ADMIN', 'MANAGER'])
   const { id } = await params
 
-  // MEGA-BACKEND блок B: грузим активных курьеров параллельно с клиентом —
-  // их список нужен в LocationsTab для селекта «Курьер» у каждой точки.
+  // Активные курьеры нужны в модалке точки для режима «Свой курьер».
   const [client, couriers] = await Promise.all([
     prisma.client.findUnique({
       where: { id },
       include: {
-        contacts: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
-        locations: { orderBy: [{ isActive: 'desc' }, { name: 'asc' }] },
+        // Общая секция контактов клиента не должна показывать технические
+        // location-scoped контакты доставки.
+        contacts: {
+          where: { locationId: null },
+          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
+        locations: {
+          orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+          include: {
+            // Загружаем все контакты точки: resolver сам выбирает primary, а
+            // затем стабильный location fallback.
+            deliveryContacts: {
+              orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+              select: {
+                id: true,
+                clientId: true,
+                locationId: true,
+                isPrimaryForDelivery: true,
+                name: true,
+                phone: true,
+                notes: true,
+                sortOrder: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
         mealConfigs: {
           orderBy: [{ isActive: 'desc' }, { mealType: 'asc' }],
           include: {
@@ -70,6 +95,17 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   if (!client) notFound()
 
   const analytics = await getClientAnalytics(client.id)
+  const deliveryContactsByLocationId = Object.fromEntries(
+    client.locations.map((location) => [
+      location.id,
+      resolveDeliveryContact({
+        clientId: client.id,
+        locationId: location.id,
+        contacts: [...location.deliveryContacts, ...client.contacts],
+        legacy: { name: client.contactName, phone: client.contactPhone },
+      }),
+    ]),
+  )
 
   return (
     <>
@@ -89,7 +125,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         invites={serialize(client.maxInvites)}
         botUsername={MAX_BOT_USERNAME}
       />
-      <ClientDetail client={serialize(client)} analytics={serialize(analytics)} couriers={couriers} />
+      <ClientDetail
+        client={serialize(client)}
+        analytics={serialize(analytics)}
+        couriers={couriers}
+        deliveryContactsByLocationId={deliveryContactsByLocationId}
+      />
     </>
   )
 }
