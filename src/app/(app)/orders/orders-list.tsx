@@ -15,6 +15,7 @@ import { ORDER_STATUS_LABELS, ORDER_STATUS_VARIANT, portionsEditedToast } from '
 import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
+import { generateAndGetUpdForDate } from '@/app/(app)/production/print/upd/actions'
 import type { Order, Client, ClientLocation, OrderStatus } from '@prisma/client'
 
 type SerializedOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
@@ -43,21 +44,59 @@ interface Props {
 // Компактная кнопка «печать УПД клиента за показанный день». Дата — та же,
 // что показывает страница заказов (selectedDateIso, срез YYYY-MM-DD в UTC —
 // совпадает с UTC-границами @db.Date, по которым PDF-роут выбирает документы).
-// Открывается в новой вкладке; если у клиента нет УПД за день — роут отдаёт
-// читаемое сообщение (не ошибку). stopPropagation, чтобы не сработал переход
-// по строке в карточку заказа.
+// Сначала выпускает недостающие УПД только этого клиента, затем открывает PDF.
+// Окно создаётся синхронно по клику, иначе браузер заблокирует его после await.
+// stopPropagation не даёт перейти по строке в карточку заказа.
 function UpdClientButton({ clientId, dateYmd }: { clientId: string; dateYmd: string }) {
+  const [pending, startTransition] = useTransition()
+  const pdfHref = `/production/print/upd/pdf?clientId=${encodeURIComponent(clientId)}&date=${encodeURIComponent(dateYmd)}&disposition=inline`
+
+  function onPrint() {
+    if (pending) return
+    const win = window.open('', '_blank')
+    if (!win) {
+      toast.error('Браузер заблокировал новое окно. Разрешите всплывающие окна для печати УПД.')
+      return
+    }
+
+    startTransition(async () => {
+      try {
+        const result = await generateAndGetUpdForDate(dateYmd, clientId)
+        if (!result.ok) {
+          win.close()
+          toast.error(result.error)
+          return
+        }
+        if (result.data.conflicts.length > 0) {
+          toast.warning(
+            `УПД сформирован. Конфликтов: ${result.data.conflicts.length}.`,
+          )
+        }
+        win.location.href = pdfHref
+      } catch {
+        win.close()
+        toast.error('Не удалось сформировать УПД. Повторите попытку.')
+      }
+    })
+  }
+
   return (
     <a
-      href={`/production/print/upd/pdf?clientId=${encodeURIComponent(clientId)}&date=${encodeURIComponent(dateYmd)}&disposition=inline`}
+      href={pdfHref}
       target="_blank"
       rel="noopener noreferrer"
-      onClick={(e) => e.stopPropagation()}
-      title="Печать УПД клиента за этот день"
-      className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-pill border border-border bg-surface text-fg-muted hover:text-fg hover:bg-surface-2 text-xs font-medium transition-colors [touch-action:manipulation]"
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onPrint()
+      }}
+      aria-busy={pending}
+      aria-disabled={pending}
+      title="Сформировать и напечатать УПД клиента за этот день"
+      className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-pill border border-border bg-surface text-fg-muted hover:text-fg hover:bg-surface-2 text-xs font-medium transition-colors [touch-action:manipulation] aria-disabled:opacity-50 aria-disabled:cursor-wait"
     >
       <FileText className="w-3 h-3" />
-      УПД
+      {pending ? 'Формирую…' : 'УПД'}
     </a>
   )
 }
@@ -344,7 +383,7 @@ function OrdersTable({ orders, dateYmd }: { orders: SerializedOrder[]; dateYmd: 
                     )}
                     {!order.ourLegalEntityId && (
                       <span
-                        title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
+                        title="Не выбрано наше юрлицо. При печати УПД система подставит юрлицо клиента или попросит выбрать его."
                         className="shrink-0 inline-flex items-center text-warning-fg"
                       >
                         <AlertTriangle className="w-3.5 h-3.5" />
@@ -442,7 +481,7 @@ function OrdersCards({ orders, dateYmd }: { orders: SerializedOrder[]; dateYmd: 
                   )}
                   {!order.ourLegalEntityId && (
                     <span
-                      title="УПД не может быть сформирован — не выбрано наше юрлицо отгрузки"
+                      title="Не выбрано наше юрлицо. При печати УПД система подставит юрлицо клиента или попросит выбрать его."
                       className="shrink-0 inline-flex items-center text-warning-fg"
                     >
                       <AlertTriangle className="w-3.5 h-3.5" />

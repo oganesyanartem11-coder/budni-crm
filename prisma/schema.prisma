@@ -466,7 +466,7 @@ model Client {
   contractNumber String?
   contractDate   DateTime? @db.Date
 
-  // === Наше юрлицо для отгрузки (опционально, обязательно если есть inn) ===
+  // === Наше юрлицо для отгрузки (можно выбрать без ИНН покупателя; обязательно при наличии inn) ===
   defaultOurLegalEntityId String?
   defaultOurLegalEntity   OurLegalEntity? @relation("ClientDefaultLegalEntity", fields: [defaultOurLegalEntityId], references: [id], onDelete: SetNull)
 

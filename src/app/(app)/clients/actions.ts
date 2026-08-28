@@ -111,7 +111,6 @@ const clientSchema = z
         'kpp',
         'ogrn',
         'legalAddress',
-        'defaultOurLegalEntityId',
       ]
       for (const field of juridicalFields) {
         const v = data[field] as string | undefined

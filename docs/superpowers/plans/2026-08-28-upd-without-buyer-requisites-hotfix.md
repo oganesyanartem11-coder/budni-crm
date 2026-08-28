@@ -27,7 +27,7 @@
 - Modify: `src/app/(app)/clients/actions.ts`
 - Modify: `prisma/schema.prisma`
 
-- [ ] **Step 1: Write the failing validation regression**
+- [x] **Step 1: Write the failing validation regression**
 
 Mock `requireRole`, Prisma and `revalidatePath`, call `createClient({ name: 'Без реквизитов', defaultOurLegalEntityId: 'seller_1' })`, and assert success plus this Prisma payload:
 
@@ -42,7 +42,7 @@ expect(mockPrisma.client.create).toHaveBeenCalledWith({
 })
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -52,11 +52,11 @@ npm test -- 'src/app/(app)/clients/actions.upd.test.ts'
 
 Expected: FAIL because current `clientSchema` rejects `defaultOurLegalEntityId` when `inn` is empty.
 
-- [ ] **Step 3: Make the minimal validation change**
+- [x] **Step 3: Make the minimal validation change**
 
 Remove only `defaultOurLegalEntityId` from `juridicalFields`; keep `legalName`, `kpp`, `ogrn`, and `legalAddress`. Update the Prisma comment to state that the seller choice is independent from buyer requisites.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run the same targeted test and expect PASS.
 
@@ -66,7 +66,7 @@ Run the same targeted test and expect PASS.
 - Create: `src/app/(app)/production/print/upd/generate-client.test.ts`
 - Modify: `src/app/(app)/production/print/upd/actions.ts`
 
-- [ ] **Step 1: Write failing client-scope regression tests**
+- [x] **Step 1: Write failing client-scope regression tests**
 
 Use hoisted Prisma/auth/numbering mocks. Cover:
 
@@ -83,7 +83,7 @@ The returned order fixture has all buyer legal/bank/contract fields `null`. Asse
 
 Add a null-seller fixture and assert a saved client default is copied to `Order.ourLegalEntityId`/`vatRate` before issuance. Add `default = null` cases: exactly one active seller is persisted and used; two active sellers return `ok: false` and do not create an UPD.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -93,9 +93,9 @@ npm test -- 'src/app/(app)/production/print/upd/generate-client.test.ts'
 
 Expected: FAIL because the second argument is currently ignored and null-seller orders are filtered out.
 
-- [ ] **Step 3: Implement seller materialization**
+- [x] **Step 3: Implement seller materialization**
 
-Add an unexported async helper in `actions.ts` that:
+Add an unexported async helper in `actions.ts` that performs its reads and writes through `prismaDirect` in one interactive transaction with `Serializable` isolation:
 
 ```ts
 const missingOrders = await prisma.order.findMany({
@@ -109,9 +109,9 @@ const missingOrders = await prisma.order.findMany({
 })
 ```
 
-Resolve an active saved client seller, otherwise query at most two active sellers. Proceed with the sole active seller only. In one interactive transaction, conditionally update null orders, conditionally set a null client default, and write `UPD_ORDER_SELLER_ASSIGNED` with source, date and order IDs.
+Resolve an active saved client seller, otherwise query at most two active sellers. Proceed with the sole active seller only. Recheck the full client/date/status/null eligibility in a returning update, persist a null client default only after at least one real assignment, and write `UPD_ORDER_SELLER_ASSIGNED` with only the returned order IDs. Retry the whole Serializable preparation at most three times on Prisma `P2034` only; preserve all other errors.
 
-- [ ] **Step 4: Implement optional client scope**
+- [x] **Step 4: Implement optional client scope**
 
 Change the action signature to:
 
@@ -122,9 +122,9 @@ export async function generateAndGetUpdForDate(
 ): Promise<ActionResult<UpdGenerateResult>>
 ```
 
-Validate a non-blank optional ID, run seller preparation for the narrow mode, and add `...(clientId ? { clientId } : {})` to the generation query. If a narrow scope has neither eligible groups nor existing documents, return a readable business error instead of sending the browser to the old text response. Preserve the old all-client call and P2002 behavior.
+Validate a non-blank optional ID, run seller preparation for the narrow mode, and add `...(clientId ? { clientId } : {})` to the generation query. Run callback issuance through `prismaDirect`. Before every successful narrow-mode return, confirm that every eligible order is linked to an `UpdDocument` for the selected client/date; otherwise return a readable business error instead of opening an incomplete PDF or the old text response. Preserve the old all-client call and P2002 behavior.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run the new test plus existing `actions.test.ts`; expect all PASS.
 
@@ -133,7 +133,7 @@ Run the new test plus existing `actions.test.ts`; expect all PASS.
 **Files:**
 - Modify: `src/app/(app)/orders/orders-list.tsx`
 
-- [ ] **Step 1: Replace direct-only click behavior**
+- [x] **Step 1: Replace direct-only click behavior**
 
 Keep the href as a non-JS fallback. In `UpdClientButton`, synchronously open a blank tab, then invoke:
 
@@ -155,8 +155,9 @@ startTransition(async () => {
 ```
 
 Prevent row navigation, guard repeated clicks, preserve popup-blocker feedback, and expose a pending label/ARIA state.
+If the successful action reports covered conflicts, show a warning toast with the count before opening the PDF.
 
-- [ ] **Step 2: Run targeted tests and typecheck**
+- [x] **Step 2: Run targeted tests and typecheck**
 
 ```bash
 npm test -- 'src/app/(app)/clients/actions.upd.test.ts' 'src/app/(app)/production/print/upd/actions.test.ts' 'src/app/(app)/production/print/upd/generate-client.test.ts'
@@ -170,11 +171,11 @@ Expected: PASS / exit 0.
 **Files:**
 - Create: `src/app/(app)/production/print/upd/pdf/upd-pdf-document.test.ts`
 
-- [ ] **Step 1: Add the render characterization**
+- [x] **Step 1: Add the render characterization**
 
 Construct `UpdPdfDocData` with a complete supplier, one food line, and every nullable buyer legal/bank/contract field set to `null`. Render using `renderToBuffer(createElement(UpdPdfDocument, { docs: [doc] }))` and assert the result begins with `%PDF` and is non-trivial in size.
 
-- [ ] **Step 2: Run the PDF test**
+- [x] **Step 2: Run the PDF test**
 
 ```bash
 npm test -- 'src/app/(app)/production/print/upd/pdf/upd-pdf-document.test.ts'
@@ -187,7 +188,7 @@ Expected: PASS, proving the existing fallback contract.
 **Files:**
 - Modify checkboxes in this plan as durable progress state.
 
-- [ ] **Step 1: Run the full verification matrix**
+- [x] **Step 1: Run the full verification matrix**
 
 ```bash
 npm test
@@ -201,11 +202,11 @@ git status --short
 
 Expected: 0 test failures, valid/generated Prisma client, TypeScript/build exit 0, no whitespace errors, only intended files changed.
 
-- [ ] **Step 2: Independent spec and quality review**
+- [x] **Step 2: Independent spec and quality review**
 
 Provide the design, plan, diff and verification output to a reviewer agent. Resolve every spec or important quality issue and rerun affected checks.
 
-- [ ] **Step 3: Commit exact files**
+- [x] **Step 3: Commit exact files**
 
 Use explicit `git add -- <paths>` only. Commit code/docs/tests; confirm the commit contains no migration and no unrelated Boris files.
 

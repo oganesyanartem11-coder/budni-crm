@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { Prisma } from '@prisma/client'
 import type { OrderStatus } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
+import { prismaDirect } from '@/lib/db/prisma-direct'
 import { requireRole } from '@/lib/auth/current-user'
 import { getNextDocumentNumber } from '@/lib/upd/document-number'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
@@ -165,18 +166,172 @@ export interface UpdGenerateResult {
   conflicts: Array<{ orderId: string; reason: string }>
 }
 
-export async function generateAndGetUpdForDate(
+async function assignMissingOrderSellerForClient(input: {
   dateIso: string
+  range: { from: Date; to: Date }
+  clientId: string
+  actor: Awaited<ReturnType<typeof requireRole>>
+}): Promise<ActionResult<{ assignedCount: number }>> {
+  const prepareOnce = () => prismaDirect.$transaction(async (tx): Promise<
+    ActionResult<{ assignedCount: number }>
+  > => {
+    const missingOrders = await tx.order.findMany({
+      where: {
+        clientId: input.clientId,
+        deliveryDate: { gte: input.range.from, lte: input.range.to },
+        status: { in: PRODUCTION_STATUSES },
+        ourLegalEntityId: null,
+      },
+      select: { id: true },
+    })
+    if (missingOrders.length === 0) {
+      return { ok: true, data: { assignedCount: 0 } }
+    }
+
+    const client = await tx.client.findUnique({
+      where: { id: input.clientId },
+      select: {
+        defaultOurLegalEntityId: true,
+        defaultOurLegalEntity: {
+          select: { id: true, shortName: true, isActive: true, vatRate: true },
+        },
+      },
+    })
+    if (!client) return { ok: false, error: 'Клиент не найден' }
+
+    let seller = client.defaultOurLegalEntity
+    let sellerSource: 'client_default' | 'sole_active' = 'client_default'
+    let persistClientDefault = false
+
+    if (client.defaultOurLegalEntityId && !seller) {
+      return {
+        ok: false,
+        error: 'Выбранное у клиента наше юрлицо не найдено',
+      }
+    }
+    if (seller && !seller.isActive) {
+      return {
+        ok: false,
+        error: `Юрлицо «${seller.shortName}» архивировано — выберите активное`,
+      }
+    }
+    if (!seller) {
+      const activeSellers = await tx.ourLegalEntity.findMany({
+        where: { isActive: true },
+        select: { id: true, shortName: true, isActive: true, vatRate: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 2,
+      })
+      if (activeSellers.length === 0) {
+        return {
+          ok: false,
+          error: 'Нет активного нашего юрлица — сначала добавьте его в настройках',
+        }
+      }
+      if (activeSellers.length > 1) {
+        return {
+          ok: false,
+          error: 'У клиента не выбрано наше юрлицо: доступно несколько активных — выберите нужное в карточке клиента',
+        }
+      }
+      seller = activeSellers[0]
+      sellerSource = 'sole_active'
+      persistClientDefault = true
+    }
+
+    const orderIds = missingOrders.map((order) => order.id)
+    const updatedOrders = await tx.order.updateManyAndReturn({
+      where: {
+        id: { in: orderIds },
+        clientId: input.clientId,
+        deliveryDate: { gte: input.range.from, lte: input.range.to },
+        status: { in: PRODUCTION_STATUSES },
+        ourLegalEntityId: null,
+      },
+      data: {
+        ourLegalEntityId: seller.id,
+        vatRate: seller.vatRate,
+      },
+      select: { id: true },
+    })
+
+    if (updatedOrders.length === 0) {
+      return { ok: true, data: { assignedCount: 0 } }
+    }
+
+    if (persistClientDefault) {
+      await tx.client.updateMany({
+        where: { id: input.clientId, defaultOurLegalEntityId: null },
+        data: { defaultOurLegalEntityId: seller.id },
+      })
+    }
+
+    const updatedOrderIds = updatedOrders.map((order) => order.id)
+
+    await tx.activityLog.create({
+      data: {
+        userId: input.actor.id,
+        userRole: input.actor.role,
+        action: 'UPD_ORDER_SELLER_ASSIGNED',
+        entityType: 'Client',
+        entityId: input.clientId,
+        payload: {
+          source: sellerSource,
+          date: input.dateIso,
+          ourLegalEntityId: seller.id,
+          orderIds: updatedOrderIds,
+          assignedCount: updatedOrders.length,
+        },
+      },
+    })
+
+    return { ok: true, data: { assignedCount: updatedOrders.length } }
+  }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  })
+
+  const maxAttempts = 3
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await prepareOnce()
+    } catch (error) {
+      const isSerializationConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034'
+      if (!isSerializationConflict || attempt === maxAttempts) throw error
+    }
+  }
+
+  throw new Error('Не удалось подготовить заказы для УПД')
+}
+
+export async function generateAndGetUpdForDate(
+  dateIso: string,
+  clientId?: string,
 ): Promise<ActionResult<UpdGenerateResult>> {
   const me = await requireRole(['ADMIN', 'MANAGER'])
   const range = dayRange(dateIso)
   if (!range) return { ok: false, error: 'Неверная дата' }
+  const scopedClientId = clientId?.trim()
+  if (clientId !== undefined && !scopedClientId) {
+    return { ok: false, error: 'Не указан клиент' }
+  }
+  if (scopedClientId) {
+    const prepared = await assignMissingOrderSellerForClient({
+      dateIso,
+      range,
+      clientId: scopedClientId,
+      actor: me,
+    })
+    if (!prepared.ok) return { ok: false, error: prepared.error }
+  }
 
   const orders = await prisma.order.findMany({
     where: {
       deliveryDate: { gte: range.from, lte: range.to },
       status: { in: PRODUCTION_STATUSES },
       ourLegalEntityId: { not: null },
+      ...(scopedClientId ? { clientId: scopedClientId } : {}),
     },
     include: { client: true, location: true, ourLegalEntity: true },
   })
@@ -187,6 +342,30 @@ export async function generateAndGetUpdForDate(
     const key = `${o.ourLegalEntityId}|${o.clientId}|${o.locationId}`
     if (!groupsMap.has(key)) groupsMap.set(key, [])
     groupsMap.get(key)!.push(o)
+  }
+
+  if (scopedClientId && groupsMap.size === 0) {
+    const existingCount = await prisma.updDocument.count({
+      where: {
+        clientId: scopedClientId,
+        deliveryDate: { gte: range.from, lte: range.to },
+      },
+    })
+    if (existingCount === 0) {
+      return {
+        ok: false,
+        error: 'За выбранный день у клиента нет заказов, подходящих для формирования УПД',
+      }
+    }
+    return {
+      ok: true,
+      data: {
+        date: dateIso,
+        createdCount: 0,
+        reusedCount: existingCount,
+        conflicts: [],
+      },
+    }
   }
 
   let createdCount = 0
@@ -232,7 +411,7 @@ export async function generateAndGetUpdForDate(
     const snap = buildSnapshots(freeOrders)
 
     try {
-      await prisma.$transaction(async (tx) => {
+      await prismaDirect.$transaction(async (tx) => {
         const { documentNumber, number, year } = await getNextDocumentNumber(
           tx, first.ourLegalEntityId!
         )
@@ -292,6 +471,46 @@ export async function generateAndGetUpdForDate(
         continue
       }
       throw err
+    }
+  }
+
+  if (scopedClientId) {
+    const currentDocumentCount = await prisma.updDocument.count({
+      where: {
+        clientId: scopedClientId,
+        deliveryDate: { gte: range.from, lte: range.to },
+      },
+    })
+    if (currentDocumentCount === 0) {
+      return {
+        ok: false,
+        error: 'Не удалось сформировать УПД за выбранный день: нет доступных заказов или готовых документов',
+      }
+    }
+
+    const currentOrderIds = orders.map((order) => order.id)
+    const coveredOrderLinks = await prisma.updDocumentOrder.findMany({
+      where: {
+        orderId: { in: currentOrderIds },
+        updDocument: {
+          clientId: scopedClientId,
+          deliveryDate: { gte: range.from, lte: range.to },
+        },
+      },
+      select: { orderId: true },
+    })
+    const coveredOrderIds = new Set(
+      coveredOrderLinks.map((link) => link.orderId),
+    )
+    const uncoveredOrderCount = currentOrderIds.reduce(
+      (count, orderId) => count + (coveredOrderIds.has(orderId) ? 0 : 1),
+      0,
+    )
+    if (uncoveredOrderCount > 0) {
+      return {
+        ok: false,
+        error: `УПД сформирован не полностью. Заказов без УПД за выбранный день: ${uncoveredOrderCount}. Аннулируйте или исправьте старый УПД и повторите формирование.`,
+      }
     }
   }
 
