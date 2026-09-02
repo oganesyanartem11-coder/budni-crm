@@ -177,7 +177,13 @@ describe('isDirectChat', () => {
   })
 })
 
-describe('handleDirectChatMessage — команды владельца', () => {
+// РОЛЬ «ВЕДЕНИЕ ДИРЕКТА» ОТКЛЮЧЕНА НАСОВСЕМ (решение владельца): кампания на
+// автостратегии Яндекса. Команды владельца и кнопки одобрения получают ранний
+// выход «ведение Директа отключено» БЕЗ обращения к состоянию/кабинету/LLM.
+// Passthrough-поведение (не Директ-чат / без обращения / без текста) сохранено.
+const DISABLED = 'Ведение Директа отключено'
+
+describe('handleDirectChatMessage — роль Директа ОТКЛЮЧЕНА', () => {
   it('не Директ-чат → next(), ничего не меняем', async () => {
     const ctx = makeCtx(-555, 'Борис, стоп')
     const next = vi.fn().mockResolvedValue(undefined)
@@ -187,191 +193,12 @@ describe('handleDirectChatMessage — команды владельца', () => 
     expect(ctx.reply).not.toHaveBeenCalled()
   })
 
-  it('«Борис, почему <фраза>» → explainPhrase(фраза) + ответ HTML, не команда состояния', async () => {
-    const ctx = makeCtx(-100777, 'Борис, почему доставка обедов в офис')
-    const next = vi.fn()
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockExplainPhrase).toHaveBeenCalledWith('доставка обедов в офис')
-    expect(ctx.reply).toHaveBeenCalledWith(
-      'Держал: тонкая, 3 клика, заявок 0.',
-      expect.objectContaining({ parse_mode: 'HTML' })
-    )
-    expect(mockSetDirectFrozen).not.toHaveBeenCalled()
-  })
-
-  it('«Борис, почему» без фразы → доменный ответ роли (не команда «почему»), explainPhrase не зовём', async () => {
-    const ctx = makeCtx(-100777, 'Борис, почему')
-    const next = vi.fn().mockResolvedValue(undefined)
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockExplainPhrase).not.toHaveBeenCalled()
-    expect(mockAnswerDirectFreeText).toHaveBeenCalledOnce()
-    expect(ctx.reply).toHaveBeenCalled()
-  })
-
-  it('«Борис, стоп» → setDirectFrozen(true) + ответ + лог freeze.change', async () => {
-    const ctx = makeCtx(-100777, 'Борис, стоп')
-    const next = vi.fn()
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockSetDirectFrozen).toHaveBeenCalledWith(true)
-    expect(ctx.reply).toHaveBeenCalledWith(
-      expect.stringContaining('Стоп-кран включён'),
-      { parse_mode: 'HTML' }
-    )
-    expect(mockActionLogCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        action: 'freeze.change',
-        targetType: 'campaign',
-        applied: true,
-        reason: 'команда владельца в чате Директа',
-      }),
-    })
-  })
-
-  it('«боря стоп» (без запятой, второй префикс) — тоже команда', async () => {
-    const ctx = makeCtx(-100777, 'боря стоп')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockSetDirectFrozen).toHaveBeenCalledWith(true)
-  })
-
-  it('«Борис, продолжай» → setDirectFrozen(false)', async () => {
-    const ctx = makeCtx(-100777, 'Борис, продолжай')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockSetDirectFrozen).toHaveBeenCalledWith(false)
-    expect(ctx.reply).toHaveBeenCalled()
-  })
-
-  it('«борис, боевой» → setDirectMode(LIVE) + лог mode.change + предупреждение', async () => {
-    mockGetDirectRoleState.mockResolvedValue({
-      mode: 'LIVE',
-      frozen: false,
-      autoNegativesEnabled: false,
-    })
-    const ctx = makeCtx(-100777, 'борис, боевой')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockSetDirectMode).toHaveBeenCalledWith('LIVE')
-    expect(mockActionLogCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ action: 'mode.change', mode: 'LIVE' }),
-    })
-    expect(ctx.reply).toHaveBeenCalledWith(
-      expect.stringContaining('реально применяются'),
-      { parse_mode: 'HTML' }
-    )
-  })
-
-  it('«Борис, наблюдение» → setDirectMode(OBSERVE)', async () => {
-    const ctx = makeCtx(-100777, 'Борис, наблюдение')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockSetDirectMode).toHaveBeenCalledWith('OBSERVE')
-  })
-
-  it('«Борис, откати последнее» → revertLastAction, ответ = result.message', async () => {
-    mockRevertLastAction.mockResolvedValue({ ok: true, message: 'Откатил ставку обратно.' })
-    const ctx = makeCtx(-100777, 'Борис, откати последнее')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockRevertLastAction).toHaveBeenCalledOnce()
-    expect(ctx.reply).toHaveBeenCalledWith('Откатил ставку обратно.', { parse_mode: 'HTML' })
-  })
-
-  it('«Борис, верни гейт» → setAutoNegativesEnabled(false) + лог gate.change', async () => {
-    const ctx = makeCtx(-100777, 'Борис, верни гейт')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockSetAutoNegativesEnabled).toHaveBeenCalledWith(false)
-    expect(mockActionLogCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ action: 'gate.change' }),
-    })
-    expect(ctx.reply).toHaveBeenCalledWith(
-      expect.stringContaining('Гейт спорных минусов снова на месте'),
-      { parse_mode: 'HTML' }
-    )
-  })
-
-  it('«Борис, статус» → сводка режим/стоп-кран/гейт', async () => {
-    mockGetDirectRoleState.mockResolvedValue({
-      mode: 'OBSERVE',
-      frozen: true,
-      autoNegativesEnabled: false,
-    })
-    const ctx = makeCtx(-100777, 'Борис, статус')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    const text = ctx.reply.mock.calls[0][0] as string
-    expect(text).toContain('наблюдение')
-    expect(text).toContain('Стоп-кран')
-    expect(text).toContain('Гейт')
-  })
-
-  it('«Борис, что ты понял» → ответ текстом getActiveLessonsReport', async () => {
-    mockGetActiveLessonsReport.mockResolvedValue('Вот что я понял по кампании: …')
-    const ctx = makeCtx(-100777, 'Борис, что ты понял')
-    const next = vi.fn()
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockGetActiveLessonsReport).toHaveBeenCalledOnce()
-    expect(ctx.reply).toHaveBeenCalledWith('Вот что я понял по кампании: …', {
-      parse_mode: 'HTML',
-    })
-  })
-
-  it('вариации «что понял» / «чему научился» — тоже команда уроков', async () => {
-    for (const text of ['боря что понял', 'Борис, чему научился']) {
-      const ctx = makeCtx(-100777, text)
-      const next = vi.fn()
-      await handleDirectChatMessage(asCtx(ctx), next)
-      expect(next).not.toHaveBeenCalled()
-      expect(ctx.reply).toHaveBeenCalledWith('Мои уроки: пока пусто.', { parse_mode: 'HTML' })
-    }
-    expect(mockGetActiveLessonsReport).toHaveBeenCalledTimes(2)
-  })
-
-  it('«Борис, что ты думаешь» — НЕ команда уроков → доменный ответ роли (не next)', async () => {
-    const ctx = makeCtx(-100777, 'Борис, что ты думаешь')
-    const next = vi.fn().mockResolvedValue(undefined)
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockGetActiveLessonsReport).not.toHaveBeenCalled() // не команда «что понял»
-    expect(mockAnswerDirectFreeText).toHaveBeenCalledWith('Борис, что ты думаешь')
-    expect(ctx.reply).toHaveBeenCalledWith(
-      'По кампании: расход у нормы, синонимы по запросам не размечены — покажу пофразный расход.',
-      { parse_mode: 'HTML' }
-    )
-  })
-
-  it('«Борис, привет» — не команда роли → доменный ответ роли (не next)', async () => {
-    const ctx = makeCtx(-100777, 'Борис, привет')
-    const next = vi.fn().mockResolvedValue(undefined)
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockAnswerDirectFreeText).toHaveBeenCalledOnce()
-    expect(ctx.reply).toHaveBeenCalled()
-  })
-
-  it('живой кейс: «Борис, Да, готовь предложение по чистке синонимов…» → доменный путь (raw в LLM)', async () => {
-    const text = 'Борис, Да, готовь предложение по чистке синонимов, там 78% кликов'
-    const ctx = makeCtx(-100777, text)
-    const next = vi.fn().mockResolvedValue(undefined)
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).not.toHaveBeenCalled()
-    expect(mockAnswerDirectFreeText).toHaveBeenCalledWith(text)
-    expect(ctx.reply).toHaveBeenCalled()
-  })
-
   it('чат Директа, БЕЗ обращения «Борис/Боря» → next() (свободный контур не наш)', async () => {
     const ctx = makeCtx(-100777, 'просто сообщение в чате без обращения')
     const next = vi.fn().mockResolvedValue(undefined)
     await handleDirectChatMessage(asCtx(ctx), next)
     expect(next).toHaveBeenCalledOnce()
-    expect(mockAnswerDirectFreeText).not.toHaveBeenCalled()
     expect(ctx.reply).not.toHaveBeenCalled()
-  })
-
-  it('НЕ чат Директа + обращённый свободный текст → next(), доменный путь НЕ трогаем', async () => {
-    const ctx = makeCtx(-555, 'Борис, что по кампании?')
-    const next = vi.fn().mockResolvedValue(undefined)
-    await handleDirectChatMessage(asCtx(ctx), next)
-    expect(next).toHaveBeenCalledOnce()
-    expect(mockAnswerDirectFreeText).not.toHaveBeenCalled()
   })
 
   it('сообщение без текста → next()', async () => {
@@ -381,78 +208,51 @@ describe('handleDirectChatMessage — команды владельца', () => 
     expect(next).toHaveBeenCalledOnce()
   })
 
-  it('команда упала → ответ «смотри логи», не throw', async () => {
-    mockSetDirectFrozen.mockRejectedValue(new Error('db down'))
-    const ctx = makeCtx(-100777, 'Борис, стоп')
-    await expect(handleDirectChatMessage(asCtx(ctx), vi.fn())).resolves.toBeUndefined()
-    expect(ctx.reply).toHaveBeenCalledWith(
-      'Не получилось применить команду, смотри логи',
-      { parse_mode: 'HTML' }
-    )
-  })
+  // Любая обращённая команда роли в чате Директа → «отключено», next() не зовём,
+  // ни одной операции роли (режим/стоп-кран/гейт/откат/рассуждение/звонок/сделка).
+  const disabledCommands = [
+    'Борис, стоп',
+    'боря стоп',
+    'Борис, продолжай',
+    'борис, боевой',
+    'Борис, наблюдение',
+    'Борис, откати последнее',
+    'Борис, верни гейт',
+    'Борис, статус',
+    'Борис, что ты понял',
+    'Борис, чему научился',
+    'Борис, почему доставка обедов в офис',
+    'Борис, звонок 79991234567',
+    'Борис, сделка 79991234567 150000',
+    'Борис, привет',
+    'Борис, что по кампании?',
+  ]
+  it.each(disabledCommands)(
+    '«%s» → ответ «отключено», next() не зовём, состояние/кабинет/LLM не трогаем',
+    async (text) => {
+      const ctx = makeCtx(-100777, text)
+      const next = vi.fn().mockResolvedValue(undefined)
+      await handleDirectChatMessage(asCtx(ctx), next)
+      expect(next).not.toHaveBeenCalled()
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining(DISABLED),
+        { parse_mode: 'HTML' }
+      )
+      expect(mockSetDirectFrozen).not.toHaveBeenCalled()
+      expect(mockSetDirectMode).not.toHaveBeenCalled()
+      expect(mockSetAutoNegativesEnabled).not.toHaveBeenCalled()
+      expect(mockRevertLastAction).not.toHaveBeenCalled()
+      expect(mockExplainPhrase).not.toHaveBeenCalled()
+      expect(mockAnswerDirectFreeText).not.toHaveBeenCalled()
+      expect(mockGetActiveLessonsReport).not.toHaveBeenCalled()
+      expect(mockMarkDealWon).not.toHaveBeenCalled()
+      expect(mockCancelDeal).not.toHaveBeenCalled()
+      expect(mockActionLogCreate).not.toHaveBeenCalled()
+    }
+  )
 })
 
-describe('М5: команда «Борис, сделка …»', () => {
-  const lead = (over: Partial<{ id: string; phoneDigits: string; name: string; utmTerm: string | null }> = {}) => ({
-    id: over.id ?? 'lead-1',
-    phoneDigits: over.phoneDigits ?? '79991234567',
-    phone: null,
-    name: over.name ?? 'Иван',
-    createdAt: new Date('2026-07-10T09:00:00Z'),
-    utmTerm: over.utmTerm ?? 'обеды в офис',
-  })
-  const replyText = (ctx: MockCtx) => ctx.reply.mock.calls[0][0] as string
-
-  it('однозначный лид → записывает сделку (markDealWon) + подтверждение', async () => {
-    mockFindRecentLeadCandidates.mockResolvedValue([lead()])
-    const ctx = makeCtx(-100777, 'Борис, сделка 79991234567 150000')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockMarkDealWon).toHaveBeenCalledWith('lead-1', 150000)
-    expect(replyText(ctx)).toContain('Записал сделку')
-    expect(replyText(ctx)).toContain('150000 ₽')
-  })
-
-  it('неоднозначно (два лида) → перечисляет, не пишет', async () => {
-    mockFindRecentLeadCandidates.mockResolvedValue([lead({ id: 'a' }), lead({ id: 'b', name: 'Пётр' })])
-    const ctx = makeCtx(-100777, 'Борис, сделка 79991234567 150000')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockMarkDealWon).not.toHaveBeenCalled()
-    expect(replyText(ctx)).toContain('несколько заявок')
-  })
-
-  it('не найден → честно говорит, не пишет', async () => {
-    mockFindRecentLeadCandidates.mockResolvedValue([])
-    const ctx = makeCtx(-100777, 'Борис, сделка 0000 150000')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockMarkDealWon).not.toHaveBeenCalled()
-    expect(replyText(ctx)).toContain('Не нашёл заявку')
-  })
-
-  it('отмена → снимает отметку (cancelDeal)', async () => {
-    mockFindRecentLeadCandidates.mockResolvedValue([lead()])
-    const ctx = makeCtx(-100777, 'Борис, сделка 79991234567 отмена')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockCancelDeal).toHaveBeenCalledWith('lead-1')
-    expect(replyText(ctx)).toContain('Снял отметку')
-  })
-
-  it('тестовый лид-маркер → не метим (не найден)', async () => {
-    mockFindRecentLeadCandidates.mockResolvedValue([lead({ phoneDigits: '79995555555', name: 'Тестик' })])
-    const ctx = makeCtx(-100777, 'Борис, сделка 79995555555 150000')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockMarkDealWon).not.toHaveBeenCalled()
-    expect(replyText(ctx)).toContain('Не нашёл заявку')
-  })
-
-  it('кривая команда → подсказка синтаксиса, не пишет', async () => {
-    const ctx = makeCtx(-100777, 'Борис, сделка 12 много')
-    await handleDirectChatMessage(asCtx(ctx), vi.fn())
-    expect(mockMarkDealWon).not.toHaveBeenCalled()
-    expect(replyText(ctx)).toContain('Не понял команду сделки')
-  })
-})
-
-describe("callback-handler scope 'bdir'", () => {
+describe("callback-handler scope 'bdir' — роль Директа ОТКЛЮЧЕНА", () => {
   function getHandler() {
     const handler = registeredHandlers.find((h) => h.scope === 'bdir')
     expect(handler).toBeDefined()
@@ -463,45 +263,25 @@ describe("callback-handler scope 'bdir'", () => {
     expect(registeredHandlers.some((h) => h.scope === 'bdir')).toBe(true)
   })
 
-  it('accept → decideProposal(id, accept) + answer + убрали кнопки + reply', async () => {
-    mockDecideProposal.mockResolvedValue({ ok: true, summaryText: 'Принято: тест.' })
-    const ctx = makeCtx(-100777)
-    await getHandler()(asCtx(ctx), 'accept', 'prop1')
-    expect(mockDecideProposal).toHaveBeenCalledWith('prop1', 'accept')
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Принято' })
-    expect(ctx.editMessageReplyMarkup).toHaveBeenCalled()
-    expect(ctx.reply).toHaveBeenCalledWith('Принято: тест.', { parse_mode: 'HTML' })
-  })
+  // Даже случайное нажатие старой кнопки «✅ Да»/«❌ Нет» → «отключено», кнопки
+  // снимаем, decideProposal НЕ зовём (никакого решения/применения предложения).
+  it.each(['accept', 'reject', 'boom'])(
+    'action «%s» → answer «отключено», кнопки снимаем, decideProposal не зовём',
+    async (action) => {
+      const ctx = makeCtx(-100777)
+      await getHandler()(asCtx(ctx), action, 'prop1')
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: DISABLED })
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalledWith(undefined)
+      expect(mockDecideProposal).not.toHaveBeenCalled()
+      expect(ctx.reply).not.toHaveBeenCalled()
+    }
+  )
 
-  it('reject → decideProposal(id, reject) + answer «Отклонено»', async () => {
-    mockDecideProposal.mockResolvedValue({ ok: true, summaryText: 'Отклонено: тест.' })
-    const ctx = makeCtx(-100777)
-    await getHandler()(asCtx(ctx), 'reject', 'prop2')
-    expect(mockDecideProposal).toHaveBeenCalledWith('prop2', 'reject')
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Отклонено' })
-    expect(ctx.reply).toHaveBeenCalledWith('Отклонено: тест.', { parse_mode: 'HTML' })
-  })
-
-  it('уже решено (ok:false) → answer «Уже решено», без reply', async () => {
-    mockDecideProposal.mockResolvedValue({ ok: false, summaryText: 'уже' })
-    const ctx = makeCtx(-100777)
-    await getHandler()(asCtx(ctx), 'accept', 'prop3')
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Уже решено' })
-    expect(ctx.reply).not.toHaveBeenCalled()
-  })
-
-  it('неизвестный action → answer «Неизвестное действие», decideProposal не зовём', async () => {
-    const ctx = makeCtx(-100777)
-    await getHandler()(asCtx(ctx), 'boom', 'prop4')
-    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Неизвестное действие' })
-    expect(mockDecideProposal).not.toHaveBeenCalled()
-  })
-
-  it('editMessageReplyMarkup упал (старое сообщение) → всё равно reply', async () => {
-    mockDecideProposal.mockResolvedValue({ ok: true, summaryText: 'Принято.' })
+  it('editMessageReplyMarkup упал (старое сообщение) → не падаем, decideProposal не зовём', async () => {
     const ctx = makeCtx(-100777)
     ctx.editMessageReplyMarkup.mockRejectedValue(new Error('message is not modified'))
-    await getHandler()(asCtx(ctx), 'accept', 'prop5')
-    expect(ctx.reply).toHaveBeenCalledWith('Принято.', { parse_mode: 'HTML' })
+    await expect(getHandler()(asCtx(ctx), 'accept', 'prop5')).resolves.toBeUndefined()
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: DISABLED })
+    expect(mockDecideProposal).not.toHaveBeenCalled()
   })
 })

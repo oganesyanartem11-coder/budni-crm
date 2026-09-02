@@ -206,9 +206,26 @@ export async function handleDirectChatMessage(
   const prefix = ['борис', 'боря'].find((p) => normalized.startsWith(p))
   if (!prefix) return next()
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // РОЛЬ «ВЕДЕНИЕ ДИРЕКТА» ОТКЛЮЧЕНА НАСОВСЕМ (решение владельца): кампания
+  // переведена на автостратегию Яндекса, Борис Директ больше не ведёт. Любая
+  // обращённая команда в чате Директа получает ранний выход — ДО смены режима
+  // (боевой/наблюдение), отката, приёма звонков/сделок и любого обращения к
+  // Direct API. Личность Бориса и другие роли не затронуты: гейт стоит уже после
+  // isDirectChat() + префикса «борис». Логика команд ниже сохранена намеренно
+  // (снятие роли с расписания, не снос кода) и сейчас недостижима.
+  await ctx.reply(
+    'Ведение Директа отключено: кампания переведена на автостратегию Яндекса. ' +
+      'Я больше не веду Директ — не меняю ставки и минусы, не рассуждаю и не шлю отчёты.',
+    { parse_mode: 'HTML' }
+  )
+  return
+
   // «борис, стоп» → «стоп»: убираем префикс и запятые, схлопываем пробелы.
+  // (prefix! — на живом пути сужен `if (!prefix) return next()`; блок недостижим
+  //  из-за раннего выхода роли, ассерт лишь удерживает типы зелёными.)
   const command = normalized
-    .slice(prefix.length)
+    .slice(prefix!.length)
     .replace(/,/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -306,7 +323,7 @@ export async function handleDirectChatMessage(
         // READ-ONLY доменный ответ РОЛЬЮ трафика (личность общая, домен по чату).
         // НИКАКИХ действий/write — только текст (см. chat-reply.ts). Раньше здесь
         // был next() → общий контур заказов без домена («это не по моей части»).
-        reply = await answerDirectFreeText(raw)
+        reply = await answerDirectFreeText(raw!)
         break
     }
   } catch (err) {
@@ -328,12 +345,23 @@ export function registerDirectCallbackHandler(): void {
   registerCallbackHandler({
     scope: 'bdir',
     async handle(ctx, action, id) {
+      // РОЛЬ «ВЕДЕНИЕ ДИРЕКТА» ОТКЛЮЧЕНА НАСОВСЕМ: даже случайное нажатие старой
+      // кнопки «✅ Да»/«❌ Нет» из истории чата не должно решать/применять
+      // предложение. Ранний выход ДО decideProposal и любого обращения к кабинету.
+      await ctx.answerCallbackQuery({ text: 'Ведение Директа отключено' })
+      try {
+        await ctx.editMessageReplyMarkup(undefined)
+      } catch (err) {
+        console.error('[boris-direct/telegram] editMessageReplyMarkup (роль отключена) failed', err)
+      }
+      return
+
       if (action !== 'accept' && action !== 'reject') {
         await ctx.answerCallbackQuery({ text: 'Неизвестное действие' })
         return
       }
 
-      const result = await decideProposal(id, action)
+      const result = await decideProposal(id, action as 'accept' | 'reject')
 
       await ctx.answerCallbackQuery({
         text: result.ok
