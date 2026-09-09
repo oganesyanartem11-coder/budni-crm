@@ -12,7 +12,8 @@ export interface OrderListFilter {
 }
 
 /**
- * Список заказов для табличного режима. Сортировка по дате доставки + времени создания.
+ * Список заказов для табличного режима. Сортировка по дате доставки,
+ * типу питания (завтрак → обед → ужин) и имени клиента.
  */
 export async function listOrders(filter: OrderListFilter, limit = 200) {
   const where: Prisma.OrderWhereInput = {}
@@ -43,8 +44,9 @@ export async function listOrders(filter: OrderListFilter, limit = 200) {
     take: limit,
     orderBy: [
       { deliveryDate: 'asc' },
-      { client: { name: 'asc' } },
+      // Порядок enum MealType в PostgreSQL: BREAKFAST, LUNCH, DINNER.
       { mealType: 'asc' },
+      { client: { name: 'asc' } },
     ],
     include: {
       client: { select: { id: true, name: true } },

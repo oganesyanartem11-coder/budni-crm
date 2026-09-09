@@ -16,7 +16,7 @@ import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
 import { cn } from '@/lib/utils/cn'
 import { generateAndGetUpdForDate } from '@/app/(app)/production/print/upd/actions'
-import type { Order, Client, ClientLocation, OrderStatus } from '@prisma/client'
+import type { Order, Client, ClientLocation, OrderStatus, MealType } from '@prisma/client'
 
 type SerializedOrder = Omit<Order, 'pricePerPortion' | 'totalPrice' | 'vatRate'> & {
   pricePerPortion: number
@@ -159,6 +159,10 @@ export function OrdersList({ orders, clients, filters, selectedDateIso, onFilter
   // Агрегаты — только по НЕ-отменённым заказам.
   const activeOrders = orders.filter((o) => o.status !== 'CANCELLED')
   const totalPortions = activeOrders.reduce((sum, o) => sum + o.portions, 0)
+  const portionsByMealType = activeOrders.reduce<Record<MealType, number>>((totals, order) => {
+    totals[order.mealType] += order.portions
+    return totals
+  }, { BREAKFAST: 0, LUNCH: 0, DINNER: 0 })
   const totalRevenue = activeOrders.reduce((sum, o) => sum + o.totalPrice, 0)
   // Доставка: одна плата на (локация, день) среди не-отменённых, где deliveryFee > 0
   // — как в delivery-revenue.ts (раз на локацию-день, НЕ на каждый заказ).
@@ -271,12 +275,15 @@ export function OrdersList({ orders, clients, filters, selectedDateIso, onFilter
         </div>
       )}
 
-      {/* Агрегаты: 5 боксов. «Заказов» — без отменённых (согласовано с «Порций»
-          и «Суммой»). «Общая сумма» = питание + доставка. */}
+      {/* Агрегаты без отменённых заказов: порции по типам питания,
+          количество заказов и суммы. «Общая сумма» = питание + доставка. */}
       {orders.length > 0 && (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 lg:gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 lg:gap-3">
+          <AggregateCard label="Всего порций" value={totalPortions.toString()} />
+          <AggregateCard label="Завтраков" value={portionsByMealType.BREAKFAST.toString()} />
+          <AggregateCard label="Обедов" value={portionsByMealType.LUNCH.toString()} />
+          <AggregateCard label="Ужинов" value={portionsByMealType.DINNER.toString()} />
           <AggregateCard label="Заказов" value={activeOrders.length.toString()} />
-          <AggregateCard label="Порций" value={totalPortions.toString()} />
           <AggregateCard label="Сумма за питание" value={formatMoney(totalRevenue)} />
           <AggregateCard label="Доставка" value={formatMoney(deliveryTotal)} />
           <AggregateCard label="Общая сумма" value={formatMoney(grandTotal)} />
