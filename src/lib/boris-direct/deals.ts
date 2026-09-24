@@ -14,6 +14,7 @@
 
 import { prisma } from '@/lib/db/prisma'
 import { isTestLead } from './test-markers'
+import { syncPipelineFromDealStatus } from '@/lib/sales/sync-deal-status'
 
 // ---------- Разбор команды ----------
 
@@ -181,6 +182,7 @@ export async function markDealWon(leadId: string, amountRub: number): Promise<vo
     where: { id: leadId },
     data: { dealStatus: 'WON', dealAmount: amountRub },
   })
+  await syncPipelineFromDealStatus(leadId, 'WON', { authorLabel: 'Борис-Директ' })
 }
 
 /** Снять отметку сделки (dealStatus=NONE, dealAmount=null). */

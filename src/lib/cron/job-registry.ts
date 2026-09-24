@@ -43,6 +43,9 @@ export const CRON_JOBS: CronJobConfig[] = [
   // false-positive «stale» в Пт/Сб/Вс.
   { jobName: 'boris-team-evening-digest',   scheduleUtc: '0 17 * * 1-4', description: 'Итог дня в группу (Командный Боря)',                maxAgeHours: 80 },
   { jobName: 'boris-team-friday',           scheduleUtc: '0 16 * * 5',  description: 'Пятничный недельный итог (Командный Боря)',         maxAgeHours: 170 },
+  // 14h: работает каждые 10 мин 09:00–21:59 МСК, ночной перерыв ~11 ч
+  // (последний запуск 18:50 UTC → первый 06:00 UTC), плюс запас.
+  { jobName: 'sales-reminders',             scheduleUtc: '*/10 6-18 * * *', description: 'Напоминания по задачам продаж',     maxAgeHours: 14 },
 ]
 
 export const CRON_HEARTBEAT_ACTION = 'CRON_HEARTBEAT'

@@ -15,6 +15,12 @@ const {
   mockFindDelivered,
   mockRecordDelivered,
   mockThrottle,
+  mockOnLeadCreated,
+  mockFindFirstOpenTaskId,
+  mockFindActiveByPhone,
+  mockLinkDuplicates,
+  mockRecordRepeat,
+  mockLeadButtons,
 } = vi.hoisted(() => ({
   mockNotifyLeads: vi.fn(),
   mockPersist: vi.fn(),
@@ -24,6 +30,12 @@ const {
   mockFindDelivered: vi.fn(),
   mockRecordDelivered: vi.fn(),
   mockThrottle: vi.fn(),
+  mockOnLeadCreated: vi.fn(),
+  mockFindFirstOpenTaskId: vi.fn(),
+  mockFindActiveByPhone: vi.fn(),
+  mockLinkDuplicates: vi.fn(),
+  mockRecordRepeat: vi.fn(),
+  mockLeadButtons: vi.fn(),
 }))
 
 vi.mock('@/lib/telegram/notify', () => ({
@@ -41,6 +53,17 @@ vi.mock('@/lib/leads/dedup', () => ({
   recordDedupDrop: mockRecordDrop,
   throttleHoneypotAlert: mockThrottle,
 }))
+// Sprint 8.0: воронка /sales — мокаем целиком (к БД не ходим).
+vi.mock('@/lib/sales/on-lead-created', () => ({
+  onLeadCreated: mockOnLeadCreated,
+  findFirstOpenTaskId: mockFindFirstOpenTaskId,
+}))
+vi.mock('@/lib/sales/duplicates', () => ({
+  findActiveLeadByPhone: mockFindActiveByPhone,
+  linkDuplicateLeads: mockLinkDuplicates,
+  recordRepeatSubmission: mockRecordRepeat,
+}))
+vi.mock('@/lib/sales/notify', () => ({ leadButtons: mockLeadButtons }))
 
 import { POST } from './route'
 
@@ -66,6 +89,12 @@ beforeEach(() => {
   mockRecordDrop.mockResolvedValue(undefined)
   mockRecordDelivered.mockResolvedValue(undefined)
   mockThrottle.mockResolvedValue(true) // по умолчанию honeypot-алёрт разрешён
+  mockOnLeadCreated.mockResolvedValue({ ok: true, taskId: 't1' })
+  mockFindFirstOpenTaskId.mockResolvedValue(null)
+  mockFindActiveByPhone.mockResolvedValue(null)
+  mockLinkDuplicates.mockResolvedValue(undefined)
+  mockRecordRepeat.mockResolvedValue(undefined)
+  mockLeadButtons.mockImplementation((leadId: string, taskId?: string | null) => ({ kb: leadId, taskId }))
 })
 
 describe('авторизация и валидация — контракт не меняем', () => {
@@ -187,5 +216,75 @@ describe('ШАГ 1а/1б — шумные алёрты по путям поте�
     const text = mockAlert.mock.calls[0][0] as string
     expect(text).toContain('НЕ записана в БД')
     expect(text).toContain('db down')
+  })
+})
+
+describe('Sprint 8.0 — воронка /sales (hook, дубли, кнопки)', () => {
+  it('новый ряд → onLeadCreated(site), кнопки с задачей, ответ как раньше', async () => {
+    const res = await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(mockOnLeadCreated).toHaveBeenCalledWith({ leadId: 'l1', source: 'site' })
+    expect(mockFindActiveByPhone).toHaveBeenCalledWith('79995999967', { excludeId: 'l1' })
+    expect(mockLinkDuplicates).not.toHaveBeenCalled()
+    expect(mockLeadButtons).toHaveBeenCalledWith('l1', 't1')
+    expect(mockNotifyLeads.mock.calls[0][1]).toEqual({ parseMode: 'HTML', replyMarkup: { kb: 'l1', taskId: 't1' } })
+  })
+
+  it('Telegram отклонил сообщение с кнопками → повтор без кнопок, заявка доставлена', async () => {
+    mockNotifyLeads.mockResolvedValueOnce({ ok: false, error: 'BUTTON_URL_INVALID' }).mockResolvedValueOnce({ ok: true })
+    const res = await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967' }))
+    expect(res.status).toBe(200)
+    expect(mockNotifyLeads).toHaveBeenCalledTimes(2)
+    expect(mockNotifyLeads.mock.calls[1][1]).toEqual({ parseMode: 'HTML' })
+    expect(mockAlert).not.toHaveBeenCalled()
+  })
+
+  it('есть активная заявка с тем же номером → linkDuplicateLeads(новый, старый)', async () => {
+    mockFindActiveByPhone.mockResolvedValue({ id: 'old-7' })
+    await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967' }))
+    expect(mockLinkDuplicates).toHaveBeenCalledWith('l1', 'old-7')
+  })
+
+  it('лечащий ретрай (ряд уже есть) → hook НЕ зовём, кнопка по открытой задаче', async () => {
+    mockFindDup.mockResolvedValue({ id: 'row-9' })
+    mockFindFirstOpenTaskId.mockResolvedValue('t-open')
+    const res = await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967' }))
+    expect(res.status).toBe(200)
+    expect(mockOnLeadCreated).not.toHaveBeenCalled()
+    expect(mockLinkDuplicates).not.toHaveBeenCalled()
+    expect(mockFindFirstOpenTaskId).toHaveBeenCalledWith('row-9')
+    expect(mockLeadButtons).toHaveBeenCalledWith('row-9', 't-open')
+  })
+
+  it('доставлено за 5 минут → повтор пишется в активную заявку, ответ тот же', async () => {
+    mockFindDelivered.mockResolvedValue({ id: 'deliv-1' })
+    mockFindActiveByPhone.mockResolvedValue({ id: 'act-1' })
+    const res = await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967', source: 'chef' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(mockRecordRepeat).toHaveBeenCalledWith('act-1', { source: 'chef' })
+    expect(mockOnLeadCreated).not.toHaveBeenCalled()
+    expect(mockNotifyLeads).not.toHaveBeenCalled()
+  })
+
+  it('hook не создал задачу и бот-env нет (кнопки бросают) → шлём без кнопок, 200', async () => {
+    mockOnLeadCreated.mockResolvedValue({ ok: false })
+    mockLeadButtons.mockImplementation(() => {
+      throw new Error('TELEGRAM_BOT_TOKEN not set')
+    })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const res = await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967' }))
+    expect(res.status).toBe(200)
+    expect(mockLeadButtons).toHaveBeenCalledWith('l1', null)
+    expect(mockNotifyLeads.mock.calls[0][1]).toEqual({ parseMode: 'HTML' })
+  })
+
+  it('persist упал → ни hook, ни кнопок (leadId неизвестен)', async () => {
+    mockPersist.mockResolvedValue({ status: 'failed', error: 'db down' })
+    await POST(req({ phone: '+7 999 599-99-67', phone_digits: '79995999967' }))
+    expect(mockOnLeadCreated).not.toHaveBeenCalled()
+    expect(mockLeadButtons).not.toHaveBeenCalled()
+    expect(mockNotifyLeads.mock.calls[0][1]).toEqual({ parseMode: 'HTML' })
   })
 })

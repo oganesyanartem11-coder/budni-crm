@@ -21,9 +21,11 @@ import {
   Factory,
   Settings,
   UserCircle,
+  Handshake,
   type LucideIcon,
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
+import { SALES_ROLES } from '@/lib/sales/labels'
 
 // 7.14A: ROLE_LABELS переехал в @/lib/constants/roles — единая точка истины
 // для лейблов/цветов/описаний ролей. Реэкспортируем здесь, чтобы существующие
@@ -97,6 +99,8 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'sales',
     title: 'Продажи',
     items: [
+      // Sprint 8.0: воронка заявок. roles = SALES_ROLES (как гард /sales).
+      { href: '/sales',         label: 'Продажи',     icon: Handshake,     roles: [...SALES_ROLES] },
       { href: '/orders',        label: 'Заказы',      icon: ClipboardList, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'pendingCount' },
       { href: '/inbox',         label: 'Сообщения',   icon: Inbox,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'], badge: 'inboxCount' },
       { href: '/clients',       label: 'Клиенты',     icon: Users,         roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },

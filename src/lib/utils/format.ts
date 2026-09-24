@@ -309,3 +309,56 @@ export function formatDateRangeRu(from: Date, to: Date): string {
 
   return `${a.day}–${b.day} ${MSK_MONTHS_GENITIVE[b.month]}`
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Sprint 8.0 «Продажи»: даты задач воронки. Все компоненты — в МСК
+   (Intl + mskDayMonthYear), не date-fns format без таймзоны.
+   ───────────────────────────────────────────────────────────── */
+
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+/** «Чт, 25 сен 14:30» — день недели с заглавной, месяц сокращённо, время МСК. */
+export function formatMskDateTimeShort(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const weekday = formatMskWeekdayShort(d)
+  const { day, month } = mskDayMonthYear(d)
+  const weekdayCap = weekday.charAt(0).toUpperCase() + weekday.slice(1)
+  return `${weekdayCap}, ${day} ${MSK_MONTHS_ABBR[month]} ${formatMskTime(d)}`
+}
+
+/** Ключ МСК-календарного дня (для сравнения «сегодня/завтра»). */
+function mskDayKey(d: Date): number {
+  const { day, month, year } = mskDayMonthYear(d)
+  return Date.UTC(year, month, day)
+}
+
+/**
+ * Срок задачи относительно `now`: «сегодня 14:30» / «завтра 10:00» /
+ * «Чт, 25 сен 14:30» / «просрочено 40 мин» / «просрочено 2 ч» / «просрочено 3 дн».
+ * Просрочка считается с первой полной минуты после срока.
+ */
+export function formatDueRelative(dueAt: Date | string, now: Date = new Date()): string {
+  const due = typeof dueAt === 'string' ? new Date(dueAt) : dueAt
+  const overdueMs = now.getTime() - due.getTime()
+  if (overdueMs >= MINUTE_MS) {
+    if (overdueMs < HOUR_MS) return `просрочено ${Math.floor(overdueMs / MINUTE_MS)} мин`
+    if (overdueMs < DAY_MS) return `просрочено ${Math.floor(overdueMs / HOUR_MS)} ч`
+    return `просрочено ${Math.floor(overdueMs / DAY_MS)} дн`
+  }
+  const dayDiff = Math.round((mskDayKey(due) - mskDayKey(now)) / DAY_MS)
+  if (dayDiff === 0) return `сегодня ${formatMskTime(due)}`
+  if (dayDiff === 1) return `завтра ${formatMskTime(due)}`
+  return formatMskDateTimeShort(due)
+}
+
+/** «только что» / «5 мин назад» / «2 ч назад» / «3 дн назад» (для lastActivityAt). */
+export function formatAgoRu(date: Date | string, now: Date = new Date()): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const diff = now.getTime() - d.getTime()
+  if (diff < MINUTE_MS) return 'только что'
+  if (diff < HOUR_MS) return `${Math.floor(diff / MINUTE_MS)} мин назад`
+  if (diff < DAY_MS) return `${Math.floor(diff / HOUR_MS)} ч назад`
+  return `${Math.floor(diff / DAY_MS)} дн назад`
+}

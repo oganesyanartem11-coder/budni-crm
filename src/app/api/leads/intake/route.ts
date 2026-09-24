@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { notifyLeads, escapeHtml } from '@/lib/telegram/notify'
+import { notifyLeads, escapeHtml, type NotifyOptions } from '@/lib/telegram/notify'
 import { readLeadsIntakeSecret } from '@/lib/telegram/env'
 import { persistLandingLead } from '@/lib/leads/persist-landing-lead'
 import { notifyIntakeAlert } from '@/lib/leads/intake-alert'
@@ -10,6 +10,10 @@ import {
   recordDedupDrop,
   throttleHoneypotAlert,
 } from '@/lib/leads/dedup'
+import { SOURCE_LABELS } from '@/lib/sales/labels'
+import { onLeadCreated, findFirstOpenTaskId } from '@/lib/sales/on-lead-created'
+import { findActiveLeadByPhone, linkDuplicateLeads, recordRepeatSubmission } from '@/lib/sales/duplicates'
+import { leadButtons } from '@/lib/sales/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,29 +26,10 @@ export const dynamic = 'force-dynamic'
 
 const ALLOWED_ORIGIN = 'https://budni.pro'
 
-// Человекочитаемые имена источников (data-source блоков лендинга budni.pro).
-// В сообщении показываем читаемое имя; тех-код остаётся в скобках и в хэштеге,
-// чтобы фильтрация в чате не зависела от перевода. Неизвестный source —
-// показываем как есть (fallback, не падаем).
-const SOURCE_LABELS: Record<string, string> = {
-  'mobile-menu': 'Меню (моб.) — Рассчитать бюджет',
-  'hero-secondary': 'Hero — Заказать дегустацию',
-  'aud-office': 'Попап: Офисы',
-  'aud-build': 'Попап: Стройки и объекты',
-  'aud-warehouse': 'Попап: Склады и производства',
-  'aud-med': 'Попап: Медучреждения',
-  'aud-film': 'Попап: Съёмочные группы',
-  'aud-event': 'Попап: Разовые мероприятия',
-  'block-8-shashlyk': 'Шашлык — Хочу шашлык в команду',
-  'menu-full': 'Меню — Получить полное меню',
-  'case-night': 'Кейс — Оставить заявку',
-  chef: 'Шеф Иван — Заказать дегустацию',
-  'tasting-block': 'Блок дегустации',
-  'final-tasting': 'Финал — дегустация',
-  'floating-button': 'Плавающая кнопка',
-  'quiz-block-3': 'Квиз (блок 3)',
-  'quiz-block-18-final': 'Квиз (финал)',
-}
+// Человекочитаемые имена источников (data-source блоков лендинга budni.pro)
+// живут в @/lib/sales/labels (общие с воронкой /sales). В сообщении показываем
+// читаемое имя; тех-код остаётся в скобках и в хэштеге, чтобы фильтрация в чате
+// не зависела от перевода. Неизвестный source — показываем как есть.
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
@@ -252,6 +237,9 @@ export async function POST(request: Request) {
     if (delivered) {
       console.log(`[leads/intake] dedup: phone_digits already delivered within window — not forwarding`)
       await recordDedupDrop(delivered.id, asString(body.source))
+      // Воронка /sales: повтор по активной заявке — отметка в её истории (не бросает).
+      const activeLead = await findActiveLeadByPhone(phoneDigits)
+      if (activeLead) await recordRepeatSubmission(activeLead.id, { source: asString(body.source) })
       return corsJson({ ok: true }, 200)
     }
     // Доставки ещё не было (или первая попытка). Если запись уже есть (прошлая
@@ -267,12 +255,46 @@ export async function POST(request: Request) {
     ? ({ status: 'created', id: existingRowId } as const)
     : await persistLandingLead(body)
 
+  // 5a) Воронка /sales (Sprint 8.0). Всё best effort: hook и дубли не бросают,
+  // ответ сайту от них не зависит. Новый ряд → история + авто-задача «Связаться»
+  // + связка с активной заявкой того же номера. Лечащий ретрай → hook не зовём
+  // повторно, только находим открытую задачу для кнопки «✅ Связался».
+  const leadId = persist.status === 'created' ? persist.id : null
+  let taskId: string | null = null
+  if (!existingRowId && persist.status === 'created') {
+    const hook = await onLeadCreated({ leadId: persist.id, source: 'site' })
+    taskId = hook.taskId ?? null
+    if (phoneDigits) {
+      const prior = await findActiveLeadByPhone(phoneDigits, { excludeId: persist.id })
+      if (prior) await linkDuplicateLeads(persist.id, prior.id)
+    }
+  } else if (existingRowId) {
+    taskId = await findFirstOpenTaskId(existingRowId)
+  }
+
+  // Кнопки [Открыть заявку] [✅ Связался]: leadButtons требует бот-env — не
+  // собрались → шлём без кнопок, как раньше.
+  let replyMarkup: NotifyOptions['replyMarkup']
+  if (leadId) {
+    try {
+      replyMarkup = leadButtons(leadId, taskId)
+    } catch (err) {
+      console.warn('[leads/intake] lead buttons skipped:', err instanceof Error ? err.message : err)
+    }
+  }
+
   // 6) Сборка сообщения и отправка в чат заявок.
   const text = buildMessage(body)
   let notifyOk = false
   let notifyError = 'unknown'
   try {
-    const result = await notifyLeads(text, { parseMode: 'HTML' })
+    let result = await notifyLeads(text, replyMarkup ? { parseMode: 'HTML', replyMarkup } : { parseMode: 'HTML' })
+    // Кнопки воронки — надстройка: если Telegram отклонил сообщение с ними, шлём
+    // заявку ещё раз как раньше, без кнопок (дубль лучше молчаливой потери).
+    if (!result.ok && replyMarkup) {
+      console.warn(`[leads/intake] notifyLeads with buttons failed (${result.error}) — retry without buttons`)
+      result = await notifyLeads(text, { parseMode: 'HTML' })
+    }
     notifyOk = result.ok
     if (!result.ok) {
       notifyError = result.error ?? 'send_failed'

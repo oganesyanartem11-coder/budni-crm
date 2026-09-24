@@ -18,6 +18,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { getAdVisitsByPhraseHour } from './metrika-client'
 import { CALL_FORM_TYPE, CALL_HINT_HOUR_RADIUS } from './config'
+import { onLeadCreated } from '@/lib/sales/on-lead-created'
 
 const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
 
@@ -272,7 +273,7 @@ export async function handleCallCommand(command: string, now: Date = new Date())
 
   const last4 = parsed.phoneDigits.slice(-4)
   try {
-    await prisma.landingLead.create({
+    const created = await prisma.landingLead.create({
       data: {
         formType: CALL_FORM_TYPE,
         phone: parsed.phoneRaw,
@@ -297,6 +298,8 @@ export async function handleCallCommand(command: string, now: Date = new Date())
         ),
       },
     })
+    // Sprint 8.0: звонок попадает в воронку /sales (история + задача «Связаться»); hook не бросает.
+    await onLeadCreated({ leadId: created.id, source: 'boris_call' })
   } catch (err) {
     console.error('[boris-direct/calls] создание лида-звонка упало', err)
     return 'Не получилось записать звонок, смотри логи.'

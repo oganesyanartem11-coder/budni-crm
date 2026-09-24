@@ -48,6 +48,10 @@ interface Props {
   client?: SerializedClient
   isNew?: boolean
   legalEntities: LegalEntityOption[]
+  /** Sprint 8.0: предзаполнение нового клиента (напр. из заявки воронки). */
+  initialValues?: { name?: string; contactName?: string; contactPhone?: string }
+  /** Sprint 8.0: заявка воронки, к которой привязать созданного клиента. */
+  leadId?: string
 }
 
 const NO_LEGAL_ENTITY = '__none__'
@@ -67,13 +71,15 @@ function dateToInputValue(d: Date | string | null | undefined): string {
   return d.slice(0, 10)
 }
 
-export function ClientForm({ client, isNew = false, legalEntities }: Props) {
+export function ClientForm({ client, isNew = false, legalEntities, initialValues, leadId }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  const [name, setName] = useState(client?.name ?? '')
-  const [contactName, setContactName] = useState(client?.contactName ?? '')
-  const [contactPhone, setContactPhone] = useState(client?.contactPhone ?? '')
+  const [name, setName] = useState(client?.name ?? initialValues?.name ?? '')
+  const [contactName, setContactName] = useState(client?.contactName ?? initialValues?.contactName ?? '')
+  const [contactPhone, setContactPhone] = useState(client?.contactPhone ?? initialValues?.contactPhone ?? '')
+  // Ссылка «назад/отмена»: из заявки воронки — обратно в заявку.
+  const backHref = client ? `/clients/${client.id}` : leadId ? `/sales/${leadId}` : '/clients'
   const [contactMessenger, setContactMessenger] = useState(client?.contactMessenger ?? '')
   const [notes, setNotes] = useState(client?.notes ?? '')
 
@@ -171,7 +177,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
               }
             : undefined
 
-        const result = await createClient({ ...baseData, firstLocation })
+        const result = await createClient({ ...baseData, firstLocation, ...(leadId ? { leadId } : {}) })
         if (result.ok) {
           toast.success('Клиент создан')
           router.push(`/clients/${result.data.id}`)
@@ -196,11 +202,11 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
     <>
       <div className="mb-6">
         <Link
-          href={client ? `/clients/${client.id}` : '/clients'}
+          href={backHref}
           className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-strong transition-colors rounded-lg [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
         >
           <ArrowLeft className="w-4 h-4" />
-          {client ? 'К карточке клиента' : 'Все клиенты'}
+          {client ? 'К карточке клиента' : leadId ? 'К заявке' : 'Все клиенты'}
         </Link>
       </div>
 
@@ -497,7 +503,7 @@ export function ClientForm({ client, isNew = false, legalEntities }: Props) {
 
         <div className="flex justify-end gap-2">
           <Link
-            href={client ? `/clients/${client.id}` : '/clients'}
+            href={backHref}
             className="inline-flex items-center justify-center min-h-[44px] px-5 py-2.5 rounded-xl border border-border-strong bg-surface text-fg font-medium text-sm hover:bg-surface-2 hover:text-fg-strong transition-colors [touch-action:manipulation] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green/30"
           >
             Отмена

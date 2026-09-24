@@ -392,6 +392,10 @@ model User {
   portionBaselinesUpdated      ClientPortionBaseline[]      @relation("PortionBaselineUpdatedBy")
   anomalyConfirmationsResolved PendingAnomalyConfirmation[] @relation("AnomalyConfirmationResolvedBy")
 
+  // Sprint 8.0 «Продажи»: ответственный по заявке и исполнитель задач воронки.
+  assignedLandingLeads LandingLead[] @relation("LandingLeadAssignee")
+  salesTasks           SalesTask[]   @relation("SalesTaskAssignee")
+
   @@index([role, isActive])
 }
 
@@ -488,6 +492,8 @@ model Client {
   courierRouteStops           CourierRouteStop[]
   maxUsers                    ClientMaxUser[]
   maxInvites                  ClientMaxInvite[]
+  // Sprint 8.0 «Продажи»: заявки воронки, из которых вырос клиент.
+  landingLeads                LandingLead[]
 
   @@index([isActive])
   @@index([name])
@@ -1806,9 +1812,116 @@ model LandingLead {
 
   createdAt DateTime @default(now())
 
+  // Sprint 8.0 «Продажи»: воронка поверх LandingLead. pipelineStatus — рабочая
+  // стадия менеджера; dealStatus выше синхронизируется с ней в обе стороны
+  // (src/lib/sales/sync-deal-status.ts), чтобы Борис-Директ и офлайн-конверсии
+  // продолжили работать. formType дополнительно принимает 'manual' (заведена в CRM).
+  pipelineStatus LeadPipelineStatus @default(NEW)
+  company        String?
+  email          String?
+  portionsHint   Int?
+  address        String?
+  comment        String?
+  lostReason     LeadLostReason?
+  lostComment    String?
+  assignedToId   String?
+  assignedTo     User?              @relation("LandingLeadAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  clientId       String?
+  client         Client?            @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  wonAt          DateTime?
+  lostAt         DateTime?
+  archivedAt     DateTime?
+  lastActivityAt DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) @updatedAt
+  tasks          SalesTask[]
+  activities     SalesActivity[]
+
   @@index([createdAt])
   @@index([yclid])
   @@index([phoneDigits])
+  @@index([pipelineStatus, archivedAt, lastActivityAt])
+  @@index([assignedToId])
+  @@index([clientId])
+}
+
+// Sprint 8.0 «Продажи»: стадии воронки заявок.
+enum LeadPipelineStatus {
+  NEW
+  IN_PROGRESS
+  PROPOSAL_SENT
+  TRIAL
+  CONTRACT
+  WON
+  LOST
+}
+
+enum LeadLostReason {
+  EXPENSIVE
+  NO_ANSWER
+  CHOSE_OTHER
+  FORMAT_MISMATCH
+  OTHER
+}
+
+enum SalesTaskType {
+  CALL
+  WRITE
+  SEND_PROPOSAL
+  MEETING
+  TRIAL
+  OTHER
+}
+
+enum SalesActivityKind {
+  INCOMING
+  NOTE
+  STATUS_CHANGE
+  TASK_CREATED
+  TASK_DONE
+  TASK_RESCHEDULED
+  TASK_DELETED
+  DUPLICATE
+  WON
+  LOST
+  ARCHIVED
+  UNARCHIVED
+  CLIENT_LINKED
+}
+
+// Задача-напоминание по заявке. notifiedAt — атомарный claim cron'а
+// sales-reminders (пуш уходит один раз; перенос сбрасывает в null).
+model SalesTask {
+  id          String        @id @default(cuid())
+  leadId      String
+  lead        LandingLead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type        SalesTaskType @default(CALL)
+  title       String
+  dueAt       DateTime
+  doneAt      DateTime?
+  notifiedAt  DateTime?
+  assigneeId  String?
+  assignee    User?         @relation("SalesTaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdById String?
+  note        String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([doneAt, dueAt])
+  @@index([leadId, doneAt])
+}
+
+// История заявки (timeline карточки /sales/[id]).
+model SalesActivity {
+  id        String            @id @default(cuid())
+  leadId    String
+  lead      LandingLead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  kind      SalesActivityKind
+  text      String
+  meta      Json?
+  authorId  String?
+  createdAt DateTime          @default(now())
+
+  @@index([leadId, createdAt])
 }
 
 // Режим работы роли «трафик». OBSERVE = читаем/анализируем/отчитываемся,

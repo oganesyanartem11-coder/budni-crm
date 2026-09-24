@@ -14,11 +14,13 @@ import {
   Settings,
   Bot,
   ChevronRight,
+  Handshake,
   type LucideIcon,
 } from 'lucide-react'
 import type { UserRole } from '@prisma/client'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
+import { SALES_ROLES } from '@/lib/sales/labels'
 
 // 7.20 / Волна 4: полноценная mobile overflow-страница «Ещё».
 // Источник истины по ролям — src/lib/navigation.ts (NAV_GROUPS/BOTTOM_NAV):
@@ -53,6 +55,7 @@ const SECTIONS: MoreSection[] = [
   {
     title: 'Продажи',
     items: [
+      { href: '/sales',        label: 'Воронка заявок', subtitle: 'Заявки, задачи, напоминания', icon: Handshake, roles: [...SALES_ROLES] },
       { href: '/clients',      label: 'Клиенты',     icon: Users,        roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER'] },
       { href: '/menu',         label: 'Меню недели', icon: CalendarDays, roles: ['ADMIN_PRO', 'ADMIN', 'MANAGER', 'CHEF'] },
       { href: '/menu/imports', label: 'Импорт меню', icon: Sparkles,     roles: ['ADMIN_PRO', 'ADMIN', 'CHEF'] },

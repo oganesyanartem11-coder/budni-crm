@@ -10,6 +10,7 @@ import { startOfTodayMsk, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { isValidPhone } from '@/lib/utils/format'
 import { notifyProductionChannel, escapeHtml } from '@/lib/telegram/notify'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
+import { linkLeadToClientCore } from '@/lib/sales/core'
 import {
   validateInn,
   validateOgrn,
@@ -331,7 +332,11 @@ function toClientRequisitesPayload(data: ClientFormData) {
 // CLIENT ============================================================
 
 export async function createClient(
-  formData: ClientFormData & { firstLocation?: LocationFormData }
+  formData: ClientFormData & {
+    firstLocation?: LocationFormData
+    /** Sprint 8.0: заявка воронки, к которой привязать нового клиента (/clients/new?leadId=). */
+    leadId?: string
+  }
 ): Promise<ActionResult<{ id: string }>> {
   const user = await requireRole(['ADMIN', 'MANAGER'])
 
@@ -386,6 +391,31 @@ export async function createClient(
       },
     },
   })
+
+  // Sprint 8.0: клиент создан из заявки воронки — привязываем заявку.
+  // Права проверяет linkLeadToClientCore (SALES_ROLES): MANAGER с leadId
+  // просто не привяжет. Любой сбой привязки НЕ ломает создание клиента.
+  const leadId = typeof formData.leadId === 'string' ? formData.leadId.trim() : ''
+  if (leadId) {
+    try {
+      const linked = await linkLeadToClientCore(
+        { id: user.id, role: user.role },
+        { leadId, clientId: client.id }
+      )
+      if (linked.ok) {
+        revalidatePath('/sales')
+        revalidatePath(`/sales/${leadId}`)
+      } else {
+        console.warn('[createClient] заявка не привязана к клиенту', {
+          leadId,
+          clientId: client.id,
+          error: linked.error,
+        })
+      }
+    } catch (err) {
+      console.warn('[createClient] сбой привязки заявки к клиенту', { leadId, clientId: client.id, err })
+    }
+  }
 
   revalidatePath('/clients')
   return { ok: true, data: { id: client.id } }

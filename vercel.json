@@ -31,6 +31,7 @@
     { "path": "/api/cron/boris-9am-summary", "schedule": "0 6 * * *" },
     { "path": "/api/cron/boris-self-analysis", "schedule": "0 7 * * 5" },
     { "path": "/api/cron/boris-team-evening-digest", "schedule": "0 17 * * 1-4" },
-    { "path": "/api/cron/boris-team-friday", "schedule": "0 16 * * 5" }
+    { "path": "/api/cron/boris-team-friday", "schedule": "0 16 * * 5" },
+    { "path": "/api/cron/sales-reminders", "schedule": "*/10 6-18 * * *" }
   ]
 }
