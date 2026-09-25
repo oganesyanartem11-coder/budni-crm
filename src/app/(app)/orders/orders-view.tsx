@@ -45,6 +45,7 @@ interface Props {
     mealType: string
     status: string
     search: string
+    sort: 'meal' | 'client'
   }
 }
 

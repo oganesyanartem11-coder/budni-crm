@@ -9,11 +9,16 @@ export interface OrderListFilter {
   mealType?: MealType
   status?: OrderStatus
   search?: string
+  /** 'meal' (по умолчанию): тип питания → клиент; 'client': клиент → тип питания. */
+  sort?: OrderListSort
 }
 
+export type OrderListSort = 'meal' | 'client'
+
 /**
- * Список заказов для табличного режима. Сортировка по дате доставки,
- * типу питания (завтрак → обед → ужин) и имени клиента.
+ * Список заказов для табличного режима. Сортировка по дате доставки, затем
+ * по умолчанию — тип питания (завтрак → обед → ужин) и имя клиента; при
+ * sort='client' — имя клиента, затем тип питания.
  */
 export async function listOrders(filter: OrderListFilter, limit = 200) {
   const where: Prisma.OrderWhereInput = {}
@@ -42,12 +47,11 @@ export async function listOrders(filter: OrderListFilter, limit = 200) {
   return prisma.order.findMany({
     where,
     take: limit,
-    orderBy: [
-      { deliveryDate: 'asc' },
-      // Порядок enum MealType в PostgreSQL: BREAKFAST, LUNCH, DINNER.
-      { mealType: 'asc' },
-      { client: { name: 'asc' } },
-    ],
+    // Порядок enum MealType в PostgreSQL: BREAKFAST, LUNCH, DINNER.
+    orderBy:
+      filter.sort === 'client'
+        ? [{ deliveryDate: 'asc' }, { client: { name: 'asc' } }, { mealType: 'asc' }]
+        : [{ deliveryDate: 'asc' }, { mealType: 'asc' }, { client: { name: 'asc' } }],
     include: {
       client: { select: { id: true, name: true } },
       // deliveryFee (Decimal?) — для сводки «Доставка»/«Общая сумма» в шапке

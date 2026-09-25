@@ -19,6 +19,7 @@ interface PageProps {
     mealType?: string
     status?: string
     search?: string
+    sort?: string
   }>
 }
 
@@ -27,6 +28,8 @@ export default async function OrdersPage({ searchParams }: PageProps) {
 
   const params = await searchParams
   const view: 'list' | 'week' = params.view === 'week' ? 'week' : 'list'
+  // Сортировка списка: по умолчанию тип питания (завтрак → обед → ужин).
+  const sort: 'meal' | 'client' = params.sort === 'client' ? 'client' : 'meal'
 
   // Дата по умолчанию: сегодня по МСК (Bug 7.25 — раньше серверный UTC new Date()
   // в окне 00:00–03:00 МСК давал «сегодня» на день раньше). Всё считаем в UTC
@@ -52,6 +55,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
       mealType: (params.mealType as MealType | undefined) || undefined,
       status: (params.status as OrderStatus | undefined) || undefined,
       search: params.search,
+      sort,
     })
   } else {
     weekStartDate = params.weekStart ? new Date(params.weekStart) : getMondayOfWeek(new Date())
@@ -97,6 +101,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
           mealType: params.mealType ?? '',
           status: params.status ?? '',
           search: params.search ?? '',
+          sort,
         }}
       />
     </>

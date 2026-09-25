@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { toast } from 'sonner'
 import { OrderStatusBadge } from '@/components/ui/status-badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SegmentedControl } from '@/components/ui/segmented-control'
 import { LockedEditConfirmDialog, requiresLockedEditConfirm } from './_components/locked-edit-confirm'
 import { editOrderPortions } from './actions'
 import { formatMoney } from '@/lib/utils/format'
@@ -35,6 +36,7 @@ interface Props {
     mealType: string
     status: string
     search: string
+    sort: 'meal' | 'client'
   }
   selectedDateIso: string
   onFilterChange: (patch: Record<string, string | null>) => void
@@ -100,6 +102,13 @@ function UpdClientButton({ clientId, dateYmd }: { clientId: string; dateYmd: str
     </a>
   )
 }
+
+// Сортировка списка (URL ?sort=): по умолчанию тип питания (завтрак → обед → ужин),
+// внутри — клиент; «По клиенту» — клиент, внутри — завтрак → обед → ужин.
+const SORT_OPTIONS: { value: 'meal' | 'client'; label: string }[] = [
+  { value: 'meal', label: 'По питанию' },
+  { value: 'client', label: 'По клиенту' },
+]
 
 const ALL_STATUSES: OrderStatus[] = [
   'DRAFT',
@@ -211,6 +220,14 @@ export function OrdersList({ orders, clients, filters, selectedDateIso, onFilter
             Сбросить
           </button>
         )}
+        <SegmentedControl
+          options={SORT_OPTIONS}
+          value={filters.sort}
+          onChange={(v) => onFilterChange({ sort: v === 'meal' ? null : v })}
+          size="sm"
+          ariaLabel="Сортировка заказов"
+          className="ml-auto"
+        />
       </div>
 
       {filtersOpen && (
