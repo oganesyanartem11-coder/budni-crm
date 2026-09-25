@@ -21,6 +21,7 @@
     "bot:dev": "dotenv -e .env.local -- tsx scripts/max-bot-dev.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:cold-load": "node scripts/check-route-cold-load.cjs",
     "test:llm": "dotenv -e .env.local -- tsx scripts/test-llm-parser.ts",
     "test:margin": "dotenv -e .env.test -- tsx scripts/test-historical-margin.ts",
     "test:e2e": "dotenv -e .env.test -- playwright test",

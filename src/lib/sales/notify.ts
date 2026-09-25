@@ -3,6 +3,7 @@ import type { SalesTaskType } from '@prisma/client'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import { escapeHtml, notifyAllAdminProDirect, notifyManagerDirect } from '@/lib/telegram/notify'
 import { leadDisplayName, TASK_TYPE_RU } from './labels'
+import { SALES_CALLBACK_SCOPE } from './callback-scope'
 
 /**
  * Sprint 8.0 «Продажи»: TG-кнопки и пуши воронки (голос Бориса: коротко, тепло).
@@ -13,7 +14,7 @@ import { leadDisplayName, TASK_TYPE_RU } from './labels'
  * (cron /api/cron/sales-reminders).
  */
 
-export const SALES_CALLBACK_SCOPE = 'sales'
+export { SALES_CALLBACK_SCOPE }
 
 /** Быстрые «что дальше?» из TG: слот → задача (см. хендлер scope 'sales'). */
 export const NEXT_STEP_SLOTS = ['call_t10', 'write_3d', 'kp_t10', 'none'] as const

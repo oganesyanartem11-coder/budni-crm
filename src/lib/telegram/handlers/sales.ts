@@ -9,13 +9,10 @@ import {
   rescheduleTaskCore,
 } from '@/lib/sales/core'
 import { isSalesRole, leadDisplayName, PIPELINE_STATUS_RU, TASK_TYPE_RU } from '@/lib/sales/labels'
-import {
-  leadButtons,
-  nextStepKeyboard,
-  parseNextStepId,
-  SALES_CALLBACK_SCOPE,
-  type NextStepSlot,
-} from '@/lib/sales/notify'
+import { leadButtons, nextStepKeyboard, parseNextStepId, type NextStepSlot } from '@/lib/sales/notify'
+// Scope — из листового модуля: registerCallbackHandler ниже читает его при
+// импорте, а sales/notify в цикле с telegram/bot (см. callback-scope.ts).
+import { SALES_CALLBACK_SCOPE } from '@/lib/sales/callback-scope'
 import { plusOneDay, quickSlots, type QuickSlots } from '@/lib/sales/time'
 import type { SalesActor } from '@/lib/sales/types'
 import { formatMskDateTimeShort } from '@/lib/utils/format'
