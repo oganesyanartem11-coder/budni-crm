@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { mockPrisma, mockCreateCore, mockCreateInbox } = vi.hoisted(() => ({
+const { mockPrisma, mockCreateCore, mockCreateInbox, mockSetPortions } = vi.hoisted(() => ({
   mockPrisma: {
     $transaction: vi.fn(),
     pendingAnomalyConfirmation: {
@@ -16,11 +16,13 @@ const { mockPrisma, mockCreateCore, mockCreateInbox } = vi.hoisted(() => ({
   },
   mockCreateCore: vi.fn(),
   mockCreateInbox: vi.fn(),
+  mockSetPortions: vi.fn(),
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('@/app/(app)/orders/actions', () => ({ createOneTimeOrderCore: mockCreateCore }))
 vi.mock('@/lib/bot/create-inbox-item', () => ({ createInboxItem: mockCreateInbox }))
+vi.mock('@/lib/orders/client-portions', () => ({ setOrderPortionsForClient: mockSetPortions }))
 
 import {
   confirmPendingAnomaly,
@@ -30,6 +32,8 @@ import {
 
 const NOW = new Date('2026-08-06T10:00:00.000Z')
 const DELIVERY = new Date('2026-08-07T00:00:00.000Z')
+// Заказ сгенерирован ДО запроса аномалии (cron 06:00).
+const GENERATED_AT = new Date('2026-08-06T03:00:00.000Z')
 const pending = {
   id: 'anom_1',
   clientId: 'client_1',
@@ -40,6 +44,7 @@ const pending = {
   status: 'PENDING',
   processingAt: null,
   conversationId: 'conv_1',
+  createdAt: new Date('2026-08-06T09:00:00.000Z'),
   client: { id: 'client_1', name: 'Клиент' },
   location: { id: 'loc_1', name: 'Офис' },
 }
@@ -61,6 +66,13 @@ beforeEach(() => {
   mockPrisma.order.findFirst.mockResolvedValue(null)
   mockCreateCore.mockResolvedValue({ ok: true, data: { orderId: 'order_1' } })
   mockCreateInbox.mockResolvedValue({ id: 'inbox_1' })
+  mockSetPortions.mockResolvedValue({
+    ok: true,
+    kind: 'confirmed',
+    orderId: 'order_existing',
+    prevPortions: 0,
+    prevStatus: 'PENDING_CONFIRMATION',
+  })
 })
 
 afterEach(() => {
@@ -225,13 +237,13 @@ describe('confirmPendingAnomaly — PROCESSING state machine', () => {
     expect(mockPrisma.order.findFirst).not.toHaveBeenCalled()
   })
 
-  it('stale PROCESSING с существующим Order восстанавливает baseline/CONFIRMED без Core', async () => {
+  it('stale PROCESSING с существующим Order доводит его порции и завершает recovery без create', async () => {
     mockPrisma.pendingAnomalyConfirmation.findUnique.mockResolvedValue({
       ...pending,
       status: 'PROCESSING',
       processingAt: new Date(NOW.getTime() - 3 * 60_000),
     })
-    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_existing' })
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_existing', updatedAt: GENERATED_AT })
 
     const result = await confirmPendingAnomaly({
       confirmationId: 'anom_1',
@@ -245,6 +257,10 @@ describe('confirmPendingAnomaly — PROCESSING state machine', () => {
       recovered: true,
     })
     expect(mockCreateCore).not.toHaveBeenCalled()
+    expect(mockSetPortions).toHaveBeenCalledWith(
+      { id: 'admin_1', role: 'ADMIN' },
+      { orderId: 'order_existing', portions: 5, via: 'anomaly_confirmation' },
+    )
     expect(mockPrisma.order.findFirst).toHaveBeenCalledWith({
       where: {
         clientId: 'client_1',
@@ -253,7 +269,7 @@ describe('confirmPendingAnomaly — PROCESSING state machine', () => {
         deliveryDate: DELIVERY,
         status: { not: 'CANCELLED' },
       },
-      select: { id: true },
+      select: { id: true, updatedAt: true },
     })
     expect(mockPrisma.clientPortionBaseline.upsert).toHaveBeenCalled()
   })
@@ -305,7 +321,10 @@ describe('confirmPendingAnomaly — PROCESSING state machine', () => {
 
   it('exception после фактического Order завершает recovery и не возвращает PENDING', async () => {
     mockCreateCore.mockRejectedValue(new Error('activity log failed'))
-    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_after_exception' })
+    // До create заказа нет (preexisting-проверка), после исключения — уже есть.
+    mockPrisma.order.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: 'order_after_exception' })
 
     const result = await confirmPendingAnomaly({
       confirmationId: 'anom_1',
@@ -320,6 +339,73 @@ describe('confirmPendingAnomaly — PROCESSING state machine', () => {
     })
     const updates = mockPrisma.pendingAnomalyConfirmation.updateMany.mock.calls.map((call) => call[0])
     expect(updates).not.toContainEqual(expect.objectContaining({ data: { status: 'PENDING' } }))
+  })
+
+  it('«Да» по дате, где заказ уже сгенерирован (DYNAMIC/FIXED): обновляет его порции, create не зовёт', async () => {
+    // Баг старых кнопок: createOneTimeOrderCore отказывал «На эту дату уже есть заказ».
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_generated', updatedAt: GENERATED_AT })
+    mockSetPortions.mockResolvedValue({
+      ok: true,
+      kind: 'confirmed',
+      orderId: 'order_generated',
+      prevPortions: 0,
+      prevStatus: 'PENDING_CONFIRMATION',
+    })
+
+    const result = await confirmPendingAnomaly({
+      confirmationId: 'anom_1',
+      user: { id: 'manager_1', role: 'MANAGER' },
+    })
+
+    expect(result).toEqual({ ok: true, orderId: 'order_generated', portions: 5 })
+    expect(mockCreateCore).not.toHaveBeenCalled()
+    expect(mockSetPortions).toHaveBeenCalledWith(
+      { id: 'manager_1', role: 'MANAGER' },
+      { orderId: 'order_generated', portions: 5, via: 'anomaly_confirmation' },
+    )
+    expect(mockPrisma.pendingAnomalyConfirmation.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'CONFIRMED' }) }),
+    )
+  })
+
+  it('старое «Да» не затирает число, принятое ПОСЛЕ запроса (заказ менялся позже)', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({
+      id: 'order_newer',
+      updatedAt: new Date('2026-08-06T09:30:00.000Z'),
+    })
+
+    const result = await confirmPendingAnomaly({
+      confirmationId: 'anom_1',
+      user: { id: 'manager_1', role: 'MANAGER' },
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      reason: 'core_error',
+      error: 'заказ изменён после этого запроса — число не применяем, проверьте заказ',
+    })
+    expect(mockSetPortions).not.toHaveBeenCalled()
+    expect(mockCreateCore).not.toHaveBeenCalled()
+  })
+
+  it('«Да» по заказу с УПД: порции не меняет, подтверждение возвращается в PENDING с причиной', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_upd', updatedAt: GENERATED_AT })
+    mockSetPortions.mockResolvedValue({
+      ok: false,
+      skipped: true,
+      reason: 'по заказу уже выписан УПД',
+      orderId: 'order_upd',
+    })
+
+    const result = await confirmPendingAnomaly({
+      confirmationId: 'anom_1',
+      user: { id: 'admin_1', role: 'ADMIN' },
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'core_error', error: 'по заказу уже выписан УПД' })
+    expect(mockCreateCore).not.toHaveBeenCalled()
+    expect(mockPrisma.pendingAnomalyConfirmation.updateMany.mock.calls[1][0].data)
+      .toEqual({ status: 'PENDING', processingAt: null, resolvedAt: null, resolvedById: null })
   })
 
   it('exception без Order освобождает PROCESSING и возвращает читаемую ошибку', async () => {

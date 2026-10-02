@@ -28,7 +28,7 @@ const DATE_HINT_RE =
 // чтобы «пн/вт/ср/чт/пт/сб/вс» не ловились внутри слов («все», «автобус»).
 const WEEKDAY_ABBR_RE = /(?<![а-яё])(пн|вт|ср|чт|пт|сб|вс)(?![а-яё])/
 
-function hasDateHint(lower: string): boolean {
+export function hasDateHint(lower: string): boolean {
   return DATE_HINT_RE.test(lower) || WEEKDAY_ABBR_RE.test(lower)
 }
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   mockRegister,
@@ -6,7 +6,11 @@ const {
   mockConfirm,
   mockReject,
   mockNotifyManagers,
+  anomalyFlag,
 } = vi.hoisted(() => ({
+  // Тесты ниже проверяют режим С проверкой аномалий (флаг можно вернуть в true);
+  // режим «проверка отключена» — отдельный describe.
+  anomalyFlag: { enabled: true },
   mockRegister: vi.fn(),
   mockIdentify: vi.fn(),
   mockConfirm: vi.fn(),
@@ -15,6 +19,17 @@ const {
 }))
 
 vi.mock('../callback-router', () => ({ registerCallbackHandler: mockRegister }))
+vi.mock('@/lib/orders/anomaly-constants', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/orders/anomaly-constants')>(
+    '@/lib/orders/anomaly-constants',
+  )
+  return {
+    ...actual,
+    get ANOMALY_CHECK_ENABLED() {
+      return anomalyFlag.enabled
+    },
+  }
+})
 vi.mock('../identify-user', () => ({ identifyTelegramUser: mockIdentify }))
 vi.mock('@/lib/orders/anomaly-confirmations', () => ({
   confirmPendingAnomaly: mockConfirm,
@@ -184,5 +199,49 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
     expect(mockReject).toHaveBeenCalledWith({ confirmationId: 'anom_1', userId: 'manager_1' })
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
       .toHaveBeenCalledWith('Отклонено, ушло в inbox')
+  })
+})
+
+describe('handleAnomalyConfirmationCallback — проверка аномалий отключена (старые кнопки)', () => {
+  function makeCtx() {
+    return {
+      from: { id: 123 },
+      answerCallbackQuery: vi.fn(),
+      editMessageText: vi.fn(),
+    } as never
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    anomalyFlag.enabled = false
+  })
+  afterEach(() => {
+    anomalyFlag.enabled = true
+  })
+
+  it('«Да» применяет число и сообщает, что проверка отключена', async () => {
+    mockIdentify.mockResolvedValue({ id: 'manager_1', role: 'MANAGER', isActive: true })
+    mockConfirm.mockResolvedValue({ ok: true, orderId: 'order_1', portions: 5 })
+    const ctx = makeCtx()
+
+    await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
+
+    expect(mockConfirm).toHaveBeenCalledWith({
+      confirmationId: 'anom_1',
+      user: { id: 'manager_1', role: 'MANAGER' },
+    })
+    expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
+      .toHaveBeenCalledWith('✅ Проверка аномалий отключена, число принято: 5 порций')
+  })
+
+  it('повторное «Да» по уже применённому — «число уже принято»', async () => {
+    mockIdentify.mockResolvedValue({ id: 'manager_1', role: 'MANAGER', isActive: true })
+    mockConfirm.mockResolvedValue({ ok: false, reason: 'already_processed' })
+    const ctx = makeCtx()
+
+    await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
+
+    expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
+      .toHaveBeenCalledWith('Проверка аномалий отключена, число уже принято')
   })
 })

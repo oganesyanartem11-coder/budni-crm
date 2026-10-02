@@ -171,7 +171,7 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
   const configs = await prisma.clientMealConfig.findMany({
     where: {
       isActive: true,
-      orderType: { in: ['FIXED', 'DYNAMIC'] },
+      orderType: { in: ['FIXED', 'DYNAMIC', 'STICKY'] },
       client: { isActive: true },
       location: { isActive: true },
     },
@@ -260,7 +260,8 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
     }
 
     try {
-      const isFixed = config.orderType === 'FIXED'
+      // STICKY генерируется как FIXED: fixedPortions = последнее число клиента.
+      const isFixed = config.orderType === 'FIXED' || config.orderType === 'STICKY'
       const portionsValue = isFixed ? (config.fixedPortions ?? 0) : 0
       const priceNum = Number(config.pricePerPortion)
       const snapshot = buildLegalEntitySnapshot(config.client)
@@ -380,7 +381,7 @@ export async function generateFixedOrdersForRange(
   const configs = await prisma.clientMealConfig.findMany({
     where: {
       isActive: true,
-      orderType: { in: ['FIXED', 'DYNAMIC'] },
+      orderType: { in: ['FIXED', 'DYNAMIC', 'STICKY'] },
       client: { isActive: true },
       location: { isActive: true },
     },
@@ -457,7 +458,8 @@ export async function generateFixedOrdersForRange(
     stats.matchedSchedule++
 
     try {
-      const isFixed = config.orderType === 'FIXED'
+      // STICKY генерируется как FIXED: fixedPortions = последнее число клиента.
+      const isFixed = config.orderType === 'FIXED' || config.orderType === 'STICKY'
       const portionsValue = isFixed ? (config.fixedPortions ?? 0) : 0
       const priceNum = Number(config.pricePerPortion)
       const snapshot = buildLegalEntitySnapshot(config.client)

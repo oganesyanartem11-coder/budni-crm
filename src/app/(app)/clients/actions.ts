@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import type { MealType, OrderStatus } from '@prisma/client'
+import type { MealType, OrderStatus, OrderType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
 import { startOfTodayMsk, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
@@ -229,7 +229,7 @@ const mealConfigSchema = z.object({
   // 5.9b: locationId обязателен. Старые null-конфиги в БД остаются (миграция позже).
   locationId: z.string().min(1, 'Выберите локацию'),
   mealType: z.enum(['BREAKFAST', 'LUNCH', 'DINNER']),
-  orderType: z.enum(['DYNAMIC', 'FIXED', 'WEEKLY']),
+  orderType: z.enum(['DYNAMIC', 'FIXED', 'WEEKLY', 'STICKY']),
   deliveryHorizon: z.enum(['NEXT_DAY', 'SAME_DAY']).default('NEXT_DAY'),
   scheduleType: z.enum(['DAILY', 'WEEKDAYS', 'WEEKENDS', 'CUSTOM_DAYS', 'ONE_TIME', 'INTERVAL']),
   scheduleData: z.record(z.string(), z.any()).nullable().optional(),
@@ -932,16 +932,24 @@ export async function assignCourierToLocation(
 
 // MEAL CONFIG =======================================================
 
+/** FIXED и STICKY генерируются автоматически по fixedPortions. */
+function usesFixedPortions(orderType: OrderType): boolean {
+  return orderType === 'FIXED' || orderType === 'STICKY'
+}
+
 export async function updateMealConfig(
   id: string,
   formData: MealConfigFormData
 ): Promise<UpdateMealConfigResult> {
-  await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'MANAGER'])
 
   const parsed = mealConfigSchema.safeParse(formData)
   if (!parsed.success) {
     const firstError = parsed.error.issues[0]
     return { ok: false, error: firstError?.message ?? 'Неверные данные питания' }
+  }
+  if (usesFixedPortions(parsed.data.orderType) && !parsed.data.fixedPortions) {
+    return { ok: false, error: 'Укажите количество порций' }
   }
 
   // E-блок MEGA-AUDIT-FIX-2: считаем будущие DRAFT/PENDING заказы с устаревшим
@@ -950,6 +958,7 @@ export async function updateMealConfig(
   const existing = await prisma.clientMealConfig.findUnique({
     where: { id },
     select: {
+      orderType: true,
       fixedPortions: true,
       clientId: true,
       scheduleType: true,
@@ -964,8 +973,17 @@ export async function updateMealConfig(
 
   const oldFixedPortions = existing.fixedPortions
   const newFixedPortions = parsed.data.fixedPortions ?? null
+  // Смена DYNAMIC/WEEKLY → FIXED/STICKY: будущие PENDING/DRAFT-заказы (0 порций)
+  // больше никто не подтвердит вопросом — тем же chunked-механизмом B-5 переводим
+  // их в CONFIRMED с fixedPortions БЕЗ выбора «оставить» (иначе повиснут нулями).
+  // Уже подтверждённые клиентом числа (CONFIRMED) при смене типа не трогаем.
+  const switchedToFixedPortions =
+    usesFixedPortions(parsed.data.orderType) &&
+    !usesFixedPortions(existing.orderType) &&
+    newFixedPortions !== null
   const portionsChanged =
-    parsed.data.orderType === 'FIXED' &&
+    !switchedToFixedPortions &&
+    usesFixedPortions(parsed.data.orderType) &&
     newFixedPortions !== null &&
     oldFixedPortions !== null &&
     newFixedPortions !== oldFixedPortions
@@ -973,7 +991,7 @@ export async function updateMealConfig(
   // T-2: смена расписания у FIXED-конфига. Будущие заказы уже сгенерированы под
   // старый график — предупреждаем менеджера (заказы НЕ трогаем автоматически).
   const scheduleChanged =
-    parsed.data.orderType === 'FIXED' &&
+    usesFixedPortions(parsed.data.orderType) &&
     (parsed.data.scheduleType !== existing.scheduleType ||
       JSON.stringify(parsed.data.scheduleData ?? null) !== JSON.stringify(existing.scheduleData ?? null) ||
       (parsed.data.validFrom ? new Date(parsed.data.validFrom).getTime() : null) !==
@@ -1005,6 +1023,68 @@ export async function updateMealConfig(
     status: { in: ['DRAFT', 'PENDING_CONFIRMATION', 'CONFIRMED'] },
     source: { in: ['FIXED_AUTO', 'RECURRING_AUTO'] },
     deliveryDate: { gte: getMskCalendarDayUtc(new Date(), 1) },
+    // По заказу с УПД документ уже выписан — порции не трогаем.
+    updDocumentLink: { is: null },
+  }
+
+  if (switchedToFixedPortions) {
+    const pending = await prisma.order.findMany({
+      where: {
+        ...affectedOrdersWhere,
+        status: { in: ['DRAFT', 'PENDING_CONFIRMATION'] },
+      },
+      select: { id: true, pricePerPortion: true },
+    })
+    const CHUNK_SIZE = 100
+    const confirmedAt = new Date()
+    for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
+      const chunk = pending.slice(i, i + CHUNK_SIZE)
+      await prisma.$transaction(
+        chunk.map((o) =>
+          prisma.order.update({
+            where: { id: o.id },
+            data: {
+              portions: newFixedPortions!,
+              totalPrice: o.pricePerPortion.mul(newFixedPortions!),
+              status: 'CONFIRMED',
+              confirmedAt,
+            },
+          })
+        )
+      )
+    }
+    const config = await prisma.clientMealConfig.update({
+      where: { id },
+      data: updateData,
+    })
+    // Больше нет DYNAMIC-питания → сегодняшний вопрос бота закрываем, чтобы
+    // напоминания/cutoff-notice не спрашивали клиента, которому вопросы не нужны.
+    const dynamicLeft = await prisma.clientMealConfig.count({
+      where: { clientId: config.clientId, orderType: 'DYNAMIC', isActive: true },
+    })
+    if (dynamicLeft === 0) {
+      await prisma.botConversation.updateMany({
+        where: { clientId: config.clientId, status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      })
+    }
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'MEAL_CONFIG_TYPE_SWITCHED',
+        entityType: 'ClientMealConfig',
+        entityId: id,
+        payload: {
+          oldOrderType: existing.orderType,
+          newOrderType: parsed.data.orderType,
+          fixedPortions: newFixedPortions,
+          pendingConfirmed: pending.length,
+        },
+      },
+    })
+    revalidatePath(`/clients/${config.clientId}`)
+    return { ok: true, data: undefined }
   }
 
   if ((portionsChanged || scheduleChanged) && !parsed.data.confirmDraftPortions) {
@@ -1300,7 +1380,7 @@ const mealConfigBulkSchema = z.object({
   mealTypes: z.array(z.enum(['BREAKFAST', 'LUNCH', 'DINNER'])).min(1, 'Выберите хотя бы один тип питания'),
   // Цены отдельно по каждому типу: { BREAKFAST: 200, LUNCH: 380, DINNER: 320 }
   pricesByType: z.record(z.string(), z.number().nonnegative()),
-  orderType: z.enum(['DYNAMIC', 'FIXED', 'WEEKLY']),
+  orderType: z.enum(['DYNAMIC', 'FIXED', 'WEEKLY', 'STICKY']),
   deliveryHorizon: z.enum(['NEXT_DAY', 'SAME_DAY']).default('NEXT_DAY'),
   scheduleType: z.enum(['DAILY', 'WEEKDAYS', 'WEEKENDS', 'CUSTOM_DAYS', 'ONE_TIME', 'INTERVAL']),
   scheduleData: z.record(z.string(), z.any()).nullable().optional(),
@@ -1325,11 +1405,12 @@ export async function createMealConfigBulk(
 
   const { mealTypes, pricesByType, fixedPortionsByType } = parsed.data
 
-  // Проверка: для FIXED у каждого типа должны быть порции
-  if (parsed.data.orderType === 'FIXED') {
+  // Проверка: для FIXED/STICKY у каждого типа должны быть порции (у STICKY —
+  // стартовое «последнее число»).
+  if (usesFixedPortions(parsed.data.orderType)) {
     for (const mt of mealTypes) {
       if (!fixedPortionsByType?.[mt] || fixedPortionsByType[mt] <= 0) {
-        return { ok: false, error: `Для FIXED укажите количество порций (${mt})` }
+        return { ok: false, error: `Укажите количество порций (${mt})` }
       }
     }
   }
@@ -1353,7 +1434,7 @@ export async function createMealConfigBulk(
           deliveryHorizon: parsed.data.deliveryHorizon,
           scheduleType: parsed.data.scheduleType,
           scheduleData: parsed.data.scheduleData ?? undefined,
-          fixedPortions: parsed.data.orderType === 'FIXED' ? (fixedPortionsByType?.[mt] ?? null) : null,
+          fixedPortions: usesFixedPortions(parsed.data.orderType) ? (fixedPortionsByType?.[mt] ?? null) : null,
           pricePerPortion: pricesByType[mt],
           validFrom: parsed.data.validFrom ? new Date(parsed.data.validFrom) : new Date(),
           validTo: parsed.data.validTo ? new Date(parsed.data.validTo) : null,

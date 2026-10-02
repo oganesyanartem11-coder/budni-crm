@@ -1,309 +1,504 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Prisma } from '@prisma/client'
 import type { ParseResult } from './parser'
-import type { SanityResult } from './sanity-checks'
-import type { OrderStatus } from '@prisma/client'
 
 /**
- * MEGA-2 actions: order-creation / rollback для недельных заявок.
- *
- * Мокаем @/lib/db/prisma (методы, которые дёргают actions) и
- * @/lib/orders/legal-entity-snapshot (snapshot юрлица — без БД в тесте).
- * $transaction в проде получает массив PrismaPromise'ов от prisma.order.create;
- * в моке create возвращает готовый объект {id}, а $transaction просто
- * резолвит переданный массив (Promise.all) — так мы проверяем и состав заказов.
+ * Недельная заявка: приём → построчное применение → откат. client-portions
+ * реальный (там логика «есть заказ → обновить / нет → создать / 0 → отменить»),
+ * мокаем БД и Core-функции заказов.
  */
 
-// --- Моки. vi.hoisted: фабрики vi.mock поднимаются в начало файла, поэтому
-// сами моки нужно создать через hoisted, иначе ReferenceError (TDZ). ---
-const { mockPrisma, mockSnapshot } = vi.hoisted(() => ({
+const { mockPrisma, mockCore } = vi.hoisted(() => ({
   mockPrisma: {
+    clientMealConfig: { findMany: vi.fn() },
     weeklyOrderSubmission: {
-      create: vi.fn(),
+      upsert: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       findUnique: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
     },
-    clientMealConfig: {
-      findFirst: vi.fn(),
-    },
-    menuCycle: {
-      findFirst: vi.fn(),
-    },
-    order: {
-      create: vi.fn(),
-      update: vi.fn(),
-    },
-    $transaction: vi.fn(),
+    user: { findFirst: vi.fn() },
+    order: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    menuCycle: { findFirst: vi.fn() },
+    activityLog: { create: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
   },
-  mockSnapshot: vi.fn(),
+  mockCore: {
+    cancelOrderCore: vi.fn(),
+    createOneTimeOrderCore: vi.fn(),
+    editOrderPortionsCore: vi.fn(),
+    restoreOrderCore: vi.fn(),
+  },
 }))
 
-vi.mock('@/lib/db/prisma', () => ({
-  prisma: mockPrisma,
-}))
+vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
+vi.mock('@/app/(app)/orders/actions', () => mockCore)
 
-vi.mock('@/lib/orders/legal-entity-snapshot', () => ({
-  getOrderLegalEntitySnapshot: (clientId: string) => mockSnapshot(clientId),
-}))
+import {
+  applyReviewedSubmission,
+  processWeeklySubmission,
+  rejectWeeklySubmission,
+  undoWeeklyApply,
+  WEEKLY_APPLIED_ACTION,
+} from './actions'
 
-// Импорт ПОСЛЕ vi.mock (hoisting гарантирует, что моки уже на месте).
-import { processWeeklySubmission, cancelWeeklySubmission } from './actions'
+// Понедельник 5 окт 2026, 10:00 МСК.
+const NOW = new Date('2026-10-05T07:00:00.000Z')
+const SYSTEM = { id: 'admin_pro_1', role: 'ADMIN_PRO' }
 
-const CLIENT_ID = 'client_1'
-const SUBMISSION_ID = 'sub_1'
-const CONFIG = {
+const CONFIG_ROW = {
   id: 'cfg_1',
   locationId: 'loc_1',
-  mealType: 'LUNCH' as const,
-  pricePerPortion: '300.00',
-  location: { packaging: 'INDIVIDUAL' as const },
+  mealType: 'LUNCH',
+  pricePerPortion: new Prisma.Decimal(300),
+  location: {
+    name: 'Офис',
+    sameDayDelivery: false,
+    isActive: true,
+    cutoffHourMsk: null,
+    cutoffMinuteMsk: null,
+  },
 }
 
-function makeParsed(overrides: Partial<ParseResult> = {}): ParseResult {
-  return {
-    items: [
-      { date: '2026-06-01', portions: 20 },
-      { date: '2026-06-02', portions: 18 },
-      { date: '2026-06-03', portions: 22 },
-    ],
-    dietaryNotes: 'всегда без свинины',
-    confidence: 1,
-    reason: 'чёткое фото',
-    ...overrides,
-  }
+function parsed(items: ParseResult['items'], confidence = 0.9): ParseResult {
+  return { items, dietaryNotes: null, confidence, reason: 'ok' }
 }
 
-const okSanity: SanityResult = { ok: true, failures: [] }
-const WEEK_START = new Date('2026-05-31T21:00:00.000Z') // МСК-полночь Пн 1 июн
+let createdCounter = 0
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // create заявки → возвращаем id
-  mockPrisma.weeklyOrderSubmission.create.mockResolvedValue({ id: SUBMISSION_ID })
-  mockPrisma.weeklyOrderSubmission.update.mockResolvedValue({ id: SUBMISSION_ID })
-  // snapshot юрлица по умолчанию — заполнен
-  mockSnapshot.mockResolvedValue({ ourLegalEntityId: 'ole_1', vatRate: '10.00' })
-  // $transaction: исполняем переданный массив операций (Promise.all)
-  mockPrisma.$transaction.mockImplementation((ops: Promise<unknown>[]) => Promise.all(ops))
+  createdCounter = 0
+  mockPrisma.clientMealConfig.findMany.mockResolvedValue([CONFIG_ROW])
+  mockPrisma.weeklyOrderSubmission.upsert.mockResolvedValue({ id: 'sub_1' })
+  mockPrisma.weeklyOrderSubmission.update.mockResolvedValue({})
+  mockPrisma.weeklyOrderSubmission.updateMany.mockResolvedValue({ count: 1 })
+  mockPrisma.user.findFirst.mockResolvedValue(SYSTEM)
+  mockPrisma.order.findFirst.mockResolvedValue(null)
+  mockPrisma.order.update.mockResolvedValue({})
+  // Меню на следующую неделю НЕ утверждено — заказы всё равно должны появиться.
+  mockPrisma.menuCycle.findFirst.mockResolvedValue(null)
+  mockPrisma.activityLog.create.mockResolvedValue({ id: 'log_apply_1' })
+  mockPrisma.activityLog.findFirst.mockResolvedValue(null)
+  mockCore.createOneTimeOrderCore.mockImplementation(async () => ({
+    ok: true,
+    data: { orderId: `order_new_${++createdCounter}` },
+  }))
+  mockCore.editOrderPortionsCore.mockResolvedValue({ ok: true, data: { editedAfterLock: false } })
+  mockCore.cancelOrderCore.mockResolvedValue({ ok: true, data: undefined })
+  mockCore.restoreOrderCore.mockResolvedValue({ ok: true, data: { editedAfterLock: false } })
 })
 
-describe('processWeeklySubmission', () => {
-  it('PARSED + sanity ok + меню есть → AUTO_CONFIRMED, N заказов WEEKLY_AUTO/CONFIRMED', async () => {
-    mockPrisma.clientMealConfig.findFirst.mockResolvedValue(CONFIG)
-    mockPrisma.menuCycle.findFirst.mockResolvedValue({ id: 'menu_1' }) // меню на любую дату
-    let seq = 0
-    mockPrisma.order.create.mockImplementation(() => Promise.resolve({ id: `order_${++seq}` }))
-
-    const parsed = makeParsed()
-    const result = await processWeeklySubmission({
-      clientId: CLIENT_ID,
-      source: 'PHOTO',
-      blobUrl: 'https://blob/photo.jpg',
-      parsedResult: parsed,
-      sanityResult: okSanity,
-      weekStartDate: WEEK_START,
+describe('processWeeklySubmission — автоприменение', () => {
+  it('БАГ до 01.10: меню не утверждено → раньше NEEDS_REVIEW и ноль заказов; теперь заказы создаются', async () => {
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      rawText: 'вт 30, ср 32',
+      parsedResult: parsed([
+        { date: '2026-10-06', portions: 30 },
+        { date: '2026-10-07', portions: 32 },
+      ]),
+      now: NOW,
     })
 
-    expect(result.status).toBe('AUTO_CONFIRMED')
-    expect(result.submissionId).toBe(SUBMISSION_ID)
-    expect(result.createdOrderIds).toEqual(['order_1', 'order_2', 'order_3'])
-
-    // Ровно 3 заказа созданы
-    expect(mockPrisma.order.create).toHaveBeenCalledTimes(3)
-
-    // Проверяем shape первого заказа
-    const firstCall = mockPrisma.order.create.mock.calls[0][0]
-    expect(firstCall.data).toMatchObject({
-      clientId: CLIENT_ID,
+    expect(r.status).toBe('AUTO_CONFIRMED')
+    expect(mockCore.createOneTimeOrderCore).toHaveBeenCalledTimes(2)
+    expect(mockCore.createOneTimeOrderCore).toHaveBeenCalledWith(SYSTEM, {
+      clientId: 'client_1',
       locationId: 'loc_1',
       mealType: 'LUNCH',
-      portions: 20,
-      pricePerPortion: 300,
-      totalPrice: 6000, // 20 * 300
-      packaging: 'INDIVIDUAL',
-      status: 'CONFIRMED',
+      // @db.Date: UTC-полночь МСК-дня, не МСК-инстант
+      deliveryDate: new Date('2026-10-06T00:00:00.000Z'),
+      portions: 30,
       source: 'WEEKLY_AUTO',
-      weeklySubmissionId: SUBMISSION_ID,
-      sourceConfigId: 'cfg_1',
-      notes: 'всегда без свинины',
-      ourLegalEntityId: 'ole_1',
-      vatRate: '10.00',
+      silent: true,
     })
-    // deliveryDate — UTC-полночь календарной даты 2026-06-01
-    expect(firstCall.data.deliveryDate.toISOString()).toBe('2026-06-01T00:00:00.000Z')
+    expect(r.applied?.outcomes.map((o) => o.result)).toEqual(['created', 'created'])
+    // отсутствие меню — только пометка менеджеру
+    expect(r.applied?.menuMissingDates).toEqual(['2026-10-06', '2026-10-07'])
+  })
 
-    // Заказы шли через транзакцию
-    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+  it('заявка в понедельник на текущую неделю: сегодня пропущено, будущие дни внесены', async () => {
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([
+        { date: '2026-10-05', portions: 30 },
+        { date: '2026-10-06', portions: 31 },
+      ]),
+      now: NOW,
+    })
 
-    // Финальный апдейт статуса заявки
+    expect(r.status).toBe('AUTO_CONFIRMED')
+    expect(r.applied?.outcomes).toEqual([
+      { date: '2026-10-05', locationName: 'Офис', portions: 30, result: 'skipped', note: 'приём на эту дату уже закрыт' },
+      { date: '2026-10-06', locationName: 'Офис', portions: 31, result: 'created', note: null },
+    ])
+    // неделя заявки — понедельник самой ранней даты (UTC-полночь)
+    expect(mockPrisma.weeklyOrderSubmission.upsert.mock.calls[0][0].where).toEqual({
+      clientId_weekStartDate: { clientId: 'client_1', weekStartDate: new Date('2026-10-05T00:00:00.000Z') },
+    })
+  })
+
+  it('confidence 0.85 → автомат', async () => {
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([{ date: '2026-10-06', portions: 30 }], 0.85),
+      now: NOW,
+    })
+    expect(r.status).toBe('AUTO_CONFIRMED')
+  })
+
+  it('confidence 0.7 → NEEDS_REVIEW, заказы не трогаются', async () => {
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([{ date: '2026-10-06', portions: 30 }], 0.7),
+      now: NOW,
+    })
+    expect(r.status).toBe('NEEDS_REVIEW')
+    expect(r.applied).toBeNull()
+    expect(mockCore.createOneTimeOrderCore).not.toHaveBeenCalled()
     expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenCalledWith({
-      where: { id: SUBMISSION_ID },
+      where: { id: 'sub_1' },
+      data: { status: 'NEEDS_REVIEW', failureReason: expect.stringContaining('0.70 ниже 0.8') },
+    })
+  })
+
+  it('пересечение с существующим FIXED-заказом → обновление порций, не create', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_fixed' })
+    mockPrisma.order.findUnique.mockResolvedValue({
+      id: 'order_fixed',
+      status: 'CONFIRMED',
+      portions: 25,
+      pricePerPortion: new Prisma.Decimal(300),
+      updDocumentLink: null,
+    })
+
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([{ date: '2026-10-06', portions: 30 }]),
+      now: NOW,
+    })
+
+    expect(r.applied?.outcomes[0].result).toBe('updated')
+    expect(mockCore.createOneTimeOrderCore).not.toHaveBeenCalled()
+    expect(mockCore.editOrderPortionsCore).toHaveBeenCalledWith(SYSTEM, { orderId: 'order_fixed', portions: 30 })
+    // «было» сохранено для отката
+    const payload = mockPrisma.activityLog.create.mock.calls[0][0].data.payload
+    expect(payload.undo).toEqual([
+      {
+        orderId: 'order_fixed',
+        kind: 'updated',
+        prevPortions: 25,
+        prevStatus: 'CONFIRMED',
+        newPortions: 30,
+        newStatus: 'CONFIRMED',
+      },
+    ])
+  })
+
+  it('0 / «не нужно» → отмена существующего заказа через cancelOrderCore', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_fixed' })
+    mockPrisma.order.findUnique.mockResolvedValue({
+      id: 'order_fixed',
+      status: 'CONFIRMED',
+      portions: 25,
+      pricePerPortion: new Prisma.Decimal(300),
+      updDocumentLink: null,
+    })
+
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([{ date: '2026-10-06', portions: 0 }]),
+      now: NOW,
+    })
+
+    expect(r.applied?.outcomes[0].result).toBe('cancelled')
+    expect(mockCore.cancelOrderCore).toHaveBeenCalledWith(SYSTEM, {
+      orderId: 'order_fixed',
+      reason: 'weekly_submission',
+    })
+  })
+
+  it('ошибка по строке не глотается: итог «НЕ получилось» + failureReason', async () => {
+    mockCore.createOneTimeOrderCore.mockResolvedValueOnce({ ok: false, error: 'Клиент в архиве' })
+
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([
+        { date: '2026-10-06', portions: 30 },
+        { date: '2026-10-07', portions: 32 },
+      ]),
+      now: NOW,
+    })
+
+    expect(r.applied?.outcomes.map((o) => [o.result, o.note])).toEqual([
+      ['failed', 'Клиент в архиве'],
+      ['created', null],
+    ])
+    expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenLastCalledWith({
+      where: { id: 'sub_1' },
+      data: { status: 'AUTO_CONFIRMED', failureReason: 'не внесено: 2026-10-06 — Клиент в архиве' },
+    })
+  })
+
+  it('повторная заявка на ту же неделю: upsert (без P2002), гонка P2002 → повтор', async () => {
+    mockPrisma.weeklyOrderSubmission.upsert
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      )
+      .mockResolvedValueOnce({ id: 'sub_1' })
+
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([{ date: '2026-10-06', portions: 30 }]),
+      now: NOW,
+    })
+
+    expect(r.submissionId).toBe('sub_1')
+    expect(mockPrisma.weeklyOrderSubmission.upsert).toHaveBeenCalledTimes(2)
+    const call = mockPrisma.weeklyOrderSubmission.upsert.mock.calls[1][0]
+    expect(call.update).toMatchObject({ status: 'PARSED', failureReason: null, cancelledAt: null })
+  })
+})
+
+describe('сообщение без строк заявки', () => {
+  it('«спасибо» от WEEKLY-клиента не создаёт и не перезаписывает заявку', async () => {
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      rawText: 'спасибо!',
+      parsedResult: parsed([], 0.2),
+      now: NOW,
+    })
+    expect(r).toMatchObject({ submissionId: null, status: 'NOT_A_SUBMISSION', applied: null })
+    expect(mockPrisma.weeklyOrderSubmission.upsert).not.toHaveBeenCalled()
+    expect(mockPrisma.weeklyOrderSubmission.update).not.toHaveBeenCalled()
+  })
+
+  it('неделя заявки — по самой поздней дате («пт этой + пн следующей» → следующая)', async () => {
+    await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      parsedResult: parsed([
+        { date: '2026-10-09', portions: 30 },
+        { date: '2026-10-12', portions: 30 },
+      ]),
+      now: NOW,
+    })
+    expect(mockPrisma.weeklyOrderSubmission.upsert.mock.calls[0][0].where.clientId_weekStartDate.weekStartDate)
+      .toEqual(new Date('2026-10-12T00:00:00.000Z'))
+  })
+})
+
+describe('ручная проверка: «Внести как распознано» / «Отклонить»', () => {
+  const ADMIN = { id: 'admin_pro_2', role: 'ADMIN_PRO' as const }
+
+  it('кнопка вносит распознанное тем же путём, что и автомат', async () => {
+    mockPrisma.weeklyOrderSubmission.findUniqueOrThrow.mockResolvedValue({
+      clientId: 'client_1',
+      parsedJson: parsed([{ date: '2026-10-06', portions: 30 }], 0.7),
+    })
+
+    const r = await applyReviewedSubmission({ submissionId: 'sub_1', actor: ADMIN, now: NOW })
+
+    expect(r.ok).toBe(true)
+    expect(mockPrisma.weeklyOrderSubmission.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub_1', status: 'NEEDS_REVIEW' },
+      data: { status: 'PARSED' },
+    })
+    expect(mockCore.createOneTimeOrderCore).toHaveBeenCalledWith(ADMIN, expect.objectContaining({ portions: 30 }))
+    expect(mockPrisma.activityLog.create.mock.calls[0][0].data).toMatchObject({
+      action: WEEKLY_APPLIED_ACTION,
+      userId: 'admin_pro_2',
+    })
+  })
+
+  it('повторное нажатие → already_processed, без дублей', async () => {
+    mockPrisma.weeklyOrderSubmission.updateMany.mockResolvedValue({ count: 0 })
+    mockPrisma.weeklyOrderSubmission.findUnique.mockResolvedValue({ id: 'sub_1' })
+
+    const r = await applyReviewedSubmission({ submissionId: 'sub_1', actor: ADMIN, now: NOW })
+
+    expect(r).toEqual({ ok: false, reason: 'already_processed' })
+    expect(mockCore.createOneTimeOrderCore).not.toHaveBeenCalled()
+  })
+
+  it('«Отклонить» повторной заявки не отменяет ранее внесённое (статус → AUTO_CONFIRMED)', async () => {
+    mockPrisma.activityLog.findFirst
+      .mockResolvedValueOnce({ id: 'log_apply_1' }) // прежнее внесение
+      .mockResolvedValueOnce(null) // не откатывалось
+    const r = await rejectWeeklySubmission({ submissionId: 'sub_1', rejectedById: 'admin_pro_2' })
+    expect(r).toEqual({ ok: true, keptPrevious: true })
+    expect(mockPrisma.weeklyOrderSubmission.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub_1', status: 'NEEDS_REVIEW' },
       data: { status: 'AUTO_CONFIRMED' },
     })
   })
 
-  it('sanity fail → NEEDS_REVIEW, 0 заказов, failureReason из failures', async () => {
-    const sanity: SanityResult = {
-      ok: false,
-      failures: ['confidence ниже порога', 'дней больше ожидаемого'],
-    }
+  it('«Отклонить», когда прежнее внесение уже откатили → CANCELLED (напоминания снова нужны)', async () => {
+    mockPrisma.activityLog.findFirst
+      .mockResolvedValueOnce({ id: 'log_apply_1' })
+      .mockResolvedValueOnce({ id: 'log_undo_1' })
+    const r = await rejectWeeklySubmission({ submissionId: 'sub_1', rejectedById: 'admin_pro_2' })
+    expect(r).toEqual({ ok: true, keptPrevious: false })
+    expect(mockPrisma.weeklyOrderSubmission.updateMany.mock.calls[0][0].data.status).toBe('CANCELLED')
+  })
 
-    const result = await processWeeklySubmission({
-      clientId: CLIENT_ID,
-      source: 'TEXT',
-      rawText: '01.06 — 20',
-      parsedResult: makeParsed({ confidence: 0.5 }),
-      sanityResult: sanity,
-      weekStartDate: WEEK_START,
+  it('сбой при внесении по кнопке возвращает заявку в NEEDS_REVIEW (кнопку можно нажать снова)', async () => {
+    mockPrisma.weeklyOrderSubmission.findUniqueOrThrow.mockResolvedValue({
+      clientId: 'client_1',
+      parsedJson: parsed([{ date: '2026-10-06', portions: 30 }], 0.7),
     })
+    mockPrisma.activityLog.create.mockRejectedValueOnce(new Error('db blip'))
 
-    expect(result.status).toBe('NEEDS_REVIEW')
-    expect(result.createdOrderIds).toEqual([])
-    expect(mockPrisma.order.create).not.toHaveBeenCalled()
-    expect(mockPrisma.clientMealConfig.findFirst).not.toHaveBeenCalled()
-    expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenCalledWith({
-      where: { id: SUBMISSION_ID },
-      data: {
-        status: 'NEEDS_REVIEW',
-        failureReason: 'confidence ниже порога; дней больше ожидаемого',
-      },
+    await expect(applyReviewedSubmission({ submissionId: 'sub_1', actor: ADMIN, now: NOW })).rejects.toThrow('db blip')
+    expect(mockPrisma.weeklyOrderSubmission.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'sub_1', status: 'PARSED' },
+      data: { status: 'NEEDS_REVIEW' },
     })
   })
 
-  it('нет активного WEEKLY-конфига → NEEDS_REVIEW, 0 заказов', async () => {
-    mockPrisma.clientMealConfig.findFirst.mockResolvedValue(null)
-
-    const result = await processWeeklySubmission({
-      clientId: CLIENT_ID,
-      source: 'PHOTO',
-      parsedResult: makeParsed(),
-      sanityResult: okSanity,
-      weekStartDate: WEEK_START,
-    })
-
-    expect(result.status).toBe('NEEDS_REVIEW')
-    expect(result.createdOrderIds).toEqual([])
-    expect(mockPrisma.order.create).not.toHaveBeenCalled()
-    expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenCalledWith({
-      where: { id: SUBMISSION_ID },
-      data: { status: 'NEEDS_REVIEW', failureReason: 'no active WEEKLY config' },
-    })
-  })
-
-  it('меню отсутствует на одну из дат → NEEDS_REVIEW, 0 заказов (проверка ДО создания)', async () => {
-    mockPrisma.clientMealConfig.findFirst.mockResolvedValue(CONFIG)
-    // Меню есть для 06-01 и 06-02, но НЕТ для 06-03.
-    mockPrisma.menuCycle.findFirst.mockImplementation(
-      (args: { where: { validFrom: { lte: Date } } }) => {
-        const date = args.where.validFrom.lte
-        const iso = date.toISOString().slice(0, 10)
-        return Promise.resolve(iso === '2026-06-03' ? null : { id: 'menu_x' })
-      }
-    )
-
-    const result = await processWeeklySubmission({
-      clientId: CLIENT_ID,
-      source: 'PHOTO',
-      parsedResult: makeParsed(),
-      sanityResult: okSanity,
-      weekStartDate: WEEK_START,
-    })
-
-    expect(result.status).toBe('NEEDS_REVIEW')
-    expect(result.createdOrderIds).toEqual([])
-    // НИ одного заказа не создано (всё-или-ничего)
-    expect(mockPrisma.order.create).not.toHaveBeenCalled()
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
-    expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenCalledWith({
-      where: { id: SUBMISSION_ID },
-      data: { status: 'NEEDS_REVIEW', failureReason: 'no menu for 2026-06-03' },
-    })
-  })
-
-  it('сбой при создании заказа → FAILED, заказов нет (транзакция откатила)', async () => {
-    mockPrisma.clientMealConfig.findFirst.mockResolvedValue(CONFIG)
-    mockPrisma.menuCycle.findFirst.mockResolvedValue({ id: 'menu_1' })
-    mockPrisma.order.create.mockRejectedValue(new Error('db exploded'))
-
-    const result = await processWeeklySubmission({
-      clientId: CLIENT_ID,
-      source: 'PHOTO',
-      parsedResult: makeParsed(),
-      sanityResult: okSanity,
-      weekStartDate: WEEK_START,
-    })
-
-    expect(result.status).toBe('FAILED')
-    expect(result.createdOrderIds).toEqual([])
-    expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenCalledWith({
-      where: { id: SUBMISSION_ID },
-      data: { status: 'FAILED', failureReason: 'db exploded' },
+  it('«Отклонить» — CANCELLED только из NEEDS_REVIEW', async () => {
+    const r = await rejectWeeklySubmission({ submissionId: 'sub_1', rejectedById: 'admin_pro_2' })
+    expect(r.ok).toBe(true)
+    expect(mockPrisma.weeklyOrderSubmission.updateMany).toHaveBeenCalledWith({
+      where: { id: 'sub_1', status: 'NEEDS_REVIEW' },
+      data: expect.objectContaining({ status: 'CANCELLED', cancelledById: 'admin_pro_2' }),
     })
   })
 })
 
-describe('cancelWeeklySubmission', () => {
-  it('все заказы CONFIRMED → все DRAFT, cancelled===N, статус CANCELLED', async () => {
-    const orders = [
-      { id: 'o1', status: 'CONFIRMED' as OrderStatus },
-      { id: 'o2', status: 'CONFIRMED' as OrderStatus },
-      { id: 'o3', status: 'CONFIRMED' as OrderStatus },
-    ]
-    mockPrisma.weeklyOrderSubmission.findUnique.mockResolvedValue({
-      id: SUBMISSION_ID,
-      orders,
-    })
-    mockPrisma.order.update.mockResolvedValue({})
+describe('«↩️ Отменить» — откат ровно к прежним значениям', () => {
+  const ADMIN = { id: 'admin_pro_2', role: 'ADMIN_PRO' as const }
 
-    const result = await cancelWeeklySubmission({
-      submissionId: SUBMISSION_ID,
-      cancelledById: 'user_1',
+  function orderRow(id: string, status: string, portions: number) {
+    return { id, status, portions, pricePerPortion: new Prisma.Decimal(300), updDocumentLink: null }
+  }
+
+  it('created → отмена, updated → прежние порции, confirmed → обратно в PENDING с 0', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue({
+      id: 'log_apply_1',
+      action: WEEKLY_APPLIED_ACTION,
+      entityId: 'sub_1',
+      payload: {
+        undo: [
+          { orderId: 'o_created', kind: 'created', prevPortions: null, prevStatus: null, newPortions: 30, newStatus: 'CONFIRMED' },
+          { orderId: 'o_updated', kind: 'updated', prevPortions: 25, prevStatus: 'CONFIRMED', newPortions: 30, newStatus: 'CONFIRMED' },
+          { orderId: 'o_confirmed', kind: 'confirmed', prevPortions: 0, prevStatus: 'PENDING_CONFIRMATION', newPortions: 32, newStatus: 'CONFIRMED' },
+        ],
+      },
+    })
+    mockPrisma.order.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
+      if (where.id === 'o_created') return orderRow('o_created', 'CONFIRMED', 30)
+      if (where.id === 'o_updated') return orderRow('o_updated', 'CONFIRMED', 30)
+      return orderRow('o_confirmed', 'CONFIRMED', 32)
     })
 
-    expect(result.cancelled).toBe(3)
-    expect(result.notCancelled).toEqual([])
-    expect(mockPrisma.order.update).toHaveBeenCalledTimes(3)
-    // каждый апдейт → DRAFT
-    for (const call of mockPrisma.order.update.mock.calls) {
-      expect(call[0].data).toEqual({ status: 'DRAFT' })
-    }
-    // заявка → CANCELLED с аудит-полями
-    const subUpdate = mockPrisma.weeklyOrderSubmission.update.mock.calls.at(-1)![0]
-    expect(subUpdate.where).toEqual({ id: SUBMISSION_ID })
-    expect(subUpdate.data.status).toBe('CANCELLED')
-    expect(subUpdate.data.cancelledById).toBe('user_1')
-    expect(subUpdate.data.cancelledAt).toBeInstanceOf(Date)
+    const r = await undoWeeklyApply({ applyLogId: 'log_apply_1', actor: ADMIN })
+
+    expect(r.ok).toBe(true)
+    expect(mockCore.cancelOrderCore).toHaveBeenCalledWith(ADMIN, {
+      orderId: 'o_created',
+      reason: 'Откат недельной заявки',
+    })
+    expect(mockCore.editOrderPortionsCore).toHaveBeenCalledWith(ADMIN, { orderId: 'o_updated', portions: 25 })
+    const revert = mockPrisma.order.update.mock.calls.find((c) => c[0].where.id === 'o_confirmed')![0]
+    expect(revert.data).toMatchObject({ status: 'PENDING_CONFIRMATION', portions: 0, confirmedAt: null })
+    expect(mockPrisma.activityLog.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: 'WEEKLY_SUBMISSION_UNDONE' }),
+      }),
+    )
   })
 
-  it('1 LOCKED среди 5 → cancelled===4, notCancelled содержит LOCKED, LOCKED не тронут', async () => {
-    const orders = [
-      { id: 'o1', status: 'CONFIRMED' as OrderStatus },
-      { id: 'o2', status: 'CONFIRMED' as OrderStatus },
-      { id: 'o3', status: 'LOCKED' as OrderStatus },
-      { id: 'o4', status: 'CONFIRMED' as OrderStatus },
-      { id: 'o5', status: 'CONFIRMED' as OrderStatus },
-    ]
-    mockPrisma.weeklyOrderSubmission.findUnique.mockResolvedValue({
-      id: SUBMISSION_ID,
-      orders,
+  it('cancelled (было «не нужно») → восстановление и прежние порции', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue({
+      id: 'log_apply_1',
+      action: WEEKLY_APPLIED_ACTION,
+      entityId: 'sub_1',
+      payload: {
+        undo: [
+          { orderId: 'o_c', kind: 'cancelled', prevPortions: 20, prevStatus: 'CONFIRMED', newPortions: 20, newStatus: 'CANCELLED' },
+        ],
+      },
     })
-    mockPrisma.order.update.mockResolvedValue({})
+    mockPrisma.order.findUnique.mockResolvedValue(orderRow('o_c', 'CANCELLED', 20))
 
-    const result = await cancelWeeklySubmission({
-      submissionId: SUBMISSION_ID,
-      cancelledById: 'user_1',
+    await undoWeeklyApply({ applyLogId: 'log_apply_1', actor: ADMIN })
+
+    expect(mockCore.restoreOrderCore).toHaveBeenCalledWith(ADMIN, { orderId: 'o_c' })
+    expect(mockCore.editOrderPortionsCore).toHaveBeenCalledWith(ADMIN, { orderId: 'o_c', portions: 20 })
+  })
+
+  it('заказ с УПД не откатываем — в итоге с причиной', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue({
+      id: 'log_apply_1',
+      action: WEEKLY_APPLIED_ACTION,
+      entityId: 'sub_1',
+      payload: {
+        undo: [
+          { orderId: 'o_upd', kind: 'updated', prevPortions: 25, prevStatus: 'CONFIRMED', newPortions: 30, newStatus: 'CONFIRMED' },
+        ],
+      },
     })
+    mockPrisma.order.findUnique.mockResolvedValue({ ...orderRow('o_upd', 'CONFIRMED', 30), updDocumentLink: { id: 'u' } })
 
-    expect(result.cancelled).toBe(4)
-    expect(result.notCancelled).toEqual([{ orderId: 'o3', status: 'LOCKED' }])
+    const r = await undoWeeklyApply({ applyLogId: 'log_apply_1', actor: ADMIN })
 
-    // ровно 4 апдейта, и НИ один не трогал o3
-    expect(mockPrisma.order.update).toHaveBeenCalledTimes(4)
-    const updatedIds = mockPrisma.order.update.mock.calls.map((c) => c[0].where.id)
-    expect(updatedIds).toEqual(['o1', 'o2', 'o4', 'o5'])
-    expect(updatedIds).not.toContain('o3')
+    expect(r).toMatchObject({ ok: true, results: [{ orderId: 'o_upd', ok: false, note: 'по заказу уже выписан УПД' }] })
+    expect(mockCore.editOrderPortionsCore).not.toHaveBeenCalled()
+  })
 
-    // заявка → CANCELLED
-    const subUpdate = mockPrisma.weeklyOrderSubmission.update.mock.calls.at(-1)![0]
-    expect(subUpdate.data.status).toBe('CANCELLED')
+  it('заказ изменён после внесения (повторная заявка/менеджер) → не трогаем; заявку не отменяем, если есть более позднее применение', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue({
+      id: 'log_apply_1',
+      action: WEEKLY_APPLIED_ACTION,
+      entityId: 'sub_1',
+      createdAt: new Date('2026-10-05T07:00:00.000Z'),
+      payload: {
+        undo: [
+          { orderId: 'o_x', kind: 'updated', prevPortions: 10, prevStatus: 'CONFIRMED', newPortions: 15, newStatus: 'CONFIRMED' },
+        ],
+      },
+    })
+    // повторная заявка B поставила 20
+    mockPrisma.order.findUnique.mockResolvedValue(orderRow('o_x', 'CONFIRMED', 20))
+    mockPrisma.activityLog.findFirst
+      .mockResolvedValueOnce(null) // не отменялось
+      .mockResolvedValueOnce({ id: 'log_apply_2' }) // есть более позднее применение
+
+    const r = await undoWeeklyApply({ applyLogId: 'log_apply_1', actor: ADMIN })
+
+    expect(r).toMatchObject({
+      ok: true,
+      results: [{ orderId: 'o_x', ok: false, note: 'заказ изменён после внесения — не трогаем' }],
+    })
+    expect(mockCore.editOrderPortionsCore).not.toHaveBeenCalled()
+    expect(mockPrisma.weeklyOrderSubmission.update).not.toHaveBeenCalled()
+  })
+
+  it('повторная отмена того же применения → already_undone', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue({
+      id: 'log_apply_1',
+      action: WEEKLY_APPLIED_ACTION,
+      entityId: 'sub_1',
+      payload: { undo: [] },
+    })
+    mockPrisma.activityLog.findFirst.mockResolvedValue({ id: 'log_undo_1' })
+
+    const r = await undoWeeklyApply({ applyLogId: 'log_apply_1', actor: ADMIN })
+
+    expect(r).toEqual({ ok: false, reason: 'already_undone' })
   })
 })

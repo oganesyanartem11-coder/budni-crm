@@ -6,7 +6,11 @@ import {
   type ClientWithBotContext,
 } from '@/lib/bot/max-users'
 import { parseClientResponse } from '@/lib/llm/parser'
-import { detectAnomalies, detectPortionAnomaly } from '@/lib/orders/anomaly-detector'
+import {
+  detectAnomalies,
+  detectPortionAnomaly,
+  type AnomalyResult,
+} from '@/lib/orders/anomaly-detector'
 import { getClientStats } from '@/lib/orders/client-stats'
 import { getCutoffMoment } from '@/lib/orders/cutoff'
 import { getClientCutoffForDate, formatCutoff } from '@/lib/utils/cutoff'
@@ -23,7 +27,7 @@ import {
 } from './templates'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
-import { NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
+import { ANOMALY_CHECK_ENABLED, NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
 import { toMskDateString, startOfTodayMsk } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
@@ -32,6 +36,7 @@ import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
 import { formatMskDayMonth } from '@/lib/utils/format'
 import { parseChangeIntent } from '@/lib/bot/parse-change-intent'
 import { extractDeliveryDateFromText } from './extract-delivery-date'
+import { handleStickyMessage, isStickyClient } from './sticky'
 import { resolveOrderChangeTarget } from '@/lib/order-changes/resolve-target'
 import { createPendingChange } from '@/lib/order-changes/actions'
 import { findActiveOrder } from '@/lib/db/queries/orders'
@@ -69,6 +74,13 @@ const MEAL_TYPE_RU: Record<MealType, string> = {
   BREAKFAST: 'завтрака',
   LUNCH: 'обеда',
   DINNER: 'ужина',
+}
+
+const NO_ANOMALY: AnomalyResult = {
+  isAnomaly: false,
+  reason: null,
+  humanReason: '',
+  priority: 'NORMAL',
 }
 
 export interface ProcessMessageInput {
@@ -171,6 +183,16 @@ export async function processClientMessage(
   // только фиксируем входящее и сигналим в inbox (менеджер ведёт диалог сам).
   if (await isManagerHandling(client.id)) {
     return handleManagerTakeover(client, text)
+  }
+
+  // STICKY «По последнему числу»: ежедневных вопросов нет, число в сообщении =
+  // новое постоянное количество. Без числа/с датой/с 0 — обычная spontaneous-ветка.
+  if (isStickyClient(client)) {
+    const sticky = await handleStickyMessage(client, text, maxChatId)
+    if (sticky) {
+      return { reply: sticky.reply, action: sticky.changed ? 'updated' : 'noop' }
+    }
+    return handleSpontaneous(client, text, maxChatId)
   }
 
   const botConv = await findLatestBotConv(client.id)
@@ -419,12 +441,19 @@ async function handleBotResponse(
   // Аномалии содержания (без cutoff — cutoff обрабатываем отдельно как кейс C
   // с сохранением заказа). isPastCutoff=false внутри detectAnomalies, чтобы
   // ветвь POST_CUTOFF не перебивала остальные reason'ы.
-  const anomaly = detectAnomalies({
-    parsed,
-    stats,
-    isNewClient: client.safeAnswerStreak < NEW_CLIENT_SAFE_STREAK,
-    isPastCutoff: false,
-  })
+  //
+  // ANOMALY_CHECK_ENABLED=false: числовой ответ принимается сразу (ни тон, ни
+  // уверенность LLM, ни «новый клиент» его не задерживают). Не-числовые ответы
+  // (вопрос/шум/отмена) по-прежнему уходят в inbox — это маршрутизация, не аномалия.
+  const anomaly = ANOMALY_CHECK_ENABLED || parsed.type !== 'numeric'
+    ? detectAnomalies({
+        parsed,
+        stats,
+        isNewClient:
+          ANOMALY_CHECK_ENABLED && client.safeAnswerStreak < NEW_CLIENT_SAFE_STREAK,
+        isPastCutoff: false,
+      })
+    : NO_ANOMALY
 
   // MEGA-4a (П10): «цифра вне нормы» — динамический порог 50–200% от истории
   // клиента по дню недели за 90 дней (вместо глобального MIN=10). Проверяем
@@ -443,7 +472,7 @@ async function handleBotResponse(
     }
     humanReason: string
   }> = []
-  if (!anomaly.isAnomaly && parsed.type === 'numeric') {
+  if (ANOMALY_CHECK_ENABLED && !anomaly.isAnomaly && parsed.type === 'numeric') {
     for (const item of parsed.items) {
       const res = await detectPortionAnomaly(
         {

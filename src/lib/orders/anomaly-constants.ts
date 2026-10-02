@@ -7,3 +7,11 @@
 // Ветка detectAnomalies → NEW_CLIENT остаётся, но с порогом 0 не срабатывает.
 export const NEW_CLIENT_SAFE_STREAK = 0
 export const LLM_CONFIDENCE_THRESHOLD = 0.8
+
+// 01.10.2026: проверка аномалий ОТКЛЮЧЕНА по решению владельца — объекты
+// закрываются/меняются, аномалия блокировала нормальные заказы. При false любое
+// число клиента принимается сразу: detectPortionAnomaly не вызывается, PendingAnomalyConfirmation
+// не создаётся, детектор контекста (detectAnomalies) для числовых ответов не
+// применяется. Код детектора, модели и callback 'anom' сохранены — вернуть
+// проверку = поставить true.
+export const ANOMALY_CHECK_ENABLED = false

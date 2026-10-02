@@ -31,7 +31,10 @@ async function hasSubmissionForWeek(clientId: string, weekStartDate: Date): Prom
   const found = await prisma.weeklyOrderSubmission.findFirst({
     where: {
       clientId,
-      weekStartDate,
+      // weekStartDate здесь — МСК-полночь Пн как UTC-инстант (вс 21:00Z), а приём
+      // заявки пишет UTC-полночь Пн (getMskCalendarDayUtc-формат). Точное
+      // равенство не совпадало никогда — ищем в пределах этих суток.
+      weekStartDate: { gte: weekStartDate, lt: new Date(weekStartDate.getTime() + 24 * 60 * 60 * 1000) },
       status: { in: ['PARSED', 'AUTO_CONFIRMED', 'NEEDS_REVIEW'] },
     },
     select: { id: true },

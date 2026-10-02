@@ -17,6 +17,7 @@ import { clearDeliveryIssue } from '../../delivery/actions'
 import { DELIVERY_ISSUE_REASON_LABELS, type DeliveryIssueReason } from '@/lib/constants/delivery'
 import { formatMoney, formatDateLong, formatDeliveryWindow, formatDateShort, formatPortions } from '@/lib/utils/format'
 import { MEAL_TYPE_LABELS, PACKAGING_LABELS, ORDER_TYPE_SHORT } from '@/lib/constants/client'
+import type { OrderType } from '@prisma/client'
 import { portionsEditedToast } from '@/lib/constants/order'
 import { showActionError } from '@/lib/ui/optimistic-lock-toast'
 import {
@@ -449,7 +450,7 @@ export function OrderDetail({ order, history, legalEntities }: Props) {
             <SourceLabel source={order.source} />
             {order.sourceConfig && (
               <span className="text-xs text-fg-muted ml-2">
-                ({ORDER_TYPE_SHORT[order.sourceConfig.orderType as 'FIXED' | 'DYNAMIC']})
+                ({ORDER_TYPE_SHORT[order.sourceConfig.orderType as OrderType]})
               </span>
             )}
             {order.createdBy && (

@@ -4,9 +4,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  * MEGA wiring (Subagent C): маршрутизация WEEKLY-заявок в MAX-вебхуке.
  *
  * Проверяем handleMessage (surgical edit) + weekly-хелперы целиком:
- *  - WEEKLY + фото → fetch → parser('photo') → process → notify + reply;
- *  - WEEKLY + текст → parser('text') → process → notify + reply;
- *  - WEEKLY + дубль недели → InboxItem, парсер НЕ вызывается;
+ *  - WEEKLY + фото → fetch → parser('photo') → process → «внесено» менеджеру + ответ клиенту;
+ *  - WEEKLY + текст на проверку → кнопки менеджеру + «менеджер проверит»;
+ *  - повторная заявка на ту же неделю обрабатывается заново (upsert, без дубль-гарда);
+ *  - ошибка обработки не глотается: inbox + личка ADMIN_PRO;
  *  - WEEKLY + не-image вложение → InboxItem, парсер НЕ вызывается;
  *  - не-WEEKLY → weekly-хелперы НЕ вызываются, идёт processClientMessage.
  *
@@ -23,9 +24,10 @@ const {
   mockFetchAttachment,
   mockPut,
   mockParse,
-  mockRunSanity,
   mockProcessWeekly,
-  mockNotifyManager,
+  mockNotifyApplied,
+  mockNotifyReview,
+  mockNotifyAdminPro,
 } = vi.hoisted(() => ({
   mockPrisma: {
     client: { updateMany: vi.fn() },
@@ -46,9 +48,10 @@ const {
   mockFetchAttachment: vi.fn(),
   mockPut: vi.fn(),
   mockParse: vi.fn(),
-  mockRunSanity: vi.fn(),
   mockProcessWeekly: vi.fn(),
-  mockNotifyManager: vi.fn(),
+  mockNotifyApplied: vi.fn(),
+  mockNotifyReview: vi.fn(),
+  mockNotifyAdminPro: vi.fn(),
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
@@ -63,13 +66,24 @@ vi.mock('@/lib/max/send-message', () => ({ sendBotMessage: mockSendBotMessage })
 vi.mock('@/lib/max/fetch-attachment', () => ({ fetchAttachmentAsBase64: mockFetchAttachment }))
 vi.mock('@vercel/blob', () => ({ put: mockPut }))
 vi.mock('@/lib/weekly/parser', () => ({ parseWeeklySubmission: mockParse }))
-vi.mock('@/lib/weekly/sanity-checks', () => ({ runSanityChecks: mockRunSanity }))
-vi.mock('@/lib/weekly/actions', () => ({ processWeeklySubmission: mockProcessWeekly }))
+vi.mock('@/lib/weekly/actions', () => ({
+  processWeeklySubmission: mockProcessWeekly,
+  loadWeeklyConfigOptions: vi.fn(async () => [
+    { configId: 'cfg_1', locationId: 'loc_1', locationName: 'Офис' },
+  ]),
+}))
 vi.mock('@/lib/telegram/handlers/weekly-submission', () => ({
-  notifyManagerAboutWeeklySubmission: mockNotifyManager,
+  notifyManagersWeeklyApplied: mockNotifyApplied,
+  notifyManagersWeeklyReview: mockNotifyReview,
+  formatClientAppliedReply: () => 'Принято! Внесли заявку: пн 8 июн — 10.',
+}))
+vi.mock('@/lib/telegram/notify', () => ({
+  notifyAllAdminProDirect: mockNotifyAdminPro,
+  escapeHtml: (s: string) => s,
 }))
 // Не нужны в этих тестах, но импортируются handlers.ts транзитивно.
 vi.mock('@/lib/bot/log-message', () => ({ logBotMessage: vi.fn() }))
+vi.mock('@/lib/bot/notify-client-signal', () => ({ notifyClientSignal: vi.fn(async () => {}) }))
 vi.mock('@/lib/bot/welcome', () => ({ pickWelcomeKind: vi.fn(), getWelcomeText: vi.fn() }))
 
 import { handleMessage } from '@/lib/max/handlers'
@@ -122,7 +136,7 @@ function makeCtx(opts: { chatId: number; text?: string; attachments?: Attachment
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
-  // Среда 2026-06-03 12:00 UTC (15:00 МСК) → ближайший будущий Пн = 2026-06-08.
+  // Среда 2026-06-03 12:00 UTC (15:00 МСК).
   vi.setSystemTime(new Date(Date.UTC(2026, 5, 3, 12, 0, 0)))
 
   mockPrisma.client.updateMany.mockResolvedValue({})
@@ -149,13 +163,20 @@ beforeEach(() => {
     confidence: 0.99,
     reason: 'clear',
   })
-  mockRunSanity.mockReturnValue({ ok: true, failures: [] })
   mockProcessWeekly.mockResolvedValue({
     submissionId: 'sub_1',
     status: 'AUTO_CONFIRMED',
-    createdOrderIds: ['ord_1'],
+    lines: [],
+    reviewReasons: [],
+    applied: {
+      applyLogId: 'log_1',
+      outcomes: [{ date: '2026-06-08', locationName: 'Офис', portions: 10, result: 'created', note: null }],
+      menuMissingDates: [],
+    },
   })
-  mockNotifyManager.mockResolvedValue(undefined)
+  mockNotifyApplied.mockResolvedValue(undefined)
+  mockNotifyReview.mockResolvedValue(undefined)
+  mockNotifyAdminPro.mockResolvedValue({ sentTo: 1, skippedNoTelegram: 0, failed: 0 })
 })
 
 afterEach(() => {
@@ -163,7 +184,7 @@ afterEach(() => {
 })
 
 describe('WEEKLY routing in handleMessage', () => {
-  it('WEEKLY + фото → fetch → parser(photo) → process → notify + reply', async () => {
+  it('WEEKLY + фото, чистая заявка → внесено: менеджеру итог, клиенту список', async () => {
     mockFindClient.mockResolvedValue(makeWeeklyClient())
     const ctx = makeCtx({
       chatId: 777,
@@ -176,25 +197,31 @@ describe('WEEKLY routing in handleMessage', () => {
     expect(mockPut).toHaveBeenCalledTimes(1)
     expect(mockParse).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'photo', base64: 'BASE64DATA', mediaType: 'image/jpeg' }),
-      expect.objectContaining({ clientName: 'Недельный Клиент' })
+      expect.objectContaining({
+        clientName: 'Недельный Клиент',
+        locations: [{ id: 'loc_1', name: 'Офис' }],
+      })
     )
     expect(mockProcessWeekly).toHaveBeenCalledWith(
       expect.objectContaining({ clientId: 'client_w', source: 'PHOTO', blobUrl: 'https://blob.example/weekly.jpg' })
     )
-    expect(mockNotifyManager).toHaveBeenCalledWith(
-      expect.objectContaining({ submissionId: 'sub_1', status: 'AUTO_CONFIRMED' })
+    expect(mockNotifyApplied).toHaveBeenCalledWith(
+      expect.objectContaining({ submissionId: 'sub_1', clientName: 'Недельный Клиент' })
     )
-    expect(mockSendBotMessage).toHaveBeenCalledWith('777', 'Получили заявку, передал менеджеру')
+    expect(mockNotifyReview).not.toHaveBeenCalled()
+    expect(mockSendBotMessage).toHaveBeenCalledWith('777', 'Принято! Внесли заявку: пн 8 июн — 10.')
     // Не уходит в обычный поток.
     expect(mockProcessClientMessage).not.toHaveBeenCalled()
   })
 
-  it('WEEKLY + текст → parser(text) → process → notify + reply (без blob)', async () => {
+  it('WEEKLY + текст на ручную проверку → кнопки менеджеру, клиенту «менеджер проверит»', async () => {
     mockFindClient.mockResolvedValue(makeWeeklyClient())
     mockProcessWeekly.mockResolvedValue({
       submissionId: 'sub_2',
       status: 'NEEDS_REVIEW',
-      createdOrderIds: [],
+      lines: [],
+      reviewReasons: ['уверенность распознавания 0.70 ниже 0.8'],
+      applied: null,
     })
     const ctx = makeCtx({ chatId: 777, text: 'Пн 10, Вт 12, Ср 8' })
 
@@ -209,87 +236,77 @@ describe('WEEKLY routing in handleMessage', () => {
     expect(mockProcessWeekly).toHaveBeenCalledWith(
       expect.objectContaining({ source: 'TEXT', rawText: 'Пн 10, Вт 12, Ср 8' })
     )
-    expect(mockNotifyManager).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'NEEDS_REVIEW' })
+    expect(mockNotifyReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        submissionId: 'sub_2',
+        reviewReasons: ['уверенность распознавания 0.70 ниже 0.8'],
+      })
     )
-    // NEEDS_REVIEW → «Получили, обрабатываем».
-    expect(mockSendBotMessage).toHaveBeenCalledWith('777', 'Получили, обрабатываем')
+    expect(mockSendBotMessage).toHaveBeenCalledWith(
+      '777',
+      'Спасибо, заявку получили, менеджер проверит и подтвердит.'
+    )
     expect(mockProcessClientMessage).not.toHaveBeenCalled()
   })
 
-  // F1: dup-guard блокирует ЛЮБОЙ не-CANCELLED статус. Мок findFirst эмулирует
-  // БД: возвращает строку только если её статус НЕ входит в where.status.notIn.
-  function simulateExistingSubmission(status: string) {
-    mockPrisma.weeklyOrderSubmission.findFirst.mockImplementation(async (args: unknown) => {
-      const notIn: string[] =
-        (args as { where?: { status?: { notIn?: string[] } } })?.where?.status?.notIn ?? []
-      return notIn.includes(status) ? null : { id: 'existing_sub', status }
-    })
-  }
-
-  it('WEEKLY + дубль недели (PARSED) → InboxItem, парсер НЕ вызывается', async () => {
+  it('повторная заявка на ту же неделю обрабатывается заново (без дубль-гарда)', async () => {
     mockFindClient.mockResolvedValue(makeWeeklyClient())
-    simulateExistingSubmission('PARSED')
-    const ctx = makeCtx({ chatId: 777, text: 'Пн 10' })
+    mockPrisma.weeklyOrderSubmission.findFirst.mockResolvedValue({ id: 'existing', status: 'AUTO_CONFIRMED' })
+    const ctx = makeCtx({ chatId: 777, text: 'Пн 12' })
+
+    await handleMessage(ctx)
+
+    expect(mockParse).toHaveBeenCalledTimes(1)
+    expect(mockProcessWeekly).toHaveBeenCalledTimes(1)
+    expect(mockCreateInbox).not.toHaveBeenCalled()
+  })
+
+  it('сообщение без заявки («спасибо») → inbox, без ответа клиенту и без уведомлений о заявке', async () => {
+    mockFindClient.mockResolvedValue(makeWeeklyClient())
+    mockProcessWeekly.mockResolvedValue({
+      submissionId: null,
+      status: 'NOT_A_SUBMISSION',
+      lines: [],
+      reviewReasons: [],
+      applied: null,
+    })
+    const ctx = makeCtx({ chatId: 777, text: 'спасибо!' })
 
     await handleMessage(ctx)
 
     expect(mockCreateInbox).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: 'NON_NUMERIC' })
+      expect.objectContaining({ humanReason: 'Сообщение недельного клиента без заявки' })
     )
-    const humanReason = mockCreateInbox.mock.calls[0][0].humanReason
-    expect(humanReason).toContain('Дубль заявки на неделю')
-    expect(humanReason).toContain('PARSED')
-    expect(mockParse).not.toHaveBeenCalled()
-    expect(mockProcessWeekly).not.toHaveBeenCalled()
-    expect(mockSendBotMessage).toHaveBeenCalledWith(
-      '777',
-      'У нас уже есть ваша заявка на эту неделю. Менеджер проверит и свяжется с вами.'
+    expect(mockNotifyApplied).not.toHaveBeenCalled()
+    expect(mockNotifyReview).not.toHaveBeenCalled()
+    expect(mockSendBotMessage).not.toHaveBeenCalled()
+  })
+
+  it('сбой уведомления ПОСЛЕ внесения не превращается в «заявка не обработана»', async () => {
+    mockFindClient.mockResolvedValue(makeWeeklyClient())
+    mockNotifyApplied.mockRejectedValue(new Error('tg down'))
+    const ctx = makeCtx({ chatId: 777, text: 'Пн 10' })
+
+    await handleMessage(ctx)
+
+    expect(mockNotifyAdminPro).not.toHaveBeenCalled()
+    expect(mockCreateInbox).not.toHaveBeenCalled()
+    expect(mockSendBotMessage).toHaveBeenCalledWith('777', 'Принято! Внесли заявку: пн 8 июн — 10.')
+  })
+
+  it('ошибка обработки не глотается: inbox HIGH + личка ADMIN_PRO', async () => {
+    mockFindClient.mockResolvedValue(makeWeeklyClient())
+    mockProcessWeekly.mockRejectedValue(new Error('db down'))
+    const ctx = makeCtx({ chatId: 777, text: 'Пн 12' })
+
+    await handleMessage(ctx)
+
+    expect(mockCreateInbox).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: 'client_w', priority: 'HIGH' })
     )
+    expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('db down')
+    expect(mockNotifyAdminPro).toHaveBeenCalledWith(expect.stringContaining('недельная заявка не обработана'))
     expect(mockProcessClientMessage).not.toHaveBeenCalled()
-  })
-
-  it('F1: дубль в статусе NEEDS_REVIEW → guard срабатывает, LLM НЕ вызывается', async () => {
-    mockFindClient.mockResolvedValue(makeWeeklyClient())
-    simulateExistingSubmission('NEEDS_REVIEW')
-    const ctx = makeCtx({ chatId: 777, text: 'Пн 10' })
-
-    await handleMessage(ctx)
-
-    expect(mockParse).not.toHaveBeenCalled()
-    expect(mockProcessWeekly).not.toHaveBeenCalled()
-    expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('NEEDS_REVIEW')
-    expect(mockSendBotMessage).toHaveBeenCalledWith(
-      '777',
-      'У нас уже есть ваша заявка на эту неделю. Менеджер проверит и свяжется с вами.'
-    )
-  })
-
-  it('F1: дубль в статусе FAILED → guard срабатывает, LLM НЕ вызывается', async () => {
-    mockFindClient.mockResolvedValue(makeWeeklyClient())
-    simulateExistingSubmission('FAILED')
-    const ctx = makeCtx({ chatId: 777, text: 'Пн 10' })
-
-    await handleMessage(ctx)
-
-    expect(mockParse).not.toHaveBeenCalled()
-    expect(mockProcessWeekly).not.toHaveBeenCalled()
-    expect(mockSendBotMessage).toHaveBeenCalledWith(
-      '777',
-      'У нас уже есть ваша заявка на эту неделю. Менеджер проверит и свяжется с вами.'
-    )
-  })
-
-  it('F1: прошлая заявка CANCELLED → guard НЕ срабатывает, нормальный flow с LLM', async () => {
-    mockFindClient.mockResolvedValue(makeWeeklyClient())
-    simulateExistingSubmission('CANCELLED')
-    const ctx = makeCtx({ chatId: 777, text: 'Пн 10' })
-
-    await handleMessage(ctx)
-
-    // CANCELLED не блокирует → парсер вызывается, заявка обрабатывается заново.
-    expect(mockParse).toHaveBeenCalledTimes(1)
-    expect(mockProcessWeekly).toHaveBeenCalledTimes(1)
   })
 
   it('WEEKLY + не-image вложение → InboxItem, парсер НЕ вызывается', async () => {
@@ -319,7 +336,7 @@ describe('WEEKLY routing in handleMessage', () => {
 
     expect(mockParse).not.toHaveBeenCalled()
     expect(mockProcessWeekly).not.toHaveBeenCalled()
-    expect(mockNotifyManager).not.toHaveBeenCalled()
+    expect(mockNotifyApplied).not.toHaveBeenCalled()
     expect(mockProcessClientMessage).toHaveBeenCalledWith({ maxChatId: '888', text: '10' })
   })
 })

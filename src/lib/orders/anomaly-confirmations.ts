@@ -2,6 +2,8 @@ import type { MealType, Prisma, UserRole } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { createOneTimeOrderCore } from '@/app/(app)/orders/actions'
 import { createInboxItem } from '@/lib/bot/create-inbox-item'
+import { setOrderPortionsForClient } from '@/lib/orders/client-portions'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 
 export interface PendingAnomalyKey {
   clientId: string
@@ -140,7 +142,7 @@ async function findExistingOrderForAnomaly(confirmation: AnomalyOrderKey) {
       deliveryDate: confirmation.deliveryDate,
       status: { not: 'CANCELLED' },
     },
-    select: { id: true },
+    select: { id: true, updatedAt: true },
   })
 }
 
@@ -277,6 +279,21 @@ export async function confirmPendingAnomaly(input: {
 
     const existingOrder = await findExistingOrderForAnomaly(confirmation)
     if (existingOrder) {
+      // Заказ на этот ключ мог существовать ДО подтверждения (сгенерированный
+      // FIXED/DYNAMIC) — доводим порции до предложенных (идемпотентно).
+      const applied = await setOrderPortionsForClient(input.user, {
+        orderId: existingOrder.id,
+        portions: confirmation.proposedPortions,
+        via: 'anomaly_confirmation',
+      })
+      if (!applied.ok) {
+        if (processingAt) await releaseAnomalyProcessing(confirmation.id, processingAt)
+        return {
+          ok: false,
+          reason: 'core_error',
+          error: applied.skipped ? applied.reason : applied.error,
+        }
+      }
       return finalizeAnomalyConfirmation({
         confirmation,
         userId: input.user.id,
@@ -323,6 +340,44 @@ export async function confirmPendingAnomaly(input: {
     })
     if (!current) return { ok: false, reason: 'not_found' }
     return terminalResult(current.status) ?? { ok: false, reason: 'already_processed' }
+  }
+
+  // Старые кнопки «Да» приходят и по датам, где заказ уже есть (FIXED/DYNAMIC
+  // генерируются заранее) — createOneTimeOrderCore там всегда отказывал
+  // «На эту дату уже есть заказ». Обновляем существующий заказ.
+  const preexisting = await findExistingOrderForAnomaly(confirmation)
+  if (preexisting) {
+    // Кнопка могла провисеть долго: если заказ менялся ПОСЛЕ запроса (клиент
+    // прислал новое число — оно уже принято) или дата прошла — старое число
+    // не применяем.
+    const stale =
+      confirmation.deliveryDate.getTime() < getMskCalendarDayUtc(new Date(), 0).getTime()
+        ? 'дата доставки уже прошла'
+        : preexisting.updatedAt.getTime() > confirmation.createdAt.getTime()
+          ? 'заказ изменён после этого запроса — число не применяем, проверьте заказ'
+          : null
+    if (stale) {
+      await releaseAnomalyProcessing(input.confirmationId, processingAt)
+      return { ok: false, reason: 'core_error', error: stale }
+    }
+    const applied = await setOrderPortionsForClient(input.user, {
+      orderId: preexisting.id,
+      portions: confirmation.proposedPortions,
+      via: 'anomaly_confirmation',
+    })
+    if (!applied.ok) {
+      await releaseAnomalyProcessing(input.confirmationId, processingAt)
+      return {
+        ok: false,
+        reason: 'core_error',
+        error: applied.skipped ? applied.reason : applied.error,
+      }
+    }
+    return finalizeAnomalyConfirmation({
+      confirmation,
+      userId: input.user.id,
+      orderId: preexisting.id,
+    })
   }
 
   let orderResult: Awaited<ReturnType<typeof createOneTimeOrderCore>>

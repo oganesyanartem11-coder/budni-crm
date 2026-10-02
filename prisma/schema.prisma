@@ -33,6 +33,7 @@ enum OrderType {
   DYNAMIC // Каждый день меняется, требует подтверждения до cut-off
   FIXED // Постоянное число, автогенерация
   WEEKLY // Клиент раз в неделю присылает заявку на 5-7 дней вперёд (Недельный заказ, MEGA-2)
+  STICKY // «По последнему числу»: число клиента = постоянное fixedPortions до следующего числа, автогенерация как FIXED
 }
 
 enum DeliveryHorizon {
@@ -702,7 +703,7 @@ model ClientMealConfig {
   deliveryHorizon DeliveryHorizon @default(NEXT_DAY)
   scheduleType    ScheduleType
   scheduleData    Json? // Гибкие правила: {daysOfWeek: [1,2,3], dates: [...], intervalDays: 14}
-  fixedPortions   Int? // Если orderType = FIXED
+  fixedPortions   Int? // Если orderType = FIXED / STICKY (текущее «последнее число»)
   pricePerPortion Decimal         @db.Decimal(10, 2)
   validFrom       DateTime        @default(now())
   validTo         DateTime? // Null = бессрочно

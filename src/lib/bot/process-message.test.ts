@@ -34,7 +34,13 @@ const {
   mockCreateOrReuseAnomaly,
   mockEnsureAnomalyInbox,
   mockNotifyManagersAnomaly,
+  anomalyFlag,
+  mockHandleSticky,
 } = vi.hoisted(() => ({
+  mockHandleSticky: vi.fn(),
+  // По умолчанию — как в проде (проверка аномалий отключена). describe про
+  // подтверждение аномалий включает её, чтобы проверять сохранённый пайплайн.
+  anomalyFlag: { enabled: false },
   mockPrisma: {
     user: { findMany: vi.fn() },
     client: { update: vi.fn(), findUnique: vi.fn() },
@@ -90,6 +96,21 @@ vi.mock('@/lib/orders/anomaly-detector', () => ({
   detectPortionAnomaly: mockDetectPortionAnomaly,
 }))
 vi.mock('@/lib/orders/client-stats', () => ({ getClientStats: mockGetStats }))
+vi.mock('./sticky', async () => {
+  const actual = await vi.importActual<typeof import('./sticky')>('./sticky')
+  return { ...actual, handleStickyMessage: mockHandleSticky }
+})
+vi.mock('@/lib/orders/anomaly-constants', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/orders/anomaly-constants')>(
+    '@/lib/orders/anomaly-constants',
+  )
+  return {
+    ...actual,
+    get ANOMALY_CHECK_ENABLED() {
+      return anomalyFlag.enabled
+    },
+  }
+})
 vi.mock('@/lib/max/send-message', () => ({ sendBotMessage: mockSendBotMessage }))
 vi.mock('./log-message', () => ({ logBotMessage: mockLogBotMessage }))
 vi.mock('@/lib/llm/tone-classifier', () => ({ classifyMessageTone: mockClassifyTone }))
@@ -774,7 +795,150 @@ describe('process-message — дата из текста приоритетне�
   })
 })
 
+describe('process-message — маршрутизация STICKY', () => {
+  function makeStickyClient() {
+    const client = makeClient()
+    return {
+      ...client,
+      locations: client.locations.map((l) => ({
+        ...l,
+        mealConfigs: [{ mealType: 'LUNCH', pricePerPortion: '300', isActive: true, orderType: 'STICKY' }],
+      })),
+    }
+  }
+
+  it('число от STICKY-клиента → sticky-ветка, без вопросов/бесед DYNAMIC', async () => {
+    mockFindClient.mockResolvedValue(makeStickyClient())
+    mockHandleSticky.mockResolvedValue({ reply: 'Принято! …', changed: true })
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: '40' })
+
+    expect(result).toEqual({ reply: 'Принято! …', action: 'updated' })
+    expect(mockHandleSticky).toHaveBeenCalledWith(expect.objectContaining({ id: 'client_1' }), '40', 'max_1')
+    expect(mockFindConv).not.toHaveBeenCalled()
+    expect(mockSave).not.toHaveBeenCalled()
+  })
+
+  it('не-число от STICKY-клиента → обычная spontaneous-ветка (inbox)', async () => {
+    mockFindClient.mockResolvedValue(makeStickyClient())
+    mockHandleSticky.mockResolvedValue(null)
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: 'завтра не нужно' })
+
+    expect(result.action).toBe('inbox')
+    expect(mockFindConv).not.toHaveBeenCalled()
+    expect(mockCreateInbox).toHaveBeenCalled()
+  })
+
+  it('DYNAMIC-клиент в sticky-ветку не попадает', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue(null)
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'привет' })
+
+    expect(mockHandleSticky).not.toHaveBeenCalled()
+  })
+})
+
+describe('process-message — ANOMALY_CHECK_ENABLED=false (проверка отключена)', () => {
+  it('число 5 после обычных 50 применяется сразу, без PendingAnomalyConfirmation и детектора', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 5 }],
+    })
+    // Даже если бы детектор сказал «аномалия» — он не должен вызываться.
+    mockDetectAnomalies.mockReturnValue({ isAnomaly: true, reason: 'NEW_CLIENT', priority: 'NORMAL' })
+    mockDetectPortionAnomaly.mockResolvedValue({
+      isAnomaly: true,
+      reason: 'below_threshold',
+      expected: { min: 25, max: 100, average: 50, samples: 10 },
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [{ locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 5 }],
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: '5' })
+
+    expect(result.action).toBe('saved')
+    expect(mockSave).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [{ locationId: 'loc_1', portions: 5 }] }),
+    )
+    expect(mockDetectAnomalies).not.toHaveBeenCalled()
+    expect(mockDetectPortionAnomaly).not.toHaveBeenCalled()
+    expect(mockCreateOrReuseAnomaly).not.toHaveBeenCalled()
+    expect(mockNotifyManagersAnomaly).not.toHaveBeenCalled()
+  })
+
+  it('грубый тон с числом больше не блокирует заказ (тон-алёрт остаётся)', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.99,
+      reason: null,
+      toneLabel: 'rude',
+      items: [{ locationId: 'loc_1', portions: 12 }],
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: '12 И ПОБЫСТРЕЕ' })
+
+    expect(result.action).toBe('saved')
+    expect(mockSave).toHaveBeenCalledOnce()
+    expect(mockNotifySignal).toHaveBeenCalledWith(expect.objectContaining({ tone: 'rude' }))
+  })
+
+  it('не-числовой ответ (вопрос) по-прежнему уходит в inbox', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_1',
+      status: 'PENDING',
+      deliveryDate: mskMidnightUtc(2026, 8, 7),
+    })
+    mockParse.mockResolvedValue({
+      type: 'question',
+      confidence: 0.9,
+      reason: 'вопрос',
+      toneLabel: 'neutral',
+      items: [],
+    })
+    mockDetectAnomalies.mockReturnValue({
+      isAnomaly: true,
+      reason: 'NON_NUMERIC',
+      humanReason: 'вопрос',
+      priority: 'NORMAL',
+    })
+    vi.setSystemTime(new Date('2026-08-06T08:00:00.000Z'))
+
+    const result = await processClientMessage({ maxChatId: 'max_1', text: 'а что в меню?' })
+
+    expect(result.action).toBe('inbox')
+    expect(mockSave).not.toHaveBeenCalled()
+  })
+})
+
 describe('process-message — подтверждение аномалии порций', () => {
+  beforeEach(() => {
+    anomalyFlag.enabled = true
+  })
+  afterEach(() => {
+    anomalyFlag.enabled = false
+  })
+
   it('baseline=30, proposed=28 → штатно сохраняет и drift обновляет только существующий baseline', async () => {
     mockFindClient.mockResolvedValue(makeClient())
     mockFindConv.mockResolvedValue({

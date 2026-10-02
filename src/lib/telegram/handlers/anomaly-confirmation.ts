@@ -9,6 +9,7 @@ import { registerCallbackHandler } from '../callback-router'
 import { identifyTelegramUser } from '../identify-user'
 import { anomalyConfirmationButtons } from '../buttons'
 import { escapeHtml, notifyAllManagersDirect } from '../notify'
+import { ANOMALY_CHECK_ENABLED } from '@/lib/orders/anomaly-constants'
 
 const ALLOWED_ANOMALY_ROLES = ['ADMIN', 'ADMIN_PRO', 'MANAGER'] as const
 
@@ -92,6 +93,19 @@ export async function handleAnomalyConfirmationCallback(
       confirmationId,
       user: { id: user.id, role: user.role },
     })
+
+    if (result.ok && !ANOMALY_CHECK_ENABLED) {
+      // Старая кнопка, висевшая до отключения проверки: число применено.
+      await safeEditAnomalyMessage(
+        ctx,
+        `✅ Проверка аномалий отключена, число принято: ${result.portions} порций`,
+      )
+      return
+    }
+    if (!result.ok && result.reason === 'already_processed' && !ANOMALY_CHECK_ENABLED) {
+      await safeEditAnomalyMessage(ctx, 'Проверка аномалий отключена, число уже принято')
+      return
+    }
 
     if (result.ok) {
       await safeEditAnomalyMessage(

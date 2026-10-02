@@ -7,6 +7,7 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { resolveClientByChatId } from '@/lib/bot/max-users'
 import { withDbRetry } from '@/lib/db-retry'
 import { createInboxItem } from '@/lib/bot/create-inbox-item'
+import { escapeHtml, notifyAllAdminProDirect } from '@/lib/telegram/notify'
 import {
   handleWeeklyPhotoSubmission,
   handleWeeklyTextSubmission,
@@ -124,7 +125,19 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
       // Пусто (ни фото, ни текста) — нечего обрабатывать.
       return
     } catch (err) {
+      // Не глотаем молча: заявка клиента не должна теряться — inbox + личка ADMIN_PRO.
       console.error('[bot] WEEKLY submission handling failed:', err)
+      const detail = err instanceof Error ? err.message : String(err)
+      await createInboxItem({
+        clientId: client.id,
+        reason: 'NON_NUMERIC',
+        humanReason: `Недельная заявка не обработана (ошибка: ${detail.slice(0, 200)}) — внести вручную`,
+        priority: 'HIGH',
+        clientMessage: text || null,
+      }).catch((e) => console.error('[bot] WEEKLY failure inbox failed:', e))
+      await notifyAllAdminProDirect(
+        `⚠️ ${escapeHtml(client.name)}: недельная заявка не обработана — ${escapeHtml(detail.slice(0, 300))}. Заявка в inbox, внесите вручную.`,
+      ).catch((e) => console.error('[bot] WEEKLY failure notify failed:', e))
       return
     }
   }

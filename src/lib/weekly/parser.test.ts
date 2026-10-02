@@ -10,11 +10,11 @@ vi.mock('@/lib/llm/client', () => ({
 import { parseWeeklySubmission } from './parser'
 
 /**
- * weekStartDate — UTC-инстант МСК-полночи понедельника 1 июня 2026.
- * Как UTC-точка = 2026-05-31T21:00:00.000Z. Неделя по МСК: 06-01 … 06-07.
+ * Сейчас — понедельник 1 июня 2026, 10:00 МСК. Окно заявки: 06-01 … 06-15
+ * (текущая и следующая неделя).
  */
-const WEEK_START = new Date('2026-05-31T21:00:00.000Z')
-const context = { weekStartDate: WEEK_START, clientName: 'ООО Ромашка' }
+const NOW = new Date('2026-06-01T07:00:00.000Z')
+const context = { now: NOW, clientName: 'ООО Ромашка', locations: [{ id: 'loc_1', name: 'Офис' }] }
 
 function toolUseResponse(input: unknown) {
   return {
@@ -62,13 +62,15 @@ describe('parseWeeklySubmission', () => {
     const textBlock = content.find((b: { type: string }) => b.type === 'text')
     expect(textBlock.text).toContain('Пн 20, Вт 18')
 
-    // в system-промпте подставлены clientName и границы недели (МСК)
+    // в system-промпте: clientName, сегодня с днём недели и конец окна (+14)
     expect(req.system).toContain('ООО Ромашка')
-    expect(req.system).toContain('2026-06-01')
-    expect(req.system).toContain('2026-06-07')
+    expect(req.system).toContain('2026-06-01 (понедельник)')
+    expect(req.system).toContain('2026-06-15')
+    // одна точка — список точек в промпт не нужен
+    expect(req.system).not.toContain('id=loc_1')
 
-    // маппинг tool input → ParseResult
-    expect(result.items).toEqual(GOOD_INPUT.items)
+    // маппинг tool input → ParseResult (locationId не пришёл → null)
+    expect(result.items).toEqual(GOOD_INPUT.items.map((i) => ({ ...i, locationId: null })))
     expect(result.dietaryNotes).toBe('всегда 2 без свинины')
     expect(result.confidence).toBe(0.98)
     expect(result.reason).toBe('таблица читается чётко')
@@ -93,6 +95,22 @@ describe('parseWeeklySubmission', () => {
     })
     // и текстовая инструкция рядом с картинкой
     expect(content.some((b: { type: string }) => b.type === 'text')).toBe(true)
+  })
+
+  it('несколько точек: список точек в промпте, locationId строки маппится', async () => {
+    createMock.mockResolvedValue(
+      toolUseResponse({
+        ...GOOD_INPUT,
+        items: [{ date: '2026-06-02', portions: 18, locationId: 'loc_2' }],
+      }),
+    )
+    const result = await parseWeeklySubmission(
+      { type: 'text', text: 'склад вт 18' },
+      { ...context, locations: [{ id: 'loc_1', name: 'Офис' }, { id: 'loc_2', name: 'Склад' }] },
+    )
+    const req = createMock.mock.calls[0][0]
+    expect(req.system).toContain('id=loc_2: Склад')
+    expect(result.items).toEqual([{ date: '2026-06-02', portions: 18, locationId: 'loc_2' }])
   })
 
   it('маппинг: dietaryNotes=null сохраняется как null', async () => {

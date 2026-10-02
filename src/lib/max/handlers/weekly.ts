@@ -1,150 +1,42 @@
-import { prisma } from '@/lib/db/prisma'
 import { put } from '@vercel/blob'
-import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
-import { createInboxItem } from '@/lib/bot/create-inbox-item'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { promoteToActiveByChatId } from '@/lib/bot/max-users'
+import { createInboxItem } from '@/lib/bot/create-inbox-item'
+import { notifyClientSignal } from '@/lib/bot/notify-client-signal'
 import { fetchAttachmentAsBase64 } from '@/lib/max/fetch-attachment'
 import { parseWeeklySubmission } from '@/lib/weekly/parser'
-import { runSanityChecks, type SanityContext } from '@/lib/weekly/sanity-checks'
-import { processWeeklySubmission } from '@/lib/weekly/actions'
-import { notifyManagerAboutWeeklySubmission } from '@/lib/telegram/handlers/weekly-submission'
+import { loadWeeklyConfigOptions, processWeeklySubmission } from '@/lib/weekly/actions'
+import {
+  formatClientAppliedReply,
+  notifyManagersWeeklyApplied,
+  notifyManagersWeeklyReview,
+} from '@/lib/telegram/handlers/weekly-submission'
 import type { ClientWithBotContext } from '@/lib/db/queries/bot'
 import type { ParseResult } from '@/lib/weekly/parser'
 
 /**
- * MEGA wiring (Subagent C): приём недельной заявки WEEKLY-клиента в MAX-вебхуке.
- * Фото бумажного списка или SMS-текст → parser → sanity → actions → notify.
+ * Приём недельной заявки WEEKLY-клиента в MAX-вебхуке.
+ * Фото бумажного списка или SMS-текст → parser → построчный разбор → чистая
+ * заявка вносится сразу (менеджеру итог + «↩️ Отменить»), иначе — менеджеру
+ * на проверку с кнопками «Внести как распознано» / «Отклонить».
  *
- * Готовые модули (parser/actions/sanity/notify) НЕ трогаем — только оркестрируем.
+ * Повторная заявка на ту же неделю не блокируется: upsert по
+ * (clientId, weekStartDate) и применение заново (строки идемпотентны).
  */
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const REPLY_REVIEW = 'Спасибо, заявку получили, менеджер проверит и подтвердит.'
 
-// Дубль-гард (F1): на эту неделю уже есть заявка в ЛЮБОМ статусе, кроме
-// CANCELLED → не запускаем LLM повторно. Раньше блокировали только
-// [PARSED, AUTO_CONFIRMED]; из-за этого заявка в NEEDS_REVIEW/FAILED пропускала
-// guard, парсер зря тратил LLM, а processWeeklySubmission падал на
-// @@unique([clientId, weekStartDate]) (P2002) — клиент оставался без ответа.
-// Теперь блокируем всё, кроме CANCELLED (после отмены клиент может прислать заново).
-const DUP_NONBLOCKING_STATUSES = ['CANCELLED'] as const
-
-// Существующий InboxItemReason (схему не меняем): для не-image вложений и
-// дублей используем NON_NUMERIC, специфику кладём в humanReason.
-const INBOX_REASON = 'NON_NUMERIC' as const
-
-const REPLY_RECEIVED_AUTO = 'Получили заявку, передал менеджеру'
-const REPLY_RECEIVED_PROCESSING = 'Получили, обрабатываем'
-const REPLY_DUP = 'У нас уже есть ваша заявка на эту неделю. Менеджер проверит и свяжется с вами.'
-
-/**
- * Ближайший БУДУЩИЙ понедельник по МСК-календарю, как UTC-полночь календарной
- * даты (тот же формат, что weekStartDate в схеме и что ждут parser/sanity/actions).
- *
- * «Будущий» строго: сегодня Пн → следующий Пн (через 7 дней); Ср → ближайший Пн;
- * Сб → ближайший Пн. Считаем от МСК-сегодня (getMskCalendarDayUtc), день недели
- * читаем из UTC-полночи (она же календарная дата).
- */
-export function nextFutureMondayMsk(now: Date = new Date()): Date {
-  const todayUtcMidnight = getMskCalendarDayUtc(now, 0)
-  const dow = todayUtcMidnight.getUTCDay() // 0=Вс, 1=Пн, ... 6=Сб
-  // Дней до следующего понедельника (строго в будущем): Пн→7, Вт→6, ..., Вс→1.
-  const daysUntilMonday = ((1 - dow + 7) % 7) || 7
-  return new Date(todayUtcMidnight.getTime() + daysUntilMonday * DAY_MS)
+/** Точки WEEKLY-конфигов для парсера (locationId нужен только при нескольких точках). */
+async function parserLocations(clientId: string) {
+  const configs = await loadWeeklyConfigOptions(clientId)
+  const seen = new Map<string, string>()
+  for (const c of configs) seen.set(c.locationId, c.locationName)
+  return [...seen].map(([id, name]) => ({ id, name }))
 }
 
-/** weekStartDate — UTC-полночь календарной даты МСК → строка «DD.MM.YYYY». */
-function formatWeekStart(d: Date): string {
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  return `${dd}.${mm}.${d.getUTCFullYear()}`
-}
-
-/**
- * Sanity-контекст из конфигурации клиента.
- *
- * expectedDaysPerWeek — из расписания активного WEEKLY-конфига
- *   (scheduleData.daysOfWeek.length), иначе дефолт 5 (рабочая неделя).
- * typicalPortionsPerDay — из config.fixedPortions, иначе среднее по недавним
- *   WEEKLY-заказам клиента (последние 8 недель), иначе дефолт 10.
- *
- * Числа лишь задают границы sanity-гейта (диапазоны порций / число дней) —
- * при провале заявка уходит на ручную проверку, не теряется.
- */
-async function deriveSanityContext(
-  clientId: string,
-  weekStartDate: Date
-): Promise<SanityContext> {
-  const config = await prisma.clientMealConfig.findFirst({
-    where: { clientId, orderType: 'WEEKLY', isActive: true },
-    select: { scheduleData: true, fixedPortions: true },
-  })
-
-  let expectedDaysPerWeek = 5
-  const schedule = config?.scheduleData as { daysOfWeek?: unknown } | null | undefined
-  if (schedule && Array.isArray(schedule.daysOfWeek) && schedule.daysOfWeek.length > 0) {
-    expectedDaysPerWeek = schedule.daysOfWeek.length
-  }
-
-  let typicalPortionsPerDay = 10
-  if (config?.fixedPortions && config.fixedPortions > 0) {
-    typicalPortionsPerDay = config.fixedPortions
-  } else {
-    const since = new Date(weekStartDate.getTime() - 8 * 7 * DAY_MS)
-    const agg = await prisma.order.aggregate({
-      where: {
-        clientId,
-        source: 'WEEKLY_AUTO',
-        deliveryDate: { gte: since },
-        status: { notIn: ['CANCELLED'] },
-      },
-      _avg: { portions: true },
-    })
-    const avg = agg._avg.portions
-    if (avg && avg > 0) {
-      typicalPortionsPerDay = Math.round(avg)
-    }
-  }
-
-  return { expectedDaysPerWeek, typicalPortionsPerDay, weekStartDate }
-}
-
-/**
- * Дубль-гард: заявка на эту же неделю уже есть в живом статусе → InboxItem,
- * вежливый ответ клиенту, НЕ запускаем парсер. Возвращает true если это дубль.
- */
-async function handleDuplicateGuard(
-  client: ClientWithBotContext,
-  weekStartDate: Date,
-  // 7.55: chatId отправителя — отвечаем тому, кто прислал заявку (multi-user).
-  chatId: string
-): Promise<boolean> {
-  const existing = await prisma.weeklyOrderSubmission.findFirst({
-    where: {
-      clientId: client.id,
-      weekStartDate,
-      status: { notIn: [...DUP_NONBLOCKING_STATUSES] },
-    },
-    select: { id: true, status: true },
-  })
-  if (!existing) return false
-
-  await createInboxItem({
-    clientId: client.id,
-    reason: INBOX_REASON,
-    humanReason: `Дубль заявки на неделю ${formatWeekStart(weekStartDate)}. Уже есть submission #${existing.id} в статусе ${existing.status}.`,
-    priority: 'NORMAL',
-  })
-  await sendBotMessage(chatId, REPLY_DUP)
-  return true
-}
-
-/**
- * Общий хвост: sanity → process → notify → ответ клиенту.
- */
+/** Общий хвост: разбор → внесение/проверка → уведомления → ответ клиенту. */
 async function finalizeSubmission(params: {
   client: ClientWithBotContext
-  weekStartDate: Date
   source: 'PHOTO' | 'TEXT'
   blobUrl?: string
   rawText: string | null
@@ -152,10 +44,7 @@ async function finalizeSubmission(params: {
   // 7.55: chatId отправителя — ответ идёт тому, кто прислал заявку.
   chatId: string
 }): Promise<void> {
-  const { client, weekStartDate, source, blobUrl, rawText, parsed, chatId } = params
-
-  const sanityContext = await deriveSanityContext(client.id, weekStartDate)
-  const sanityResult = runSanityChecks(parsed, sanityContext)
+  const { client, source, blobUrl, rawText, parsed, chatId } = params
 
   const result = await processWeeklySubmission({
     clientId: client.id,
@@ -163,33 +52,64 @@ async function finalizeSubmission(params: {
     blobUrl,
     rawText: rawText ?? undefined,
     parsedResult: parsed,
-    sanityResult,
-    weekStartDate,
   })
 
-  // notifyManager ждёт статус AUTO_CONFIRMED | NEEDS_REVIEW. Всё остальное
-  // (FAILED и т.п.) к менеджеру шлём как NEEDS_REVIEW — заявку надо разобрать руками.
-  const notifyStatus = result.status === 'AUTO_CONFIRMED' ? 'AUTO_CONFIRMED' : 'NEEDS_REVIEW'
-  await notifyManagerAboutWeeklySubmission({
-    submissionId: result.submissionId,
-    status: notifyStatus,
-    clientName: client.name,
-    items: parsed.items,
-    dietaryNotes: parsed.dietaryNotes,
-    confidence: parsed.confidence,
-    reason: parsed.reason,
-    source,
-    blobUrl,
-    rawText: rawText ?? undefined,
-  })
+  // Ни одной строки заявки («спасибо», вопрос, нечитаемое фото): заявку не
+  // трогаем, сообщение — менеджеру в inbox. На текст не отвечаем (это может быть
+  // просто разговор), на фото — что получили.
+  if (result.submissionId === null) {
+    const inbox = await createInboxItem({
+      clientId: client.id,
+      reason: 'NON_NUMERIC',
+      humanReason:
+        source === 'PHOTO'
+          ? `Фото от недельного клиента — заявку не распознал (${parsed.reason || 'нет строк'}). ${blobUrl ?? ''}`.trim()
+          : 'Сообщение недельного клиента без заявки',
+      priority: 'NORMAL',
+      clientMessage: rawText,
+    })
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: rawText ?? '[фото]',
+      inboxItemId: inbox.id,
+      tone: null,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => console.error('[weekly] notifyClientSignal failed:', e))
+    if (source === 'PHOTO') await sendBotMessage(chatId, REPLY_REVIEW)
+    return
+  }
 
-  const reply =
-    result.status === 'AUTO_CONFIRMED' ? REPLY_RECEIVED_AUTO : REPLY_RECEIVED_PROCESSING
-  await sendBotMessage(chatId, reply)
+  // Заказы уже внесены/заявка сохранена — сбой уведомления или ответа ниже не
+  // должен превращаться в «заявка не обработана» (менеджер внёс бы её второй раз).
+  const submissionId = result.submissionId
+  const reply = result.applied
+    ? (formatClientAppliedReply(result.applied.outcomes) ?? REPLY_REVIEW)
+    : REPLY_REVIEW
+  try {
+    if (result.applied) {
+      await notifyManagersWeeklyApplied({ submissionId, clientName: client.name, applied: result.applied })
+    } else {
+      await notifyManagersWeeklyReview({
+        submissionId,
+        clientName: client.name,
+        lines: result.lines,
+        reviewReasons: result.reviewReasons,
+        source,
+        blobUrl,
+        rawText: rawText ?? undefined,
+        dietaryNotes: parsed.dietaryNotes,
+      })
+    }
+  } catch (err) {
+    console.error('[weekly] manager notification failed after save:', err)
+  }
 
-  // 7.55: успешная недельная заявка (content-bearing) → отправитель становится
+  await sendBotMessage(chatId, reply).catch((e) => console.error('[weekly] client reply failed:', e))
+
+  // 7.55: недельная заявка (content-bearing) → отправитель становится
   // активным пользователем клиента. Идемпотентно.
-  await promoteToActiveByChatId(chatId)
+  await promoteToActiveByChatId(chatId).catch((e) => console.error('[weekly] promote failed:', e))
 }
 
 /**
@@ -202,9 +122,6 @@ export async function handleWeeklyPhotoSubmission(params: {
   chatId: string
 }): Promise<void> {
   const { client, attachmentUrl, caption, chatId } = params
-  const weekStartDate = nextFutureMondayMsk()
-
-  if (await handleDuplicateGuard(client, weekStartDate, chatId)) return
 
   const { base64, buffer, mediaType } = await fetchAttachmentAsBase64(attachmentUrl)
 
@@ -215,12 +132,11 @@ export async function handleWeeklyPhotoSubmission(params: {
 
   const parsed = await parseWeeklySubmission(
     { type: 'photo', base64, mediaType },
-    { weekStartDate, clientName: client.name }
+    { now: new Date(), clientName: client.name, locations: await parserLocations(client.id) }
   )
 
   await finalizeSubmission({
     client,
-    weekStartDate,
     source: 'PHOTO',
     blobUrl: blob.url,
     rawText: caption ?? null,
@@ -238,18 +154,14 @@ export async function handleWeeklyTextSubmission(params: {
   chatId: string
 }): Promise<void> {
   const { client, text, chatId } = params
-  const weekStartDate = nextFutureMondayMsk()
-
-  if (await handleDuplicateGuard(client, weekStartDate, chatId)) return
 
   const parsed = await parseWeeklySubmission(
     { type: 'text', text },
-    { weekStartDate, clientName: client.name }
+    { now: new Date(), clientName: client.name, locations: await parserLocations(client.id) }
   )
 
   await finalizeSubmission({
     client,
-    weekStartDate,
     source: 'TEXT',
     rawText: text,
     parsed,

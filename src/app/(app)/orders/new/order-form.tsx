@@ -116,7 +116,7 @@ export function OrderForm({ clients, defaultDate, defaultClientId }: Props) {
       if (!overridePrice) {
         setPricePerPortion(String(config.pricePerPortion))
       }
-      if (config.orderType === 'FIXED' && config.fixedPortions && !portions) {
+      if ((config.orderType === 'FIXED' || config.orderType === 'STICKY') && config.fixedPortions && !portions) {
         setPortions(String(config.fixedPortions))
       }
     }

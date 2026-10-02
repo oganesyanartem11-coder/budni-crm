@@ -74,12 +74,21 @@ export function importButton(
 }
 
 /**
- * Inline-кнопка «Отменить заявку» под пушем о принятой недельной заявке.
- * callback_data `wsub:cancel:<cuid>` (cuid ~25 символов, well under 64 байт).
- * Обрабатывается scope 'wsub' (см. handlers/weekly-submission.ts).
+ * Недельная заявка на ручной проверке: «Внести как распознано» / «Отклонить».
+ * callback_data `wsub:apply:<cuid>` / `wsub:reject:<cuid>` (submissionId).
  */
-export function weeklySubmissionCancelButton(submissionId: string): InlineKeyboard {
-  return new InlineKeyboard().text('Отменить заявку', `wsub:cancel:${submissionId}`)
+export function weeklySubmissionReviewButtons(submissionId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✅ Внести как распознано', `wsub:apply:${submissionId}`)
+    .text('❌ Отклонить', `wsub:reject:${submissionId}`)
+}
+
+/**
+ * «↩️ Отменить» под итогом внесения недельной заявки. id — ActivityLog
+ * WEEKLY_SUBMISSION_APPLIED: откатывается ровно это применение.
+ */
+export function weeklyApplyUndoButton(applyLogId: string): InlineKeyboard {
+  return new InlineKeyboard().text('↩️ Отменить', `wsub:undo:${applyLogId}`)
 }
 
 /**

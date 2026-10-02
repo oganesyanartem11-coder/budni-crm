@@ -4,12 +4,14 @@ export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   DYNAMIC: 'Динамика (подтверждение)',
   FIXED: 'Фикс (постоянное число)',
   WEEKLY: 'Недельный',
+  STICKY: 'По последнему числу',
 }
 
 export const ORDER_TYPE_SHORT: Record<OrderType, string> = {
   DYNAMIC: 'Динамика',
   FIXED: 'Фикс',
   WEEKLY: 'Неделя',
+  STICKY: 'Посл. число',
 }
 
 export const SCHEDULE_TYPE_LABELS: Record<ScheduleType, string> = {

@@ -16,7 +16,9 @@ export type ParserInput =
   | { type: 'text'; text: string }
 
 export interface ParseResult {
-  items: { date: string /* YYYY-MM-DD */; portions: number }[]
+  // locationId — только если у клиента несколько точек с недельной заявкой и
+  // строка однозначно относится к одной из них; иначе null.
+  items: { date: string /* YYYY-MM-DD */; portions: number; locationId?: string | null }[]
   dietaryNotes: string | null
   confidence: number // 0..1
   reason: string
@@ -39,7 +41,11 @@ const WEEKLY_TOOL: Anthropic.Messages.Tool = {
           type: 'object',
           properties: {
             date: { type: 'string', description: 'Дата дня в формате YYYY-MM-DD' },
-            portions: { type: 'number', description: 'Количество порций на этот день' },
+            portions: { type: 'number', description: 'Количество порций на этот день (0 = «не нужно»)' },
+            locationId: {
+              type: ['string', 'null'],
+              description: 'id точки из списка точек клиента, если точек несколько и строка явно про одну из них; иначе null',
+            },
           },
           required: ['date', 'portions'],
         },
@@ -51,7 +57,7 @@ const WEEKLY_TOOL: Anthropic.Messages.Tool = {
       },
       confidence: {
         type: 'number',
-        description: 'Уверенность 0..1 (1 = всё читается чётко, <0.95 = есть сомнения).',
+        description: 'Уверенность 0..1 (1 = всё читается чётко, <0.8 = есть сомнения).',
       },
       reason: { type: 'string', description: 'Краткое объяснение confidence (1-2 предложения).' },
     },
@@ -61,10 +67,12 @@ const WEEKLY_TOOL: Anthropic.Messages.Tool = {
 
 const MSK_OFFSET_MS = 3 * 60 * 60 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
+/** Окно заявки: текущая и следующая неделя (сегодня … +14 дней). */
+export const WINDOW_DAYS = 14
 
 /**
  * Форматирует UTC-инстант в YYYY-MM-DD по МСК-календарю.
- * weekStartDate — UTC-инстант МСК-полночи понедельника; сдвигаем +3ч и читаем
+ * Сдвигаем +3ч и читаем
  * UTC-компоненты (MSK = UTC+3, без DST), как в src/lib/utils/week.ts и msk-window.ts.
  */
 function toMskDateString(instant: Date): string {
@@ -75,16 +83,35 @@ function toMskDateString(instant: Date): string {
   return `${y}-${m}-${d}`
 }
 
-function buildSystemPrompt(clientName: string, monday: string, sunday: string): string {
-  return `Ты — ассистент извлечения данных из заявок клиентов кейтеринг-сервиса «Будни». Клиент ${clientName} прислал заявку на следующую календарную неделю (Пн ${monday} — Вс ${sunday}, МСК).
+const RU_WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'] as const
+
+export interface ParserLocation {
+  id: string
+  name: string
+}
+
+function buildSystemPrompt(
+  clientName: string,
+  today: string,
+  todayWeekday: string,
+  lastDay: string,
+  locations: ParserLocation[],
+): string {
+  const locationsBlock =
+    locations.length > 1
+      ? `\n\nУ клиента несколько точек доставки:\n${locations.map((l) => `- id=${l.id}: ${l.name}`).join('\n')}\nДля каждой строки укажи locationId, если строка явно относится к одной точке. Если по строке непонятно, к какой точке она относится — locationId=null.`
+      : ''
+  return `Ты — ассистент извлечения данных из заявок клиентов кейтеринг-сервиса «Будни». Клиент ${clientName} прислал заявку с датами и количеством порций.
+
+Сегодня ${today} (${todayWeekday}), МСК. Заявка может быть на текущую и/или следующую неделю — даты в пределах ${today}—${lastDay}. День недели без даты («пн», «вторник») — это ближайший такой день начиная с сегодняшнего.${locationsBlock}
 
 Извлеки:
-- items: массив { date, portions } для каждого дня где указано количество. ВАЖНО: дни без количества (выходные, серая заливка, пропуски) — НЕ включай в items.
+- items: массив { date, portions, locationId } для каждого дня, где указано количество. Дни без количества (выходные, серая заливка, пропуски) — НЕ включай. «не нужно» / «не возить» / прочерк на конкретный день — portions=0.
 - dietaryNotes: общие постоянные пометки клиента (например "всегда 2 без свинины", "без морепродуктов"). Если нет — null.
-- confidence: твоя уверенность 0..1 (1 = всё читается чётко без сомнений, <0.95 = есть хоть одна неоднозначная цифра / нечёткая ячейка / сомнения).
+- confidence: твоя уверенность 0..1 (1 = всё читается чётко без сомнений, <0.8 = есть хоть одна неоднозначная цифра / нечёткая ячейка / непонятная дата).
 - reason: краткое объяснение confidence (1-2 предложения).
 
-Все даты в items должны попадать в диапазон ${monday}—${sunday}. Если в исходнике даты вне этого диапазона — confidence ≤0.8 и опиши в reason.`
+Если в исходнике даты вне диапазона ${today}—${lastDay} — всё равно включи их как есть, confidence ≤0.8 и опиши в reason.`
 }
 
 function fallback(detail: string): ParseResult {
@@ -93,11 +120,18 @@ function fallback(detail: string): ParseResult {
 
 export async function parseWeeklySubmission(
   input: ParserInput,
-  context: { weekStartDate: Date /* nearest Monday MSK */; clientName: string }
+  context: { now: Date; clientName: string; locations: ParserLocation[] }
 ): Promise<ParseResult> {
-  const monday = toMskDateString(context.weekStartDate)
-  const sunday = toMskDateString(new Date(context.weekStartDate.getTime() + 6 * DAY_MS))
-  const systemPrompt = buildSystemPrompt(context.clientName, monday, sunday)
+  const today = toMskDateString(context.now)
+  const todayWeekday = RU_WEEKDAYS[new Date(context.now.getTime() + MSK_OFFSET_MS).getUTCDay()]
+  const lastDay = toMskDateString(new Date(context.now.getTime() + WINDOW_DAYS * DAY_MS))
+  const systemPrompt = buildSystemPrompt(
+    context.clientName,
+    today,
+    todayWeekday,
+    lastDay,
+    context.locations,
+  )
 
   const instruction =
     input.type === 'photo'
@@ -152,7 +186,14 @@ export async function parseWeeklySubmission(
           typeof (it as { date?: unknown }).date === 'string' &&
           typeof (it as { portions?: unknown }).portions === 'number'
       )
-      .map((it) => ({ date: it.date, portions: it.portions }))
+      .map((it) => {
+        const locationId = (it as { locationId?: unknown }).locationId
+        return {
+          date: it.date,
+          portions: it.portions,
+          locationId: typeof locationId === 'string' && locationId ? locationId : null,
+        }
+      })
 
     return {
       items,

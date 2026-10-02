@@ -1,196 +1,200 @@
-import { describe, it, expect } from 'vitest'
-import { runSanityChecks, type SanityContext } from './sanity-checks'
+import { describe, expect, it } from 'vitest'
 import type { ParseResult } from './parser'
+import {
+  classifyWeeklyItems,
+  formatWeeklyDate,
+  mondayOf,
+  parseItemDate,
+  type WeeklyConfigOption,
+} from './sanity-checks'
 
 /**
- * MEGA-1 sanity-checks. weekStartDate — UTC-инстант МСК-полночи понедельника
- * 1 июня 2026 (Пн). Как UTC-точка это 2026-05-31T21:00:00.000Z (МСК = UTC+3).
- * Неделя по МСК-календарю: 2026-06-01 (Пн) … 2026-06-07 (Вс).
+ * Построчный разбор недельной заявки. Сейчас — понедельник 5 окт 2026,
+ * 10:00 МСК (07:00Z). Обычная точка: cut-off 16:00 МСК накануне.
  */
-const WEEK_START = new Date('2026-05-31T21:00:00.000Z')
+const NOW = new Date('2026-10-05T07:00:00.000Z')
 
-const baseContext: SanityContext = {
-  expectedDaysPerWeek: 5,
-  typicalPortionsPerDay: 20,
-  weekStartDate: WEEK_START,
+const OFFICE: WeeklyConfigOption = {
+  configId: 'cfg_office',
+  locationId: 'loc_office',
+  locationName: 'Офис',
+  mealType: 'LUNCH',
+  pricePerPortion: 300,
+  location: { sameDayDelivery: false, isActive: true, cutoffHourMsk: null, cutoffMinuteMsk: null },
+}
+const WAREHOUSE: WeeklyConfigOption = {
+  ...OFFICE,
+  configId: 'cfg_wh',
+  locationId: 'loc_wh',
+  locationName: 'Склад',
 }
 
-function makeParsed(overrides: Partial<ParseResult> = {}): ParseResult {
-  return {
-    items: [
-      { date: '2026-06-01', portions: 20 },
-      { date: '2026-06-02', portions: 18 },
-      { date: '2026-06-03', portions: 22 },
-    ],
-    dietaryNotes: null,
-    confidence: 1,
-    reason: 'чёткое фото',
-    ...overrides,
-  }
+function parsed(items: ParseResult['items'], confidence = 0.9): ParseResult {
+  return { items, dietaryNotes: null, confidence, reason: 'ok' }
 }
 
-describe('runSanityChecks', () => {
-  it('PASS: полностью валидная заявка → ok=true, нет failures', () => {
-    const result = runSanityChecks(makeParsed(), baseContext)
-    expect(result.ok).toBe(true)
-    expect(result.failures).toEqual([])
-  })
-
-  // Rule 1: confidence
-  it('FAIL rule 1: confidence ниже 0.95', () => {
-    const result = runSanityChecks(makeParsed({ confidence: 0.9 }), baseContext)
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('confidence'))).toBe(true)
-  })
-
-  it('PASS rule 1: confidence ровно 0.95 — граница включена', () => {
-    const result = runSanityChecks(makeParsed({ confidence: 0.95 }), baseContext)
-    expect(result.failures.some((f) => f.includes('confidence'))).toBe(false)
-  })
-
-  // Rule 2: items.length
-  it('FAIL rule 2: пустой items', () => {
-    const result = runSanityChecks(makeParsed({ items: [] }), baseContext)
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('пуст'))).toBe(true)
-  })
-
-  it('FAIL rule 2: больше expectedDaysPerWeek+1 дней', () => {
-    const result = runSanityChecks(
-      makeParsed({
-        items: [
-          { date: '2026-06-01', portions: 20 },
-          { date: '2026-06-02', portions: 20 },
-          { date: '2026-06-03', portions: 20 },
-          { date: '2026-06-04', portions: 20 },
-          { date: '2026-06-05', portions: 20 },
-          { date: '2026-06-06', portions: 20 },
-          { date: '2026-06-07', portions: 20 },
+describe('classifyWeeklyItems', () => {
+  it('чистая заявка с confidence 0.85 → автоприменение', () => {
+    const r = classifyWeeklyItems(
+      parsed(
+        [
+          { date: '2026-10-06', portions: 30 },
+          { date: '2026-10-07', portions: 32 },
         ],
-      }),
-      baseContext
+        0.85,
+      ),
+      [OFFICE],
+      NOW,
     )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('больше ожидаемого'))).toBe(true)
+    expect(r.autoApply).toBe(true)
+    expect(r.reviewReasons).toEqual([])
+    expect(r.lines.map((l) => l.status)).toEqual(['ok', 'ok'])
+    expect(r.lines[0].deliveryDate).toEqual(new Date('2026-10-06T00:00:00.000Z'))
+    expect(r.lines[0].config?.configId).toBe('cfg_office')
   })
 
-  it('PASS rule 2: ровно expectedDaysPerWeek+1 дней — граница включена', () => {
-    const result = runSanityChecks(
-      makeParsed({
-        items: [
-          { date: '2026-06-01', portions: 20 },
-          { date: '2026-06-02', portions: 20 },
-          { date: '2026-06-03', portions: 20 },
-          { date: '2026-06-04', portions: 20 },
-          { date: '2026-06-05', portions: 20 },
-          { date: '2026-06-06', portions: 20 },
-        ],
-      }),
-      baseContext
-    )
-    expect(result.failures.some((f) => f.includes('дней'))).toBe(false)
+  it('confidence 0.7 → ручная проверка с причиной', () => {
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-06', portions: 30 }], 0.7), [OFFICE], NOW)
+    expect(r.autoApply).toBe(false)
+    expect(r.reviewReasons[0]).toContain('0.70 ниже 0.8')
+    // строка сама по себе чистая — менеджер сможет «Внести как распознано»
+    expect(r.lines[0].status).toBe('ok')
   })
 
-  // Rule 3: portions range
-  it('FAIL rule 3: порции выше typical*2.0', () => {
-    const result = runSanityChecks(
-      makeParsed({ items: [{ date: '2026-06-01', portions: 41 }] }),
-      baseContext
+  it('заявка в понедельник на текущую неделю: сегодня пропущено, вт–пт применяются автоматически', () => {
+    const r = classifyWeeklyItems(
+      parsed([
+        { date: '2026-10-05', portions: 30 },
+        { date: '2026-10-06', portions: 31 },
+        { date: '2026-10-09', portions: 28 },
+      ]),
+      [OFFICE],
+      NOW,
     )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('вне диапазона'))).toBe(true)
+    expect(r.lines.map((l) => [l.date, l.status])).toEqual([
+      ['2026-10-05', 'skip'],
+      ['2026-10-06', 'ok'],
+      ['2026-10-09', 'ok'],
+    ])
+    expect(r.lines[0].note).toBe('приём на эту дату уже закрыт')
+    expect(r.autoApply).toBe(true)
   })
 
-  it('FAIL rule 3: порции ниже typical*0.5', () => {
-    const result = runSanityChecks(
-      makeParsed({ items: [{ date: '2026-06-01', portions: 9 }] }),
-      baseContext
+  it('после 16:00 МСК завтрашний день уже закрыт по cut-off', () => {
+    const evening = new Date('2026-10-05T13:30:00.000Z') // 16:30 МСК
+    const r = classifyWeeklyItems(
+      parsed([
+        { date: '2026-10-06', portions: 31 },
+        { date: '2026-10-07', portions: 30 },
+      ]),
+      [OFFICE],
+      evening,
     )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('вне диапазона'))).toBe(true)
+    expect(r.lines.map((l) => l.status)).toEqual(['skip', 'ok'])
   })
 
-  it('PASS rule 3: порции ровно на границах [10, 40] включительно', () => {
-    const result = runSanityChecks(
-      makeParsed({
-        items: [
-          { date: '2026-06-01', portions: 10 },
-          { date: '2026-06-02', portions: 40 },
-        ],
-      }),
-      baseContext
-    )
-    expect(result.failures.some((f) => f.includes('вне диапазона'))).toBe(false)
+  it('same-day точка: сегодня можно до её cut-off', () => {
+    const sameDay: WeeklyConfigOption = {
+      ...OFFICE,
+      location: { sameDayDelivery: true, isActive: true, cutoffHourMsk: 11, cutoffMinuteMsk: 0 },
+    }
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-05', portions: 20 }]), [sameDay], NOW)
+    expect(r.lines[0].status).toBe('ok')
   })
 
-  // Rule 4: valid YYYY-MM-DD
-  it('FAIL rule 4: невалидный формат даты', () => {
-    const result = runSanityChecks(
-      makeParsed({ items: [{ date: '01.06.2026', portions: 20 }] }),
-      baseContext
+  it('прошедшая дата и дата дальше 14 дней — пропуск с пометкой, остальное применяется', () => {
+    const r = classifyWeeklyItems(
+      parsed([
+        { date: '2026-10-02', portions: 30 },
+        { date: '2026-10-07', portions: 30 },
+        { date: '2026-10-25', portions: 30 },
+      ]),
+      [OFFICE],
+      NOW,
     )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('невалидная дата'))).toBe(true)
+    expect(r.lines.map((l) => [l.status, l.note])).toEqual([
+      ['skip', 'дата уже прошла'],
+      ['ok', null],
+      ['skip', 'дальше 14 дней'],
+    ])
+    expect(r.autoApply).toBe(true)
   })
 
-  it('FAIL rule 4: несуществующая календарная дата (30 февраля)', () => {
-    const result = runSanityChecks(
-      makeParsed({ items: [{ date: '2026-02-30', portions: 20 }] }),
-      baseContext
-    )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('невалидная дата'))).toBe(true)
+  it('все даты нередактируемые → ручная проверка «нет дат»', () => {
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-01', portions: 30 }]), [OFFICE], NOW)
+    expect(r.autoApply).toBe(false)
+    expect(r.reviewReasons).toContain('нет дат, которые ещё можно внести')
   })
 
-  // Rule 5: date within week
-  it('FAIL rule 5: дата раньше понедельника недели', () => {
-    const result = runSanityChecks(
-      makeParsed({ items: [{ date: '2026-05-31', portions: 20 }] }),
-      baseContext
-    )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('вне недели'))).toBe(true)
+  it('две точки без locationId → строка неоднозначна, не автомат', () => {
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-06', portions: 30 }]), [OFFICE, WAREHOUSE], NOW)
+    expect(r.lines[0].status).toBe('blocked')
+    expect(r.lines[0].note).toBe('непонятно, на какую точку')
+    expect(r.autoApply).toBe(false)
   })
 
-  it('FAIL rule 5: дата позже воскресенья недели', () => {
-    const result = runSanityChecks(
-      makeParsed({ items: [{ date: '2026-06-08', portions: 20 }] }),
-      baseContext
+  it('две точки с locationId → однозначно, автомат', () => {
+    const r = classifyWeeklyItems(
+      parsed([
+        { date: '2026-10-06', portions: 30, locationId: 'loc_office' },
+        { date: '2026-10-06', portions: 12, locationId: 'loc_wh' },
+      ]),
+      [OFFICE, WAREHOUSE],
+      NOW,
     )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('вне недели'))).toBe(true)
+    expect(r.lines.map((l) => l.config?.locationName)).toEqual(['Офис', 'Склад'])
+    expect(r.autoApply).toBe(true)
   })
 
-  it('PASS rule 5: крайние дни недели (Пн и Вс) внутри диапазона', () => {
-    const result = runSanityChecks(
-      makeParsed({
-        items: [
-          { date: '2026-06-01', portions: 20 },
-          { date: '2026-06-07', portions: 20 },
-        ],
-      }),
-      baseContext
+  it('невалидная дата, дробное число, дубль и нет цены — blocked', () => {
+    const r = classifyWeeklyItems(
+      parsed([
+        { date: '2026-02-30', portions: 30 },
+        { date: '2026-10-06', portions: 2.5 },
+        { date: '2026-10-07', portions: 30 },
+        { date: '2026-10-07', portions: 31 },
+      ]),
+      [OFFICE],
+      NOW,
     )
-    expect(result.failures.some((f) => f.includes('вне недели'))).toBe(false)
+    expect(r.lines.map((l) => l.status)).toEqual(['blocked', 'blocked', 'ok', 'blocked'])
+    expect(r.lines[3].note).toBe('дата повторяется')
+
+    const noPrice = classifyWeeklyItems(
+      parsed([{ date: '2026-10-06', portions: 30 }]),
+      [{ ...OFFICE, pricePerPortion: 0 }],
+      NOW,
+    )
+    expect(noPrice.lines[0].note).toBe('у питания не задана цена')
   })
 
-  // Rule 6: no duplicate dates
-  it('FAIL rule 6: дубликат даты', () => {
-    const result = runSanityChecks(
-      makeParsed({
-        items: [
-          { date: '2026-06-01', portions: 20 },
-          { date: '2026-06-01', portions: 18 },
-        ],
-      }),
-      baseContext
-    )
-    expect(result.ok).toBe(false)
-    expect(result.failures.some((f) => f.includes('дубликат'))).toBe(true)
+  it('0 порций — валидная строка («не нужно» → отмена при применении)', () => {
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-06', portions: 0 }]), [OFFICE], NOW)
+    expect(r.lines[0].status).toBe('ok')
+    expect(r.autoApply).toBe(true)
   })
 
-  it('PASS rule 6: все даты уникальны → нет жалобы на дубликаты', () => {
-    const result = runSanityChecks(makeParsed(), baseContext)
-    expect(result.failures.some((f) => f.includes('дубликат'))).toBe(false)
+  it('нет WEEKLY-конфига → ручная проверка', () => {
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-06', portions: 30 }]), [], NOW)
+    expect(r.autoApply).toBe(false)
+    expect(r.reviewReasons).toContain('у клиента нет активного недельного питания')
+  })
+})
+
+describe('даты', () => {
+  it('parseItemDate → UTC-полночь календарной даты', () => {
+    expect(parseItemDate('2026-10-06')).toEqual(new Date('2026-10-06T00:00:00.000Z'))
+    expect(parseItemDate('2026-13-01')).toBeNull()
+  })
+
+  it('mondayOf: понедельник недели @db.Date-дня', () => {
+    expect(mondayOf(new Date('2026-10-08T00:00:00.000Z'))).toEqual(new Date('2026-10-05T00:00:00.000Z'))
+    expect(mondayOf(new Date('2026-10-11T00:00:00.000Z'))).toEqual(new Date('2026-10-05T00:00:00.000Z'))
+    expect(mondayOf(new Date('2026-10-05T00:00:00.000Z'))).toEqual(new Date('2026-10-05T00:00:00.000Z'))
+  })
+
+  it('formatWeeklyDate: «пн 5 окт»', () => {
+    expect(formatWeeklyDate('2026-10-05')).toBe('пн 5 окт')
+    expect(formatWeeklyDate('2026-10-11')).toBe('вс 11 окт')
   })
 })

@@ -932,6 +932,9 @@ const createOneTimeOrderSchema = z.object({
   portions: z.number().int().positive(),
   pricePerPortion: z.number().positive().optional(),
   source: z.nativeEnum(OrderSource).optional(),
+  // Без пуша «Разовый заказ» в групповой чат — для пакетного внесения
+  // (недельная заявка), где итог по строкам уходит менеджеру одним сообщением.
+  silent: z.boolean().optional(),
 })
 
 /**
@@ -981,15 +984,14 @@ export async function createOneTimeOrderCore(
     return { ok: false, error: 'Локация не принадлежит клиенту' }
   }
 
-  // Антидубль по бизнес-ключу
-  const dayEnd = new Date(deliveryDate)
-  dayEnd.setHours(23, 59, 59, 999)
+  // Антидубль по бизнес-ключу. deliveryDate — @db.Date (UTC-полночь МСК-дня),
+  // сравниваем точным равенством.
   const existing = await prisma.order.findFirst({
     where: {
       clientId: data.clientId,
       locationId: data.locationId,
       mealType: data.mealType,
-      deliveryDate: { gte: deliveryDate, lte: dayEnd },
+      deliveryDate,
       status: { not: 'CANCELLED' },
     },
     select: { id: true },
@@ -1096,6 +1098,8 @@ export async function createOneTimeOrderCore(
       },
     },
   })
+
+  if (data.silent) return { ok: true, data: { orderId: newOrder.id } }
 
   // Уведомление в групповой чат «Будни — Команда». Системное событие
   // (не голос Бориса) — менеджеры/шеф/курьер должны знать о разовом заказе.

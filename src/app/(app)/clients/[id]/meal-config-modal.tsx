@@ -164,6 +164,10 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
 
   if (!open) return null
 
+  // FIXED и STICKY генерируются по fixedPortions — поле порций обязательно.
+  // У STICKY это стартовое «последнее число», дальше его меняет клиент в MAX.
+  const usesFixedPortions = orderType === 'FIXED' || orderType === 'STICKY'
+
   function toggleType(mt: MealType) {
     if (isEditing) return
     setSelectedTypes((prev) => {
@@ -264,7 +268,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
       // но дублируем явно, чтобы payload не зависел от тайминга рендера.
       scheduleType: orderType === 'WEEKLY' ? 'CUSTOM_DAYS' : scheduleType,
       scheduleData,
-      fixedPortions: orderType === 'FIXED' ? parseInt(portionsByType[mt] || '0', 10) : null,
+      fixedPortions: usesFixedPortions ? parseInt(portionsByType[mt] || '0', 10) : null,
       pricePerPortion: parseFloat(pricesByType[mt] || '0'),
       validFrom: validFrom || null,
       validTo: validTo || null,
@@ -303,7 +307,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
   }
 
   // Предупреждение: для FIXED у нескольких типов порции должны совпадать (правило ТЗ)
-  const portionsMismatch = !isEditing && orderType === 'FIXED' && selectedTypes.length > 1
+  const portionsMismatch = !isEditing && usesFixedPortions && selectedTypes.length > 1
     ? (() => {
         const values = selectedTypes
           .map((mt) => parseInt(portionsByType[mt] || '0', 10))
@@ -336,7 +340,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
       }
     }
 
-    if (orderType === 'FIXED') {
+    if (usesFixedPortions) {
       for (const mt of selectedTypes) {
         const v = parseInt(portionsByType[mt] || '0', 10)
         if (v <= 0) {
@@ -386,7 +390,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           deliveryHorizon,
           scheduleType: effectiveScheduleType,
           scheduleData,
-          fixedPortions: orderType === 'FIXED' ? parseInt(portionsByType[mt] || '0', 10) : null,
+          fixedPortions: usesFixedPortions ? parseInt(portionsByType[mt] || '0', 10) : null,
           pricePerPortion: parseFloat(pricesByType[mt] || '0'),
           validFrom: validFrom || null,
           validTo: validTo || null,
@@ -398,7 +402,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
         const portionsNumbers: Record<string, number> = {}
         for (const mt of selectedTypes) {
           pricesNumbers[mt] = parseFloat(pricesByType[mt])
-          if (orderType === 'FIXED') {
+          if (usesFixedPortions) {
             portionsNumbers[mt] = parseInt(portionsByType[mt], 10)
           }
         }
@@ -411,7 +415,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
           deliveryHorizon,
           scheduleType: effectiveScheduleType,
           scheduleData,
-          fixedPortionsByType: orderType === 'FIXED' ? portionsNumbers : null,
+          fixedPortionsByType: usesFixedPortions ? portionsNumbers : null,
           validFrom: validFrom || null,
           validTo: validTo || null,
         })
@@ -510,8 +514,14 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
                 <SelectItem value="FIXED">{ORDER_TYPE_LABELS.FIXED}</SelectItem>
                 <SelectItem value="DYNAMIC">{ORDER_TYPE_LABELS.DYNAMIC}</SelectItem>
                 <SelectItem value="WEEKLY">{ORDER_TYPE_LABELS.WEEKLY}</SelectItem>
+                <SelectItem value="STICKY">{ORDER_TYPE_LABELS.STICKY}</SelectItem>
               </SelectContent>
             </Select>
+            {orderType === 'STICKY' && (
+              <p className="text-xs text-fg-subtle">
+                Клиент пишет количество — оно сохраняется, пока не напишет новое.
+              </p>
+            )}
           </div>
 
           {/* Поля цены и порций — по каждому выбранному типу */}
@@ -532,7 +542,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
                     className="w-full min-h-[44px] px-3 py-2.5 rounded-xl bg-surface border border-border focus:outline-none focus:border-brand-green focus:ring-1 focus:ring-brand-green/30 transition-colors text-sm tabular-nums"
                   />
                 </div>
-                {orderType === 'FIXED' && (
+                {usesFixedPortions && (
                   <div className="space-y-1.5">
                     <label className="text-xs text-fg-muted">Количество порций</label>
                     <input
