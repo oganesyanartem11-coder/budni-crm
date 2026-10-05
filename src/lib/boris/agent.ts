@@ -182,7 +182,9 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
       initialMessages: [...historyMessages, userMessage],
       tools,
       maxIterations: 8,
-      maxTokens: 2048,
+      // 2048 не хватало на пачку mutate-вызовов (27 create_one_time_order) —
+      // ответ обрывался по max_tokens и план терялся.
+      maxTokens: 4096,
       onToolCall: (name) => {
         console.log('[boris] tool_use', name)
       },
@@ -211,18 +213,39 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
     source: BorisMetricSource.ACTION_CHAT,
   })
 
-  // 5. Собрать pending-actions из tool-результатов.
+  // 5. Собрать pending-actions из tool-результатов. Обычный mutate-tool даёт
+  // одно action; create_orders_for_period — пачку actions с одним preview
+  // (в превью — один пункт на вызов, в исполнение — все строки).
   const pendingActions: PendingActionForPreview[] = []
+  const previewItems: PendingActionForPreview[] = []
   for (const call of result.toolCalls) {
-    const r = call.result as { pending?: boolean; action?: { tool: string; input: Record<string, unknown> }; preview?: string } | null
-    if (r && r.pending === true && r.action) {
-      pendingActions.push({
-        tool: r.action.tool,
-        input: r.action.input,
-        preview: r.preview,
-      })
+    const r = call.result as {
+      pending?: boolean
+      action?: { tool: string; input: Record<string, unknown> }
+      actions?: Array<{ tool: string; input: Record<string, unknown> }>
+      preview?: string
+    } | null
+    if (!r || r.pending !== true) continue
+    if (r.action) {
+      const item = { tool: r.action.tool, input: r.action.input, preview: r.preview }
+      pendingActions.push(item)
+      previewItems.push(item)
+    } else if (r.actions && r.actions.length > 0) {
+      pendingActions.push(...r.actions.map((a) => ({ tool: a.tool, input: a.input })))
+      previewItems.push({ tool: call.name, input: call.input as Record<string, unknown>, preview: r.preview })
     }
   }
+
+  // Ответ оборвался по лимиту токенов, а план так и не собрался — говорим
+  // прямо, а не повторяем «создаю…» без единого действия.
+  const truncated = result.stopReason === 'max_tokens' && pendingActions.length === 0
+  if (truncated) {
+    console.warn('[boris] max_tokens без pending-actions', { conversationId: conversation.id })
+  }
+  const finalText = truncated
+    ? '⚠️ Не уместил план в один ответ — ничего не создано. Повтори запрос короче или по частям ' +
+      '(например, по одному приёму пищи).'
+    : result.finalText
 
   // 6. Сохранить assistant-ответ в БД.
   //    ВАЖНО: сохраняем ТОЛЬКО text-блоки. Если в последнем assistant message
@@ -234,7 +257,7 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
       role: 'assistant',
       // Json column принимает string. Финальный текст result.finalText уже
       // собран из всех text-блоков последнего ответа модели.
-      content: result.finalText as unknown as Prisma.InputJsonValue,
+      content: finalText as unknown as Prisma.InputJsonValue,
     },
   })
 
@@ -246,7 +269,7 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
 
   // 8. Если есть pending — создать BorisPendingAction и собрать preview.
   if (pendingActions.length > 0) {
-    let preview = buildMultiActionPreview(pendingActions)
+    let preview = buildMultiActionPreview(previewItems)
 
     // MEGA-4a guard (П6): если в одном плане смешаны заказы РАЗНЫХ клиентов —
     // помечаем preview предупреждением. Берём clientId только оттуда, где он
@@ -290,7 +313,7 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
 
     return {
       conversationId: conversation.id,
-      reply: result.finalText,
+      reply: finalText,
       pendingActionId: pending.id,
       preview,
     }
@@ -298,6 +321,6 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
 
   return {
     conversationId: conversation.id,
-    reply: result.finalText,
+    reply: finalText,
   }
 }

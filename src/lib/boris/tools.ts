@@ -769,6 +769,144 @@ const createOneTimeOrderTool: AgentTool = {
   },
 }
 
+/**
+ * Заказы на период одним вызовом («с 6 по 14 октября по 9 завтраков, обедов,
+ * ужинов»). Раньше модель пыталась выдать 27 вызовов create_one_time_order в
+ * одном ответе, упиралась в max_tokens, и план не собирался вовсе — Боря
+ * повторял «создаю» без единого заказа. Здесь сервер сам раскладывает период
+ * в строки upsert_order_portions: есть заказ на дату → обновить порции, нет →
+ * создать (см. applyPortionsByBusinessKey).
+ */
+const MAX_PERIOD_DAYS = 31
+const MEAL_ORDER: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
+
+const createOrdersForPeriodTool: AgentTool = {
+  name: 'create_orders_for_period',
+  description:
+    'Запланировать заказы клиенту на ДИАПАЗОН дат и/или несколько приёмов пищи одним вызовом ' +
+    '(«с 6 по 14 по 9 завтраков и обедов»). Если заказ на дату уже есть — порции обновятся. ' +
+    'Требует подтверждения. Для одного заказа на одну дату — create_one_time_order.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      clientId: { type: 'string' },
+      locationId: { type: 'string' },
+      dateFrom: { type: 'string', description: 'YYYY-MM-DD, первый день (включительно)' },
+      dateTo: { type: 'string', description: 'YYYY-MM-DD, последний день (включительно)' },
+      items: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: {
+            mealType: { type: 'string', enum: ['BREAKFAST', 'LUNCH', 'DINNER'] },
+            portions: { type: 'integer', minimum: 1 },
+            pricePerPortion: { type: 'number', minimum: 0 },
+          },
+          required: ['mealType', 'portions'],
+        },
+      },
+      weekdays: {
+        type: 'array',
+        description: 'Только эти дни недели (1=Пн … 7=Вс), например «по будням» = [1,2,3,4,5]. Не указывать = каждый день.',
+        items: { type: 'integer', minimum: 1, maximum: 7 },
+      },
+    },
+    required: ['clientId', 'locationId', 'dateFrom', 'dateTo', 'items'],
+  },
+  execute: async (rawInput) => {
+    const input = rawInput as {
+      clientId: string
+      locationId: string
+      dateFrom: string
+      dateTo: string
+      items: Array<{ mealType: MealType; portions: number; pricePerPortion?: number }>
+      weekdays?: number[]
+    }
+    const fail = (error: string) => ({ ok: false as const, error })
+
+    const from = parseYmd(input.dateFrom)
+    const to = parseYmd(input.dateTo)
+    if (!from || !to) return fail('Даты нужны в формате YYYY-MM-DD')
+    if (to.getTime() < from.getTime()) return fail('dateTo раньше dateFrom')
+    if (input.dateFrom < toMskDateString(new Date())) return fail('Период начинается в прошлом')
+    const days = Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1
+    if (days > MAX_PERIOD_DAYS) return fail(`Период длиннее ${MAX_PERIOD_DAYS} дней — разбей на части`)
+
+    const items = [...(input.items ?? [])]
+      .filter((i) => MEAL_ORDER.includes(i.mealType) && Number.isInteger(i.portions) && i.portions >= 1)
+      .sort((a, b) => MEAL_ORDER.indexOf(a.mealType) - MEAL_ORDER.indexOf(b.mealType))
+    if (items.length === 0) return fail('Нет приёмов пищи с количеством порций')
+    if (new Set(items.map((i) => i.mealType)).size !== items.length) {
+      return fail('Один приём пищи указан дважды')
+    }
+
+    const [client, location] = await Promise.all([
+      prisma.client.findUnique({ where: { id: input.clientId }, select: { name: true, isActive: true } }),
+      prisma.clientLocation.findUnique({
+        where: { id: input.locationId },
+        select: { name: true, clientId: true, sameDayDelivery: true },
+      }),
+    ])
+    if (!client) return fail('client_not_found')
+    if (!location || location.clientId !== input.clientId) return fail('location_not_found')
+    if (location.sameDayDelivery && isFutureMskDate(input.dateTo)) {
+      return {
+        ok: false,
+        reason: 'same_day_future_create_blocked',
+        clientName: client.name,
+        deliveryDate: input.dateFrom,
+      } satisfies SameDayFutureFailure
+    }
+
+    const weekdays = input.weekdays?.length ? new Set(input.weekdays) : null
+    const dates: string[] = []
+    for (let i = 0; i < days; i++) {
+      const d = new Date(from.getTime() + i * 86_400_000)
+      const isoDow = d.getUTCDay() === 0 ? 7 : d.getUTCDay()
+      if (!weekdays || weekdays.has(isoDow)) dates.push(d.toISOString().slice(0, 10))
+    }
+    if (dates.length === 0) return fail('В периоде нет выбранных дней недели')
+
+    const actions = dates.flatMap((deliveryDate) =>
+      items.map((it) => ({
+        tool: 'upsert_order_portions',
+        input: {
+          clientId: input.clientId,
+          locationId: input.locationId,
+          mealType: it.mealType,
+          deliveryDate,
+          portions: it.portions,
+          ...(it.pricePerPortion !== undefined ? { pricePerPortion: it.pricePerPortion } : {}),
+        } as Record<string, unknown>,
+      })),
+    )
+
+    const short = (ymd: string) => `${ymd.slice(8, 10)}.${ymd.slice(5, 7)}`
+    const period =
+      dates.length === days
+        ? `${short(input.dateFrom)}–${short(input.dateTo)}, каждый день (${days} дн.)`
+        : `${short(input.dateFrom)}–${short(input.dateTo)}: ${dates.map(short).join(', ')}`
+    const lines = items.map((it) => {
+      const price = it.pricePerPortion !== undefined ? ` по ${it.pricePerPortion} ₽` : ''
+      return `— ${MEAL_TYPE_RU[it.mealType]}: ${it.portions} порций${price}`
+    })
+    const preview =
+      `${escapeHtml(client.name)}, ${escapeHtml(location.name)}\n${period}\n${lines.join('\n')}\n` +
+      `Всего заказов: ${actions.length}. Где заказ на дату уже есть — обновлю порции.`
+
+    return { pending: true, actions, preview }
+  },
+}
+
+function parseYmd(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '')
+  if (!m) return null
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  return d.toISOString().slice(0, 10) === value ? d : null
+}
+
 const rescheduleOrderTool: AgentTool = {
   name: 'reschedule_order',
   description:
@@ -844,6 +982,7 @@ const MUTATE_TOOL_NAMES = [
   'cancel_order',
   'restore_order',
   'create_one_time_order',
+  'create_orders_for_period',
   'reschedule_order',
   'add_order_note',
 ] as const
@@ -862,6 +1001,7 @@ export const BORIS_TOOLS: AgentTool[] = [
   cancelOrderTool,
   restoreOrderTool,
   createOneTimeOrderTool,
+  createOrdersForPeriodTool,
   rescheduleOrderTool,
   addOrderNoteTool,
 ]

@@ -38,6 +38,8 @@ export const TOOL_TITLES: Record<string, string> = {
   cancel_order: 'Отмена заказа',
   restore_order: 'Восстановление заказа',
   create_one_time_order: 'Новый разовый заказ',
+  create_orders_for_period: 'Заказы на период',
+  upsert_order_portions: 'Заказ на дату',
   reschedule_order: 'Перенос заказа',
   add_order_note: 'Заметка к заказу',
 }

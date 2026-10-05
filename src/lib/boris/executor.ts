@@ -31,6 +31,9 @@ import {
   addOrderNoteCore,
   createOneTimeOrderCore,
 } from '@/app/(app)/orders/actions'
+import { applyPortionsByBusinessKey } from '@/lib/orders/client-portions'
+import { MEAL_TYPE_RU } from './labels'
+import type { MealType, UserRole } from '@prisma/client'
 
 export interface ExecuteResultItem {
   tool: string
@@ -111,6 +114,9 @@ export async function executePendingAction(
         case 'create_one_time_order':
           r = await createOneTimeOrderCore(user, a.input)
           break
+        case 'upsert_order_portions':
+          r = await upsertOrderPortions(user, a.input)
+          break
         default:
           r = { ok: false, error: `unknown_tool:${a.tool}` }
       }
@@ -150,4 +156,43 @@ export async function executePendingAction(
   }
 
   return { ok: results.every((r) => r.ok), results }
+}
+
+const UPSERT_KIND_RU: Record<string, string> = {
+  created: 'создан',
+  updated: 'обновлён',
+  confirmed: 'подтверждён',
+  unchanged: 'без изменений',
+  cancelled: 'отменён',
+  noop: 'нечего менять',
+}
+
+/**
+ * Строка create_orders_for_period: есть заказ на дату/точку/тип → порции,
+ * нет → создание (цена из input или конфига). data.label — для итога в TG.
+ */
+async function upsertOrderPortions(
+  user: { id: string; role: UserRole },
+  input: Record<string, unknown>,
+): Promise<{ ok: boolean; error?: string; data?: unknown }> {
+  const ymd = String(input.deliveryDate ?? '')
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd)
+  const mealType = input.mealType as MealType
+  const portions = Number(input.portions)
+  const label = `${ymd.slice(8, 10)}.${ymd.slice(5, 7)} ${MEAL_TYPE_RU[mealType] ?? mealType} — ${portions}`
+  if (!m || !MEAL_TYPE_RU[mealType] || !Number.isInteger(portions) || portions < 1) {
+    return { ok: false, error: `${label}: неверные данные` }
+  }
+  const r = await applyPortionsByBusinessKey(user, {
+    clientId: String(input.clientId),
+    locationId: String(input.locationId),
+    mealType,
+    deliveryDate: new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))),
+    portions,
+    source: 'BORIS',
+    via: 'boris_period',
+    ...(typeof input.pricePerPortion === 'number' ? { pricePerPortion: input.pricePerPortion } : {}),
+  })
+  if (r.ok) return { ok: true, data: { label: `${label} (${UPSERT_KIND_RU[r.kind] ?? r.kind})` } }
+  return { ok: false, error: `${label}: ${r.skipped ? r.reason : r.error}` }
 }

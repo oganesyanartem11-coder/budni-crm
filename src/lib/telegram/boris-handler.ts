@@ -4,6 +4,7 @@ import { registerCallbackHandler } from './callback-router'
 import { chatWithBoris } from '@/lib/boris/agent'
 import { executePendingAction } from '@/lib/boris/executor'
 import { TOOL_TITLES } from '@/lib/boris/preview'
+import { escapeHtml } from './notify'
 import {
   shouldRespondInChat,
   shouldRespondInGroup,
@@ -335,12 +336,17 @@ registerCallbackHandler({
       try {
         const result = await executePendingAction(id, user.id)
         const titleFor = (tool: string) => TOOL_TITLES[tool] ?? tool
+        // Строки create_orders_for_period несут свою подпись (дата, приём, итог).
+        const labelOf = (data: unknown) =>
+          data && typeof data === 'object' && 'label' in data ? String((data as { label: unknown }).label) : null
         const summary = result.results
-          .map((r) =>
-            r.ok
-              ? `✅ ${titleFor(r.tool)}`
+          .map((r) => {
+            const label = labelOf(r.data)
+            if (r.ok) return `✅ ${escapeHtml(label ?? titleFor(r.tool))}`
+            return r.tool === 'upsert_order_portions'
+              ? `❌ ${escapeHtml(r.error ?? 'ошибка')}`
               : `❌ ${titleFor(r.tool)}: ${r.error ?? 'ошибка'}`
-          )
+          })
           .join('\n')
         await ctx.editMessageText(`${pending.previewText}\n\n${summary}`, {
           parse_mode: 'HTML',

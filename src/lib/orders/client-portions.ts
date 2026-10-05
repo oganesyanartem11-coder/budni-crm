@@ -176,6 +176,8 @@ export async function applyPortionsByBusinessKey(
     /** Для созданного заказа: конфиг-источник и пометки клиента (кухня видит на заказе). */
     sourceConfigId?: string
     notes?: string | null
+    /** Цена для нового заказа; не задана — из активного конфига. */
+    pricePerPortion?: number
   },
 ): Promise<PortionsChangeResult> {
   const existing = await prisma.order.findFirst({
@@ -207,6 +209,7 @@ export async function applyPortionsByBusinessKey(
     portions: input.portions,
     source: input.source,
     silent: true,
+    ...(input.pricePerPortion !== undefined ? { pricePerPortion: input.pricePerPortion } : {}),
   })
   if (!created.ok) return { ok: false, skipped: false, error: created.error, orderId: null }
 
