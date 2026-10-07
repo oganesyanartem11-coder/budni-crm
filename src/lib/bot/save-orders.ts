@@ -16,8 +16,11 @@ export interface SaveBotOrdersInput {
   clientId: string
   conversationId: string
   deliveryDate: Date
-  /** [{ locationId, portions }] из ParsedResponse.items */
-  items: Array<{ locationId: string; portions: number }>
+  /**
+   * [{ locationId, portions, mealType? }] из ParsedResponse.items. mealType —
+   * если клиент назвал приём пищи («обед 75, завтрак и ужин 45»).
+   */
+  items: Array<{ locationId: string; portions: number; mealType?: MealType; mode?: 'add' }>
   /** Активные meal-конфиги, сгруппированные по locationId */
   activeMealConfigsByLocation: Record<
     string,
@@ -30,6 +33,8 @@ export interface SaveBotOrdersInput {
 export interface SaveBotOrdersResult {
   savedItems: SavedItem[]
   wasUpdate: boolean
+  /** Строки, которым не нашлось питания (точка без такого приёма пищи). */
+  unmatchedItems: Array<{ locationId: string; mealType?: MealType; portions: number; reason: string }>
 }
 
 /**
@@ -49,9 +54,47 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
   // Snapshot юрлица/НДС берём один раз — он одинаков для всех заказов клиента.
   const snapshot = await getOrderLegalEntitySnapshot(input.clientId)
 
+  // Приёмы пищи, названные клиентом явно, по точке: строка без mealType
+  // («30») не должна перетирать их числом.
+  const namedMeals = new Map<string, Set<MealType>>()
   for (const item of input.items) {
-    const configs = input.activeMealConfigsByLocation[item.locationId] ?? []
+    if (!item.mealType) continue
+    const set = namedMeals.get(item.locationId) ?? new Set<MealType>()
+    set.add(item.mealType)
+    namedMeals.set(item.locationId, set)
+  }
+  const handled = new Set<string>()
+  const unmatchedItems: SaveBotOrdersResult['unmatchedItems'] = []
+
+  for (const item of input.items) {
+    const locationConfigs = input.activeMealConfigsByLocation[item.locationId] ?? []
+    // Баг 06.10 («Идеология Еды»): «Обед 75, завтрак и ужин 45» — каждое число
+    // применялось ко ВСЕМ приёмам точки, последнее перетирало обед (75 → 45),
+    // а клиенту уходило 6 строк «Повадино — …». Теперь строка с mealType —
+    // только свой приём; без mealType — все приёмы, не названные явно.
+    const configs = item.mealType
+      ? locationConfigs.filter((c) => c.mealType === item.mealType)
+      : locationConfigs.filter((c) => !namedMeals.get(item.locationId)?.has(c.mealType))
+    const unmatched = (reason: string) =>
+      unmatchedItems.push({
+        locationId: item.locationId,
+        ...(item.mealType ? { mealType: item.mealType } : {}),
+        portions: item.portions,
+        reason,
+      })
+    if (item.mealType && configs.length === 0) {
+      unmatched('у точки нет такого приёма пищи')
+      continue
+    }
+    // «Добавьте 2» без приёма пищи при нескольких приёмах — непонятно, к чему.
+    if (item.mode === 'add' && configs.length > 1) {
+      unmatched('непонятно, к какому приёму пищи прибавить')
+      continue
+    }
     for (const cfg of configs) {
+      const key = `${item.locationId}:${cfg.mealType}`
+      if (handled.has(key)) continue
+      handled.add(key)
       const existing = await prisma.order.findFirst({
         where: {
           clientId: input.clientId,
@@ -63,8 +106,25 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
         select: { id: true, portions: true, status: true },
       })
 
+      // «Добавьте 2» / «на 3 меньше»: итог = что стоит в заказе + изменение.
+      // Заказа нет или он ещё без ответа (0 в PENDING) — прибавлять не к чему.
+      let portions = item.portions
+      if (item.mode === 'add') {
+        const hasBase =
+          existing && !(existing.portions === 0 && (existing.status === 'PENDING_CONFIRMATION' || existing.status === 'DRAFT'))
+        if (!existing || !hasBase) {
+          unmatched('заказа на этот день ещё нет — не к чему прибавить')
+          continue
+        }
+        portions = existing.portions + item.portions
+        if (portions < 0) {
+          unmatched(`в заказе ${existing.portions}, убрать ${-item.portions} нельзя`)
+          continue
+        }
+      }
+
       if (existing) {
-        const needsPortionsUpdate = existing.portions !== item.portions
+        const needsPortionsUpdate = existing.portions !== portions
         // GUARD: разрешён ТОЛЬКО переход PENDING_CONFIRMATION → CONFIRMED.
         // Любой другой статус (CONFIRMED/LOCKED/IN_PRODUCTION/OUT_FOR_DELIVERY/
         // DELIVERED) НИКОГДА не понижается и не трогается здесь.
@@ -74,8 +134,8 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
           await prisma.order.update({
             where: { id: existing.id },
             data: {
-              portions: item.portions,
-              totalPrice: cfg.pricePerPortion * item.portions,
+              portions: portions,
+              totalPrice: cfg.pricePerPortion * portions,
               sourceConversationId: input.conversationId,
               // status выставляем ТОЛЬКО при подтверждении из PENDING_CONFIRMATION.
               ...(needsStatusBump ? { status: 'CONFIRMED' as const, confirmedAt: new Date() } : {}),
@@ -86,7 +146,7 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
             locationId: item.locationId,
             locationName: cfg.locationName,
             mealType: cfg.mealType,
-            portions: item.portions,
+            portions: portions,
             wasUpdate: true,
             previousPortions: existing.portions,
           })
@@ -105,9 +165,9 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
             locationId: item.locationId,
             mealType: cfg.mealType,
             deliveryDate: input.deliveryDate,
-            portions: item.portions,
+            portions: portions,
             pricePerPortion: cfg.pricePerPortion,
-            totalPrice: cfg.pricePerPortion * item.portions,
+            totalPrice: cfg.pricePerPortion * portions,
             status: 'CONFIRMED',
             source: 'BOT',
             sourceConversationId: input.conversationId,
@@ -122,12 +182,12 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
           locationId: item.locationId,
           locationName: cfg.locationName,
           mealType: cfg.mealType,
-          portions: item.portions,
+          portions: portions,
           wasUpdate: false,
         })
       }
     }
   }
 
-  return { savedItems, wasUpdate }
+  return { savedItems, wasUpdate, unmatchedItems }
 }

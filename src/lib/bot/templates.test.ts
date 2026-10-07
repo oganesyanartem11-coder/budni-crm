@@ -41,3 +41,26 @@ describe('getDailyQuestionText — персональный cut-off в шапк�
     expect(text).toContain('Ожидаем заявку до 16:00')
   })
 })
+
+describe('formatAcceptedReply — приёмы пищи вместо «Повадино — 75, Повадино — 75…»', () => {
+  it('одна точка, три приёма → подписи приёмами', async () => {
+    const { formatAcceptedReply } = await import('./templates')
+    expect(
+      formatAcceptedReply([
+        { locationName: 'Повадино', portions: 75, mealType: 'LUNCH' },
+        { locationName: 'Повадино', portions: 45, mealType: 'BREAKFAST' },
+        { locationName: 'Повадино', portions: 45, mealType: 'DINNER' },
+      ]),
+    ).toBe('Принято: обед — 75, завтрак — 45, ужин — 45. Спасибо!')
+  })
+
+  it('две точки, один приём → подписи точками', async () => {
+    const { formatAcceptedReply } = await import('./templates')
+    expect(
+      formatAcceptedReply([
+        { locationName: 'Офис', portions: 10, mealType: 'LUNCH' },
+        { locationName: 'Склад', portions: 5, mealType: 'LUNCH' },
+      ]),
+    ).toBe('Принято: Офис — 10, Склад — 5. Спасибо!')
+  })
+})

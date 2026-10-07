@@ -15,6 +15,8 @@ import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
 import { hasDateHint } from './extract-delivery-date'
+
+const NUMBER_WORD_RE = /(^|[^а-яё])(один|одн[аоу]|дв[аеу]|двое|три|трое|четыр|пят[ьи]|шест|сем[ьи]|восем|девят|десят)/i
 import { logBotMessage } from './log-message'
 
 /**
@@ -69,7 +71,8 @@ export async function handleStickyMessage(
   senderChatId: string,
   now: Date = new Date(),
 ): Promise<{ reply: string; changed: boolean } | null> {
-  if (!/\d/.test(text) || hasDateHint(text.toLowerCase())) return null
+  // «уберите одну» / «добавьте два» — число словом тоже число.
+  if (!(/\d/.test(text) || NUMBER_WORD_RE.test(text)) || hasDateHint(text.toLowerCase())) return null
 
   const tomorrow = getMskCalendarDayUtc(now, 1)
   const stats = await getClientStats(client.id, tomorrow.getUTCDay())
@@ -103,16 +106,19 @@ export async function handleStickyMessage(
     portions: number
   }> = []
   for (const item of parsed.items) {
-    if (!Number.isInteger(item.portions) || item.portions <= 0 || item.portions > MAX_STICKY_PORTIONS) {
-      return null
-    }
+    if (!Number.isInteger(item.portions)) return null
     const location = client.locations.find((l) => l.id === item.locationId)
     if (!location) return null
     const stickyConfigs = location.mealConfigs.filter(
       (c) => c.isActive && c.orderType === 'STICKY' && (!item.mealType || c.mealType === item.mealType),
     )
     if (stickyConfigs.length !== 1) return null
-    targets.push({ config: stickyConfigs[0], location, portions: item.portions })
+    // «Добавьте 2» / «на 3 меньше» — к текущему постоянному количеству.
+    const portions =
+      item.mode === 'add' ? (stickyConfigs[0].fixedPortions ?? 0) + item.portions : item.portions
+    if (item.mode === 'add' && stickyConfigs[0].fixedPortions == null) return null
+    if (portions <= 0 || portions > MAX_STICKY_PORTIONS) return null
+    targets.push({ config: stickyConfigs[0], location, portions })
   }
 
   const actor = await resolveSystemActor()

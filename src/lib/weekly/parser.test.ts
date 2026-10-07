@@ -70,7 +70,7 @@ describe('parseWeeklySubmission', () => {
     expect(req.system).not.toContain('id=loc_1')
 
     // маппинг tool input → ParseResult (locationId не пришёл → null)
-    expect(result.items).toEqual(GOOD_INPUT.items.map((i) => ({ ...i, locationId: null })))
+    expect(result.items).toEqual(GOOD_INPUT.items.map((i) => ({ ...i, locationId: null, mode: 'set' })))
     expect(result.dietaryNotes).toBe('всегда 2 без свинины')
     expect(result.confidence).toBe(0.98)
     expect(result.reason).toBe('таблица читается чётко')
@@ -110,7 +110,7 @@ describe('parseWeeklySubmission', () => {
     )
     const req = createMock.mock.calls[0][0]
     expect(req.system).toContain('id=loc_2: Склад')
-    expect(result.items).toEqual([{ date: '2026-06-02', portions: 18, locationId: 'loc_2' }])
+    expect(result.items).toEqual([{ date: '2026-06-02', portions: 18, locationId: 'loc_2', mode: 'set' }])
   })
 
   it('маппинг: dietaryNotes=null сохраняется как null', async () => {

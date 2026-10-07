@@ -57,7 +57,7 @@ const APPLIED: WeeklyApplyResult = {
   applyLogId: 'log_1',
   outcomes: [
     { date: '2026-10-05', locationName: 'Офис', portions: 30, result: 'created', note: null },
-    { date: '2026-10-06', locationName: 'Офис', portions: 32, result: 'updated', note: null },
+    { date: '2026-10-06', locationName: 'Офис', portions: 32, result: 'updated', note: null, prevPortions: 30 },
     { date: '2026-10-07', locationName: 'Офис', portions: 0, result: 'cancelled', note: null },
     { date: '2026-10-02', locationName: 'Офис', portions: 30, result: 'skipped', note: 'дата уже прошла' },
   ],
@@ -65,6 +65,8 @@ const APPLIED: WeeklyApplyResult = {
 }
 
 const LINE_BASE = {
+  delta: null,
+  prevPortions: null,
   deliveryDate: new Date('2026-10-06T00:00:00.000Z'),
   config: {
     configId: 'cfg_1',
@@ -86,36 +88,65 @@ beforeEach(() => {
 })
 
 describe('форматтеры', () => {
-  it('автовнесение: итог по строкам, пропуски с причиной, пометка про меню', () => {
-    const text = formatAutoAppliedNotification('ООО <Ромашка>', APPLIED)
-    expect(text).toContain('✅ ООО &lt;Ромашка&gt; прислал заявку на неделю — внесено:')
-    expect(text).toContain('пн 5 окт — 30 (внесено)')
-    expect(text).toContain('вт 6 окт — 32 (обновлено)')
-    expect(text).toContain('ср 7 окт — не нужно (отменено)')
-    expect(text).toContain('пт 2 окт — 30 (пропущено: дата уже прошла)')
+  it('автовнесение: коротко — «было → стало», невнесённое отдельно с причиной', () => {
+    const text = formatAutoAppliedNotification('ООО <Ромашка>', APPLIED, { source: 'TEXT', rawText: 'пн 30, вт 32' })
+    expect(text).toContain('✅ ООО &lt;Ромашка&gt;: внёс заявку')
+    expect(text).toContain('💬 «пн 30, вт 32»')
+    expect(text).toContain('• пн 5 окт — 30')
+    expect(text).toContain('• вт 6 окт — 30 → 32')
+    expect(text).toContain('• ср 7 окт — отменено')
+    expect(text).toContain('Не внесено:\n• пт 2 окт — дата уже прошла')
     expect(text).toContain('ℹ️ Меню ещё не утверждено на: пн 5 окт')
   })
 
-  it('ручная проверка: причина и таблица «дата — точка — порции», HTML экранирован', () => {
+  it('ручная проверка (ИНПАРТ 06.10 «С 07 октября добавьте 1 полный обед»): коротко и понятно', () => {
+    const lines: WeeklyLine[] = [
+      { ...LINE_BASE, date: '2026-10-07', portions: 1, delta: 1, status: 'skip', note: 'приём на эту дату уже закрыт' },
+      { ...LINE_BASE, date: '2026-10-08', portions: 35, delta: 1, prevPortions: 34, status: 'ok', note: null },
+      { ...LINE_BASE, date: '2026-10-09', portions: 35, delta: 1, prevPortions: 34, status: 'ok', note: null },
+    ]
+    const text = formatReviewNotification({
+      clientName: 'ООО "ИНПАРТ АВТО"',
+      lines,
+      reviewReasons: ['не уверен, что правильно понял сообщение'],
+      source: 'TEXT',
+      rawText: 'С 07 октября добавьте 1 полный обед',
+      dietaryNotes: null,
+    })
+    expect(text).toBe(
+      [
+        '🔍 ООО "ИНПАРТ АВТО": проверьте заявку',
+        '💬 «С 07 октября добавьте 1 полный обед»',
+        '',
+        'Если нажать «Внести»:',
+        '• чт 8 окт — 34 → 35 (+1)',
+        '• пт 9 окт — 34 → 35 (+1)',
+        'Не внесётся:',
+        '• ср 7 окт — приём на эту дату уже закрыт',
+        '',
+        'Почему не внёс сам: не уверен, что правильно понял сообщение',
+      ].join('\n'),
+    )
+  })
+
+  it('ручная проверка: невалидные строки и HTML экранированы', () => {
     const lines: WeeklyLine[] = [
       { ...LINE_BASE, date: '2026-10-06', portions: 30, status: 'ok', note: null },
       { ...LINE_BASE, date: '2026-10-07', portions: 0, status: 'ok', note: null },
-      { date: '2026-02-30', deliveryDate: null, portions: 5, status: 'blocked', note: 'непонятная дата', config: null },
+      { date: '2026-02-30', deliveryDate: null, portions: 5, delta: null, prevPortions: null, status: 'blocked', note: 'непонятная дата «2026-02-30»', config: null },
     ]
     const text = formatReviewNotification({
       clientName: 'ХАЛВА',
       lines,
-      reviewReasons: ['уверенность распознавания 0.70 ниже 0.8'],
+      reviewReasons: ['часть строк непонятна (отмечены ниже)'],
       source: 'TEXT',
       rawText: 'вт 30 <ср 0>',
       dietaryNotes: null,
     })
-    expect(text).toContain('🔍 ХАЛВА: заявка требует проверки.')
-    expect(text).toContain('Почему не автоматически: уверенность распознавания 0.70 ниже 0.8')
-    expect(text).toContain('вт 6 окт — Офис &lt;1&gt; — 30')
-    expect(text).toContain('ср 7 окт — Офис &lt;1&gt; — не нужно')
-    expect(text).toContain('2026-02-30 — ? — 5 (непонятная дата)')
-    expect(text).toContain('текст: вт 30 &lt;ср 0&gt;')
+    expect(text).toContain('• вт 6 окт — 30')
+    expect(text).toContain('• ср 7 окт — не нужно')
+    expect(text).toContain('• 2026-02-30 — непонятная дата «2026-02-30»')
+    expect(text).toContain('💬 «вт 30 &lt;ср 0&gt;»')
   })
 
   it('клиенту — только внесённое, без пропусков', () => {
@@ -146,7 +177,7 @@ describe('уведомления менеджерам', () => {
     )
   })
 
-  it('ручная проверка — кнопки «Внести как распознано» / «Отклонить»', async () => {
+  it('ручная проверка — кнопки «Внести» / «Не вносить»', async () => {
     await notifyManagersWeeklyReview({
       submissionId: 'sub_2',
       clientName: 'ХАЛВА',
@@ -157,7 +188,7 @@ describe('уведомления менеджерам', () => {
       dietaryNotes: null,
     })
     const markup = JSON.stringify(mockNotifyAllAdminProDirect.mock.calls[0][1].replyMarkup)
-    expect(markup).toContain('✅ Внести как распознано')
+    expect(markup).toContain('✅ Внести')
     expect(markup).toContain('wsub:apply:sub_2')
     expect(markup).toContain('wsub:reject:sub_2')
   })
@@ -191,8 +222,8 @@ describe("callback scope 'wsub'", () => {
       actor: { id: 'admin_pro_1', role: 'ADMIN_PRO' },
     })
     const [text, opts] = ctx.editMessageText.mock.calls[0]
-    expect(text).toContain('✅ ХАЛВА: заявка внесена по распознанному.')
-    expect(text).toContain('пт 2 окт — 30 (пропущено: дата уже прошла)')
+    expect(text).toContain('✅ ХАЛВА: внесено')
+    expect(text).toContain('• пт 2 окт — дата уже прошла')
     expect(JSON.stringify(opts.reply_markup)).toContain('wsub:undo:log_1')
     expect(mockSendBot).toHaveBeenCalledWith(
       'max_chat_1',

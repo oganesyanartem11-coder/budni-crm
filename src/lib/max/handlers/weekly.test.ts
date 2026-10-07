@@ -71,6 +71,10 @@ vi.mock('@/lib/weekly/actions', () => ({
   loadWeeklyConfigOptions: vi.fn(async () => [
     { configId: 'cfg_1', locationId: 'loc_1', locationName: 'Офис' },
   ]),
+  loadUpcomingWeeklyOrders: vi.fn(async () => ({
+    list: [{ date: '2026-06-09', locationId: 'loc_1', locationName: 'Офис', portions: 34 }],
+    byKey: new Map(),
+  })),
 }))
 vi.mock('@/lib/telegram/handlers/weekly-submission', () => ({
   notifyManagersWeeklyApplied: mockNotifyApplied,

@@ -84,3 +84,38 @@ describe('parseClientResponse mealType', () => {
     expect(result.items).toEqual([{ locationId: 'loc_1', locationName: '', portions: 7 }])
   })
 })
+
+describe('parseClientResponse — «добавьте / уберите» (mode=add, 07.10)', () => {
+  function llm(items: unknown[]) {
+    mockCreate.mockResolvedValue({
+      stop_reason: 'end_turn',
+      usage: { output_tokens: 42 },
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ type: 'numeric', items, confidence: 0.95, reason: '', toneLabel: 'neutral' }),
+      }],
+    })
+  }
+
+  it('в промпте есть правило про прибавку, mode=add и отрицательное изменение сохраняются', async () => {
+    llm([
+      { locationId: 'loc_1', locationName: 'Офис', portions: 2, mealType: 'LUNCH', mode: 'add' },
+      { locationId: 'loc_1', locationName: 'Офис', portions: -3, mealType: 'DINNER', mode: 'add' },
+    ])
+    const result = await parseClientResponse({ ...input, clientText: 'обедов +2, ужинов на 3 меньше' })
+    expect(mockCreate.mock.calls[0][0].system).toContain('ДОБАВИТЬ или УБРАТЬ')
+    expect(result.items).toEqual([
+      { locationId: 'loc_1', locationName: 'Офис', portions: 2, mealType: 'LUNCH', mode: 'add' },
+      { locationId: 'loc_1', locationName: 'Офис', portions: -3, mealType: 'DINNER', mode: 'add' },
+    ])
+  })
+
+  it('отрицательное число без mode=add и нулевое изменение отбрасываются', async () => {
+    llm([
+      { locationId: 'loc_1', locationName: 'Офис', portions: -3 },
+      { locationId: 'loc_1', locationName: 'Офис', portions: 0, mode: 'add' },
+    ])
+    const result = await parseClientResponse(input)
+    expect(result.items).toEqual([])
+  })
+})

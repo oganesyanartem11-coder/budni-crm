@@ -19,7 +19,7 @@ const { mockPrisma, mockCore } = vi.hoisted(() => ({
       findUniqueOrThrow: vi.fn(),
     },
     user: { findFirst: vi.fn() },
-    order: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    order: { findFirst: vi.fn(), findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
     menuCycle: { findFirst: vi.fn() },
     activityLog: { create: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() },
   },
@@ -75,6 +75,7 @@ beforeEach(() => {
   mockPrisma.weeklyOrderSubmission.updateMany.mockResolvedValue({ count: 1 })
   mockPrisma.user.findFirst.mockResolvedValue(SYSTEM)
   mockPrisma.order.findFirst.mockResolvedValue(null)
+  mockPrisma.order.findMany.mockResolvedValue([])
   mockPrisma.order.update.mockResolvedValue({})
   // Меню на следующую неделю НЕ утверждено — заказы всё равно должны появиться.
   mockPrisma.menuCycle.findFirst.mockResolvedValue(null)
@@ -133,7 +134,7 @@ describe('processWeeklySubmission — автоприменение', () => {
     expect(r.status).toBe('AUTO_CONFIRMED')
     expect(r.applied?.outcomes).toEqual([
       { date: '2026-10-05', locationName: 'Офис', portions: 30, result: 'skipped', note: 'приём на эту дату уже закрыт' },
-      { date: '2026-10-06', locationName: 'Офис', portions: 31, result: 'created', note: null },
+      { date: '2026-10-06', locationName: 'Офис', portions: 31, result: 'created', note: null, prevPortions: null },
     ])
     // неделя заявки — понедельник самой ранней даты (UTC-полночь)
     expect(mockPrisma.weeklyOrderSubmission.upsert.mock.calls[0][0].where).toEqual({
@@ -163,7 +164,7 @@ describe('processWeeklySubmission — автоприменение', () => {
     expect(mockCore.createOneTimeOrderCore).not.toHaveBeenCalled()
     expect(mockPrisma.weeklyOrderSubmission.update).toHaveBeenCalledWith({
       where: { id: 'sub_1' },
-      data: { status: 'NEEDS_REVIEW', failureReason: expect.stringContaining('0.70 ниже 0.8') },
+      data: { status: 'NEEDS_REVIEW', failureReason: expect.stringContaining('не уверен, что правильно понял') },
     })
   })
 
@@ -500,5 +501,57 @@ describe('«↩️ Отменить» — откат ровно к прежни�
     const r = await undoWeeklyApply({ applyLogId: 'log_apply_1', actor: ADMIN })
 
     expect(r).toEqual({ ok: false, reason: 'already_undone' })
+  })
+})
+
+describe('«добавьте / уберите» в недельной заявке (ИНПАРТ АВТО, 06.10)', () => {
+  it('«С 07 октября добавьте 1 полный обед» → 8 и 9 окт 34 → 35 автоматически, 7-е закрыто', async () => {
+    const TUE_1623 = new Date('2026-10-06T13:23:00.000Z')
+    mockPrisma.order.findMany.mockResolvedValue(
+      ['07', '08', '09'].map((d) => ({
+        locationId: 'loc_1',
+        mealType: 'LUNCH',
+        deliveryDate: new Date(`2026-10-${d}T00:00:00.000Z`),
+        portions: 34,
+      })),
+    )
+    mockPrisma.order.findFirst.mockImplementation(async ({ where }: { where: { deliveryDate: Date } }) => ({
+      id: `o_${where.deliveryDate.toISOString().slice(8, 10)}`,
+    }))
+    mockPrisma.order.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      status: 'CONFIRMED',
+      portions: 34,
+      pricePerPortion: new Prisma.Decimal(300),
+      updDocumentLink: null,
+    }))
+    mockCore.editOrderPortionsCore.mockResolvedValue({ ok: true, data: { editedAfterLock: false } })
+
+    const r = await processWeeklySubmission({
+      clientId: 'client_1',
+      source: 'TEXT',
+      rawText: 'С 07 октября добавьте 1 полный обед',
+      parsedResult: parsed(
+        ['2026-10-07', '2026-10-08', '2026-10-09'].map((date) => ({ date, portions: 1, mode: 'add' as const })),
+      ),
+      now: TUE_1623,
+    })
+
+    expect(r.status).toBe('AUTO_CONFIRMED')
+    expect(mockCore.editOrderPortionsCore.mock.calls.map((c) => c[1])).toEqual([
+      { orderId: 'o_08', portions: 35 },
+      { orderId: 'o_09', portions: 35 },
+    ])
+    expect(r.applied?.outcomes.map((o) => [o.date, o.result, o.portions, o.prevPortions ?? null])).toEqual([
+      ['2026-10-07', 'skipped', 1, null],
+      ['2026-10-08', 'updated', 35, 34],
+      ['2026-10-09', 'updated', 35, 34],
+    ])
+    // база для прибавки — только этот клиент, его недельные точка/приём, не отменённые
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where).toMatchObject({
+      clientId: 'client_1',
+      status: { not: 'CANCELLED' },
+      OR: [{ locationId: 'loc_1', mealType: 'LUNCH' }],
+    })
   })
 })

@@ -42,7 +42,12 @@ export interface WeeklyLine {
   date: string
   /** UTC-полночь МСК-дня (@db.Date); null — дата невалидна. */
   deliveryDate: Date | null
+  /** Итог на день (для mode='add' — уже пересчитанный: было + изменение). */
   portions: number
+  /** Изменение из «добавьте 1» (mode='add'); null — клиент назвал итог. */
+  delta: number | null
+  /** Сколько стояло в заказе на момент разбора (только для mode='add'). */
+  prevPortions: number | null
   status: WeeklyLineStatus
   note: string | null
   config: WeeklyConfigOption | null
@@ -65,30 +70,47 @@ export function parseItemDate(dateStr: string): Date | null {
   return dt
 }
 
+/** Ключ уже внесённого заказа: точка + приём + `YYYY-MM-DD`. */
+export function weeklyPortionKey(locationId: string, mealType: MealType, date: string): string {
+  return `${locationId}:${mealType}:${date}`
+}
+
+/**
+ * @param existing — порции уже внесённых (не отменённых) заказов по
+ *   weeklyPortionKey: «добавьте 1 обед с 7-го» прибавляется к ним.
+ */
 export function classifyWeeklyItems(
   parsed: ParseResult,
   configs: WeeklyConfigOption[],
   now: Date = new Date(),
+  existing: Map<string, number> = new Map(),
 ): WeeklyClassification {
   const today = getMskCalendarDayUtc(now, 0)
   const lastDay = new Date(today.getTime() + WINDOW_DAYS * DAY_MS)
   const reviewReasons: string[] = []
 
+  // Причины — короткие и человеческие: менеджер читает их с телефона (06.10
+  // ИНПАРТ: длинное объяснение модели никто не дочитал). Объяснение модели
+  // остаётся в failureReason заявки.
   if (parsed.confidence < AUTO_APPLY_MIN_CONFIDENCE) {
-    reviewReasons.push(
-      `уверенность распознавания ${parsed.confidence.toFixed(2)} ниже ${AUTO_APPLY_MIN_CONFIDENCE}` +
-        (parsed.reason ? ` (${parsed.reason})` : ''),
-    )
+    reviewReasons.push('не уверен, что правильно понял сообщение')
   }
   if (configs.length === 0) reviewReasons.push('у клиента нет активного недельного питания')
 
   const seen = new Set<string>()
   const lines: WeeklyLine[] = parsed.items.map((item) => {
     const deliveryDate = parseItemDate(item.date)
-    const base = { date: item.date, deliveryDate, portions: item.portions }
+    const isAdd = item.mode === 'add'
+    const base = {
+      date: item.date,
+      deliveryDate,
+      portions: item.portions,
+      delta: isAdd ? item.portions : null,
+      prevPortions: null as number | null,
+    }
 
     if (!deliveryDate) return { ...base, status: 'blocked', note: `непонятная дата «${item.date}»`, config: null }
-    if (!Number.isInteger(item.portions) || item.portions < 0) {
+    if (!Number.isInteger(item.portions) || (isAdd ? item.portions === 0 : item.portions < 0)) {
       return { ...base, status: 'blocked', note: `непонятное количество «${item.portions}»`, config: null }
     }
 
@@ -126,16 +148,28 @@ export function classifyWeeklyItems(
     if (!isDeliveryDateEditable(config.location, deliveryDate, now)) {
       return { ...base, status: 'skip', note: 'приём на эту дату уже закрыт', config }
     }
-    return { ...base, status: 'ok', note: null, config }
+    if (isAdd) {
+      const current = existing.get(weeklyPortionKey(config.locationId, config.mealType, item.date))
+      if (current === undefined) {
+        return { ...base, status: 'skip', note: 'заказа на этот день нет — не к чему прибавить', config }
+      }
+      const total = current + item.portions
+      if (total < 0) {
+        return { ...base, prevPortions: current, status: 'blocked', note: `в заказе ${current}, убрать ${-item.portions} нельзя`, config }
+      }
+      return { ...base, portions: total, prevPortions: current, status: 'ok', note: null, config }
+    }
+    const current = existing.get(weeklyPortionKey(config.locationId, config.mealType, item.date))
+    return { ...base, prevPortions: current ?? null, status: 'ok', note: null, config }
   })
 
-  if (lines.length === 0) reviewReasons.push('не распознано ни одной строки')
+  if (lines.length === 0) reviewReasons.push('не распознал ни одного дня')
   const blocked = lines.filter((l) => l.status === 'blocked')
   if (blocked.length > 0) {
-    reviewReasons.push(`неоднозначные строки: ${blocked.map((l) => `${l.date} — ${l.note}`).join('; ')}`)
+    reviewReasons.push('часть строк непонятна (отмечены ниже)')
   }
   if (lines.length > 0 && !lines.some((l) => l.status === 'ok') && blocked.length === 0) {
-    reviewReasons.push('нет дат, которые ещё можно внести')
+    reviewReasons.push('ни один день уже нельзя внести')
   }
 
   return { lines, reviewReasons, autoApply: reviewReasons.length === 0 }

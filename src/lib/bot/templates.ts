@@ -3,6 +3,7 @@ import { ru } from 'date-fns/locale'
 import { toZonedTime } from 'date-fns-tz'
 import { formatPortions } from '@/lib/utils/format'
 import { WELCOME_FIXED } from './welcome'
+import type { MealType } from '@prisma/client'
 
 export type ReplyTemplateKey = 'ONBOARDING'
 
@@ -86,14 +87,39 @@ export const CUTOFF_NOTICE_TEXT = 'Приём заявок на сегодня �
 export interface SavedItemForReply {
   locationName: string
   portions: number
+  mealType?: MealType
+}
+
+const MEAL_NAME: Record<MealType, string> = {
+  BREAKFAST: 'завтрак',
+  LUNCH: 'обед',
+  DINNER: 'ужин',
+}
+
+/**
+ * Подпись строки заказа: точка — только если точек несколько, приём пищи —
+ * если приёмов несколько. «Повадино — 75, Повадино — 75, …» (06.10) клиенту
+ * ничего не говорит; нужно «обед — 75, завтрак — 45, ужин — 45».
+ */
+export function formatSavedItemLabels(items: SavedItemForReply[]): string[] {
+  const multiLocation = new Set(items.map((i) => i.locationName)).size > 1
+  const multiMeal = new Set(items.map((i) => i.mealType ?? '')).size > 1
+  return items.map((i) => {
+    const parts: string[] = []
+    if (multiLocation || !multiMeal || !i.mealType) parts.push(i.locationName)
+    if (multiMeal && i.mealType) parts.push(MEAL_NAME[i.mealType])
+    return parts.join(', ')
+  })
 }
 
 function formatItemsList(items: SavedItemForReply[]): string {
-  return items.map((i) => `${i.locationName} — ${i.portions}`).join(', ')
+  const labels = formatSavedItemLabels(items)
+  return items.map((i, idx) => `${labels[idx]} — ${i.portions}`).join(', ')
 }
 
 /** Кейс A: первый ответ числом, до 16:00. */
 export function formatAcceptedReply(items: SavedItemForReply[]): string {
+  if (items.length === 0) return 'Принято, спасибо!'
   if (items.length === 1) {
     return `Принято, ${formatPortions(items[0].portions)}. Спасибо!`
   }

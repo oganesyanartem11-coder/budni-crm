@@ -18,7 +18,14 @@ export type ParserInput =
 export interface ParseResult {
   // locationId — только если у клиента несколько точек с недельной заявкой и
   // строка однозначно относится к одной из них; иначе null.
-  items: { date: string /* YYYY-MM-DD */; portions: number; locationId?: string | null }[]
+  // mode='add' — клиент просит прибавить/убавить к уже внесённому («добавьте 1
+  // обед с 7 октября»): portions — изменение со знаком, а не итог.
+  items: {
+    date: string /* YYYY-MM-DD */
+    portions: number
+    locationId?: string | null
+    mode?: 'set' | 'add'
+  }[]
   dietaryNotes: string | null
   confidence: number // 0..1
   reason: string
@@ -41,7 +48,17 @@ const WEEKLY_TOOL: Anthropic.Messages.Tool = {
           type: 'object',
           properties: {
             date: { type: 'string', description: 'Дата дня в формате YYYY-MM-DD' },
-            portions: { type: 'number', description: 'Количество порций на этот день (0 = «не нужно»)' },
+            portions: {
+              type: 'number',
+              description:
+                'mode=set: итоговое количество порций на день (0 = «не нужно»). mode=add: изменение со знаком (+1, -2)',
+            },
+            mode: {
+              type: 'string',
+              enum: ['set', 'add'],
+              description:
+                'set — клиент назвал итоговое количество; add — просит добавить/убавить к уже заказанному',
+            },
             locationId: {
               type: ['string', 'null'],
               description: 'id точки из списка точек клиента, если точек несколько и строка явно про одну из них; иначе null',
@@ -90,23 +107,41 @@ export interface ParserLocation {
   name: string
 }
 
+/** Уже внесённый заказ — чтобы «добавьте 1 с 7-го» разложить по дням. */
+export interface ParserExistingOrder {
+  date: string // YYYY-MM-DD
+  locationId: string
+  locationName: string
+  portions: number
+}
+
 function buildSystemPrompt(
   clientName: string,
   today: string,
   todayWeekday: string,
   lastDay: string,
   locations: ParserLocation[],
+  existingOrders: ParserExistingOrder[],
 ): string {
   const locationsBlock =
     locations.length > 1
       ? `\n\nУ клиента несколько точек доставки:\n${locations.map((l) => `- id=${l.id}: ${l.name}`).join('\n')}\nДля каждой строки укажи locationId, если строка явно относится к одной точке. Если по строке непонятно, к какой точке она относится — locationId=null.`
       : ''
+  const multi = locations.length > 1
+  const existingBlock =
+    existingOrders.length > 0
+      ? `\n\nУже внесённые заказы клиента:\n${existingOrders
+          .map((o) => `- ${o.date}${multi ? ` (${o.locationName})` : ''}: ${o.portions}`)
+          .join('\n')}`
+      : '\n\nВнесённых заказов на эти даты у клиента пока нет.'
   return `Ты — ассистент извлечения данных из заявок клиентов кейтеринг-сервиса «Будни». Клиент ${clientName} прислал заявку с датами и количеством порций.
 
-Сегодня ${today} (${todayWeekday}), МСК. Заявка может быть на текущую и/или следующую неделю — даты в пределах ${today}—${lastDay}. День недели без даты («пн», «вторник») — это ближайший такой день начиная с сегодняшнего.${locationsBlock}
+Сегодня ${today} (${todayWeekday}), МСК. Заявка может быть на текущую и/или следующую неделю — даты в пределах ${today}—${lastDay}. День недели без даты («пн», «вторник») — это ближайший такой день начиная с сегодняшнего.${locationsBlock}${existingBlock}
 
 Извлеки:
-- items: массив { date, portions, locationId } для каждого дня, где указано количество. Дни без количества (выходные, серая заливка, пропуски) — НЕ включай. «не нужно» / «не возить» / прочерк на конкретный день — portions=0.
+- items: массив { date, portions, mode, locationId } для каждого дня, где указано количество. Дни без количества (выходные, серая заливка, пропуски) — НЕ включай. «не нужно» / «не возить» / прочерк на конкретный день — portions=0.
+- mode: "set", если клиент назвал итоговое количество на день; "add", если просит добавить или убрать порции к уже заказанному («добавьте 1 обед», «+2», «на 3 меньше», «уберите одну») — тогда portions = изменение со знаком (добавить 1 → 1, убрать 2 → -2).
+- «С <даты>» без конечной даты — это каждый день с этой даты, на который уже есть заказ в списке выше; если заказов в списке нет — рабочие дни до конца текущей недели. Это обычная формулировка, confidence из-за неё НЕ снижай.
 - dietaryNotes: общие постоянные пометки клиента (например "всегда 2 без свинины", "без морепродуктов"). Если нет — null.
 - confidence: твоя уверенность 0..1 (1 = всё читается чётко без сомнений, <0.8 = есть хоть одна неоднозначная цифра / нечёткая ячейка / непонятная дата).
 - reason: краткое объяснение confidence (1-2 предложения).
@@ -120,7 +155,12 @@ function fallback(detail: string): ParseResult {
 
 export async function parseWeeklySubmission(
   input: ParserInput,
-  context: { now: Date; clientName: string; locations: ParserLocation[] }
+  context: {
+    now: Date
+    clientName: string
+    locations: ParserLocation[]
+    existingOrders?: ParserExistingOrder[]
+  }
 ): Promise<ParseResult> {
   const today = toMskDateString(context.now)
   const todayWeekday = RU_WEEKDAYS[new Date(context.now.getTime() + MSK_OFFSET_MS).getUTCDay()]
@@ -131,6 +171,7 @@ export async function parseWeeklySubmission(
     todayWeekday,
     lastDay,
     context.locations,
+    context.existingOrders ?? [],
   )
 
   const instruction =
@@ -188,10 +229,12 @@ export async function parseWeeklySubmission(
       )
       .map((it) => {
         const locationId = (it as { locationId?: unknown }).locationId
+        const mode = (it as { mode?: unknown }).mode === 'add' ? ('add' as const) : ('set' as const)
         return {
           date: it.date,
           portions: it.portions,
           locationId: typeof locationId === 'string' && locationId ? locationId : null,
+          mode,
         }
       })
 

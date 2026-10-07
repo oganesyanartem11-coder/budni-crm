@@ -24,32 +24,44 @@ import { weeklyApplyUndoButton, weeklySubmissionReviewButtons } from '../buttons
  * Регистрация callback — side-effect импорта в bot.ts.
  */
 
-const RESULT_LABEL: Record<WeeklyLineOutcome['result'], string> = {
-  created: 'внесено',
-  updated: 'обновлено',
-  confirmed: 'внесено',
-  cancelled: 'отменено',
-  unchanged: 'без изменений',
-  noop: 'заказа не было',
-  skipped: 'пропущено',
-  failed: 'НЕ получилось',
-}
-
 function lineLabel(date: string, locationName: string | null, multiLocation: boolean): string {
   const day = formatWeeklyDate(date)
   return multiLocation && locationName ? `${day} — ${locationName}` : day
 }
 
-/** Строки итога: «пн 5 окт — 30 (обновлено)», для пропусков — с причиной. HTML-safe. */
+/** «34 → 35», «35», «не нужно» — без служебных слов, читается с телефона. */
+function portionsChange(prev: number | null | undefined, next: number): string {
+  if (next === 0) return prev ? `${prev} → не нужно` : 'не нужно'
+  if (prev != null && prev !== next) return `${prev} → ${next}`
+  return String(next)
+}
+
+/**
+ * Итог внесения: «• чт 8 окт — 34 → 35»; невнесённое — отдельным блоком
+ * «Не внесено» с причиной. HTML-safe.
+ */
 export function formatOutcomeLines(outcomes: WeeklyLineOutcome[], multiLocation: boolean): string {
-  return outcomes
-    .map((o) => {
+  const done = outcomes.filter((o) => o.result !== 'skipped' && o.result !== 'failed')
+  const notDone = outcomes.filter((o) => o.result === 'skipped' || o.result === 'failed')
+  const rows: string[] = done.map((o) => {
+    const label = escapeHtml(lineLabel(o.date, o.locationName, multiLocation))
+    const value =
+      o.result === 'cancelled'
+        ? 'отменено'
+        : o.result === 'unchanged'
+          ? `${o.portions} (так и было)`
+          : portionsChange(o.prevPortions, o.portions)
+    return `• ${label} — ${value}`
+  })
+  if (notDone.length > 0) {
+    if (rows.length > 0) rows.push('')
+    rows.push('Не внесено:')
+    for (const o of notDone) {
       const label = escapeHtml(lineLabel(o.date, o.locationName, multiLocation))
-      const value = o.portions === 0 ? 'не нужно' : String(o.portions)
-      const note = o.note ? `: ${escapeHtml(o.note)}` : ''
-      return `${label} — ${value} (${RESULT_LABEL[o.result]}${note})`
-    })
-    .join('\n')
+      rows.push(`• ${label} — ${escapeHtml(o.note ?? 'ошибка')}`)
+    }
+  }
+  return rows.join('\n')
 }
 
 function menuNote(applied: WeeklyApplyResult): string {
@@ -61,12 +73,44 @@ function isMultiLocation(items: Array<{ locationName: string | null }>): boolean
   return new Set(items.map((i) => i.locationName).filter(Boolean)).size > 1
 }
 
-export function formatAutoAppliedNotification(clientName: string, applied: WeeklyApplyResult): string {
+/** Что прислал клиент — одной строкой (фото — ссылкой). */
+function sourceLine(source: 'PHOTO' | 'TEXT' | undefined, rawText?: string, blobUrl?: string): string {
+  if (source === 'PHOTO') {
+    const caption = rawText?.trim() ? ` «${escapeHtml(shorten(rawText, 200))}»` : ''
+    return `📷 Фото${caption}${blobUrl ? `: ${escapeHtml(blobUrl)}` : ''}`
+  }
+  if (!rawText?.trim()) return ''
+  return `💬 «${escapeHtml(shorten(rawText, 300))}»`
+}
+
+function shorten(text: string, limit: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`
+}
+
+export function formatAutoAppliedNotification(
+  clientName: string,
+  applied: WeeklyApplyResult,
+  origin: { source?: 'PHOTO' | 'TEXT'; rawText?: string; blobUrl?: string } = {},
+): string {
+  const src = sourceLine(origin.source, origin.rawText, origin.blobUrl)
   return (
-    `✅ ${escapeHtml(clientName)} прислал заявку на неделю — внесено:\n` +
-    `${formatOutcomeLines(applied.outcomes, isMultiLocation(applied.outcomes))}` +
+    `✅ ${escapeHtml(clientName)}: внёс заявку\n` +
+    (src ? `${src}\n` : '') +
+    `\n${formatOutcomeLines(applied.outcomes, isMultiLocation(applied.outcomes))}` +
     menuNote(applied)
   )
+}
+
+/** Строка распознанного для проверки: «• чт 8 окт — 34 → 35» / «• ср 7 окт — приём закрыт». */
+function reviewLineValue(l: WeeklyLine): string {
+  if (l.delta != null && l.prevPortions != null) {
+    const sign = l.delta > 0 ? '+' : '−'
+    return `${l.prevPortions} → ${l.portions} (${sign}${Math.abs(l.delta)})`
+  }
+  if (l.delta != null) return `${l.delta > 0 ? '+' : '−'}${Math.abs(l.delta)}`
+  if (l.prevPortions != null && l.prevPortions === l.portions) return `${l.portions} (так и было)`
+  return portionsChange(l.prevPortions, l.portions)
 }
 
 export function formatReviewNotification(params: {
@@ -78,27 +122,28 @@ export function formatReviewNotification(params: {
   rawText?: string
   dietaryNotes: string | null
 }): string {
-  const table = params.lines.length
-    ? params.lines
-        .map((l) => {
-          const point = l.config?.locationName ?? '?'
-          const value = l.portions === 0 ? 'не нужно' : String(l.portions)
-          const note = l.note ? ` (${escapeHtml(l.note)})` : ''
-          return `${escapeHtml(formatWeeklyDate(l.date))} — ${escapeHtml(point)} — ${value}${note}`
-        })
-        .join('\n')
-    : '—'
-  const sourceLine =
-    params.source === 'PHOTO'
-      ? `фото ${escapeHtml(params.blobUrl ?? '')}`
-      : `текст: ${escapeHtml((params.rawText ?? '').slice(0, 1000))}`
-  return (
-    `🔍 ${escapeHtml(params.clientName)}: заявка требует проверки.\n\n` +
-    `Почему не автоматически: ${escapeHtml(params.reviewReasons.join('; '))}\n\n` +
-    `Распознано (дата — точка — порции):\n${table}\n\n` +
-    (params.dietaryNotes ? `Пометки: ${escapeHtml(params.dietaryNotes)}\n` : '') +
-    `Источник: ${sourceLine}`
-  )
+  const multi = isMultiLocation(params.lines.map((l) => ({ locationName: l.config?.locationName ?? null })))
+  const label = (l: WeeklyLine) => escapeHtml(lineLabel(l.date, l.config?.locationName ?? null, multi))
+  const ok = params.lines.filter((l) => l.status === 'ok')
+  const rest = params.lines.filter((l) => l.status !== 'ok')
+  const parts: string[] = [`🔍 ${escapeHtml(params.clientName)}: проверьте заявку`]
+  const src = sourceLine(params.source, params.rawText, params.blobUrl)
+  if (src) parts.push(src)
+  parts.push('')
+  if (ok.length > 0) {
+    parts.push('Если нажать «Внести»:')
+    for (const l of ok) parts.push(`• ${label(l)} — ${reviewLineValue(l)}`)
+  } else {
+    parts.push('Внести нечего.')
+  }
+  if (rest.length > 0) {
+    parts.push('Не внесётся:')
+    for (const l of rest) parts.push(`• ${label(l)} — ${escapeHtml(l.note ?? '')}`)
+  }
+  parts.push('')
+  parts.push(`Почему не внёс сам: ${escapeHtml(params.reviewReasons.join('; '))}`)
+  if (params.dietaryNotes) parts.push(`Пометки: ${escapeHtml(params.dietaryNotes)}`)
+  return parts.join('\n')
 }
 
 /**
@@ -130,9 +175,12 @@ export async function notifyManagersWeeklyApplied(params: {
   submissionId: string
   clientName: string
   applied: WeeklyApplyResult
+  source?: 'PHOTO' | 'TEXT'
+  rawText?: string
+  blobUrl?: string
 }): Promise<void> {
   const r = await notifyAllAdminProDirect(
-    truncateForTelegram(formatAutoAppliedNotification(params.clientName, params.applied)),
+    truncateForTelegram(formatAutoAppliedNotification(params.clientName, params.applied, params)),
     { replyMarkup: weeklyApplyUndoButton(params.applied.applyLogId) },
   )
   await markNotified(params.submissionId, r.sentTo, 'Недельная заявка внесена автоматически')
@@ -231,7 +279,7 @@ registerCallbackHandler({
         select: { name: true },
       })
       await edit(
-        `✅ ${escapeHtml(client?.name ?? '')}: заявка внесена по распознанному.\n` +
+        `✅ ${escapeHtml(client?.name ?? '')}: внесено\n\n` +
           `${formatOutcomeLines(result.applied.outcomes, isMultiLocation(result.applied.outcomes))}` +
           menuNote(result.applied),
         result.applied.applyLogId,

@@ -56,7 +56,7 @@ describe('classifyWeeklyItems', () => {
   it('confidence 0.7 → ручная проверка с причиной', () => {
     const r = classifyWeeklyItems(parsed([{ date: '2026-10-06', portions: 30 }], 0.7), [OFFICE], NOW)
     expect(r.autoApply).toBe(false)
-    expect(r.reviewReasons[0]).toContain('0.70 ниже 0.8')
+    expect(r.reviewReasons[0]).toContain('не уверен, что правильно понял')
     // строка сама по себе чистая — менеджер сможет «Внести как распознано»
     expect(r.lines[0].status).toBe('ok')
   })
@@ -123,7 +123,7 @@ describe('classifyWeeklyItems', () => {
   it('все даты нередактируемые → ручная проверка «нет дат»', () => {
     const r = classifyWeeklyItems(parsed([{ date: '2026-10-01', portions: 30 }]), [OFFICE], NOW)
     expect(r.autoApply).toBe(false)
-    expect(r.reviewReasons).toContain('нет дат, которые ещё можно внести')
+    expect(r.reviewReasons).toContain('ни один день уже нельзя внести')
   })
 
   it('две точки без locationId → строка неоднозначна, не автомат', () => {
@@ -196,5 +196,53 @@ describe('даты', () => {
   it('formatWeeklyDate: «пн 5 окт»', () => {
     expect(formatWeeklyDate('2026-10-05')).toBe('пн 5 окт')
     expect(formatWeeklyDate('2026-10-11')).toBe('вс 11 окт')
+  })
+})
+
+describe('classifyWeeklyItems — «добавьте / уберите» (mode=add, 07.10)', () => {
+  // вт 6 окт 16:23 МСК — как у ИНПАРТ АВТО: приём на ср 7 окт уже закрыт.
+  const TUE_1623 = new Date('2026-10-06T13:23:00.000Z')
+  const existing = new Map([
+    ['loc_office:LUNCH:2026-10-07', 34],
+    ['loc_office:LUNCH:2026-10-08', 34],
+    ['loc_office:LUNCH:2026-10-09', 34],
+  ])
+
+  it('«С 07 октября добавьте 1 обед»: 7-е закрыто, 8-е и 9-е 34 → 35, можно автоматически', () => {
+    const r = classifyWeeklyItems(
+      parsed(
+        ['2026-10-07', '2026-10-08', '2026-10-09'].map((date) => ({ date, portions: 1, mode: 'add' as const })),
+        0.9,
+      ),
+      [OFFICE],
+      TUE_1623,
+      existing,
+    )
+    expect(r.lines.map((l) => [l.date, l.status, l.portions, l.prevPortions, l.delta, l.note])).toEqual([
+      ['2026-10-07', 'skip', 1, null, 1, 'приём на эту дату уже закрыт'],
+      ['2026-10-08', 'ok', 35, 34, 1, null],
+      ['2026-10-09', 'ok', 35, 34, 1, null],
+    ])
+    expect(r.autoApply).toBe(true)
+  })
+
+  it('прибавка к дню без заказа → пропуск с причиной; убрать больше, чем есть → нужна проверка', () => {
+    const r = classifyWeeklyItems(
+      parsed([
+        { date: '2026-10-12', portions: 2, mode: 'add' },
+        { date: '2026-10-08', portions: -40, mode: 'add' },
+      ]),
+      [OFFICE],
+      TUE_1623,
+      existing,
+    )
+    expect(r.lines[0]).toMatchObject({ status: 'skip', note: 'заказа на этот день нет — не к чему прибавить' })
+    expect(r.lines[1]).toMatchObject({ status: 'blocked', note: 'в заказе 34, убрать 40 нельзя' })
+    expect(r.autoApply).toBe(false)
+  })
+
+  it('итоговое число показывает «было» из заказа (для «34 → 30»)', () => {
+    const r = classifyWeeklyItems(parsed([{ date: '2026-10-08', portions: 30 }]), [OFFICE], TUE_1623, existing)
+    expect(r.lines[0]).toMatchObject({ status: 'ok', portions: 30, prevPortions: 34, delta: null })
   })
 })

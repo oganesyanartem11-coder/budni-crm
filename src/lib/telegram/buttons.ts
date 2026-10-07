@@ -79,8 +79,8 @@ export function importButton(
  */
 export function weeklySubmissionReviewButtons(submissionId: string): InlineKeyboard {
   return new InlineKeyboard()
-    .text('✅ Внести как распознано', `wsub:apply:${submissionId}`)
-    .text('❌ Отклонить', `wsub:reject:${submissionId}`)
+    .text('✅ Внести', `wsub:apply:${submissionId}`)
+    .text('❌ Не вносить', `wsub:reject:${submissionId}`)
 }
 
 /**

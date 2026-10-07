@@ -1,7 +1,8 @@
 import type { MealType } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { findActiveOrder } from '@/lib/db/queries/orders'
-import { editOrderPortionsCore, createOneTimeOrderCore } from '@/app/(app)/orders/actions'
+import { createOneTimeOrderCore } from '@/app/(app)/orders/actions'
+import { setOrderPortionsForClient } from '@/lib/orders/client-portions'
 import { getPostCutoffReply } from '@/lib/bot/templates'
 import { formatCutoff, DEFAULT_CUTOFF, getClientCutoffForDate } from '@/lib/utils/cutoff'
 import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
@@ -185,15 +186,20 @@ export async function confirmPendingChange(params: {
       await markFailed('order_now_locked')
       return { ok: false, reason: 'order_now_locked' }
     } else {
-      const result = await editOrderPortionsCore(actor, {
-        orderId: change.currentOrderId,
+      // Общий путь «число клиента → заказ»: PENDING (ещё без ответа) →
+      // подтверждаем с числом, 0 («уберите все») → отмена, УПД — не трогаем.
+      // Голый editOrderPortionsCore падал на PENDING-заказах.
+      const result = await setOrderPortionsForClient(actor, {
+        orderId: active.id,
         portions: change.proposedPortions,
+        via: 'order_change',
       })
       if (!result.ok) {
-        await markFailed(result.error)
-        return { ok: false, reason: 'edit_failed', details: result.error }
+        const error = result.skipped ? result.reason : result.error
+        await markFailed(error)
+        return { ok: false, reason: 'edit_failed', details: error }
       }
-      orderId = change.currentOrderId
+      orderId = active.id
     }
   }
 

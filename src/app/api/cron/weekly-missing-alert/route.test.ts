@@ -11,6 +11,7 @@ const { mockPrisma, mockNotify } = vi.hoisted(() => ({
   mockPrisma: {
     client: { findMany: vi.fn() },
     weeklyOrderSubmission: { findFirst: vi.fn() },
+    order: { findFirst: vi.fn() },
     activityLog: { findFirst: vi.fn(), create: vi.fn() },
   },
   mockNotify: vi.fn(),
@@ -34,6 +35,7 @@ beforeEach(() => {
   mockPrisma.activityLog.findFirst.mockResolvedValue(null)
   mockPrisma.activityLog.create.mockResolvedValue({ id: 'log_1' })
   mockNotify.mockResolvedValue({ sentTo: 1, skippedNoTelegram: 0, failed: 0 })
+  mockPrisma.order.findFirst.mockResolvedValue(null)
 })
 
 describe('weekly-missing-alert', () => {
@@ -49,9 +51,10 @@ describe('weekly-missing-alert', () => {
     expect(mockNotify).toHaveBeenCalledTimes(1)
     const text = mockNotify.mock.calls[0][0] as string
     expect(text).toContain('Кафе Будни')
-    expect(text).toContain('нет заявки на след неделю')
-    // Диапазон DD.MM по DD.MM (две даты в формате 2 цифры . 2 цифры).
-    expect(text).toMatch(/с \d{2}\.\d{2} по \d{2}\.\d{2}/)
+    expect(text).toContain('нет заявки на следующую неделю')
+    expect(text).toContain('Напомнили в пятницу в 10:00 и 13:00')
+    // Диапазон «DD.MM–DD.MM».
+    expect(text).toMatch(/\(\d{2}\.\d{2}–\d{2}\.\d{2}\)/)
     expect(text.startsWith('⚠️')).toBe(true)
     expect(body.alerted).toBe(1)
   })
@@ -91,5 +94,18 @@ describe('weekly-missing-alert', () => {
     expect(body.skipped).toBe(true)
     expect(mockPrisma.client.findMany).not.toHaveBeenCalled()
     expect(mockNotify).not.toHaveBeenCalled()
+  })
+
+  it('заявки нет, но заказы на следующую неделю внесены (менеджер руками) → алёрта нет', async () => {
+    mockPrisma.client.findMany.mockResolvedValue([
+      { id: 'c1', name: 'ИНПАРТ', mealConfigs: [{ locationId: 'loc_1', mealType: 'LUNCH' }] },
+    ])
+    mockPrisma.weeklyOrderSubmission.findFirst.mockResolvedValue(null)
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'o1' })
+
+    const body = await (await handler(REQ)).json()
+
+    expect(mockNotify).not.toHaveBeenCalled()
+    expect(body.skippedHasSubmission).toBe(1)
   })
 })

@@ -366,3 +366,37 @@ describe('parseChangeIntent — промт', () => {
     expect(call.tool_choice).toEqual({ type: 'tool', name: 'submit_change_intent' })
   })
 })
+
+describe('parseChangeIntent — «добавьте / уберите» (mode=add, 07.10)', () => {
+  it('«на завтра добавьте 2 обеда» → CHANGE mode=add +2', async () => {
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: 2, mode: 'add', date: '2026-06-05', mealType: 'ОБЕД', confidence: 0.95, reason: '' }),
+    )
+    const r = await run('на завтра добавьте 2 обеда')
+    expect(r).toMatchObject({ action: 'CHANGE', portions: 2, mode: 'add', date: '2026-06-05' })
+  })
+
+  it('«в пятницу на 3 меньше» → CHANGE mode=add −3 (отрицательное изменение не out_of_range)', async () => {
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: -3, mode: 'add', date: '2026-06-05', mealType: null, confidence: 0.95, reason: '' }),
+    )
+    expect(await run('в пятницу на 3 меньше')).toMatchObject({ action: 'CHANGE', portions: -3, mode: 'add' })
+  })
+
+  it('итоговое число без mode → mode=set; отрицательный итог и нулевое изменение → NONE', async () => {
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: 13, date: '2026-06-05', mealType: null, confidence: 0.97, reason: '' }),
+    )
+    expect(await run('13 на завтра')).toMatchObject({ mode: 'set', portions: 13 })
+
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: -3, mode: 'set', date: '2026-06-05', mealType: null, confidence: 0.97, reason: '' }),
+    )
+    expect(await run('-3')).toEqual({ action: 'NONE', reason: 'out_of_range' })
+
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: 0, mode: 'add', date: '2026-06-05', mealType: null, confidence: 0.97, reason: '' }),
+    )
+    expect(await run('+0')).toEqual({ action: 'NONE', reason: 'out_of_range' })
+  })
+})

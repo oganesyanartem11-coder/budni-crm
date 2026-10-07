@@ -153,3 +153,116 @@ describe('saveBotOrders — П3 status bump', () => {
     expect(res.savedItems).toHaveLength(1)
   })
 })
+
+describe('saveBotOrders — приём пищи из ответа (баг 06.10, «Идеология Еды»)', () => {
+  const THREE_MEALS: SaveBotOrdersInput['activeMealConfigsByLocation'] = {
+    loc_1: [
+      { mealType: 'BREAKFAST', pricePerPortion: 200, locationName: 'Повадино' },
+      { mealType: 'LUNCH', pricePerPortion: 300, locationName: 'Повадино' },
+      { mealType: 'DINNER', pricePerPortion: 250, locationName: 'Повадино' },
+    ],
+  }
+
+  it('«Обед 75, завтрак и ужин 45» → обед 75, завтрак 45, ужин 45 (а не всё по 45)', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue(null)
+
+    const r = await saveBotOrders({
+      clientId: 'client_1',
+      conversationId: 'conv_1',
+      deliveryDate: DELIVERY_DATE,
+      items: [
+        { locationId: 'loc_1', portions: 75, mealType: 'LUNCH' },
+        { locationId: 'loc_1', portions: 45, mealType: 'BREAKFAST' },
+        { locationId: 'loc_1', portions: 45, mealType: 'DINNER' },
+      ],
+      activeMealConfigsByLocation: THREE_MEALS,
+    })
+
+    const created = mockPrisma.order.create.mock.calls.map((c) => [c[0].data.mealType, c[0].data.portions])
+    expect(created).toEqual([
+      ['LUNCH', 75],
+      ['BREAKFAST', 45],
+      ['DINNER', 45],
+    ])
+    expect(r.savedItems).toHaveLength(3)
+    expect(r.unmatchedItems).toEqual([])
+  })
+
+  it('число без приёма пищи → все приёмы точки, кроме названных явно', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue(null)
+
+    await saveBotOrders({
+      clientId: 'client_1',
+      conversationId: 'conv_1',
+      deliveryDate: DELIVERY_DATE,
+      items: [
+        { locationId: 'loc_1', portions: 30 },
+        { locationId: 'loc_1', portions: 10, mealType: 'DINNER' },
+      ],
+      activeMealConfigsByLocation: THREE_MEALS,
+    })
+
+    const created = mockPrisma.order.create.mock.calls.map((c) => [c[0].data.mealType, c[0].data.portions])
+    expect(created).toEqual([
+      ['BREAKFAST', 30],
+      ['LUNCH', 30],
+      ['DINNER', 10],
+    ])
+  })
+
+  it('приём пищи, которого у точки нет → ничего не создаём, строка в unmatchedItems', async () => {
+    const r = await saveBotOrders({ ...makeInput(20), items: [{ locationId: 'loc_1', portions: 20, mealType: 'DINNER' }] })
+    expect(mockPrisma.order.create).not.toHaveBeenCalled()
+    expect(r.unmatchedItems).toEqual([
+      { locationId: 'loc_1', mealType: 'DINNER', portions: 20, reason: 'у точки нет такого приёма пищи' },
+    ])
+  })
+})
+
+describe('saveBotOrders — «добавьте / уберите» (mode=add, 07.10)', () => {
+  it('заказ 34 + «добавьте 1» → 35', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'o1', portions: 34, status: 'CONFIRMED' })
+    const r = await saveBotOrders({ ...makeInput(1), items: [{ locationId: 'loc_1', portions: 1, mode: 'add' }] })
+    expect(mockPrisma.order.update.mock.calls[0][0].data).toMatchObject({ portions: 35, totalPrice: 300 * 35 })
+    expect(r.savedItems[0]).toMatchObject({ portions: 35, previousPortions: 34 })
+  })
+
+  it('заказ 10 + «на 3 меньше» → 7', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'o1', portions: 10, status: 'CONFIRMED' })
+    await saveBotOrders({ ...makeInput(-3), items: [{ locationId: 'loc_1', portions: -3, mode: 'add' }] })
+    expect(mockPrisma.order.update.mock.calls[0][0].data.portions).toBe(7)
+  })
+
+  it('заказа нет / он ещё без ответа (0 в PENDING) → не создаём «1», а unmatched', async () => {
+    mockPrisma.order.findFirst.mockResolvedValueOnce(null)
+    const r1 = await saveBotOrders({ ...makeInput(1), items: [{ locationId: 'loc_1', portions: 1, mode: 'add' }] })
+    mockPrisma.order.findFirst.mockResolvedValueOnce({ id: 'o1', portions: 0, status: 'PENDING_CONFIRMATION' })
+    const r2 = await saveBotOrders({ ...makeInput(1), items: [{ locationId: 'loc_1', portions: 1, mode: 'add' }] })
+    expect(mockPrisma.order.create).not.toHaveBeenCalled()
+    expect(mockPrisma.order.update).not.toHaveBeenCalled()
+    expect(r1.unmatchedItems[0].reason).toContain('не к чему прибавить')
+    expect(r2.unmatchedItems[0].reason).toContain('не к чему прибавить')
+  })
+
+  it('убрать больше, чем заказано → unmatched, заказ не трогаем', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'o1', portions: 3, status: 'CONFIRMED' })
+    const r = await saveBotOrders({ ...makeInput(-5), items: [{ locationId: 'loc_1', portions: -5, mode: 'add' }] })
+    expect(mockPrisma.order.update).not.toHaveBeenCalled()
+    expect(r.unmatchedItems[0].reason).toBe('в заказе 3, убрать 5 нельзя')
+  })
+
+  it('«добавьте 1» без приёма пищи при завтраке/обеде/ужине → unmatched (непонятно к чему)', async () => {
+    const r = await saveBotOrders({
+      ...makeInput(1),
+      items: [{ locationId: 'loc_1', portions: 1, mode: 'add' }],
+      activeMealConfigsByLocation: {
+        loc_1: [
+          { mealType: 'BREAKFAST', pricePerPortion: 200, locationName: 'Офис' },
+          { mealType: 'LUNCH', pricePerPortion: 300, locationName: 'Офис' },
+        ],
+      },
+    })
+    expect(mockPrisma.order.findFirst).not.toHaveBeenCalled()
+    expect(r.unmatchedItems[0].reason).toBe('непонятно, к какому приёму пищи прибавить')
+  })
+})

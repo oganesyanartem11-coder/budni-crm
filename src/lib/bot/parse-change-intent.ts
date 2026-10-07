@@ -21,7 +21,9 @@ export type MealType = 'ЗАВТРАК' | 'ОБЕД' | 'УЖИН'
 export type ChangeIntent =
   | {
       action: 'CHANGE'
+      /** mode='add' — изменение со знаком («добавьте 2» → 2, «уберите 3» → -3). */
       portions: number
+      mode: 'set' | 'add'
       date: string // YYYY-MM-DD МСК
       mealType: MealType | null
       confidence: number
@@ -37,7 +39,8 @@ const CHANGE_TOOL: Anthropic.Messages.Tool = {
     type: 'object',
     properties: {
       action: { type: 'string', enum: ['CHANGE', 'NONE'] },
-      portions: { type: ['number', 'null'], minimum: 1, maximum: 1000 },
+      portions: { type: ['number', 'null'] },
+      mode: { type: 'string', enum: ['set', 'add'] },
       date: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       mealType: {
         type: ['string', 'null'],
@@ -64,6 +67,8 @@ function buildSystemPrompt(
 - Дату (на завтра, в пятницу, 12.06, на 15-е) — конвертируй в YYYY-MM-DD по МСК
 - ОДНУ дату с ОДНИМ числом (не «12 завтра и 14 в пятницу» — это NONE)
 
+Если клиент просит ДОБАВИТЬ или УБРАТЬ порции к уже заказанному («добавьте 2 на завтра», «+1 обед в пятницу», «на 3 меньше завтра», «уберите одну на 08.10») — это тоже CHANGE: mode='add', portions = изменение со знаком (добавить 2 → 2, убрать 3 → -3). Если клиент называет итоговое количество — mode='set'.
+
 Если упомянут тип еды (завтрак/обед/ужин) — извлеки в mealType. У этого клиента активны: ${availableMealTypes.join(', ')}. Если только один тип активен → mealType=null (используется тот единственный). Если клиент активен на >1 типе и в тексте тип не указан → mealType=null (это потом обработает менеджер).
 
 Возвращай action='NONE' когда:
@@ -86,7 +91,9 @@ Confidence ≥ 0.95 — твёрдо уверен. < 0.85 — обязатель
 6. «12 завтра и 14 в пятницу» → NONE
 7. «спасибо!» → NONE
 8. «через пол часа» → NONE
-9. «завтрак 5 на 06.06» → CHANGE portions=5 date=2026-06-06 mealType=ЗАВТРАК confidence=0.96
+9. «завтрак 5 на 06.06» → CHANGE portions=5 date=2026-06-06 mealType=ЗАВТРАК confidence=0.96 mode=set
+10. «на завтра добавьте 2 обеда» (сегодня 04.06) → CHANGE portions=2 mode=add date=2026-06-05 mealType=ОБЕД confidence=0.95
+11. «в пятницу на 3 меньше» (сегодня среда 04.06) → CHANGE portions=-3 mode=add date=2026-06-06 mealType=null confidence=0.95
 
 ВАЖНО: ты НЕ исполняешь. Только классифицируешь. Менеджер проверит.`
 }
@@ -94,6 +101,7 @@ Confidence ≥ 0.95 — твёрдо уверен. < 0.85 — обязатель
 interface RawIntent {
   action?: string
   portions?: number | null
+  mode?: string | null
   date?: string | null
   mealType?: string | null
   confidence?: number
@@ -162,8 +170,10 @@ export async function parseChangeIntent(
     return NONE('incomplete')
   }
 
-  // Диапазон порций.
-  if (portions <= 0 || portions > 1000) {
+  // Диапазон порций (для «добавьте/уберите» — ненулевое целое изменение).
+  const mode: 'set' | 'add' = raw.mode === 'add' ? 'add' : 'set'
+  if (!Number.isInteger(portions)) return NONE('out_of_range')
+  if (mode === 'add' ? portions === 0 || Math.abs(portions) > 1000 : portions <= 0 || portions > 1000) {
     return NONE('out_of_range')
   }
 
@@ -208,6 +218,7 @@ export async function parseChangeIntent(
   return {
     action: 'CHANGE',
     portions,
+    mode,
     date,
     mealType,
     confidence: conf,

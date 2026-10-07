@@ -5,7 +5,11 @@ import { createInboxItem } from '@/lib/bot/create-inbox-item'
 import { notifyClientSignal } from '@/lib/bot/notify-client-signal'
 import { fetchAttachmentAsBase64 } from '@/lib/max/fetch-attachment'
 import { parseWeeklySubmission } from '@/lib/weekly/parser'
-import { loadWeeklyConfigOptions, processWeeklySubmission } from '@/lib/weekly/actions'
+import {
+  loadUpcomingWeeklyOrders,
+  loadWeeklyConfigOptions,
+  processWeeklySubmission,
+} from '@/lib/weekly/actions'
 import {
   formatClientAppliedReply,
   notifyManagersWeeklyApplied,
@@ -26,12 +30,22 @@ import type { ParseResult } from '@/lib/weekly/parser'
 
 const REPLY_REVIEW = 'Спасибо, заявку получили, менеджер проверит и подтвердит.'
 
-/** Точки WEEKLY-конфигов для парсера (locationId нужен только при нескольких точках). */
-async function parserLocations(clientId: string) {
+/**
+ * Контекст парсера: точки WEEKLY-конфигов (locationId нужен только при
+ * нескольких точках) и уже внесённые заказы — «с 7 октября добавьте 1»
+ * раскладывается по дням, где заказ есть.
+ */
+async function parserContext(clientId: string, clientName: string, now: Date) {
   const configs = await loadWeeklyConfigOptions(clientId)
   const seen = new Map<string, string>()
   for (const c of configs) seen.set(c.locationId, c.locationName)
-  return [...seen].map(([id, name]) => ({ id, name }))
+  const { list } = await loadUpcomingWeeklyOrders(clientId, configs, now)
+  return {
+    now,
+    clientName,
+    locations: [...seen].map(([id, name]) => ({ id, name })),
+    existingOrders: list,
+  }
 }
 
 /** Общий хвост: разбор → внесение/проверка → уведомления → ответ клиенту. */
@@ -88,7 +102,14 @@ async function finalizeSubmission(params: {
     : REPLY_REVIEW
   try {
     if (result.applied) {
-      await notifyManagersWeeklyApplied({ submissionId, clientName: client.name, applied: result.applied })
+      await notifyManagersWeeklyApplied({
+        submissionId,
+        clientName: client.name,
+        applied: result.applied,
+        source,
+        rawText: rawText ?? undefined,
+        blobUrl,
+      })
     } else {
       await notifyManagersWeeklyReview({
         submissionId,
@@ -132,7 +153,7 @@ export async function handleWeeklyPhotoSubmission(params: {
 
   const parsed = await parseWeeklySubmission(
     { type: 'photo', base64, mediaType },
-    { now: new Date(), clientName: client.name, locations: await parserLocations(client.id) }
+    await parserContext(client.id, client.name, new Date())
   )
 
   await finalizeSubmission({
@@ -157,7 +178,7 @@ export async function handleWeeklyTextSubmission(params: {
 
   const parsed = await parseWeeklySubmission(
     { type: 'text', text },
-    { now: new Date(), clientName: client.name, locations: await parserLocations(client.id) }
+    await parserContext(client.id, client.name, new Date())
   )
 
   await finalizeSubmission({

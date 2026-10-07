@@ -13,7 +13,8 @@ const DEFAULT_RECIPES_MODEL = 'claude-opus-4-7'
 const DEFAULT_INBOX_MODEL = 'claude-haiku-4-5-20251001'
 const DEFAULT_FALLBACK_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_VISION_MODEL = 'claude-sonnet-4-6'
-const DEFAULT_BORIS_MODEL = 'claude-sonnet-4-6'
+// 07.10.2026: Борис-ассистент (чат, утренний брифинг, самоанализ, посты команды) — Sonnet 5.
+const DEFAULT_BORIS_MODEL = 'claude-sonnet-5'
 const DEFAULT_BORIS_DIRECT_MODEL = 'claude-opus-4-8'
 const DEFAULT_BORIS_DIRECT_LIGHT_MODEL = 'claude-sonnet-4-6'
 

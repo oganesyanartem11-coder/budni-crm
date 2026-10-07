@@ -263,3 +263,33 @@ describe('generateFixedOrdersForRange — STICKY как FIXED', () => {
     }
   })
 })
+
+describe('handleStickyMessage — «добавьте / уберите» (07.10)', () => {
+  function delta(portions: number) {
+    return { ...numeric(portions), items: [{ locationId: 'loc_1', portions, mode: 'add' }] }
+  }
+
+  it('постоянно 33, «добавьте 2» → теперь 35 и заказы пересчитаны', async () => {
+    mockParse.mockResolvedValue(delta(2))
+    mockPrisma.order.findMany.mockResolvedValue([{ id: 'o_fri', deliveryDate: new Date('2026-10-02T00:00:00.000Z') }])
+
+    const r = await handleStickyMessage(makeClient(), 'добавьте 2', 'chat_1', new Date('2026-10-01T09:00:00.000Z'))
+
+    expect(mockSetPortions).toHaveBeenCalledWith(expect.anything(), { orderId: 'o_fri', portions: 35, via: 'sticky' })
+    expect(mockPrisma.clientMealConfig.update).toHaveBeenCalledWith({ where: { id: 'cfg_s' }, data: { fixedPortions: 35 } })
+    expect(r?.reply).toContain('Теперь 35 порций')
+  })
+
+  it('«уберите одну» (число словом) → 32', async () => {
+    mockParse.mockResolvedValue(delta(-1))
+    const r = await handleStickyMessage(makeClient(), 'уберите одну', 'chat_1', new Date('2026-10-01T09:00:00.000Z'))
+    expect(mockParse).toHaveBeenCalled()
+    expect(r?.reply).toContain('Теперь 32 порций')
+  })
+
+  it('убрать больше, чем стоит (33 − 40) → не STICKY, отдаём менеджеру', async () => {
+    mockParse.mockResolvedValue(delta(-40))
+    expect(await handleStickyMessage(makeClient(), 'уберите 40', 'chat_1', new Date('2026-10-01T09:00:00.000Z'))).toBeNull()
+    expect(mockSetPortions).not.toHaveBeenCalled()
+  })
+})

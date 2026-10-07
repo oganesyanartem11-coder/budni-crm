@@ -22,6 +22,7 @@ import { logBotMessage } from './log-message'
 import {
   formatAcceptedReply,
   formatUpdatedReply,
+  formatSavedItemLabels,
   getPostCutoffReply,
   type SavedItemForReply,
 } from './templates'
@@ -735,6 +736,42 @@ async function handleBotResponse(
     clientMessage: text,
   })
 
+  // Не всё из сообщения удалось внести: приёма пищи у точки нет, «добавьте 2»
+  // без заказа/непонятно к какому приёму, «уберите» больше, чем заказано.
+  // Ничего не сохранилось — не делаем вид, что приняли: менеджеру. Часть
+  // сохранилась — внесённое подтверждаем, остальное менеджеру в inbox.
+  const unmatchedItems = save.unmatchedItems ?? []
+  if (unmatchedItems.length > 0) {
+    const nothingSaved = save.savedItems.length === 0
+    if (nothingSaved && conv.status !== 'AWAITING_MANAGER') {
+      await prisma.botConversation.update({
+        where: { id: conv.id },
+        data: { status: 'AWAITING_MANAGER' },
+      })
+    }
+    const reasons = Array.from(new Set(unmatchedItems.map((u) => u.reason)))
+    const inbox = await createInboxItem({
+      clientId: client.id,
+      conversationId: conv.id,
+      reason: 'NON_NUMERIC',
+      humanReason: `${nothingSaved ? 'Не внесено' : 'Внесено не всё'}: ${reasons.join('; ')} — проверьте заказ`,
+      priority: 'NORMAL',
+      clientMessage: text,
+      parsedJson: parsed as unknown as Prisma.InputJsonValue,
+    })
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: text,
+      inboxItemId: inbox.id,
+      tone: alertTone,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => {
+      console.error('[bot] notifyClientSignal failed (unmatched items):', e)
+    })
+    if (nothingSaved) return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+  }
+
   // A6: только уже существующие baseline плавно следуют за фактически
   // сохранёнными значениями. updateMany не создаёт baseline автоматически.
   for (const savedItem of save.savedItems) {
@@ -816,7 +853,11 @@ async function handleBotResponse(
   const itemsForReply: SavedItemForReply[] = save.savedItems.map((s) => ({
     locationName: s.locationName,
     portions: s.portions,
+    mealType: s.mealType,
   }))
+  // Подписи «точка/приём» для клиента и производства (у клиента с завтраком,
+  // обедом и ужином одна точка — без приёма пищи строки неотличимы).
+  const savedLabels = formatSavedItemLabels(itemsForReply)
 
   if (afterCutoff) {
     // КЕЙС C — после cutoff МСК. Заказ уже создан/обновлён saveBotOrders выше
@@ -836,7 +877,7 @@ async function handleBotResponse(
     if (save.savedItems.length > 0) {
       const dateStr = formatMskDayMonth(effectiveDeliveryDate)
       const itemsStr = save.savedItems
-        .map((s) => `${s.locationName} — ${s.portions}`)
+        .map((s, idx) => `${savedLabels[idx]} — ${s.portions}`)
         .join(', ')
       postCutoffReply =
         `Принято: ${itemsStr} на ${dateStr}. ` +
@@ -849,10 +890,10 @@ async function handleBotResponse(
         const it = save.savedItems[0]
         prodText =
           `⚠️ <b>${clientNameHtml}</b> ответил после приёма заявок на ${dateStr}: ` +
-          `${escapeHtml(it.locationName)} — ${it.portions}. Имейте ввиду.`
+          `${escapeHtml(savedLabels[0])} — ${it.portions}. Имейте ввиду.`
       } else {
         const rows = save.savedItems
-          .map((s) => `• ${escapeHtml(s.locationName)} — ${s.portions}`)
+          .map((s, idx) => `• ${escapeHtml(savedLabels[idx])} — ${s.portions}`)
           .join('\n')
         prodText =
           `⚠️ <b>${clientNameHtml}</b> ответил после приёма заявок. ` +
@@ -966,10 +1007,10 @@ async function handleBotResponse(
       let prodText: string
       if (save.savedItems.length === 1) {
         const it = save.savedItems[0]
-        prodText = `✅ <b>${clientNameHtml}</b> подтвердил заказ на ${dateStr}: ${escapeHtml(it.locationName)} — ${it.portions}`
+        prodText = `✅ <b>${clientNameHtml}</b> подтвердил заказ на ${dateStr}: ${escapeHtml(savedLabels[0])} — ${it.portions}`
       } else {
         const rows = save.savedItems
-          .map((it) => `📍 ${escapeHtml(it.locationName)} — ${it.portions}`)
+          .map((it, idx) => `📍 ${escapeHtml(savedLabels[idx])} — ${it.portions}`)
           .join('\n')
         prodText = `✅ <b>${clientNameHtml}</b> подтвердил заказ на ${dateStr}:\n${rows}`
       }
@@ -1035,7 +1076,7 @@ async function handleBotResponse(
     let prodText: string
     if (save.savedItems.length === 1) {
       const it = save.savedItems[0]
-      const locHtml = escapeHtml(it.locationName)
+      const locHtml = escapeHtml(savedLabels[0])
       if (it.wasUpdate && it.previousPortions != null) {
         prodText = `✏️ <b>${clientNameHtml}</b> обновил заказ на ${dateStr}: ${locHtml} было ${it.previousPortions} → стало ${it.portions} порций`
       } else {
@@ -1043,8 +1084,8 @@ async function handleBotResponse(
       }
     } else {
       const rows = save.savedItems
-        .map((it) => {
-          const locHtml = escapeHtml(it.locationName)
+        .map((it, idx) => {
+          const locHtml = escapeHtml(savedLabels[idx])
           if (it.wasUpdate && it.previousPortions != null) {
             return `📍 ${locHtml}: ${it.previousPortions} → ${it.portions}`
           }
@@ -1350,6 +1391,42 @@ async function handleSpontaneous(
         return { reply: null, action: 'inbox', inboxItemId: inbox.id }
       }
 
+      // «Добавьте 2» / «на 3 меньше»: предлагаем итог = текущий заказ + изменение.
+      // Без заказа (или он ещё без ответа, 0 в PENDING) прибавлять не к чему.
+      let proposedPortions = intent.portions
+      if (intent.mode === 'add') {
+        const base =
+          existingOrder && !(existingOrder.portions === 0 && (existingOrder.status === 'PENDING_CONFIRMATION' || existingOrder.status === 'DRAFT'))
+            ? existingOrder.portions
+            : null
+        const total = base == null ? null : base + intent.portions
+        if (total == null || total < 0) {
+          const inbox = await createInboxItem({
+            clientId: client.id,
+            conversationId: conversation.id,
+            reason: 'NON_NUMERIC',
+            humanReason:
+              total == null
+                ? `Клиент просит ${intent.portions > 0 ? 'добавить' : 'убрать'} ${Math.abs(intent.portions)}, но заказа на ${intent.date} нет — уточните`
+                : `Клиент просит убрать ${-intent.portions}, а в заказе ${base} — уточните`,
+            priority: 'NORMAL',
+            clientMessage: text,
+          })
+          await notifyClientSignal({
+            clientId: client.id,
+            messageText: text,
+            inboxItemId: inbox.id,
+            tone: spontaneousAlertTone,
+            reason: inbox.reason,
+            priority: inbox.priority,
+          }).catch((e) => {
+            console.error('[bot] notifyClientSignal failed (П3 delta):', e)
+          })
+          return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+        }
+        proposedPortions = total
+      }
+
       const action = existingOrder ? 'EDIT' : 'CREATE'
       const locationName =
         client.locations.find((l) => l.id === resolveResult.locationId)?.name ?? 'не указано'
@@ -1360,7 +1437,7 @@ async function handleSpontaneous(
         deliveryDate,
         mealType: resolveResult.mealType,
         action,
-        proposedPortions: intent.portions,
+        proposedPortions,
         currentOrderId: existingOrder?.id,
         currentPortions: existingOrder?.portions ?? null,
         sourceMaxChatId: senderChatId,
@@ -1379,7 +1456,7 @@ async function handleSpontaneous(
         deliveryDate,
         mealType: resolveResult.mealType,
         action,
-        proposedPortions: intent.portions,
+        proposedPortions,
         currentPortions: existingOrder?.portions ?? null,
         rawClientMessage: text,
         parsedConfidence: intent.confidence,

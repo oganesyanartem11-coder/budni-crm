@@ -9,10 +9,12 @@ import {
 } from '@/lib/orders/client-portions'
 import { cancelOrderCore, editOrderPortionsCore, restoreOrderCore } from '@/app/(app)/orders/actions'
 import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
-import type { ParseResult } from './parser'
+import type { ParseResult, ParserExistingOrder } from './parser'
+import { WINDOW_DAYS } from './parser'
 import {
   classifyWeeklyItems,
   mondayOf,
+  weeklyPortionKey,
   type WeeklyConfigOption,
   type WeeklyLine,
 } from './sanity-checks'
@@ -54,6 +56,8 @@ export interface WeeklyLineOutcome {
   portions: number
   result: WeeklyLineResult
   note: string | null
+  /** Сколько было в заказе до внесения (для «34 → 35»); null — заказа не было. */
+  prevPortions?: number | null
 }
 
 /**
@@ -96,6 +100,41 @@ export async function loadWeeklyConfigOptions(clientId: string): Promise<WeeklyC
       cutoffMinuteMsk: c.location.cutoffMinuteMsk,
     },
   }))
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Уже внесённые (не отменённые) заказы WEEKLY-питания клиента на окно заявки:
+ * парсеру — чтобы разложить «добавьте 1 с 7-го» по дням, разбору — база для
+ * прибавки. Ключ — weeklyPortionKey (точка + приём + дата).
+ */
+export async function loadUpcomingWeeklyOrders(
+  clientId: string,
+  configs: WeeklyConfigOption[],
+  now: Date,
+): Promise<{ list: ParserExistingOrder[]; byKey: Map<string, number> }> {
+  const byKey = new Map<string, number>()
+  const list: ParserExistingOrder[] = []
+  if (configs.length === 0) return { list, byKey }
+  const today = getMskCalendarDayUtc(now, 0)
+  const orders = await prisma.order.findMany({
+    where: {
+      clientId,
+      deliveryDate: { gte: today, lte: new Date(today.getTime() + WINDOW_DAYS * DAY_MS) },
+      status: { not: 'CANCELLED' },
+      OR: configs.map((c) => ({ locationId: c.locationId, mealType: c.mealType })),
+    },
+    select: { locationId: true, mealType: true, deliveryDate: true, portions: true },
+    orderBy: { deliveryDate: 'asc' },
+  })
+  for (const o of orders) {
+    const date = o.deliveryDate.toISOString().slice(0, 10)
+    byKey.set(weeklyPortionKey(o.locationId, o.mealType, date), o.portions)
+    const config = configs.find((c) => c.locationId === o.locationId && c.mealType === o.mealType)
+    list.push({ date, locationId: o.locationId, locationName: config?.locationName ?? '', portions: o.portions })
+  }
+  return { list, byKey }
 }
 
 /**
@@ -175,7 +214,8 @@ export async function processWeeklySubmission(params: {
 }): Promise<ProcessWeeklyResult> {
   const now = params.now ?? new Date()
   const configs = await loadWeeklyConfigOptions(params.clientId)
-  const classification = classifyWeeklyItems(params.parsedResult, configs, now)
+  const { byKey } = await loadUpcomingWeeklyOrders(params.clientId, configs, now)
+  const classification = classifyWeeklyItems(params.parsedResult, configs, now, byKey)
   // «Спасибо», вопрос, нечитаемое фото — ни одной строки. Upsert тут затёр бы
   // настоящую заявку текущей недели, поэтому заявку не трогаем вовсе.
   if (classification.lines.length === 0) {
@@ -205,9 +245,10 @@ export async function processWeeklySubmission(params: {
   }
 
   if (reviewReasons.length > 0 || !actor) {
+    const modelReason = params.parsedResult.reason ? ` (распознавание: ${params.parsedResult.reason})` : ''
     await prisma.weeklyOrderSubmission.update({
       where: { id: submission.id },
-      data: { status: 'NEEDS_REVIEW', failureReason: reviewReasons.join('; ') },
+      data: { status: 'NEEDS_REVIEW', failureReason: reviewReasons.join('; ') + modelReason },
     })
     return {
       submissionId: submission.id,
@@ -289,7 +330,14 @@ export async function applyWeeklyLines(params: {
         notes: notes ?? null,
       })
       if (r.ok) {
-        outcomes.push({ date: line.date, locationName, portions: line.portions, result: r.kind, note: null })
+        outcomes.push({
+          date: line.date,
+          locationName,
+          portions: line.portions,
+          result: r.kind,
+          note: null,
+          prevPortions: r.prevPortions,
+        })
         if (r.orderId && (r.kind === 'created' || r.kind === 'updated' || r.kind === 'confirmed' || r.kind === 'cancelled')) {
           undo.push({
             orderId: r.orderId,
@@ -375,10 +423,14 @@ export async function applyReviewedSubmission(params: {
     select: { clientId: true, parsedJson: true },
   })
   const parsed = submission.parsedJson as unknown as ParseResult
+  const now = params.now ?? new Date()
   const configs = await loadWeeklyConfigOptions(submission.clientId)
+  // «Добавьте 1» прибавляем к тому, что стоит в заказе СЕЙЧАС (пока заявка
+  // ждала, заказ могли поменять).
+  const { byKey } = await loadUpcomingWeeklyOrders(submission.clientId, configs, now)
   // Менеджер подтверждает распознанное — уверенность не гейтит, но даты/точки
   // перепроверяем на текущий момент (cut-off мог пройти, пока заявка ждала).
-  const { lines } = classifyWeeklyItems({ ...parsed, confidence: 1 }, configs, params.now)
+  const { lines } = classifyWeeklyItems({ ...parsed, confidence: 1 }, configs, now, byKey)
 
   try {
     const applied = await applyWeeklyLines({

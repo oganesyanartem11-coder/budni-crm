@@ -9,8 +9,11 @@ export type ToneLabel = 'neutral' | 'rude' | 'thanks' | 'urgent'
 export interface ParsedItem {
   locationId: string
   locationName: string
+  /** mode='add' — изменение со знаком («добавьте 2» → 2, «на 3 меньше» → -3). */
   portions: number
   mealType?: MealType
+  /** 'add' — клиент просит прибавить/убавить к уже заказанному, а не называет итог. */
+  mode?: 'add'
 }
 
 export interface ParsedResponse {
@@ -77,11 +80,12 @@ export async function parseClientResponse(input: ParseInput): Promise<ParsedResp
 6. Reason — короткое объяснение что распознал и почему такой confidence (НЕ повторяй сам ответ).
 7. ToneLabel — оценка тона клиента: "rude" (грубо), "thanks" (благодарность), "urgent" (срочно), "neutral" (нейтрально).
 8. Если клиент явно назвал приём пищи, верни mealType из BREAKFAST|LUNCH|DINNER. Если определить его нельзя — не выдумывай и не добавляй mealType.
+9. Если клиент просит ДОБАВИТЬ или УБРАТЬ порции к уже заказанному («добавьте 2», «+1 обед», «на 3 меньше», «уберите одну», «минус 2») — это type="numeric", у позиции "mode": "add", а portions — изменение со знаком (добавить 2 → 2, убрать 3 → -3). Если клиент называет итоговое количество («нас будет 30») — mode не указывай.
 
 Формат ответа:
 {
   "type": "numeric" | "cancellation_intent" | "question" | "noise",
-  "items": [{"locationId": "...", "locationName": "...", "portions": число, "mealType": "DINNER"}],
+  "items": [{"locationId": "...", "locationName": "...", "portions": число, "mealType": "DINNER", "mode": "add"}],
   "confidence": 0.0-1.0,
   "reason": "...",
   "toneLabel": "neutral" | "rude" | "thanks" | "urgent"
@@ -167,7 +171,13 @@ ${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — 
   const rawItems = Array.isArray(p.items) ? (p.items as unknown[]) : []
   const items: ParsedItem[] = rawItems.flatMap((raw) => {
     const i = raw as Record<string, unknown>
-    if (typeof i.locationId === 'string' && typeof i.portions === 'number' && i.portions >= 0) {
+    const isAdd = i.mode === 'add'
+    if (
+      typeof i.locationId === 'string' &&
+      typeof i.portions === 'number' &&
+      Number.isFinite(i.portions) &&
+      (isAdd ? i.portions !== 0 : i.portions >= 0)
+    ) {
       const mealType = VALID_MEAL_TYPES.includes(i.mealType as MealType)
         ? (i.mealType as MealType)
         : undefined
@@ -176,6 +186,7 @@ ${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — 
         locationName: typeof i.locationName === 'string' ? i.locationName : '',
         portions: i.portions,
         ...(mealType ? { mealType } : {}),
+        ...(isAdd ? { mode: 'add' as const } : {}),
       }]
     }
     return []

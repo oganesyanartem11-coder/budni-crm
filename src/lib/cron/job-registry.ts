@@ -31,7 +31,7 @@ export const CRON_JOBS: CronJobConfig[] = [
   { jobName: 'cleanup-sessions',            scheduleUtc: '30 0 * * 1',  description: 'Очистка expired/revoked Session (понедельник)',     maxAgeHours: 170 },
   { jobName: 'cleanup-activity-log',        scheduleUtc: '0 1 * * 1',   description: 'Очистка ActivityLog/ErrorLog (понедельник)',        maxAgeHours: 200 },
   { jobName: 'market-check-reminder',       scheduleUtc: '0 7 * * 0',   description: 'Воскресная проверка рынка (овощи)',                 maxAgeHours: 170 },
-  { jobName: 'weekly-request-reminder',     scheduleUtc: '0 9 * * 4',   description: 'Недельная заявка — напоминание клиенту (Чт 12:00 МСК)', maxAgeHours: 168 },
+  { jobName: 'weekly-request-reminder',     scheduleUtc: '0 7,10 * * 5', description: 'Недельная заявка — напоминание клиенту (Пт 10:00 и 13:00 МСК)', maxAgeHours: 168 },
   { jobName: 'weekly-missing-alert',        scheduleUtc: '0 12 * * 5',  description: 'Недельная заявка — алёрт менеджеру если нет заявки (Пт 15:00 МСК)', maxAgeHours: 168 },
   // Закрываем дыру мониторинга: cron бежал, но в реестре его не было → монитор
   // его не отслеживал. 90h: работает Пн–Пт 08:00 МСК, монитор должен пережить

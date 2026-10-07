@@ -1250,3 +1250,141 @@ describe('process-message — подтверждение аномалии пор
     expect(mockSave).not.toHaveBeenCalled()
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────
+// 07.10: «добавьте / уберите N» понимается во всех типах питания.
+// DYNAMIC (ответ на вопрос дня) — mode='add' уходит в saveBotOrders, там
+// итог = заказ + изменение; FIXED/любой клиент без беседы — PendingOrderChange
+// с итогом «было + изменение»; STICKY — sticky.test.ts; WEEKLY — weekly/*.
+// ─────────────────────────────────────────────────────────────────────
+describe('process-message — «добавьте / уберите» (07.10)', () => {
+  it('DYNAMIC: «добавьте 2 обеда» → в saveBotOrders уходит mode=add, клиенту итог', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'CONFIRMED', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParse.mockResolvedValue({
+      type: 'numeric',
+      confidence: 0.95,
+      reason: null,
+      toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 2, mealType: 'LUNCH', mode: 'add' }],
+    })
+    mockSave.mockResolvedValue({
+      savedItems: [
+        { locationId: 'loc_1', locationName: 'Офис', mealType: 'LUNCH', portions: 12, wasUpdate: true, previousPortions: 10 },
+      ],
+      unmatchedItems: [],
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_1', reason: 'ANOMALY_HISTORICAL', priority: 'NORMAL' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 10, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'добавьте 2 обеда' })
+
+    expect(mockSave.mock.calls[0][0].items).toEqual([
+      { locationId: 'loc_1', portions: 2, mealType: 'LUNCH', mode: 'add' },
+    ])
+    expect(res.reply).toBe('Принято, обновили на 12 порций.')
+  })
+
+  it('DYNAMIC: «добавьте 2», а прибавлять не к чему → не «принято», а менеджеру', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockSave.mockResolvedValue({
+      savedItems: [],
+      unmatchedItems: [
+        { locationId: 'loc_1', portions: 2, reason: 'заказа на этот день ещё нет — не к чему прибавить' },
+      ],
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_9', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 10, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'добавьте 2' })
+
+    expect(res).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_9' })
+    expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('не к чему прибавить')
+    expect(mockSendBotMessage).not.toHaveBeenCalled()
+  })
+
+  describe('FIXED / сообщение вне вопроса дня', () => {
+    beforeEach(() => {
+      mockFindConv.mockResolvedValue(null)
+      mockFindClient.mockResolvedValue(makeClient())
+      vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+    })
+
+    it('«на завтра добавьте 1 обед» при заказе 34 → менеджеру предложение 34 → 35', async () => {
+      mockParseChangeIntent.mockResolvedValue({
+        action: 'CHANGE',
+        portions: 1,
+        mode: 'add',
+        date: '2026-06-05',
+        mealType: 'ОБЕД',
+        confidence: 0.96,
+        reason: 'ok',
+      })
+      mockFindActiveOrder.mockResolvedValue({ id: 'ord_1', portions: 34, status: 'CONFIRMED' })
+
+      const res = await processClientMessage({ maxChatId: 'max_1', text: 'на завтра добавьте 1 обед' })
+
+      expect(res.action).toBe('pending_order_change')
+      const pendingArg = mockCreatePendingChange.mock.calls[0][0]
+      expect(pendingArg).toMatchObject({ action: 'EDIT', currentPortions: 34, proposedPortions: 35 })
+      expect(mockNotifyManagerOrderChange.mock.calls[0][0]).toMatchObject({ currentPortions: 34, proposedPortions: 35 })
+    })
+
+    it('«в пятницу на 3 меньше» при заказе 10 → 7', async () => {
+      mockParseChangeIntent.mockResolvedValue({
+        action: 'CHANGE',
+        portions: -3,
+        mode: 'add',
+        date: '2026-06-05',
+        mealType: null,
+        confidence: 0.95,
+        reason: 'ok',
+      })
+      mockFindActiveOrder.mockResolvedValue({ id: 'ord_1', portions: 10, status: 'CONFIRMED' })
+
+      await processClientMessage({ maxChatId: 'max_1', text: 'в пятницу на 3 меньше' })
+
+      expect(mockCreatePendingChange.mock.calls[0][0]).toMatchObject({ proposedPortions: 7 })
+    })
+
+    it('«добавьте 2», а заказа на дату нет → менеджеру в inbox, без предложения', async () => {
+      mockParseChangeIntent.mockResolvedValue({
+        action: 'CHANGE',
+        portions: 2,
+        mode: 'add',
+        date: '2026-06-05',
+        mealType: null,
+        confidence: 0.95,
+        reason: 'ok',
+      })
+      mockFindActiveOrder.mockResolvedValue(null)
+      mockCreateInbox.mockResolvedValue({ id: 'inbox_d', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+
+      const res = await processClientMessage({ maxChatId: 'max_1', text: 'добавьте 2 на завтра' })
+
+      expect(res).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_d' })
+      expect(mockCreatePendingChange).not.toHaveBeenCalled()
+      expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('заказа на 2026-06-05 нет')
+    })
+
+    it('«уберите 5» при заказе 3 → менеджеру, а не минус в заказе', async () => {
+      mockParseChangeIntent.mockResolvedValue({
+        action: 'CHANGE',
+        portions: -5,
+        mode: 'add',
+        date: '2026-06-05',
+        mealType: null,
+        confidence: 0.95,
+        reason: 'ok',
+      })
+      mockFindActiveOrder.mockResolvedValue({ id: 'ord_1', portions: 3, status: 'CONFIRMED' })
+      mockCreateInbox.mockResolvedValue({ id: 'inbox_n', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+
+      await processClientMessage({ maxChatId: 'max_1', text: 'уберите 5 на завтра' })
+
+      expect(mockCreatePendingChange).not.toHaveBeenCalled()
+      expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('в заказе 3')
+    })
+  })
+})

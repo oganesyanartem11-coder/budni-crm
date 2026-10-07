@@ -34,9 +34,11 @@ vi.mock('@/lib/bot/max-users', () => ({
 }))
 vi.mock('@/lib/db/queries/orders', () => ({ findActiveOrder: mockFindActiveOrder }))
 vi.mock('@/app/(app)/orders/actions', () => ({
-  editOrderPortionsCore: mockEditCore,
   createOneTimeOrderCore: mockCreateCore,
 }))
+// EDIT идёт общим путём «число клиента → заказ» (PENDING → подтверждение,
+// 0 → отмена, УПД — пропуск); mockEditCore подменяет setOrderPortionsForClient.
+vi.mock('@/lib/orders/client-portions', () => ({ setOrderPortionsForClient: mockEditCore }))
 
 import {
   createPendingChange,
@@ -109,7 +111,7 @@ describe('confirmPendingChange — EDIT happy', () => {
       portions: 10,
       updatedAt: NOW,
     })
-    mockEditCore.mockResolvedValue({ ok: true, data: { editedAfterLock: false } })
+    mockEditCore.mockResolvedValue({ ok: true, kind: 'updated', orderId: 'o1', prevPortions: 10, prevStatus: 'CONFIRMED' })
 
     const res = await confirmPendingChange({ changeId: 'poc_1', confirmedById: 'mgr1' })
 
@@ -125,7 +127,7 @@ describe('confirmPendingChange — EDIT happy', () => {
     // editCore вызван от лица ADMIN_PRO.
     expect(mockEditCore).toHaveBeenCalledWith(
       { id: 'mgr1', role: 'ADMIN_PRO' },
-      { orderId: 'o1', portions: 12 },
+      { orderId: 'o1', portions: 12, via: 'order_change' },
     )
     // EXECUTED проставлен.
     const updates = mockPrisma.pendingOrderChange.update.mock.calls.map((c) => c[0].data.status)
