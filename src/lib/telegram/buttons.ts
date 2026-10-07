@@ -103,6 +103,16 @@ export function orderChangeButtons(changeId: string): InlineKeyboard {
     .text('❌ Отклонить', `poc:reject:${changeId}`)
 }
 
+/**
+ * Запрос клиента на изменение заказов за период («с 7 по 14 +1 обед»):
+ * одно сообщение — одна пара кнопок на весь план. id — ActivityLog запроса.
+ */
+export function rangeChangeButtons(requestId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text('✅ Подтвердить', `pocr:ok:${requestId}`)
+    .text('❌ Отклонить', `pocr:no:${requestId}`)
+}
+
 /** Отдельный scope для ручной проверки аномального количества порций. */
 export function anomalyConfirmationButtons(confirmationId: string): InlineKeyboard {
   return new InlineKeyboard()

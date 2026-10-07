@@ -400,3 +400,36 @@ describe('parseChangeIntent — «добавьте / уберите» (mode=add,
     expect(await run('+0')).toEqual({ action: 'NONE', reason: 'out_of_range' })
   })
 })
+
+describe('parseChangeIntent — период «с 7 по 14» (07.10)', () => {
+  it('«с 8 по 12 +1 обед» → date + dateTo', async () => {
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: 1, mode: 'add', date: '2026-06-08', dateTo: '2026-06-12', mealType: 'ОБЕД', confidence: 0.96, reason: '' }),
+    )
+    expect(await run('с 8 по 12 +1 обед')).toMatchObject({ date: '2026-06-08', dateTo: '2026-06-12', mode: 'add', portions: 1 })
+  })
+
+  it('начало в прошлом подрезается до сегодня; одна дата → dateTo=null', async () => {
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: 30, mode: 'set', date: '2026-06-01', dateTo: '2026-06-10', mealType: null, confidence: 0.95, reason: '' }),
+    )
+    expect(await run('с 1 по 10 по 30')).toMatchObject({ date: '2026-06-04', dateTo: '2026-06-10' })
+
+    mockCreate.mockResolvedValue(
+      toolResponse({ action: 'CHANGE', portions: 30, mode: 'set', date: '2026-06-05', dateTo: null, mealType: null, confidence: 0.95, reason: '' }),
+    )
+    expect(await run('30 на завтра')).toMatchObject({ date: '2026-06-05', dateTo: null })
+  })
+
+  it('перевёрнутый / прошедший / слишком длинный период → NONE', async () => {
+    const ask = (date: string, dateTo: string) => {
+      mockCreate.mockResolvedValue(
+        toolResponse({ action: 'CHANGE', portions: 1, mode: 'add', date, dateTo, mealType: null, confidence: 0.95, reason: '' }),
+      )
+      return run('x')
+    }
+    expect(await ask('2026-06-10', '2026-06-08')).toEqual({ action: 'NONE', reason: 'incomplete' })
+    expect(await ask('2026-05-20', '2026-05-30')).toEqual({ action: 'NONE', reason: 'past_date' })
+    expect(await ask('2026-06-05', '2026-08-01')).toEqual({ action: 'NONE', reason: 'too_far_future' })
+  })
+})

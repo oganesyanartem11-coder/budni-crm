@@ -14,7 +14,7 @@ import { prisma } from '@/lib/db/prisma'
 
 describe('BORIS_TOOLS подмножества', () => {
   it('BORIS_TOOLS содержит ровно 14 tools', () => {
-    expect(BORIS_TOOLS.length).toBe(14)
+    expect(BORIS_TOOLS.length).toBe(15)
   })
 
   it('BORIS_READ_TOOLS содержит ровно 7 read-tools', () => {
@@ -22,7 +22,7 @@ describe('BORIS_TOOLS подмножества', () => {
   })
 
   it('BORIS_MUTATE_TOOLS содержит ровно 7 mutate-tools', () => {
-    expect(BORIS_MUTATE_TOOLS.length).toBe(7)
+    expect(BORIS_MUTATE_TOOLS.length).toBe(8)
   })
 
   it('READ + MUTATE = BORIS_TOOLS (нет пересечений и пропусков)', () => {
@@ -41,6 +41,7 @@ describe('BORIS_TOOLS подмножества', () => {
     expect(names).toEqual([
       'add_order_note',
       'cancel_order',
+      'change_orders_for_period',
       'create_one_time_order',
       'create_orders_for_period',
       'edit_order_portions',

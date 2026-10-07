@@ -129,9 +129,15 @@ vi.mock('@/lib/order-changes/resolve-target', () => ({
 }))
 vi.mock('@/lib/order-changes/actions', () => ({ createPendingChange: mockCreatePendingChange }))
 vi.mock('@/lib/db/queries/orders', () => ({ findActiveOrder: mockFindActiveOrder }))
+const { mockSubmitRange, mockNotifyRange } = vi.hoisted(() => ({
+  mockSubmitRange: vi.fn(),
+  mockNotifyRange: vi.fn(),
+}))
 vi.mock('@/lib/telegram/handlers/order-change', () => ({
   notifyManagerAboutOrderChange: mockNotifyManagerOrderChange,
+  notifyManagerAboutRangeChange: mockNotifyRange,
 }))
+vi.mock('@/lib/order-changes/range-request', () => ({ submitClientRangeRequest: mockSubmitRange }))
 vi.mock('@/lib/orders/anomaly-confirmations', () => ({
   createOrReusePendingAnomalyConfirmation: mockCreateOrReuseAnomaly,
   ensurePendingAnomalyInbox: mockEnsureAnomalyInbox,
@@ -1386,5 +1392,98 @@ describe('process-message — «добавьте / уберите» (07.10)', ()
       expect(mockCreatePendingChange).not.toHaveBeenCalled()
       expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('в заказе 3')
     })
+  })
+})
+
+
+// ─────────────────────────────────────────────────────────────────────
+// 07.10: изменение на период «с 7 по 14 +1 обед» — для клиента любого типа
+// (FIXED/DYNAMIC вне вопроса дня, DYNAMIC в ответ на вопрос дня).
+// ─────────────────────────────────────────────────────────────────────
+describe('process-message — изменение на период', () => {
+  const RANGE_INTENT = {
+    action: 'CHANGE',
+    portions: 1,
+    mode: 'add',
+    date: '2026-06-08',
+    dateTo: '2026-06-12',
+    mealType: 'ОБЕД',
+    confidence: 0.96,
+    reason: 'ok',
+  }
+  const PLAN = { lines: [{ orderId: 'o1' }], skipped: [], missingDates: [] }
+
+  beforeEach(() => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockSubmitRange.mockResolvedValue({ kind: 'pending', requestId: 'req_1', plan: PLAN })
+    mockNotifyRange.mockResolvedValue(undefined)
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+  })
+
+  it('вне вопроса дня (FIXED): один запрос на весь период, менеджеру одно сообщение', async () => {
+    mockFindConv.mockResolvedValue(null)
+    mockParseChangeIntent.mockResolvedValue(RANGE_INTENT)
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'с 8 по 12 +1 обед' })
+
+    expect(res).toEqual({ reply: null, action: 'pending_order_change', pendingId: 'req_1' })
+    expect(mockSubmitRange.mock.calls[0][0]).toMatchObject({
+      clientId: 'client_1',
+      sourceMaxChatId: 'max_1',
+      request: {
+        clientId: 'client_1',
+        locationId: 'loc_1',
+        mealTypes: ['LUNCH'],
+        dateFrom: '2026-06-08',
+        dateTo: '2026-06-12',
+        mode: 'add',
+        portions: 1,
+      },
+    })
+    expect(mockNotifyRange).toHaveBeenCalledOnce()
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+  })
+
+  it('в ответ на вопрос дня (DYNAMIC): период не становится числом на завтра', async () => {
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParseChangeIntent.mockResolvedValue(RANGE_INTENT)
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'с 8 по 12 +1 обед' })
+
+    expect(res.action).toBe('pending_order_change')
+    expect(mockParse).not.toHaveBeenCalled()
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockPrisma.botConversation.update).toHaveBeenCalledWith({
+      where: { id: 'conv_1' },
+      data: { status: 'AWAITING_MANAGER' },
+    })
+  })
+
+  it('в ответ на вопрос дня, но это не период (LLM: NONE) → обычный ответ числом', async () => {
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParseChangeIntent.mockResolvedValue({ action: 'NONE', reason: 'no' })
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'с 9 утра будем, 10 порций' })
+
+    expect(mockParse).toHaveBeenCalled()
+    expect(mockSubmitRange).not.toHaveBeenCalled()
+  })
+
+  it('обычное число в ответ на вопрос дня — без лишнего LLM-вызова', async () => {
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    await processClientMessage({ maxChatId: 'max_1', text: '12' })
+    expect(mockParseChangeIntent).not.toHaveBeenCalled()
+  })
+
+  it('менять нечего → менеджеру в inbox с причиной', async () => {
+    mockFindConv.mockResolvedValue(null)
+    mockParseChangeIntent.mockResolvedValue(RANGE_INTENT)
+    mockSubmitRange.mockResolvedValue({ kind: 'nothing', plan: PLAN, reason: 'на эти дни заказов нет' })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_r', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'с 8 по 12 +1 обед' })
+
+    expect(res).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_r' })
+    expect(mockCreateInbox.mock.calls.at(-1)![0].humanReason).toContain('нечего менять (на эти дни заказов нет)')
   })
 })

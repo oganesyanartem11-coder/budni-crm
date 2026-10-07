@@ -8,7 +8,13 @@ import {
 } from '@/lib/order-changes/actions'
 import { registerCallbackHandler } from '../callback-router'
 import { notifyAllAdminProDirect, escapeHtml } from '../notify'
-import { orderChangeButtons } from '../buttons'
+import { orderChangeButtons, rangeChangeButtons } from '../buttons'
+import {
+  confirmRangeRequest,
+  formatRangeRequestText,
+  rejectRangeRequest,
+  type RangeRequestPayload,
+} from '@/lib/order-changes/range-request'
 
 /**
  * MEGA-4b (П3): TG-обработка запросов клиента на изменение/создание заказа.
@@ -174,5 +180,67 @@ registerCallbackHandler({
     }
 
     await ctx.answerCallbackQuery()
+  },
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Изменение на период («с 7 по 14 +1 обед»): одно сообщение со всем планом,
+// одна пара кнопок (scope 'pocr', id — ActivityLog запроса).
+// ─────────────────────────────────────────────────────────────────────
+
+export async function notifyManagerAboutRangeChange(params: {
+  requestId: string
+  payload: RangeRequestPayload
+}): Promise<void> {
+  await notifyAllAdminProDirect(escapeHtml(formatRangeRequestText(params.payload)), {
+    replyMarkup: rangeChangeButtons(params.requestId),
+    parseMode: 'HTML',
+  })
+}
+
+registerCallbackHandler({
+  scope: 'pocr',
+  async handle(ctx, action, requestId) {
+    const telegramId = ctx.from?.id
+    const user = telegramId
+      ? await prisma.user.findFirst({
+          where: { telegramChatId: String(telegramId), role: 'ADMIN_PRO', isActive: true },
+          select: { id: true, role: true },
+        })
+      : null
+    if (!user) {
+      await ctx.answerCallbackQuery({ text: 'Только для админов', show_alert: true })
+      return
+    }
+
+    const result =
+      action === 'ok'
+        ? await confirmRangeRequest({ requestId, actor: user })
+        : action === 'no'
+          ? await rejectRangeRequest({ requestId, actor: user })
+          : null
+    if (!result) {
+      await ctx.answerCallbackQuery({ text: 'Неизвестное действие' })
+      return
+    }
+    if (!result.ok) {
+      await ctx.answerCallbackQuery({
+        text: result.reason === 'not_found' ? 'Запрос не найден' : 'Уже обработано',
+        show_alert: true,
+      })
+      return
+    }
+
+    try {
+      await ctx.editMessageText(result.managerText)
+    } catch (err) {
+      console.error('[order-change] range editMessageText failed', err)
+    }
+    if (result.clientReply && result.clientChatId) {
+      await sendBotMessage(result.clientChatId, result.clientReply, { delay: true }).catch((err) =>
+        console.error('[order-change] range client reply failed', err),
+      )
+    }
+    await ctx.answerCallbackQuery({ text: action === 'ok' ? 'Готово' : 'Отклонено' })
   },
 })

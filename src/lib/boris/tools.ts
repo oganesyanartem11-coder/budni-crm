@@ -29,6 +29,15 @@ import {
   formatPortions,
 } from './labels'
 import { resolveClient } from './client-resolver'
+import {
+  formatRangeAmount,
+  formatRangePlanLines,
+  isMultiLocationPlan,
+  planRangeChange,
+  rangeLineLabel,
+  validateRangeRequest,
+  type RangeChangeRequest,
+} from '@/lib/orders/range-change'
 import { toMskDateString } from '@/lib/utils/msk-window'
 
 /**
@@ -900,6 +909,95 @@ const createOrdersForPeriodTool: AgentTool = {
   },
 }
 
+const changeOrdersForPeriodTool: AgentTool = {
+  name: 'change_orders_for_period',
+  description:
+    'Изменить УЖЕ существующие заказы клиента на ДИАПАЗОН дат одним вызовом: «с 7 по 14 +1 обед» ' +
+    '(mode=add, portions=+1), «всю неделю на 2 меньше» (mode=add, portions=-2), «с 7 по 14 по 30» ' +
+    '(mode=set, portions=30). Работает для любого типа питания. Дни без заказа не создаются ' +
+    '(для новых заказов — create_orders_for_period). Требует подтверждения.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      clientId: { type: 'string' },
+      locationId: { type: 'string', description: 'Точка; не указывать — все точки клиента' },
+      dateFrom: { type: 'string', description: 'YYYY-MM-DD, первый день (включительно)' },
+      dateTo: { type: 'string', description: 'YYYY-MM-DD, последний день (включительно)' },
+      mealTypes: {
+        type: 'array',
+        description: 'Приёмы пищи; не указывать — все приёмы',
+        items: { type: 'string', enum: ['BREAKFAST', 'LUNCH', 'DINNER'] },
+      },
+      mode: { type: 'string', enum: ['set', 'add'], description: 'add — прибавить/убавить, set — поставить итог' },
+      portions: { type: 'integer', description: 'mode=add: изменение со знаком (+1, -2); mode=set: итог на день' },
+      weekdays: {
+        type: 'array',
+        description: 'Только эти дни недели (1=Пн … 7=Вс); не указывать — все дни',
+        items: { type: 'integer', minimum: 1, maximum: 7 },
+      },
+    },
+    required: ['clientId', 'dateFrom', 'dateTo', 'mode', 'portions'],
+  },
+  execute: async (rawInput) => {
+    const input = rawInput as {
+      clientId: string
+      locationId?: string
+      dateFrom: string
+      dateTo: string
+      mealTypes?: MealType[]
+      mode: 'set' | 'add'
+      portions: number
+      weekdays?: number[]
+    }
+    const request: RangeChangeRequest = {
+      clientId: input.clientId,
+      locationId: input.locationId ?? null,
+      mealTypes: input.mealTypes?.filter((m) => MEAL_ORDER.includes(m)) ?? null,
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      mode: input.mode === 'add' ? 'add' : 'set',
+      portions: input.portions,
+      weekdays: input.weekdays ?? null,
+    }
+    const invalid = validateRangeRequest(request)
+    if (invalid) return { ok: false, error: invalid }
+
+    const client = await prisma.client.findUnique({ where: { id: input.clientId }, select: { name: true } })
+    if (!client) return { ok: false, error: 'client_not_found' }
+    if (input.locationId) {
+      const location = await prisma.clientLocation.findUnique({
+        where: { id: input.locationId },
+        select: { clientId: true },
+      })
+      if (!location || location.clientId !== input.clientId) return { ok: false, error: 'location_not_found' }
+    }
+
+    const plan = await planRangeChange(request)
+    if (plan.lines.length === 0) {
+      return {
+        ok: false,
+        error: 'Менять нечего',
+        details: formatRangePlanLines(plan),
+      }
+    }
+
+    const multi = isMultiLocationPlan(plan)
+    const actions = plan.lines.map((line) => ({
+      tool: 'apply_range_line',
+      input: {
+        orderId: line.orderId,
+        expected: line.expected,
+        next: line.next,
+        label: rangeLineLabel(line, multi),
+      } as Record<string, unknown>,
+    }))
+    const preview =
+      `${escapeHtml(client.name)}: ${formatRangeAmount(request.mode, request.portions)}\n` +
+      escapeHtml(formatRangePlanLines(plan).join('\n'))
+    return { pending: true, actions, preview }
+  },
+}
+
 function parseYmd(value: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '')
   if (!m) return null
@@ -983,6 +1081,7 @@ const MUTATE_TOOL_NAMES = [
   'restore_order',
   'create_one_time_order',
   'create_orders_for_period',
+  'change_orders_for_period',
   'reschedule_order',
   'add_order_note',
 ] as const
@@ -1002,6 +1101,7 @@ export const BORIS_TOOLS: AgentTool[] = [
   restoreOrderTool,
   createOneTimeOrderTool,
   createOrdersForPeriodTool,
+  changeOrdersForPeriodTool,
   rescheduleOrderTool,
   addOrderNoteTool,
 ]

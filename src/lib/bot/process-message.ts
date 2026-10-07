@@ -36,12 +36,17 @@ import { sendTelegramMessage } from '@/lib/telegram/send'
 import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
 import { formatMskDayMonth } from '@/lib/utils/format'
 import { parseChangeIntent } from '@/lib/bot/parse-change-intent'
-import { extractDeliveryDateFromText } from './extract-delivery-date'
+import { extractDeliveryDateFromText, looksLikeDateRange } from './extract-delivery-date'
 import { handleStickyMessage, isStickyClient } from './sticky'
 import { resolveOrderChangeTarget } from '@/lib/order-changes/resolve-target'
 import { createPendingChange } from '@/lib/order-changes/actions'
 import { findActiveOrder } from '@/lib/db/queries/orders'
-import { notifyManagerAboutOrderChange } from '@/lib/telegram/handlers/order-change'
+import {
+  notifyManagerAboutOrderChange,
+  notifyManagerAboutRangeChange,
+} from '@/lib/telegram/handlers/order-change'
+import { submitClientRangeRequest } from '@/lib/order-changes/range-request'
+import type { ChangeIntent } from '@/lib/bot/parse-change-intent'
 import {
   createOrReusePendingAnomalyConfirmation,
   ensurePendingAnomalyInbox,
@@ -271,6 +276,13 @@ async function handleBotResponse(
   // 7.55: chatId отправителя — отвечаем именно тому, кто написал (multi-user).
   senderChatId: string
 ): Promise<ProcessMessageResult> {
+  // «С 7 по 14 +1 обед» в ответ на вопрос дня: это не число на завтра, а
+  // изменение на период — тем же путём, что и вне вопроса дня.
+  if (looksLikeDateRange(text)) {
+    const range = await tryRangeChangeInConversation(client, conv, text, senderChatId)
+    if (range) return range
+  }
+
   // Дата, явно указанная клиентом, определяет и статистику/аномалию, и запись
   // заказа. Без даты в тексте сохраняется прежний fallback на дату беседы.
   const dateFromText = await extractDeliveryDateFromText(text, new Date())
@@ -1361,6 +1373,22 @@ async function handleSpontaneous(
         return { reply: null, action: 'inbox', inboxItemId: inbox.id }
       }
 
+      // «С 7 по 14 +1 обед» — период: один план на все дни, менеджеру одно
+      // сообщение с кнопками (а не PendingOrderChange на каждый день).
+      if (intent.dateTo) {
+        await promoteToActiveByChatId(senderChatId)
+        return submitRangeChange({
+          client,
+          conversationId: conversation.id,
+          text,
+          senderChatId,
+          intent,
+          locationId: resolveResult.locationId,
+          mealType: resolveResult.mealType,
+          tone: spontaneousAlertTone,
+        })
+      }
+
       const existingOrder = await findActiveOrder({
         clientId: client.id,
         locationId: resolveResult.locationId,
@@ -1522,4 +1550,146 @@ async function handleSpontaneous(
   })
 
   return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────
+// Изменение на период («с 7 по 14 +1 обед», «всю неделю по 30»).
+// ─────────────────────────────────────────────────────────────────────
+
+function availableMealTypesRu(client: ClientWithBotContext) {
+  return Array.from(
+    new Set(
+      client.locations.flatMap((l) =>
+        l.mealConfigs.filter((c) => c.isActive).map((c) => MEAL_TYPE_TO_RU[c.mealType]),
+      ),
+    ),
+  )
+}
+
+/**
+ * Вопрос дня открыт, а клиент пишет период. Не период (LLM сказал NONE или
+ * одна дата) → null, обычная обработка ответа.
+ */
+async function tryRangeChangeInConversation(
+  client: ClientWithBotContext,
+  conv: BotConversation,
+  text: string,
+  senderChatId: string,
+): Promise<ProcessMessageResult | null> {
+  const intent = await parseChangeIntent(text, {
+    clientName: client.name,
+    today: new Date(),
+    availableMealTypes: availableMealTypesRu(client),
+  })
+  if (intent.action !== 'CHANGE' || !intent.dateTo) return null
+
+  const tone = await classifyMessageTone(text).catch(() => 'neutral' as const)
+  await logBotMessage({ clientId: client.id, conversationId: conv.id, direction: 'IN', text, toneLabel: tone })
+  // Ответ на сегодняшний вопрос теперь у менеджера — напоминания не нужны.
+  if (conv.status === 'PENDING') {
+    await prisma.botConversation.update({ where: { id: conv.id }, data: { status: 'AWAITING_MANAGER' } })
+  }
+  await promoteToActiveByChatId(senderChatId)
+
+  const resolveResult = resolveOrderChangeTarget({
+    client: {
+      mealConfigs: client.locations.flatMap((l) =>
+        l.mealConfigs
+          .filter((c) => c.isActive)
+          .map((c) => ({ id: c.id, mealType: c.mealType, locationId: c.locationId, isActive: c.isActive })),
+      ),
+      locations: client.locations.filter((l) => l.isActive).map((l) => ({ id: l.id, isActive: l.isActive })),
+    },
+    parsedMealType: intent.mealType != null ? RU_TO_MEAL_TYPE[intent.mealType] : null,
+  })
+  const alertTone = tone === 'rude' || tone === 'urgent' ? tone : null
+  if (!resolveResult.ok) {
+    return rangeToInbox(client, conv.id, text, `Изменение на период — не смог определить адрес/приём пищи: ${resolveResult.reason}`, alertTone)
+  }
+  return submitRangeChange({
+    client,
+    conversationId: conv.id,
+    text,
+    senderChatId,
+    intent,
+    locationId: resolveResult.locationId,
+    mealType: resolveResult.mealType,
+    tone: alertTone,
+  })
+}
+
+async function submitRangeChange(params: {
+  client: ClientWithBotContext
+  conversationId: string
+  text: string
+  senderChatId: string
+  intent: Extract<ChangeIntent, { action: 'CHANGE' }>
+  locationId: string
+  mealType: MealType
+  tone: 'rude' | 'urgent' | null
+}): Promise<ProcessMessageResult> {
+  const { client, intent } = params
+  const request = {
+    clientId: client.id,
+    locationId: params.locationId,
+    mealTypes: [params.mealType],
+    dateFrom: intent.date,
+    dateTo: intent.dateTo as string,
+    mode: intent.mode,
+    portions: intent.portions,
+  }
+  const submitted = await submitClientRangeRequest({
+    clientId: client.id,
+    clientName: client.name,
+    rawText: params.text,
+    sourceMaxChatId: params.senderChatId,
+    request,
+  })
+  if (submitted.kind === 'nothing') {
+    return rangeToInbox(
+      client,
+      params.conversationId,
+      params.text,
+      `Изменение на период ${intent.date} — ${intent.dateTo}: нечего менять (${submitted.reason})`,
+      params.tone,
+    )
+  }
+  await notifyManagerAboutRangeChange({
+    requestId: submitted.requestId,
+    payload: {
+      clientName: client.name,
+      rawText: params.text,
+      sourceMaxChatId: params.senderChatId,
+      request,
+      plan: submitted.plan,
+    },
+  })
+  return { reply: null, action: 'pending_order_change', pendingId: submitted.requestId }
+}
+
+async function rangeToInbox(
+  client: ClientWithBotContext,
+  conversationId: string,
+  text: string,
+  humanReason: string,
+  tone: 'rude' | 'urgent' | null,
+): Promise<ProcessMessageResult> {
+  const inbox = await createInboxItem({
+    clientId: client.id,
+    conversationId,
+    reason: 'NON_NUMERIC',
+    humanReason,
+    priority: 'NORMAL',
+    clientMessage: text,
+  })
+  await notifyClientSignal({
+    clientId: client.id,
+    messageText: text,
+    inboxItemId: inbox.id,
+    tone,
+    reason: inbox.reason,
+    priority: inbox.priority,
+  }).catch((e) => console.error('[bot] notifyClientSignal failed (range):', e))
+  return { reply: null, action: 'inbox', inboxItemId: inbox.id }
 }

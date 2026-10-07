@@ -23,6 +23,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { BorisMetricSource } from '@prisma/client'
 import { trackBorisCall } from './metrics/track'
+import { applyRangeLine } from '@/lib/orders/range-change'
 import {
   editOrderPortionsCore,
   cancelOrderCore,
@@ -117,6 +118,9 @@ export async function executePendingAction(
         case 'upsert_order_portions':
           r = await upsertOrderPortions(user, a.input)
           break
+        case 'apply_range_line':
+          r = await applyRangeLineAction(user, a.input)
+          break
         default:
           r = { ok: false, error: `unknown_tool:${a.tool}` }
       }
@@ -171,6 +175,25 @@ const UPSERT_KIND_RU: Record<string, string> = {
  * Строка create_orders_for_period: есть заказ на дату/точку/тип → порции,
  * нет → создание (цена из input или конфига). data.label — для итога в TG.
  */
+/**
+ * Строка change_orders_for_period: «было → стало» с проверкой, что заказ не
+ * меняли после плана (второе подтверждение не прибавит ещё раз).
+ */
+async function applyRangeLineAction(
+  user: { id: string; role: UserRole },
+  input: Record<string, unknown>,
+): Promise<{ ok: boolean; error?: string; data?: unknown }> {
+  const expected = Number(input.expected)
+  const next = Number(input.next)
+  const label = `${String(input.label ?? input.orderId)} — ${expected} → ${next}`
+  if (typeof input.orderId !== 'string' || !Number.isInteger(expected) || !Number.isInteger(next) || next < 0) {
+    return { ok: false, error: `${label}: неверные данные` }
+  }
+  const r = await applyRangeLine(user, { orderId: input.orderId, expected, next }, 'boris_range')
+  if (r.ok) return { ok: true, data: { label: r.note ? `${label} (${r.note})` : label } }
+  return { ok: false, error: `${label}: ${r.note}` }
+}
+
 async function upsertOrderPortions(
   user: { id: string; role: UserRole },
   input: Record<string, unknown>,

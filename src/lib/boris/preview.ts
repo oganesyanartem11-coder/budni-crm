@@ -40,6 +40,8 @@ export const TOOL_TITLES: Record<string, string> = {
   create_one_time_order: 'Новый разовый заказ',
   create_orders_for_period: 'Заказы на период',
   upsert_order_portions: 'Заказ на дату',
+  change_orders_for_period: 'Изменение на период',
+  apply_range_line: 'Изменение на период',
   reschedule_order: 'Перенос заказа',
   add_order_note: 'Заметка к заказу',
 }

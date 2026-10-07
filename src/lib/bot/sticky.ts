@@ -14,7 +14,7 @@ import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
-import { hasDateHint } from './extract-delivery-date'
+import { hasDateHint, looksLikeDateRange } from './extract-delivery-date'
 
 const NUMBER_WORD_RE = /(^|[^а-яё])(один|одн[аоу]|дв[аеу]|двое|три|трое|четыр|пят[ьи]|шест|сем[ьи]|восем|девят|десят)/i
 import { logBotMessage } from './log-message'
@@ -72,7 +72,9 @@ export async function handleStickyMessage(
   now: Date = new Date(),
 ): Promise<{ reply: string; changed: boolean } | null> {
   // «уберите одну» / «добавьте два» — число словом тоже число.
-  if (!(/\d/.test(text) || NUMBER_WORD_RE.test(text)) || hasDateHint(text.toLowerCase())) return null
+  if (!(/\d/.test(text) || NUMBER_WORD_RE.test(text)) || hasDateHint(text.toLowerCase()) || looksLikeDateRange(text)) {
+    return null
+  }
 
   const tomorrow = getMskCalendarDayUtc(now, 1)
   const stats = await getClientStats(client.id, tomorrow.getUTCDay())

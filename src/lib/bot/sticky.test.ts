@@ -293,3 +293,11 @@ describe('handleStickyMessage — «добавьте / уберите» (07.10)'
     expect(mockSetPortions).not.toHaveBeenCalled()
   })
 })
+
+describe('handleStickyMessage — период не становится новой постоянной', () => {
+  it('«с 7 по 14 +1» → null (уходит в изменение на период), LLM не зовём', async () => {
+    expect(await handleStickyMessage(makeClient(), 'с 7 по 14 +1', 'c')).toBeNull()
+    expect(await handleStickyMessage(makeClient(), 'всю следующую неделю по 30', 'c')).toBeNull()
+    expect(mockParse).not.toHaveBeenCalled()
+  })
+})

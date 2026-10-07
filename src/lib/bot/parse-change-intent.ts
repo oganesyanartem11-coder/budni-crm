@@ -24,7 +24,9 @@ export type ChangeIntent =
       /** mode='add' — изменение со знаком («добавьте 2» → 2, «уберите 3» → -3). */
       portions: number
       mode: 'set' | 'add'
-      date: string // YYYY-MM-DD МСК
+      date: string // YYYY-MM-DD МСК (для периода — первый день)
+      /** Последний день периода включительно («с 7 по 14»); null — одна дата. */
+      dateTo: string | null
       mealType: MealType | null
       confidence: number
       reason: string
@@ -42,6 +44,7 @@ const CHANGE_TOOL: Anthropic.Messages.Tool = {
       portions: { type: ['number', 'null'] },
       mode: { type: 'string', enum: ['set', 'add'] },
       date: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+      dateTo: { type: ['string', 'null'], pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
       mealType: {
         type: ['string', 'null'],
         enum: ['ЗАВТРАК', 'ОБЕД', 'УЖИН', null],
@@ -66,6 +69,7 @@ function buildSystemPrompt(
 - Количество порций (целое число)
 - Дату (на завтра, в пятницу, 12.06, на 15-е) — конвертируй в YYYY-MM-DD по МСК
 - ОДНУ дату с ОДНИМ числом (не «12 завтра и 14 в пятницу» — это NONE)
+- ИЛИ ПЕРИОД с ОДНИМ изменением на все его дни: «с 7 по 14 +1 обед», «с понедельника по пятницу по 30», «всю следующую неделю на 2 меньше» → date = первый день, dateTo = последний день (включительно). Одна дата → dateTo=null. «С 7-го» без конца периода — dateTo=null (одна дата 7-го не подразумевается — это NONE, если конец не понятен).
 
 Если клиент просит ДОБАВИТЬ или УБРАТЬ порции к уже заказанному («добавьте 2 на завтра», «+1 обед в пятницу», «на 3 меньше завтра», «уберите одну на 08.10») — это тоже CHANGE: mode='add', portions = изменение со знаком (добавить 2 → 2, убрать 3 → -3). Если клиент называет итоговое количество — mode='set'.
 
@@ -94,6 +98,9 @@ Confidence ≥ 0.95 — твёрдо уверен. < 0.85 — обязатель
 9. «завтрак 5 на 06.06» → CHANGE portions=5 date=2026-06-06 mealType=ЗАВТРАК confidence=0.96 mode=set
 10. «на завтра добавьте 2 обеда» (сегодня 04.06) → CHANGE portions=2 mode=add date=2026-06-05 mealType=ОБЕД confidence=0.95
 11. «в пятницу на 3 меньше» (сегодня среда 04.06) → CHANGE portions=-3 mode=add date=2026-06-06 mealType=null confidence=0.95
+12. «с 8 по 12 июня +1 обед» (сегодня 04.06) → CHANGE portions=1 mode=add date=2026-06-08 dateTo=2026-06-12 mealType=ОБЕД confidence=0.96
+13. «на следующей неделе каждый день по 30» (сегодня среда 04.06) → CHANGE portions=30 mode=set date=2026-06-08 dateTo=2026-06-14 mealType=null confidence=0.93
+14. «с понедельника добавьте 2» (без конца) → NONE
 
 ВАЖНО: ты НЕ исполняешь. Только классифицируешь. Менеджер проверит.`
 }
@@ -103,6 +110,7 @@ interface RawIntent {
   portions?: number | null
   mode?: string | null
   date?: string | null
+  dateTo?: string | null
   mealType?: string | null
   confidence?: number
   reason?: string
@@ -192,11 +200,24 @@ export async function parseChangeIntent(
   const todayUtc = getMskCalendarDayUtc(context.today, 0)
   const maxUtc = getMskCalendarDayUtc(context.today, 14)
 
-  if (requestedUtc.getTime() < todayUtc.getTime()) {
-    return NONE('past_date')
-  }
-  if (requestedUtc.getTime() > maxUtc.getTime()) {
-    return NONE('too_far_future')
+  // Период «с 7 по 14»: начало в прошлом подрезаем до сегодня (прошедшие дни
+  // всё равно не меняются), конец — не дальше 31 дня.
+  let startDate = date
+  let dateTo: string | null = null
+  if (typeof raw.dateTo === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.dateTo) && raw.dateTo !== date) {
+    const toUtc = new Date(`${raw.dateTo}T00:00:00.000Z`)
+    if (Number.isNaN(toUtc.getTime()) || toUtc.getTime() < requestedUtc.getTime()) return NONE('incomplete')
+    if (toUtc.getTime() < todayUtc.getTime()) return NONE('past_date')
+    if (toUtc.getTime() > getMskCalendarDayUtc(context.today, 31).getTime()) return NONE('too_far_future')
+    if (requestedUtc.getTime() < todayUtc.getTime()) startDate = todayUtc.toISOString().slice(0, 10)
+    dateTo = raw.dateTo
+  } else {
+    if (requestedUtc.getTime() < todayUtc.getTime()) {
+      return NONE('past_date')
+    }
+    if (requestedUtc.getTime() > maxUtc.getTime()) {
+      return NONE('too_far_future')
+    }
   }
 
   // Тип еды.
@@ -219,7 +240,8 @@ export async function parseChangeIntent(
     action: 'CHANGE',
     portions,
     mode,
-    date,
+    date: startDate,
+    dateTo,
     mealType,
     confidence: conf,
     reason: typeof raw.reason === 'string' ? raw.reason : '',
