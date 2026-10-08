@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { getOrderLegalEntitySnapshot } from '@/lib/orders/legal-entity-snapshot'
-import type { MealType } from '@prisma/client'
+import type { MealType, OrderType } from '@prisma/client'
+import { IN_WORK_STATUSES } from '@/lib/orders/client-portions'
 
 export interface SavedItem {
   locationId: string
@@ -24,7 +25,7 @@ export interface SaveBotOrdersInput {
   /** Активные meal-конфиги, сгруппированные по locationId */
   activeMealConfigsByLocation: Record<
     string,
-    Array<{ mealType: MealType; pricePerPortion: number; locationName: string }>
+    Array<{ mealType: MealType; pricePerPortion: number; locationName: string; orderType?: OrderType }>
   >
   /** Сырой текст клиента — попадает в InboxItem.clientMessage при escalation. */
   clientMessage?: string
@@ -64,6 +65,7 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
     namedMeals.set(item.locationId, set)
   }
   const handled = new Set<string>()
+  const handledPortions = new Map<string, number>()
   const unmatchedItems: SaveBotOrdersResult['unmatchedItems'] = []
 
   for (const item of input.items) {
@@ -72,9 +74,16 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
     // применялось ко ВСЕМ приёмам точки, последнее перетирало обед (75 → 45),
     // а клиенту уходило 6 строк «Повадино — …». Теперь строка с mealType —
     // только свой приём; без mealType — все приёмы, не названные явно.
+    // Без приёма пищи число относится к питаниям, о которых спрашивает бот
+    // (DYNAMIC): FIXED-завтрак на 10 не должен стать «25» от ответа про обед.
+    // Нет DYNAMIC на точке — как раньше, все питания.
+    const unnamed = locationConfigs.filter((c) => !namedMeals.get(item.locationId)?.has(c.mealType))
+    const unnamedDynamic = unnamed.filter((c) => c.orderType === 'DYNAMIC')
     const configs = item.mealType
       ? locationConfigs.filter((c) => c.mealType === item.mealType)
-      : locationConfigs.filter((c) => !namedMeals.get(item.locationId)?.has(c.mealType))
+      : unnamedDynamic.length > 0
+        ? unnamedDynamic
+        : unnamed
     const unmatched = (reason: string) =>
       unmatchedItems.push({
         locationId: item.locationId,
@@ -82,6 +91,10 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
         portions: item.portions,
         reason,
       })
+    if (locationConfigs.length === 0) {
+      unmatched('у клиента нет такой точки или на ней нет питания')
+      continue
+    }
     if (item.mealType && configs.length === 0) {
       unmatched('у точки нет такого приёма пищи')
       continue
@@ -93,7 +106,15 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
     }
     for (const cfg of configs) {
       const key = `${item.locationId}:${cfg.mealType}`
-      if (handled.has(key)) continue
+      if (handled.has(key)) {
+        // «завтра 15, послезавтра 20» с одной датой → два числа на один заказ:
+        // не выбираем молча, отдаём менеджеру.
+        if (handledPortions.get(key) !== item.portions) {
+          unmatched('в сообщении два разных числа для одного приёма пищи')
+        }
+        continue
+      }
+      handledPortions.set(key, item.portions)
       handled.add(key)
       const existing = await prisma.order.findFirst({
         where: {
@@ -103,8 +124,18 @@ export async function saveBotOrders(input: SaveBotOrdersInput): Promise<SaveBotO
           deliveryDate: input.deliveryDate,
           status: { notIn: ['CANCELLED'] },
         },
-        select: { id: true, portions: true, status: true },
+        select: { id: true, portions: true, status: true, updDocumentLink: { select: { id: true } } },
       })
+
+      // Кухня уже готовит / везёт или выписан УПД — ответ клиента сюда не пишем.
+      if (existing && IN_WORK_STATUSES.has(existing.status)) {
+        unmatched('заказ уже в работе у кухни')
+        continue
+      }
+      if (existing?.updDocumentLink) {
+        unmatched('по заказу уже выписан УПД')
+        continue
+      }
 
       // «Добавьте 2» / «на 3 меньше»: итог = что стоит в заказе + изменение.
       // Заказа нет или он ещё без ответа (0 в PENDING) — прибавлять не к чему.

@@ -92,6 +92,15 @@ export async function findLatestBotConv(clientId: string) {
         },
         // Late-ответ: сегодняшняя EXPIRED (помечена cutoff-notice в 16:00).
         { status: 'EXPIRED', createdAt: { gte: todayMskMidnight } },
+        // Сегодняшний вопрос, на который клиент сначала написал «Добрый день»
+        // (ушло менеджеру): следующее число — ответ на него, а не на вчерашний
+        // вопрос. Только беседы, где бот реально спросил (spontaneous-беседы
+        // без вопроса — не сюда).
+        {
+          status: 'AWAITING_MANAGER',
+          createdAt: { gte: todayMskMidnight },
+          messages: { some: { direction: 'OUT' } },
+        },
       ],
     },
     orderBy: { createdAt: 'desc' },

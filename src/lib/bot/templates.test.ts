@@ -64,3 +64,38 @@ describe('formatAcceptedReply — приёмы пищи вместо «Пова�
     ).toBe('Принято: Офис — 10, Склад — 5. Спасибо!')
   })
 })
+
+describe('getReminder14Text — «на завтра» только если доставка завтра (МСК)', () => {
+  it('пятница → понедельник: не «на завтра», а дата', async () => {
+    const { getReminder14Text } = await import('./templates')
+    // пн 18.05.2026 (18 % 7 = 4 → вариант с датой), отправка пт 15.05 14:00 МСК.
+    const monday = new Date('2026-05-18T00:00:00Z')
+    const fridayNow = new Date('2026-05-15T11:00:00Z')
+    const text = getReminder14Text(monday, fridayNow)
+    expect(text).not.toContain('завтра')
+    expect(text).toBe('Сколько порций готовим на 18.05?')
+  })
+
+  it('доставка завтра → «на завтра»', async () => {
+    const { getReminder14Text } = await import('./templates')
+    const thu = new Date('2026-06-04T00:00:00Z')
+    const wedNow = new Date('2026-06-03T11:00:00Z')
+    expect(getReminder14Text(thu, wedNow)).toBe('Сколько порций готовим на завтра?')
+  })
+
+  it('без now — не утверждаем «завтра»', async () => {
+    const { getReminder14Text } = await import('./templates')
+    expect(getReminder14Text(new Date('2026-06-04T00:00:00Z'))).toBe('Сколько порций готовим на 04.06?')
+  })
+
+  it('ни один вариант вопроса/напоминаний не говорит «завтра» про пн из пятницы', async () => {
+    const { getReminder14Text, getReminder1530Text } = await import('./templates')
+    const fridayNow = new Date('2026-05-15T11:00:00Z')
+    for (let d = 18; d < 25; d++) {
+      const delivery = new Date(Date.UTC(2026, 4, d))
+      expect(getReminder14Text(delivery, fridayNow)).not.toContain('завтра')
+      expect(getReminder1530Text(delivery)).not.toContain('завтра')
+      expect(getDailyQuestionText(delivery, fridayNow)).not.toContain('завтра')
+    }
+  })
+})

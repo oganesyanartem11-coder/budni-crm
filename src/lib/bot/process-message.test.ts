@@ -175,7 +175,7 @@ function makeClient(opts: { sameDay?: boolean; cutoffHour?: number; cutoffMinute
         sameDayDelivery: opts.sameDay ?? false,
         cutoffHourMsk: opts.cutoffHour ?? null,
         cutoffMinuteMsk: opts.cutoffMinute ?? null,
-        mealConfigs: [{ mealType: 'LUNCH', pricePerPortion: '300', isActive: true }],
+        mealConfigs: [{ mealType: 'LUNCH', pricePerPortion: '300', isActive: true, orderType: 'DYNAMIC' }],
       },
     ],
   }
@@ -188,8 +188,8 @@ function makeMultiMealClient() {
     locations: client.locations.map((location) => ({
       ...location,
       mealConfigs: [
-        { mealType: 'LUNCH', pricePerPortion: '300', isActive: true },
-        { mealType: 'DINNER', pricePerPortion: '350', isActive: true },
+        { mealType: 'LUNCH', pricePerPortion: '300', isActive: true, orderType: 'DYNAMIC' },
+        { mealType: 'DINNER', pricePerPortion: '350', isActive: true, orderType: 'DYNAMIC' },
       ],
     })),
   }
@@ -1485,5 +1485,110 @@ describe('process-message — изменение на период', () => {
 
     expect(res).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_r' })
     expect(mockCreateInbox.mock.calls.at(-1)![0].humanReason).toContain('нечего менять (на эти дни заказов нет)')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// Аудит 08.10: маршрутизация ответа и защита от записи не туда.
+// ─────────────────────────────────────────────────────────────────────
+describe('process-message — аудит 08.10', () => {
+  it('FIXED-клиент с открытой беседой → не сохраняем сразу, а через менеджера (spontaneous)', async () => {
+    const fixed = makeClient()
+    fixed.locations[0].mealConfigs = [
+      { mealType: 'LUNCH', pricePerPortion: '300', isActive: true, orderType: 'FIXED' },
+    ] as never
+    mockFindClient.mockResolvedValue(fixed)
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'CONFIRMED', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'на завтра 15 вместо 10' })
+
+    expect(mockFindConv).not.toHaveBeenCalled()
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockParseChangeIntent).toHaveBeenCalled()
+  })
+
+  it('«Добрый день», потом «20»: сегодняшняя беседа у менеджера → «20» — первый ответ на неё', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_today',
+      status: 'AWAITING_MANAGER',
+      createdAt: new Date(Date.UTC(2026, 5, 4, 8, 0, 0)),
+      deliveryDate: mskMidnightUtc(2026, 6, 5),
+    })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '20' })
+
+    expect(res.action).toBe('saved')
+    expect(mockPrisma.botConversation.update).toHaveBeenCalledWith({
+      where: { id: 'conv_today' },
+      data: { status: 'CONFIRMED' },
+    })
+  })
+
+  it('число без даты на вчерашний вопрос, доставка по нему сегодня → спрашиваем день, не пишем в закрытый день', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_yday',
+      status: 'CONFIRMED',
+      createdAt: new Date(Date.UTC(2026, 5, 3, 8, 0, 0)),
+      deliveryDate: mskMidnightUtc(2026, 6, 4),
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_s', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 7, 30, 0))) // 10:30 МСК
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '7' })
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(res).toMatchObject({ action: 'inbox', reply: 'Спасибо! Подскажите, пожалуйста, на какой день это количество?' })
+    expect(mockSendBotMessage).toHaveBeenCalledWith('max_1', 'Спасибо! Подскажите, пожалуйста, на какой день это количество?')
+  })
+
+  it('та же ситуация, но клиент назвал день («на завтра 7») → сохраняем на завтра', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({
+      id: 'conv_yday',
+      status: 'CONFIRMED',
+      createdAt: new Date(Date.UTC(2026, 5, 3, 8, 0, 0)),
+      deliveryDate: mskMidnightUtc(2026, 6, 4),
+    })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 7, 30, 0)))
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'на завтра 7' })
+
+    expect(mockSave.mock.calls[0][0].deliveryDate).toEqual(new Date('2026-06-05T00:00:00.000Z'))
+  })
+
+  it('сбой распознавания → сообщение не теряется: inbox HIGH, беседа менеджеру', async () => {
+    mockFindClient.mockResolvedValue(makeClient())
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParse.mockRejectedValue(new Error('overloaded'))
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_e', reason: 'NON_NUMERIC', priority: 'HIGH' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '12' })
+
+    expect(res).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_e' })
+    expect(mockLogBotMessage).toHaveBeenCalledWith(expect.objectContaining({ direction: 'IN', text: '12' }))
+    expect(mockCreateInbox.mock.calls[0][0]).toMatchObject({ priority: 'HIGH' })
+    expect(mockPrisma.botConversation.update).toHaveBeenCalledWith({
+      where: { id: 'conv_1' },
+      data: { status: 'AWAITING_MANAGER' },
+    })
+  })
+
+  it('«добавьте 1» вне вопроса дня → в запрос пишется изменение (+1 дважды = +2 при подтверждении)', async () => {
+    mockFindConv.mockResolvedValue(null)
+    mockFindClient.mockResolvedValue(makeClient())
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE', portions: 1, mode: 'add', date: '2026-06-05', dateTo: null, mealType: null, confidence: 0.95, reason: '',
+    })
+    mockFindActiveOrder.mockResolvedValue({ id: 'ord_1', portions: 10, status: 'CONFIRMED' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'на завтра добавьте 1' })
+
+    expect(mockCreatePendingChange.mock.calls[0][0]).toMatchObject({ proposedPortions: 11, deltaPortions: 1 })
   })
 })

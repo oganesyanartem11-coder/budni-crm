@@ -50,7 +50,7 @@ const CHANGE_TOOL: Anthropic.Messages.Tool = {
         enum: ['ЗАВТРАК', 'ОБЕД', 'УЖИН', null],
       },
       confidence: { type: 'number' },
-      reason: { type: 'string' },
+      reason: { type: 'string', description: 'Одно короткое предложение, до 100 символов' },
     },
     required: ['action', 'confidence', 'reason'],
   },
@@ -138,7 +138,8 @@ export async function parseChangeIntent(
     const client = getAnthropicClient()
     const response = await client.messages.create({
       model: getInboxModel(),
-      max_tokens: 300,
+      // запас: Haiku 5.5 пишет длинный reason, обрыв tool_use = NONE
+      max_tokens: 1000,
       system: systemPrompt,
       tools: [CHANGE_TOOL],
       tool_choice: { type: 'tool', name: 'submit_change_intent' },

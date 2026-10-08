@@ -136,21 +136,26 @@ describe('saveBotOrders — П3 status bump', () => {
     expect(res.savedItems[0].previousPortions).toBeUndefined()
   })
 
-  it('LOCKED, portions 25, клиент шлёт 30 → status НЕ понижается, portions=30, 1 savedItem', async () => {
-    mockPrisma.order.findFirst.mockResolvedValue({
-      id: 'order_1',
-      portions: 25,
-      status: 'LOCKED',
-    })
+  it('LOCKED (кухня уже готовит), клиент шлёт 30 → заказ не трогаем, менеджеру причина', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({ id: 'order_1', portions: 25, status: 'LOCKED' })
 
     const res = await saveBotOrders(makeInput(30))
 
-    expect(mockPrisma.order.update).toHaveBeenCalledTimes(1)
-    const data = mockPrisma.order.update.mock.calls[0][0].data
-    expect(data.portions).toBe(30)
-    // LOCKED не понижается до PENDING и не повышается до CONFIRMED
-    expect(data.status).toBeUndefined()
-    expect(res.savedItems).toHaveLength(1)
+    expect(mockPrisma.order.update).not.toHaveBeenCalled()
+    expect(res.savedItems).toHaveLength(0)
+    expect(res.unmatchedItems[0].reason).toBe('заказ уже в работе у кухни')
+  })
+
+  it('по заказу выписан УПД → не трогаем', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue({
+      id: 'order_1',
+      portions: 25,
+      status: 'CONFIRMED',
+      updDocumentLink: { id: 'upd_1' },
+    })
+    const res = await saveBotOrders(makeInput(30))
+    expect(mockPrisma.order.update).not.toHaveBeenCalled()
+    expect(res.unmatchedItems[0].reason).toBe('по заказу уже выписан УПД')
   })
 })
 
@@ -264,5 +269,41 @@ describe('saveBotOrders — «добавьте / уберите» (mode=add, 07.
     })
     expect(mockPrisma.order.findFirst).not.toHaveBeenCalled()
     expect(r.unmatchedItems[0].reason).toBe('непонятно, к какому приёму пищи прибавить')
+  })
+})
+
+
+describe('saveBotOrders — аудит 08.10', () => {
+  it('«25» без приёма пищи: DYNAMIC-обед 25, FIXED-завтрак (10) не трогаем', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue(null)
+    await saveBotOrders({
+      ...makeInput(25),
+      activeMealConfigsByLocation: {
+        loc_1: [
+          { mealType: 'BREAKFAST', pricePerPortion: 200, locationName: 'Офис', orderType: 'FIXED' },
+          { mealType: 'LUNCH', pricePerPortion: 300, locationName: 'Офис', orderType: 'DYNAMIC' },
+        ],
+      },
+    })
+    expect(mockPrisma.order.create.mock.calls.map((c) => c[0].data.mealType)).toEqual(['LUNCH'])
+  })
+
+  it('два разных числа на один заказ («завтра 15, послезавтра 20» с одной датой) → не выбираем молча', async () => {
+    mockPrisma.order.findFirst.mockResolvedValue(null)
+    const r = await saveBotOrders({
+      ...makeInput(15),
+      items: [
+        { locationId: 'loc_1', portions: 15 },
+        { locationId: 'loc_1', portions: 20 },
+      ],
+    })
+    expect(mockPrisma.order.create).toHaveBeenCalledTimes(1)
+    expect(r.unmatchedItems[0].reason).toBe('в сообщении два разных числа для одного приёма пищи')
+  })
+
+  it('чужая/неизвестная точка → unmatched, а не «Принято» без заказа', async () => {
+    const r = await saveBotOrders({ ...makeInput(5), items: [{ locationId: 'loc_x', portions: 5 }] })
+    expect(mockPrisma.order.create).not.toHaveBeenCalled()
+    expect(r.unmatchedItems[0].reason).toBe('у клиента нет такой точки или на ней нет питания')
   })
 })

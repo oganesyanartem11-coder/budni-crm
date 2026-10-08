@@ -86,7 +86,7 @@ vi.mock('@/lib/telegram/notify', () => ({
   escapeHtml: (s: string) => s,
 }))
 // Не нужны в этих тестах, но импортируются handlers.ts транзитивно.
-vi.mock('@/lib/bot/log-message', () => ({ logBotMessage: vi.fn() }))
+vi.mock('@/lib/bot/log-message', () => ({ logBotMessage: vi.fn(async () => {}) }))
 vi.mock('@/lib/bot/notify-client-signal', () => ({ notifyClientSignal: vi.fn(async () => {}) }))
 vi.mock('@/lib/bot/welcome', () => ({ pickWelcomeKind: vi.fn(), getWelcomeText: vi.fn() }))
 
@@ -342,5 +342,46 @@ describe('WEEKLY routing in handleMessage', () => {
     expect(mockProcessWeekly).not.toHaveBeenCalled()
     expect(mockNotifyApplied).not.toHaveBeenCalled()
     expect(mockProcessClientMessage).toHaveBeenCalledWith({ maxChatId: '888', text: '10' })
+  })
+})
+
+describe('handleMessage — аудит 08.10', () => {
+  function mixedClient() {
+    const c = makeWeeklyClient()
+    c.locations[0].mealConfigs.push({ orderType: 'DYNAMIC', isActive: true, mealType: 'DINNER' })
+    return c
+  }
+
+  it('клиент и с недельной заявкой, и с вопросом дня: «15» → ответ на вопрос дня', async () => {
+    mockFindClient.mockResolvedValue(mixedClient())
+    await handleMessage(makeCtx({ chatId: 777, text: '15' }))
+    expect(mockProcessClientMessage).toHaveBeenCalledWith({ maxChatId: '777', text: '15' })
+    expect(mockParse).not.toHaveBeenCalled()
+  })
+
+  it('тот же клиент: список по дням → недельная заявка', async () => {
+    mockFindClient.mockResolvedValue(mixedClient())
+    await handleMessage(makeCtx({ chatId: 777, text: 'пн 8.06 — 10\nвт 9.06 — 12\nср 10.06 — 11' }))
+    expect(mockParse).toHaveBeenCalled()
+    expect(mockProcessClientMessage).not.toHaveBeenCalled()
+  })
+
+  it('фото от обычного клиента без текста → менеджеру, а не молча в никуда', async () => {
+    mockFindClient.mockResolvedValue(makePlainClient())
+    await handleMessage(makeCtx({ chatId: 888, attachments: [{ type: 'image', payload: { url: 'https://x' } }] }))
+    expect(mockProcessClientMessage).not.toHaveBeenCalled()
+    expect(mockCreateInbox.mock.calls[0][0]).toMatchObject({
+      clientId: 'client_p',
+      humanReason: 'Клиент прислал вложение (image) без текста — посмотрите в MAX',
+    })
+  })
+
+  it('сбой обработки сообщения → inbox HIGH + личка, сообщение не теряется', async () => {
+    mockFindClient.mockResolvedValue(makePlainClient())
+    mockProcessClientMessage.mockRejectedValue(new Error('LLM overloaded'))
+    mockNotifyAdminPro.mockResolvedValue({ sentTo: 1 })
+    await handleMessage(makeCtx({ chatId: 888, text: '12' }))
+    expect(mockCreateInbox.mock.calls[0][0]).toMatchObject({ priority: 'HIGH', clientMessage: '12' })
+    expect(mockNotifyAdminPro).toHaveBeenCalled()
   })
 })

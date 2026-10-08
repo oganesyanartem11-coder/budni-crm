@@ -77,7 +77,7 @@ export async function classifyMessageRelatesToBoris(
     const t0 = Date.now()
     const response = await client.messages.create({
       model: getInboxModel(),
-      max_tokens: 50,
+      max_tokens: 300,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }],
     })

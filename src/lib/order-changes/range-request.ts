@@ -18,10 +18,14 @@ import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
  * Запрос клиента «с 7 по 14 +1 обед» / «всю неделю по 30»: план по
  * существующим заказам → менеджеру одно сообщение с кнопками. Запрос и итог
  * хранятся в ActivityLog (без новой таблицы): REQUESTED — план, RESOLVED —
- * решение менеджера (второе нажатие видит RESOLVED и ничего не делает).
+ * решение менеджера. Гонка двух нажатий (два менеджера / «Подтвердить» и
+ * «Отклонить» одновременно) закрыта атомарным claim: updateMany переводит
+ * сам лог запроса REQUESTED → CLAIMED, выигрывает тот, у кого count=1.
  */
 
 export const RANGE_REQUESTED_ACTION = 'ORDER_RANGE_CHANGE_REQUESTED'
+/** Запрос забран одним нажатием — второе получает already_processed. */
+export const RANGE_CLAIMED_ACTION = 'ORDER_RANGE_CHANGE_CLAIMED'
 export const RANGE_RESOLVED_ACTION = 'ORDER_RANGE_CHANGE_RESOLVED'
 
 export interface RangeRequestPayload {
@@ -93,16 +97,17 @@ async function loadRequest(requestId: string) {
     where: { id: requestId },
     select: { id: true, action: true, entityId: true, payload: true },
   })
-  if (!log || log.action !== RANGE_REQUESTED_ACTION) return null
+  if (!log || (log.action !== RANGE_REQUESTED_ACTION && log.action !== RANGE_CLAIMED_ACTION)) return null
   return { clientId: log.entityId as string, payload: log.payload as unknown as RangeRequestPayload }
 }
 
-async function isResolved(requestId: string): Promise<boolean> {
-  const done = await prisma.activityLog.findFirst({
-    where: { action: RANGE_RESOLVED_ACTION, entityType: 'ActivityLog', entityId: requestId },
-    select: { id: true },
+/** Атомарный claim: true — запрос наш, false — уже забран другим нажатием. */
+async function claimRequest(requestId: string): Promise<boolean> {
+  const claim = await prisma.activityLog.updateMany({
+    where: { id: requestId, action: RANGE_REQUESTED_ACTION },
+    data: { action: RANGE_CLAIMED_ACTION },
   })
-  return done !== null
+  return claim.count === 1
 }
 
 export type ResolveRangeResult =
@@ -122,7 +127,7 @@ export async function confirmRangeRequest(params: {
 }): Promise<ResolveRangeResult> {
   const req = await loadRequest(params.requestId)
   if (!req) return { ok: false, reason: 'not_found' }
-  if (await isResolved(params.requestId)) return { ok: false, reason: 'already_processed' }
+  if (!(await claimRequest(params.requestId))) return { ok: false, reason: 'already_processed' }
   await markResolved(params.requestId, params.actor, 'confirmed')
 
   const { plan } = req.payload
@@ -163,7 +168,7 @@ export async function rejectRangeRequest(params: {
 }): Promise<ResolveRangeResult> {
   const req = await loadRequest(params.requestId)
   if (!req) return { ok: false, reason: 'not_found' }
-  if (await isResolved(params.requestId)) return { ok: false, reason: 'already_processed' }
+  if (!(await claimRequest(params.requestId))) return { ok: false, reason: 'already_processed' }
   await markResolved(params.requestId, params.actor, 'rejected')
   const clientChatId =
     (await getActiveMaxChatIdForClient(req.clientId).catch(() => null)) ?? req.payload.sourceMaxChatId

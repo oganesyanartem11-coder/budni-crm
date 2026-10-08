@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
 
 const ACTION = 'PRODUCTION_SUMMARY_SENT'
 
-async function handler(_request: Request) {
+export async function handler(_request: Request) {
   const now = new Date()
   const todayMsk = mskMidnightUtc(now, 0)
   const tomorrowMsk = mskMidnightUtc(now, 1)
@@ -33,7 +33,7 @@ async function handler(_request: Request) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'already_ran_today' })
   }
 
-  const orders = await prisma.order.findMany({
+  const allOrders = await prisma.order.findMany({
     where: {
       deliveryDate: tomorrowMsk,
       status: { notIn: ['CANCELLED'] },
@@ -51,11 +51,49 @@ async function handler(_request: Request) {
     },
   })
 
+  // 0-порционные PENDING/DRAFT — заглушки генератора под DYNAMIC-вопрос: клиент
+  // ещё не ответил. Это НЕ заказ — в «Завтра: N заказов» и список «Клиент — 0
+  // порций» не попадают; остаются только в «Не ответили» (computeUnconfirmedConfigs
+  // получает полный список и считает их неотвеченными по статусу).
+  const orders = allOrders.filter(
+    (o) => !(o.portions === 0 && (o.status === 'PENDING_CONFIRMATION' || o.status === 'DRAFT')),
+  )
+
+  // "Не ответили" — активные DYNAMIC-конфиги на завтра без отвеченного Order.
+  // same-day точки исключены: их заказ на завтра создаётся и спрашивается только
+  // завтра утром (daily-questions-sameday), сегодня в 16:00 они «не ответили» всегда.
+  const dynamicConfigs = await prisma.clientMealConfig.findMany({
+    where: {
+      isActive: true,
+      orderType: 'DYNAMIC',
+      client: { isActive: true },
+      location: { isActive: true, sameDayDelivery: false },
+    },
+    include: {
+      client: { select: { name: true } },
+      location: { select: { name: true } },
+    },
+  })
+  const activeConfigsForTomorrow = dynamicConfigs.filter((c) => isScheduledForDate(c, tomorrowMsk))
+  // П3-механизм1: матчинг «отвечен» по бизнес-ключу (clientId, locationId, mealType)
+  // вместо sourceConfigId — ручной MANUAL-заказ (sourceConfigId=null) теперь
+  // корректно «закрывает» свой DYNAMIC-конфиг. См. computeUnconfirmedConfigs.
+  const unconfirmedConfigs = computeUnconfirmedConfigs(activeConfigsForTomorrow, allOrders)
+
+  // "Не ответили" — дедуп по клиент+локация.
+  const unconfirmedMap = new Map<string, { clientName: string; locationName: string }>()
+  for (const c of unconfirmedConfigs) {
+    const key = `${c.client.name}::${c.location.name}`
+    if (!unconfirmedMap.has(key))
+      unconfirmedMap.set(key, { clientName: c.client.name, locationName: c.location.name })
+  }
+  const unconfirmedRows = Array.from(unconfirmedMap.values())
+
   const button = productionSummaryButton(tomorrowIso)
   const dateLabel = format(tomorrowMsk, 'EEEEEE, d MMMM', { locale: ru })
 
   // Кейс: на завтра нет заказов.
-  if (orders.length === 0) {
+  if (orders.length === 0 && unconfirmedRows.length === 0) {
     const text =
       `📦 На завтра, <i>${escapeHtml(dateLabel)}</i>\n\n` +
       `Заказов пока нет. Менеджеры — проверьте, всё ли в порядке.`
@@ -86,25 +124,6 @@ async function handler(_request: Request) {
   const uniqueClientIds = new Set(orders.map((o) => o.client.id))
   const uniqueLocationIds = new Set(orders.map((o) => o.location.id))
 
-  // "Не ответили" — активные DYNAMIC-конфиги на завтра без созданного Order.
-  const dynamicConfigs = await prisma.clientMealConfig.findMany({
-    where: {
-      isActive: true,
-      orderType: 'DYNAMIC',
-      client: { isActive: true },
-      location: { isActive: true },
-    },
-    include: {
-      client: { select: { name: true } },
-      location: { select: { name: true } },
-    },
-  })
-  const activeConfigsForTomorrow = dynamicConfigs.filter((c) => isScheduledForDate(c, tomorrowMsk))
-  // П3-механизм1: матчинг «отвечен» по бизнес-ключу (clientId, locationId, mealType)
-  // вместо sourceConfigId — ручной MANUAL-заказ (sourceConfigId=null) теперь
-  // корректно «закрывает» свой DYNAMIC-конфиг. См. computeUnconfirmedConfigs.
-  const unconfirmedConfigs = computeUnconfirmedConfigs(activeConfigsForTomorrow, orders)
-
   // Единый список заказов на завтра (подтверждённые DYNAMIC + фиксированные FIXED),
   // сгруппированный по клиент+локация: несколько mealConfig'ов на одной точке =
   // одна строка с суммарными порциями. Разные локации одного клиента = разные строки.
@@ -126,15 +145,6 @@ async function handler(_request: Request) {
       })
   }
   const orderRows = Array.from(orderMap.values())
-
-  // "Не ответили" — дедуп по клиент+локация.
-  const unconfirmedMap = new Map<string, { clientName: string; locationName: string }>()
-  for (const c of unconfirmedConfigs) {
-    const key = `${c.client.name}::${c.location.name}`
-    if (!unconfirmedMap.has(key))
-      unconfirmedMap.set(key, { clientName: c.client.name, locationName: c.location.name })
-  }
-  const unconfirmedRows = Array.from(unconfirmedMap.values())
 
   const text = formatProductionSummary({
     dateLabel,

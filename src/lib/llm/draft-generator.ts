@@ -46,7 +46,7 @@ ${messagesText}
 
   const response = await client.messages.create({
     model: getInboxModel(),
-    max_tokens: 300,
+    max_tokens: 800,
     system: systemPrompt,
     messages: [{ role: 'user', content: userPrompt }],
   })

@@ -58,6 +58,16 @@ describe('findLatestBotConv — late-ответ ловит сегодняшню�
     })
   })
 
+  it('«Добрый день» → сегодняшняя беседа у менеджера всё ещё ловится (только если бот спрашивал)', async () => {
+    await findLatestBotConv('client1')
+    const arg = mockPrisma.botConversation.findFirst.mock.calls[0][0]
+    expect(arg.where.OR).toContainEqual({
+      status: 'AWAITING_MANAGER',
+      createdAt: { gte: FIXED_TODAY_MSK },
+      messages: { some: { direction: 'OUT' } },
+    })
+  })
+
   it('граница EXPIRED берётся из mskMidnightUtc(now, 0) — старые EXPIRED отсекаются', async () => {
     await findLatestBotConv('client1')
     expect(mockMsk).toHaveBeenCalledWith(expect.any(Date), 0)

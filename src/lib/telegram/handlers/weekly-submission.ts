@@ -245,6 +245,21 @@ async function findAdminPro(telegramId: number | undefined) {
   })
 }
 
+/** «ХАЛВА: » — чтобы после правки было видно, чья заявка. Сбой — пустая строка. */
+async function submissionClientPrefix(submissionId: string): Promise<string> {
+  try {
+    const sub = await prisma.weeklyOrderSubmission.findUnique({
+      where: { id: submissionId },
+      select: { client: { select: { name: true } } },
+    })
+    const name = sub?.client?.name
+    return name ? `${escapeHtml(name)}: ` : ''
+  } catch (err) {
+    console.error('[weekly-submission] load client name failed', err)
+    return ''
+  }
+}
+
 registerCallbackHandler({
   scope: 'wsub',
   async handle(ctx, action, id) {
@@ -264,6 +279,14 @@ registerCallbackHandler({
         console.error('[weekly-submission] editMessageText failed', err)
       }
     }
+    // Снимаем спиннер с кнопки ДО медленной работы (ответ клиенту, правка).
+    const answer = async (args: { text: string; show_alert?: boolean }) => {
+      try {
+        await ctx.answerCallbackQuery(args)
+      } catch (err) {
+        console.error('[weekly-submission] answerCallbackQuery failed', err)
+      }
+    }
 
     if (action === 'apply') {
       const result = await applyReviewedSubmission({ submissionId: id, actor: user })
@@ -274,37 +297,51 @@ registerCallbackHandler({
         })
         return
       }
+      await answer({ text: 'Внесено' })
       const client = await prisma.client.findUnique({
         where: { id: result.clientId },
         select: { name: true },
       })
+      const clientReply = formatClientAppliedReply(result.applied.outcomes, 'Заявку подтвердили')
+      let clientNote = ''
+      if (clientReply) {
+        const chatId = await getActiveMaxChatIdForClient(result.clientId)
+        let sent = false
+        if (chatId) {
+          sent = await sendBotMessage(chatId, clientReply, { delay: false }).then(
+            () => true,
+            (e) => {
+              console.error('[weekly-submission] client reply failed', e)
+              return false
+            },
+          )
+        }
+        clientNote = sent ? '\n\nКлиенту отправлено.' : '\n\n⚠️ Клиенту не отправилось — напиши ему сам.'
+      }
       await edit(
         `✅ ${escapeHtml(client?.name ?? '')}: внесено\n\n` +
           `${formatOutcomeLines(result.applied.outcomes, isMultiLocation(result.applied.outcomes))}` +
-          menuNote(result.applied),
+          menuNote(result.applied) +
+          clientNote,
         result.applied.applyLogId,
       )
-      const clientReply = formatClientAppliedReply(result.applied.outcomes, 'Заявку подтвердили')
-      const chatId = await getActiveMaxChatIdForClient(result.clientId)
-      if (chatId && clientReply) {
-        await sendBotMessage(chatId, clientReply).catch((e) =>
-          console.error('[weekly-submission] client reply failed', e),
-        )
-      }
-      await ctx.answerCallbackQuery({ text: 'Внесено' })
       return
     }
 
     if (action === 'reject') {
       const r = await rejectWeeklySubmission({ submissionId: id, rejectedById: user.id })
+      if (!r.ok) {
+        // Не затираем сообщение: в нём таблица заявки, она нужна для разбора.
+        await answer({ text: 'Уже обработано', show_alert: true })
+        return
+      }
+      await answer({ text: 'Отклонено' })
+      const who = await submissionClientPrefix(id)
       await edit(
-        !r.ok
-          ? 'Уже обработано'
-          : r.keptPrevious
-            ? '❌ Повторная заявка отклонена. Ранее внесённое по этой неделе не трогали.'
-            : '❌ Заявка отклонена, заказы не вносились.',
+        r.keptPrevious
+          ? `❌ ${who}повторная заявка отклонена. Ранее внесённое по этой неделе не трогали.`
+          : `❌ ${who}заявка отклонена, заказы не вносились.`,
       )
-      await ctx.answerCallbackQuery({ text: r.ok ? 'Отклонено' : 'Уже обработано' })
       return
     }
 
@@ -317,14 +354,15 @@ registerCallbackHandler({
         })
         return
       }
+      await answer({ text: 'Отменено' })
+      const who = await submissionClientPrefix(r.submissionId)
       const failed = r.results.filter((x) => !x.ok)
       await edit(
-        `↩️ Внесение отменено: вернули ${r.results.length - failed.length} заказ(ов) к прежним значениям.` +
+        `↩️ ${who}внесение отменено: вернули ${r.results.length - failed.length} заказ(ов) к прежним значениям.` +
           (failed.length
             ? `\n⚠️ Не откатили: ${failed.map((f) => `${f.orderId} (${escapeHtml(f.note ?? '')})`).join(', ')} — свяжись с шефом.`
             : ''),
       )
-      await ctx.answerCallbackQuery({ text: 'Отменено' })
       return
     }
 
@@ -334,8 +372,10 @@ registerCallbackHandler({
         submissionId: id,
         cancelledById: user.id,
       })
+      await answer({ text: 'Готово' })
+      const who = await submissionClientPrefix(id)
       await edit(
-        '❌ Заявка отменена. Откатили ' +
+        `❌ ${who}заявка отменена. Откатили ` +
           cancelled +
           ' заказов в DRAFT.' +
           (notCancelled.length
@@ -344,7 +384,6 @@ registerCallbackHandler({
               ' — свяжись с шефом.'
             : ''),
       )
-      await ctx.answerCallbackQuery({ text: 'Готово' })
       return
     }
 

@@ -5,6 +5,8 @@ import { getDailyQuestionText } from '@/lib/bot/templates'
 import { getEarliestSameDayCutoff, formatCutoff } from '@/lib/utils/cutoff'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
+import { isScheduledForDate } from '@/lib/orders/generate-orders'
+import type { MealType, OrderStatus } from '@prisma/client'
 
 /**
  * Общее ядро для cron'ов daily-questions и daily-questions-sameday.
@@ -27,7 +29,25 @@ export interface RunResult {
   skipped_not_onboarded: number
   skipped_existing: number
   skipped_no_active_day: number
+  /** Число на целевую дату уже стоит (клиент написал раньше / менеджер / Борис). */
+  skipped_already_answered: number
+  /** Повторная отправка на conv, где вопрос раньше не ушёл (send упал). */
+  resent_unsent: number
   errors: ErrorEntry[]
+}
+
+/**
+ * «Same-day клиент» = есть АКТИВНАЯ same-day локация, на которой есть активное
+ * DYNAMIC-питание (только про такие локации бот спрашивает утром о сегодня).
+ * Деактивированная same-day точка или same-day точка только с FIXED-питанием
+ * клиента same-day НЕ делают — иначе его спрашивали бы в 07:40 о сегодня и
+ * никогда о завтра. Один предикат на выбор кандидатов обоих cron'ов и на
+ * исключения в напоминаниях / cutoff-notice / production-summary.
+ */
+export const SAME_DAY_DYNAMIC_LOCATION: Prisma.ClientLocationWhereInput = {
+  sameDayDelivery: true,
+  isActive: true,
+  mealConfigs: { some: { orderType: 'DYNAMIC', isActive: true } },
 }
 
 /**
@@ -45,11 +65,80 @@ export interface RunResult {
 export function buildCandidatesWhere(sameDayOnly: boolean): Prisma.ClientWhereInput {
   return {
     isActive: true,
-    mealConfigs: { some: { orderType: 'DYNAMIC', isActive: true } },
+    // DYNAMIC-питание только на активной точке (генератор неактивные не трогает).
+    mealConfigs: { some: { orderType: 'DYNAMIC', isActive: true, location: { isActive: true } } },
     locations: sameDayOnly
-      ? { some: { sameDayDelivery: true } }
-      : { none: { sameDayDelivery: true } },
+      ? { some: SAME_DAY_DYNAMIC_LOCATION }
+      : { none: SAME_DAY_DYNAMIC_LOCATION },
   }
+}
+
+/**
+ * Статусы, при которых число на дату уже «стоит»: подтверждено или дальше по
+ * конвейеру. PENDING/DRAFT (0-заглушки генератора) и CANCELLED — не ответ.
+ */
+const SETTLED_ORDER_STATUSES: ReadonlySet<OrderStatus> = new Set<OrderStatus>([
+  'CONFIRMED',
+  'LOCKED',
+  'IN_PRODUCTION',
+  'OUT_FOR_DELIVERY',
+  'DELIVERED',
+])
+
+export interface OrderKey {
+  locationId: string
+  mealType: MealType
+}
+
+/**
+ * Чистая функция: по КАЖДОМУ ключу (точка × приём пищи) есть заказ с числом > 0
+ * в статусе CONFIRMED или дальше. Пустой список ключей → false (спрашивать).
+ */
+export function allKeysSettled(
+  keys: OrderKey[],
+  orders: Array<{ locationId: string; mealType: MealType; portions: number; status: OrderStatus }>,
+): boolean {
+  if (keys.length === 0) return false
+  return keys.every((k) =>
+    orders.some(
+      (o) =>
+        o.locationId === k.locationId &&
+        o.mealType === k.mealType &&
+        o.portions > 0 &&
+        SETTLED_ORDER_STATUSES.has(o.status),
+    ),
+  )
+}
+
+async function loadOrdersForKeys(clientId: string, deliveryDate: Date) {
+  return prisma.order.findMany({
+    where: { clientId, deliveryDate, status: { in: [...SETTLED_ORDER_STATUSES] } },
+    select: { locationId: true, mealType: true, portions: true, status: true },
+  })
+}
+
+/**
+ * Число на дату уже дано по всем DYNAMIC-питаниям клиента на эту дату
+ * (клиент написал «на завтра 7» утром, менеджер/Борис поставил вручную).
+ * Тогда вопрос, напоминания и «приём закрыт» ему не нужны.
+ * `keys` — если уже известны (из getNextActiveDayForClient), иначе грузим сами.
+ */
+export async function isDeliveryDateAnswered(
+  clientId: string,
+  deliveryDate: Date,
+  keys?: OrderKey[],
+): Promise<boolean> {
+  let k = keys
+  if (!k) {
+    const configs = await prisma.clientMealConfig.findMany({
+      where: { clientId, isActive: true, orderType: 'DYNAMIC', location: { isActive: true } },
+    })
+    k = configs
+      .filter((c) => isScheduledForDate(c, deliveryDate))
+      .map((c) => ({ locationId: c.locationId, mealType: c.mealType }))
+  }
+  if (k.length === 0) return false
+  return allKeysSettled(k, await loadOrdersForKeys(clientId, deliveryDate))
 }
 
 export type TargetDateMode = 'next-active' | 'today-only'
@@ -81,7 +170,14 @@ export interface RunDailyQuestionsOptions {
 async function resolveTargetDate(
   clientId: string,
   opts: RunDailyQuestionsOptions
-): Promise<Date | null> {
+): Promise<{ date: Date; keys: OrderKey[] } | null> {
+  const toResult = (next: Awaited<ReturnType<typeof getNextActiveDayForClient>>) =>
+    next
+      ? {
+          date: next.date,
+          keys: next.configs.map((c) => ({ locationId: c.locationId, mealType: c.mealType })),
+        }
+      : null
   if (opts.targetMode === 'today-only') {
     // sameDay: спрашиваем строго про сегодня. Используем тот же scheduler,
     // что и обычный cron, но стартуем поиск с сегодня и принимаем результат
@@ -89,10 +185,9 @@ async function resolveTargetDate(
     // по расписанию клиента, и same-day-вопрос неуместен).
     const next = await getNextActiveDayForClient(clientId, opts.todayMsk)
     if (!next) return null
-    return next.date.getTime() === opts.todayMsk.getTime() ? next.date : null
+    return next.date.getTime() === opts.todayMsk.getTime() ? toResult(next) : null
   }
-  const next = await getNextActiveDayForClient(clientId, opts.searchFrom)
-  return next ? next.date : null
+  return toResult(await getNextActiveDayForClient(clientId, opts.searchFrom))
 }
 
 /**
@@ -123,6 +218,8 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
     skipped_not_onboarded: 0,
     skipped_existing: 0,
     skipped_no_active_day: 0,
+    skipped_already_answered: 0,
+    resent_unsent: 0,
     errors: [],
   }
 
@@ -135,22 +232,40 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
         continue
       }
 
-      const targetDate = await resolveTargetDate(client.id, opts)
-      if (!targetDate) {
+      const target = await resolveTargetDate(client.id, opts)
+      if (!target) {
         result.skipped_no_active_day++
         result.errors.push({ clientName: client.name, reason: 'no_active_day' })
         console.log(`[${opts.label}] no active target day: ${client.name}`)
         continue
       }
+      const targetDate = target.date
 
       const existing = await prisma.botConversation.findFirst({
         where: { clientId: client.id, deliveryDate: targetDate },
-        select: { id: true },
+        select: { id: true, status: true, messages: { select: { id: true }, take: 1 } },
       })
-      if (existing) {
+      // Conv есть, но в ней ни одного сообщения и она PENDING — прошлый прогон
+      // создал её, а sendBotMessage упал. Это «ещё не спросили»: шлём вопрос в
+      // ЭТУ же conv (новую не создаём — @@unique([clientId, deliveryDate])).
+      const unsentConv =
+        existing && existing.status === 'PENDING' && existing.messages.length === 0 ? existing : null
+      if (existing && !unsentConv) {
         result.skipped_existing++
         console.log(
           `[${opts.label}] skip existing conversation: ${client.name} @ ${targetDate.toISOString()}`
+        )
+        continue
+      }
+
+      // Число на эту дату уже стоит по всем DYNAMIC-питаниям (клиент написал
+      // заранее «на завтра 7», менеджер/Борис поставил) — не спрашиваем. Conv
+      // не создаём → напоминания 14:00/15:30 и «приём закрыт» 16:00 (работают
+      // по PENDING-conv) его тоже не тронут.
+      if (await isDeliveryDateAnswered(client.id, targetDate, target.keys)) {
+        result.skipped_already_answered++
+        console.log(
+          `[${opts.label}] skip already answered: ${client.name} @ ${targetDate.toISOString()}`
         )
         continue
       }
@@ -174,14 +289,16 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
         continue
       }
 
-      const conversation = await prisma.botConversation.create({
-        data: {
-          clientId: client.id,
-          deliveryDate: targetDate,
-          status: 'PENDING',
-          questionVariant: String(variantIdx),
-        },
-      })
+      const conversation =
+        unsentConv ??
+        (await prisma.botConversation.create({
+          data: {
+            clientId: client.id,
+            deliveryDate: targetDate,
+            status: 'PENDING',
+            questionVariant: String(variantIdx),
+          },
+        }))
 
       await sendBotMessage(chatId, text, { delay: false })
 
@@ -195,7 +312,10 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
       })
 
       result.sent++
-      console.log(`[${opts.label}] sent to ${client.name} (target=${targetDate.toISOString()})`)
+      if (unsentConv) result.resent_unsent++
+      console.log(
+        `[${opts.label}] ${unsentConv ? 're-sent (prev send failed)' : 'sent'} to ${client.name} (target=${targetDate.toISOString()})`
+      )
     } catch (err) {
       // Race condition по @@unique([clientId, deliveryDate]) — клиент только что сам написал.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {

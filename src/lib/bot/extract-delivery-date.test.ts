@@ -28,7 +28,7 @@ describe('extractDateDeterministic (баг 08.10, «Промышленная т�
     expect(extractDateDeterministic(text, THU)).toBe(expected)
   })
 
-  it.each(['7 обедов', 'Обед 75, завтрак и ужин 45', 'нас будет 12', 'средний 5', 'к 12.30 привезите 5'])(
+  it.each(['7 обедов', 'Обед 75, завтрак и ужин 45', 'нас будет 12', 'средний 5', 'к 12.30 привезите 5', 'к 12.10 привезите 5', 'до 12.10 — 5'])(
     'без даты: %s',
     (text) => {
       expect(extractDateDeterministic(text, THU)).toBeNull()

@@ -1,5 +1,20 @@
-import { describe, it, expect } from 'vitest'
-import { resolveTargetDate, planConfigDeliveryDates } from './generate-orders'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+const { mockPrisma } = vi.hoisted(() => ({
+  mockPrisma: {
+    clientMealConfig: { findMany: vi.fn() },
+    order: { findMany: vi.fn(), createMany: vi.fn() },
+    activityLog: { findMany: vi.fn(), create: vi.fn() },
+  },
+}))
+vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
+
+import {
+  resolveTargetDate,
+  planConfigDeliveryDates,
+  selectBlockingOrders,
+  generateFixedOrdersForRange,
+} from './generate-orders'
 import type { ClientMealConfig } from '@prisma/client'
 
 /**
@@ -114,5 +129,105 @@ describe('planConfigDeliveryDates (7.41 range)', () => {
       false, now, DAYS,
     )
     expect(isoDates(dates)).toEqual(['2026-06-08', '2026-06-10', '2026-06-12'])
+  })
+})
+
+/**
+ * Отменённый заказ не воскрешается ночным прогоном, если отмена — решение
+ * «не доставлять» (лог ORDER_CANCELLED / ORDER_DECLINED). Каскадная отмена
+ * архивации/деактивации питания (без per-order лога) НЕ блокирует — после
+ * реактивации генератор снова заполняет горизонт.
+ */
+describe('selectBlockingOrders', () => {
+  const orders = [
+    { id: 'live', status: 'CONFIRMED' },
+    { id: 'pending', status: 'PENDING_CONFIRMATION' },
+    { id: 'manualCancel', status: 'CANCELLED' },
+    { id: 'archiveCancel', status: 'CANCELLED' },
+  ]
+  it('живые блокируют всегда, отменённые — только с логом решения', () => {
+    const ids = selectBlockingOrders(orders, new Set(['manualCancel'])).map((o) => o.id)
+    expect(ids).toEqual(['live', 'pending', 'manualCancel'])
+  })
+})
+
+describe('generateFixedOrdersForRange — отменённые заказы', () => {
+  // пн 2026-06-08 10:00 МСК → горизонт 1 день = вт 2026-06-09.
+  const NOW = new Date('2026-06-08T07:00:00.000Z')
+  const TUE = new Date('2026-06-09T00:00:00.000Z')
+
+  const config = {
+    id: 'cfg1',
+    clientId: 'c1',
+    mealType: 'LUNCH',
+    orderType: 'FIXED',
+    fixedPortions: 10,
+    pricePerPortion: 300,
+    scheduleType: 'DAILY',
+    scheduleData: null,
+    validFrom: null,
+    validTo: null,
+    client: { id: 'c1', isActive: true, defaultOurLegalEntityId: null, defaultOurLegalEntity: null },
+    location: {
+      id: 'l1',
+      isActive: true,
+      packaging: 'BULK',
+      sameDayDelivery: false,
+      cutoffHourMsk: null,
+      cutoffMinuteMsk: null,
+    },
+  }
+  const cancelledOrder = {
+    id: 'o1',
+    status: 'CANCELLED',
+    clientId: 'c1',
+    locationId: 'l1',
+    mealType: 'LUNCH',
+    deliveryDate: TUE,
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    vi.clearAllMocks()
+    mockPrisma.clientMealConfig.findMany.mockResolvedValue([config])
+    mockPrisma.order.createMany.mockResolvedValue({ count: 1 })
+    mockPrisma.activityLog.create.mockResolvedValue({})
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('менеджер отменил заказ (ORDER_CANCELLED) → не воссоздаём', async () => {
+    mockPrisma.order.findMany.mockResolvedValue([cancelledOrder])
+    mockPrisma.activityLog.findMany.mockResolvedValue([{ entityId: 'o1' }])
+
+    const stats = await generateFixedOrdersForRange(TUE, 1, {})
+
+    expect(mockPrisma.order.createMany).not.toHaveBeenCalled()
+    expect(stats.created).toBe(0)
+    expect(stats.skippedExisting).toBe(1)
+    const logWhere = mockPrisma.activityLog.findMany.mock.calls[0][0].where
+    expect(logWhere.entityId).toEqual({ in: ['o1'] })
+    expect(logWhere.action.in).toEqual(['ORDER_CANCELLED', 'ORDER_DECLINED'])
+  })
+
+  it('отмена каскадом архивации/деактивации (без лога) → после реактивации заказ создаётся', async () => {
+    mockPrisma.order.findMany.mockResolvedValue([cancelledOrder])
+    mockPrisma.activityLog.findMany.mockResolvedValue([])
+
+    const stats = await generateFixedOrdersForRange(TUE, 1, {})
+
+    expect(stats.created).toBe(1)
+    const data = mockPrisma.order.createMany.mock.calls[0][0].data
+    expect(data[0]).toMatchObject({ clientId: 'c1', locationId: 'l1', mealType: 'LUNCH', portions: 10 })
+    expect(data[0].deliveryDate.toISOString()).toBe(TUE.toISOString())
+  })
+
+  it('живой заказ на ключ → не дублируем; нет отменённых → ActivityLog не читаем', async () => {
+    mockPrisma.order.findMany.mockResolvedValue([{ ...cancelledOrder, status: 'CONFIRMED' }])
+
+    const stats = await generateFixedOrdersForRange(TUE, 1, {})
+
+    expect(stats.created).toBe(0)
+    expect(mockPrisma.activityLog.findMany).not.toHaveBeenCalled()
   })
 })

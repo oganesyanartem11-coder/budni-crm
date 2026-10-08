@@ -40,6 +40,8 @@ export interface CreatePendingChangeParams {
   mealType: MealType
   action: 'EDIT' | 'CREATE'
   proposedPortions: number
+  /** «Добавьте N»: изменение со знаком — итог пересчитается при подтверждении. */
+  deltaPortions?: number | null
   currentOrderId?: string
   currentPortions?: number | null
   sourceMaxChatId: string
@@ -64,6 +66,7 @@ export async function createPendingChange(
       mealType: params.mealType,
       action: params.action,
       proposedPortions: params.proposedPortions,
+      deltaPortions: params.deltaPortions ?? null,
       currentOrderId: params.currentOrderId ?? null,
       currentPortions: params.currentPortions ?? null,
       sourceMaxChatId: params.sourceMaxChatId,
@@ -131,7 +134,9 @@ export async function confirmPendingChange(params: {
       select: { status: true, expiresAt: true },
     })
     if (!existing) return { ok: false, reason: 'already_processed' }
-    if (existing.status === 'PENDING' && existing.expiresAt < now) {
+    // Протух (cron уже пометил EXPIRED или ещё не успел) — честно «истёк»,
+    // а не «уже обработано»: менеджер решил бы, что заказ изменён.
+    if (existing.status === 'EXPIRED' || (existing.status === 'PENDING' && existing.expiresAt < now)) {
       return { ok: false, reason: 'expired' }
     }
     return { ok: false, reason: 'already_processed' }
@@ -169,6 +174,9 @@ export async function confirmPendingChange(params: {
 
   let resolvedAction: 'EDIT' | 'CREATE' = change.action
   let orderId: string | null = null
+  let newPortions = change.proposedPortions
+
+  try {
 
   // 3. EDIT (если есть currentOrderId).
   if (change.action === 'EDIT' && change.currentOrderId) {
@@ -186,12 +194,23 @@ export async function confirmPendingChange(params: {
       await markFailed('order_now_locked')
       return { ok: false, reason: 'order_now_locked' }
     } else {
+      if (change.deltaPortions != null) {
+        const unanswered =
+          active.portions === 0 && (active.status === 'PENDING_CONFIRMATION' || active.status === 'DRAFT')
+        const total = active.portions + change.deltaPortions
+        if (unanswered || total < 0) {
+          const why = unanswered ? 'клиент ещё не назвал число — не к чему прибавить' : `в заказе ${active.portions}, убрать ${-change.deltaPortions} нельзя`
+          await markFailed(why)
+          return { ok: false, reason: 'edit_failed', details: why }
+        }
+        newPortions = total
+      }
       // Общий путь «число клиента → заказ»: PENDING (ещё без ответа) →
       // подтверждаем с числом, 0 («уберите все») → отмена, УПД — не трогаем.
       // Голый editOrderPortionsCore падал на PENDING-заказах.
       const result = await setOrderPortionsForClient(actor, {
         orderId: active.id,
-        portions: change.proposedPortions,
+        portions: newPortions,
         via: 'order_change',
       })
       if (!result.ok) {
@@ -204,6 +223,11 @@ export async function confirmPendingChange(params: {
   }
 
   // 4. CREATE (явный CREATE или EDIT-fallback).
+  if (resolvedAction === 'CREATE' && orderId === null && change.deltaPortions != null) {
+    const why = 'заказа на эту дату уже нет — не к чему прибавить'
+    await markFailed(why)
+    return { ok: false, reason: 'edit_failed', details: why }
+  }
   if (resolvedAction === 'CREATE' && orderId === null) {
     const result = await createOneTimeOrderCore(actor, {
       clientId: change.clientId,
@@ -223,6 +247,13 @@ export async function confirmPendingChange(params: {
     }
     orderId = result.data.orderId
   }
+  } catch (err) {
+    // Не оставляем запрос в CONFIRMED навсегда (кнопка потом говорила бы
+    // «уже обработано», хотя ничего не применилось).
+    const detail = err instanceof Error ? err.message : String(err)
+    await markFailed(detail).catch(() => {})
+    return { ok: false, reason: 'edit_failed', details: detail }
+  }
 
   // orderId всегда установлен на этом этапе (EDIT-успех или CREATE-успех).
   if (orderId === null) {
@@ -234,7 +265,6 @@ export async function confirmPendingChange(params: {
   await markExecuted()
 
   // 6. Текст автоответа клиенту.
-  const newPortions = change.proposedPortions
   const replyText =
     resolvedAction === 'EDIT'
       ? `Обновили, теперь ${newPortions} порций на ${dateStr}.`

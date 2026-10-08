@@ -25,6 +25,7 @@ import { buildMultiActionPreview, type PendingActionForPreview } from './preview
 import { trackBorisCall } from './metrics/track'
 import { BORIS_HISTORY_WINDOW, BORIS_CONVERSATION_TTL_MINUTES } from './config'
 import { prisma } from '@/lib/db/prisma'
+import { escapeHtml } from '@/lib/telegram/notify'
 import { BorisMetricSource, type BorisConversation, type Prisma, type UserRole } from '@prisma/client'
 import type Anthropic from '@anthropic-ai/sdk'
 
@@ -297,7 +298,8 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
         labels = clientIds
       }
       preview =
-        `⚠️ В плане заказы РАЗНЫХ клиентов: ${labels.join(', ')}. Подтверди осознанно.\n\n` +
+        // preview уходит с parse_mode=HTML — имена клиентов экранируем.
+        `⚠️ В плане заказы РАЗНЫХ клиентов: ${labels.map(escapeHtml).join(', ')}. Подтверди осознанно.\n\n` +
         preview
     }
 

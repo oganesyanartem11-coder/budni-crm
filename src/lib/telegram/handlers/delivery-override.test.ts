@@ -5,13 +5,18 @@ const {
   mockRegister,
   mockRequireTelegramUser,
   mockResolveCore,
+  mockFindRequest,
 } = vi.hoisted(() => ({
+  mockFindRequest: vi.fn(),
   mockRegister: vi.fn(),
   mockRequireTelegramUser: vi.fn(),
   mockResolveCore: vi.fn(),
 }))
 
 vi.mock('../callback-router', () => ({ registerCallbackHandler: mockRegister }))
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: { deliveryOverrideRequest: { findUnique: mockFindRequest } },
+}))
 vi.mock('../identify-user', () => ({ requireTelegramUser: mockRequireTelegramUser }))
 vi.mock('@/lib/delivery/delivery-override', () => ({
   resolveDeliveryOverrideRequestCore: mockResolveCore,
@@ -43,6 +48,11 @@ function context() {
 beforeEach(() => {
   vi.clearAllMocks()
   mockRegister.mockClear()
+  mockFindRequest.mockResolvedValue({
+    courierNameSnapshot: 'Иван',
+    resolvedByNameSnapshot: 'Мария',
+    stop: { clientNameSnapshot: 'ХАЛВА', locationNameSnapshot: 'Офис' },
+  })
   // Re-register captured at module import is restored from Vitest mock history
   // below when needed through the original first call snapshot.
 })
@@ -84,9 +94,12 @@ describe('delivery override Telegram callback', () => {
       now,
     })
     expect(ctx.editMessageText).toHaveBeenCalledWith(
-      expect.stringContaining('Доставка подтверждена'),
+      '✅ Доставка подтверждена менеджером.\nХАЛВА · Офис, курьер Иван. Решение: Мария.',
     )
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Готово' })
+    const answer = ctx.answerCallbackQuery as unknown as ReturnType<typeof vi.fn>
+    const edit = ctx.editMessageText as unknown as ReturnType<typeof vi.fn>
+    expect(answer.mock.invocationCallOrder[0]).toBeLessThan(edit.mock.invocationCallOrder[0])
     vi.useRealTimers()
   })
 
@@ -112,5 +125,22 @@ describe('delivery override Telegram callback', () => {
     await registeredHandler.handle(ctx, 'approve', 'override-1')
 
     expect(ctx.editMessageText).toHaveBeenCalledWith(expect.stringContaining('истёк'))
+  })
+
+  it('context load failure still edits with the bare status', async () => {
+    const ctx = context()
+    mockRequireTelegramUser.mockResolvedValue(manager)
+    mockFindRequest.mockRejectedValue(new Error('db'))
+    mockResolveCore.mockResolvedValue({
+      requestId: 'override-1',
+      status: 'REJECTED',
+      stopDelivered: false,
+      idempotent: true,
+    })
+
+    await registeredHandler.handle(ctx, 'reject', 'override-1')
+
+    expect(ctx.editMessageText).toHaveBeenCalledWith('❌ Запрос отклонён менеджером.')
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Уже обработано' })
   })
 })

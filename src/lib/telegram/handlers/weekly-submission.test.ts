@@ -85,6 +85,7 @@ beforeEach(() => {
   mockPrisma.client.findUnique.mockReset().mockResolvedValue({ name: 'ХАЛВА' })
   Object.values(mockActions).forEach((f) => f.mockReset())
   mockSendBot.mockReset().mockResolvedValue(undefined)
+  mockPrisma.weeklyOrderSubmission.findUnique.mockReset().mockResolvedValue({ client: { name: 'ХАЛВА' } })
 })
 
 describe('форматтеры', () => {
@@ -225,11 +226,28 @@ describe("callback scope 'wsub'", () => {
     expect(text).toContain('✅ ХАЛВА: внесено')
     expect(text).toContain('• пт 2 окт — дата уже прошла')
     expect(JSON.stringify(opts.reply_markup)).toContain('wsub:undo:log_1')
+    expect(text).toContain('Клиенту отправлено.')
+    // Клиенту — без «живой» задержки 15–30 с: менеджер ждёт итог на кнопке.
     expect(mockSendBot).toHaveBeenCalledWith(
       'max_chat_1',
       'Заявку подтвердили: пн 5 окт — 30, вт 6 окт — 32, ср 7 окт — не нужно. ' +
         'Не смогли внести: пт 2 окт (дата уже прошла) — менеджер свяжется, если нужно.',
+      { delay: false },
     )
+    // Спиннер снят до отправки клиенту.
+    expect(ctx.answerCallbackQuery.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSendBot.mock.invocationCallOrder[0],
+    )
+  })
+
+  it('apply: клиенту не ушло → в правке предупреждение, не «отправлено»', async () => {
+    mockActions.applyReviewedSubmission.mockResolvedValue({ ok: true, applied: APPLIED, clientId: 'client_1' })
+    mockSendBot.mockRejectedValue(new Error('max down'))
+    const ctx = makeCtx()
+    await handler.handle(ctx, 'apply', 'sub_1')
+    const [text] = ctx.editMessageText.mock.calls[0]
+    expect(text).not.toContain('Клиенту отправлено')
+    expect(text).toContain('Клиенту не отправилось')
   })
 
   it('apply повторно → «Уже обработано»', async () => {
@@ -244,7 +262,16 @@ describe("callback scope 'wsub'", () => {
     mockActions.rejectWeeklySubmission.mockResolvedValue({ ok: true })
     const ctx = makeCtx()
     await handler.handle(ctx, 'reject', 'sub_1')
-    expect(ctx.editMessageText.mock.calls[0][0]).toBe('❌ Заявка отклонена, заказы не вносились.')
+    expect(ctx.editMessageText.mock.calls[0][0]).toBe('❌ ХАЛВА: заявка отклонена, заказы не вносились.')
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Отклонено' })
+  })
+
+  it('reject повторно → alert, сообщение с таблицей не затираем', async () => {
+    mockActions.rejectWeeklySubmission.mockResolvedValue({ ok: false, keptPrevious: false })
+    const ctx = makeCtx()
+    await handler.handle(ctx, 'reject', 'sub_1')
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Уже обработано', show_alert: true })
+    expect(ctx.editMessageText).not.toHaveBeenCalled()
   })
 
   it('undo → итог отката, неоткатанные с причиной', async () => {
@@ -263,7 +290,7 @@ describe("callback scope 'wsub'", () => {
       actor: { id: 'admin_pro_1', role: 'ADMIN_PRO' },
     })
     const text = ctx.editMessageText.mock.calls[0][0]
-    expect(text).toContain('вернули 1 заказ(ов) к прежним значениям')
+    expect(text).toContain('↩️ ХАЛВА: внесение отменено: вернули 1 заказ(ов) к прежним значениям')
     expect(text).toContain('o2 (по заказу уже выписан УПД)')
   })
 

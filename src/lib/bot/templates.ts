@@ -47,15 +47,40 @@ export function getDailyQuestionText(deliveryDate: Date, todayInMsk: Date, cutof
   return `${header}\n\n${variants[idx]}`
 }
 
-/** Напоминание-1 (14:00 МСК) — без шапки, чистый одиночный вопрос. */
-export function getReminder14Text(deliveryDate: Date): string {
+/** UTC-полночь МСК-календарного дня момента `now` (МСК = UTC+3, без DST). */
+function mskDayUtc(now: Date): number {
+  const m = new Date(now.getTime() + 3 * 60 * 60 * 1000)
+  return Date.UTC(m.getUTCFullYear(), m.getUTCMonth(), m.getUTCDate())
+}
+
+/**
+ * «на завтра» — только если deliveryDate (@db.Date, UTC-полночь МСК-дня) ровно
+ * следующий МСК-день относительно `now`. Иначе (пт → пн, same-day «сегодня»,
+ * `now` не передан) — «на DD.MM», чтобы не врать про «завтра».
+ */
+export function deliveryDayLabel(deliveryDate: Date, now?: Date): string {
+  if (now) {
+    const diffDays = Math.round((deliveryDate.getTime() - mskDayUtc(now)) / 86_400_000)
+    if (diffDays === 1) return 'на завтра'
+    if (diffDays === 0) return 'на сегодня'
+  }
+  const dd = String(deliveryDate.getUTCDate()).padStart(2, '0')
+  const mm = String(deliveryDate.getUTCMonth() + 1).padStart(2, '0')
+  return `на ${dd}.${mm}`
+}
+
+/**
+ * Напоминание-1 (14:00 МСК) — без шапки, чистый одиночный вопрос.
+ * `now` — момент отправки: «на завтра» пишем только если доставка завтра (МСК).
+ */
+export function getReminder14Text(deliveryDate: Date, now?: Date): string {
   const idx = deliveryDate.getDate() % 7
   const variants = [
     `Напомним о заявке — сколько порций готовим?`,
     `Подскажете количество порций?`,
     `Ждём заявку — сколько порций нужно?`,
     `Уточните, пожалуйста, сколько порций.`,
-    `Сколько порций готовим на завтра?`,
+    `Сколько порций готовим ${deliveryDayLabel(deliveryDate, now)}?`,
     `Напоминаем о заявке — какое количество порций?`,
     `Подскажите, сколько порций понадобится?`,
   ]

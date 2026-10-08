@@ -3,9 +3,11 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
-import { notifyAllManagersDirect } from '@/lib/telegram/notify'
+import { notifyAllManagersDirect, escapeHtml } from '@/lib/telegram/notify'
 import { inboxListButton } from '@/lib/telegram/buttons'
 import { formatPortions } from '@/lib/utils/format'
+import { SAME_DAY_DYNAMIC_LOCATION, isDeliveryDateAnswered } from '@/lib/bot/daily-questions-core'
+import type { MealType } from '@prisma/client'
 
 const MSK_TIMEZONE = 'Europe/Moscow'
 
@@ -66,7 +68,7 @@ export interface SendOutcome {
 
 /** Рассылает текст напоминания всем молчащим клиентам сегодня. Per-conv idempotent. */
 export async function sendRemindersToSilentClients(
-  textFor: (deliveryDate: Date) => string,
+  textFor: (deliveryDate: Date, now: Date) => string,
   now: Date = new Date()
 ): Promise<SendOutcome> {
   const convs = await findSilentPendingConvsCreatedToday(now)
@@ -81,7 +83,10 @@ export async function sendRemindersToSilentClients(
   const clientIds = [...new Set(convs.map((c) => c.clientId))]
   const sameDayClients = clientIds.length
     ? await prisma.client.findMany({
-        where: { id: { in: clientIds }, locations: { some: { sameDayDelivery: true } } },
+        // Только АКТИВНАЯ same-day точка с DYNAMIC-питанием (тот же предикат, что
+        // выбор кандидатов daily-questions): деактивированная same-day точка не
+        // делает клиента same-day.
+        where: { id: { in: clientIds }, locations: { some: SAME_DAY_DYNAMIC_LOCATION } },
         select: { id: true },
       })
     : []
@@ -103,8 +108,13 @@ export async function sendRemindersToSilentClients(
         outcome.skipped++
         continue
       }
+      // Число на дату уже поставил менеджер/Борис после вопроса — не дёргаем.
+      if (await isDeliveryDateAnswered(conv.clientId, conv.deliveryDate)) {
+        outcome.skipped++
+        continue
+      }
 
-      const text = textFor(conv.deliveryDate)
+      const text = textFor(conv.deliveryDate, now)
       // Cron-рассылка (reminder-1/2): получателей может быть много, естественная
       // задержка из sendBotMessage упёрлась бы в timeout Vercel-функции.
       await sendBotMessage(chatId, text, { delay: false })
@@ -128,16 +138,62 @@ export async function sendRemindersToSilentClients(
   return outcome
 }
 
+const MEAL_ORDER: MealType[] = ['BREAKFAST', 'LUNCH', 'DINNER']
+const MEAL_LABEL: Record<MealType, string> = { BREAKFAST: 'завтрак', LUNCH: 'обед', DINNER: 'ужин' }
+
+export interface SummaryOrder {
+  portions: number
+  status: string
+  mealType: MealType
+  location: { id: string; name: string }
+}
+
+/**
+ * Разбивка порций клиента: по приёмам пищи и (если точек несколько) по точкам.
+ * CANCELLED не считаем. Один приём на одной точке → «75 порций».
+ *   «завтрак 45 · обед 75 · ужин 45»
+ *   «Офис: обед 30; Склад: обед 20 · ужин 10»
+ */
+export function formatOrdersBreakdown(orders: SummaryOrder[]): string {
+  const live = orders.filter((o) => o.status !== 'CANCELLED')
+  if (live.length === 0) return formatPortions(0)
+  const byLoc = new Map<string, { name: string; meals: Map<MealType, number> }>()
+  for (const o of live) {
+    const loc = byLoc.get(o.location.id) ?? { name: o.location.name, meals: new Map() }
+    loc.meals.set(o.mealType, (loc.meals.get(o.mealType) ?? 0) + o.portions)
+    byLoc.set(o.location.id, loc)
+  }
+  const fmtMeals = (meals: Map<MealType, number>) =>
+    MEAL_ORDER.filter((m) => meals.has(m))
+      .map((m) => `${MEAL_LABEL[m]} ${meals.get(m)}`)
+      .join(' · ')
+  const locs = [...byLoc.values()]
+  if (locs.length === 1) {
+    const meals = locs[0].meals
+    if (meals.size === 1) return formatPortions([...meals.values()][0])
+    return fmtMeals(meals)
+  }
+  return locs.map((l) => `${escapeHtml(l.name)}: ${fmtMeals(l.meals)}`).join('; ')
+}
+
+function fmtDdMm(d: Date): string {
+  return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
 /**
  * Строит текст сводки. Возвращает null если за сегодня нет ни одной отслеживаемой
  * conv (значит cron 11:00 ничего не нашёл — рассылать managers нечего).
  *
  * Группы:
- *   - «Принято»  : status=CONFIRMED — клиент ответил числом (кейс A/B/C)
- *   - «Не ответили» : status=PENDING без IN-сообщений (молчат)
- * AWAITING_MANAGER исключены (manager уже получил срочный push).
- * PENDING с IN (тех. странный кейс — клиент написал, но статус не сменился)
- * также исключены, чтобы не путать менеджера.
+ *   - «Принято»       : status=CONFIRMED — клиент ответил числом; разбивка по
+ *                       приёмам пищи / точкам, отменённые заказы не считаются
+ *   - «Не ответили»   : status=PENDING без IN-сообщений (молчат)
+ *   - «У менеджера»   : status=AWAITING_MANAGER — клиент ответил, но разбор у
+ *                       менеджера (раньше пропадали из «X из Y»)
+ * PENDING с IN (тех. странный кейс) исключены, чтобы не путать менеджера.
+ * Если среди conv разные даты доставки (same-day «сегодня» + обычные «завтра»),
+ * к строке клиента добавляется дата «(DD.MM)».
+ * Текст уходит в Telegram с parse_mode=HTML — имена экранируются.
  */
 export async function buildSummaryText(title: string, now: Date = new Date()): Promise<string | null> {
   const todayUtc = mskMidnightUtc(now, 0)
@@ -146,27 +202,46 @@ export async function buildSummaryText(title: string, now: Date = new Date()): P
     where: { createdAt: { gte: todayUtc } },
     include: {
       client: { select: { id: true, name: true } },
-      orders: { select: { portions: true } },
+      orders: {
+        select: {
+          portions: true,
+          status: true,
+          mealType: true,
+          location: { select: { id: true, name: true } },
+        },
+      },
       messages: { where: { direction: 'IN' }, select: { id: true }, take: 1 },
     },
   })
 
   const confirmed = convs.filter((c) => c.status === 'CONFIRMED')
   const silent = convs.filter((c) => c.status === 'PENDING' && c.messages.length === 0)
-  const total = confirmed.length + silent.length
+  const withManager = convs.filter((c) => c.status === 'AWAITING_MANAGER')
+  const shown = [...confirmed, ...silent, ...withManager]
+  const total = shown.length
 
   if (total === 0) return null
 
-  const lines: string[] = [title, '']
+  const mixedDates = new Set(shown.map((c) => c.deliveryDate.getTime())).size > 1
+  const name = (c: (typeof convs)[number]) =>
+    escapeHtml(c.client.name) + (mixedDates ? ` (${fmtDdMm(c.deliveryDate)})` : '')
+
+  const lines: string[] = [escapeHtml(title), '']
   lines.push(`Принято: ${confirmed.length} из ${total}`)
   for (const c of confirmed) {
-    const totalPortions = c.orders.reduce((s, o) => s + o.portions, 0)
-    lines.push(`• ${c.client.name} — ${formatPortions(totalPortions)}`)
+    lines.push(`• ${name(c)} — ${formatOrdersBreakdown(c.orders)}`)
   }
   lines.push('')
   lines.push(`Не ответили: ${silent.length}`)
   for (const c of silent) {
-    lines.push(`• ${c.client.name}`)
+    lines.push(`• ${name(c)}`)
+  }
+  if (withManager.length > 0) {
+    lines.push('')
+    lines.push(`У менеджера: ${withManager.length}`)
+    for (const c of withManager) {
+      lines.push(`• ${name(c)}`)
+    }
   }
 
   return lines.join('\n')

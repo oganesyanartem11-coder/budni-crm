@@ -9,12 +9,13 @@ import {
 } from '@/lib/bot/daily-summary'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
+import { SAME_DAY_DYNAMIC_LOCATION, isDeliveryDateAnswered } from '@/lib/bot/daily-questions-core'
 
 export const dynamic = 'force-dynamic'
 
 const CRON_LABEL = 'cutoff-notice' // 16:00 МСК
 
-async function handler(_request: Request) {
+export async function handler(_request: Request) {
   const now = new Date()
 
   if (await alreadyRanToday(CRON_LABEL, now)) {
@@ -34,13 +35,16 @@ async function handler(_request: Request) {
   const clientIds = [...new Set(convs.map((c) => c.clientId))]
   const sameDayClients = clientIds.length
     ? await prisma.client.findMany({
-        where: { id: { in: clientIds }, locations: { some: { sameDayDelivery: true } } },
+        // Тот же предикат same-day, что у выбора кандидатов daily-questions:
+        // только АКТИВНАЯ same-day точка с DYNAMIC-питанием.
+        where: { id: { in: clientIds }, locations: { some: SAME_DAY_DYNAMIC_LOCATION } },
         select: { id: true },
       })
     : []
   const sameDayClientIds = new Set(sameDayClients.map((c) => c.id))
 
   let sent = 0
+  let skippedAnswered = 0
   const errors: Array<{ clientName: string; reason: string }> = []
 
   for (const conv of convs) {
@@ -49,6 +53,12 @@ async function handler(_request: Request) {
       continue
     }
     try {
+      // Число на дату уже поставил менеджер/Борис — «приём закрыт» не шлём и
+      // conv не экспайрим (заявка есть).
+      if (await isDeliveryDateAnswered(conv.clientId, conv.deliveryDate)) {
+        skippedAnswered++
+        continue
+      }
       const chatId = await getActiveMaxChatIdForClient(conv.clientId)
       if (!chatId) {
         // Без активного chatId не можем отправить, но статус всё равно закрываем.
@@ -81,9 +91,13 @@ async function handler(_request: Request) {
     }
   }
 
-  await markRanToday(CRON_LABEL, { sent_notices: sent, errors: errors.length })
+  await markRanToday(CRON_LABEL, {
+    sent_notices: sent,
+    skipped_answered: skippedAnswered,
+    errors: errors.length,
+  })
 
-  return NextResponse.json({ ok: true, sent_notices: sent, errors })
+  return NextResponse.json({ ok: true, sent_notices: sent, skipped_answered: skippedAnswered, errors })
 }
 
 export const GET = withCronHeartbeat('cutoff-notice', handler)

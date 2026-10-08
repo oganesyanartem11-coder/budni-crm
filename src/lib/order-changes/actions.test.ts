@@ -345,3 +345,52 @@ describe('expirePendingChanges', () => {
     expect(res.expired).toHaveLength(0)
   })
 })
+
+describe('confirmPendingChange — аудит 08.10', () => {
+  it('протух и cron уже пометил EXPIRED → «expired», а не «уже обработано»', async () => {
+    mockPrisma.pendingOrderChange.updateMany.mockResolvedValue({ count: 0 })
+    mockPrisma.pendingOrderChange.findUnique.mockResolvedValue({ status: 'EXPIRED', expiresAt: new Date(NOW.getTime() - 60_000) })
+    expect(await confirmPendingChange({ changeId: 'poc_1', confirmedById: 'mgr1' })).toEqual({ ok: false, reason: 'expired' })
+  })
+
+  function pending(extra: Record<string, unknown>) {
+    return {
+      id: 'poc_1',
+      clientId: 'c1',
+      locationId: 'loc_1',
+      mealType: 'LUNCH',
+      deliveryDate: DELIVERY,
+      action: 'EDIT',
+      proposedPortions: 11,
+      deltaPortions: 1,
+      currentOrderId: 'o1',
+      sourceMaxChatId: '999',
+      ...extra,
+    }
+  }
+
+  it('«+1»: итог считается от заказа в момент подтверждения (две «+1» подряд = +2)', async () => {
+    mockPrisma.pendingOrderChange.updateMany.mockResolvedValue({ count: 1 })
+    mockPrisma.pendingOrderChange.findUnique.mockResolvedValue(pending({}))
+    mockFindActiveOrder.mockResolvedValue({ id: 'o1', status: 'CONFIRMED', portions: 11, updatedAt: NOW })
+    mockEditCore.mockResolvedValue({ ok: true, kind: 'updated', orderId: 'o1', prevPortions: 11, prevStatus: 'CONFIRMED' })
+
+    const res = await confirmPendingChange({ changeId: 'poc_1', confirmedById: 'mgr1' })
+
+    expect(mockEditCore).toHaveBeenCalledWith({ id: 'mgr1', role: 'ADMIN_PRO' }, { orderId: 'o1', portions: 12, via: 'order_change' })
+    expect(res).toMatchObject({ ok: true, newPortions: 12 })
+  })
+
+  it('ошибка при применении → FAILED, а не вечный CONFIRMED', async () => {
+    mockPrisma.pendingOrderChange.updateMany.mockResolvedValue({ count: 1 })
+    mockPrisma.pendingOrderChange.findUnique.mockResolvedValue(pending({ deltaPortions: null }))
+    mockFindActiveOrder.mockResolvedValue({ id: 'o1', status: 'CONFIRMED', portions: 10, updatedAt: NOW })
+    mockEditCore.mockRejectedValue(new Error('db down'))
+
+    const res = await confirmPendingChange({ changeId: 'poc_1', confirmedById: 'mgr1' })
+
+    expect(res).toEqual({ ok: false, reason: 'edit_failed', details: 'db down' })
+    const statuses = mockPrisma.pendingOrderChange.update.mock.calls.map((c) => c[0].data.status)
+    expect(statuses).toContain('FAILED')
+  })
+})

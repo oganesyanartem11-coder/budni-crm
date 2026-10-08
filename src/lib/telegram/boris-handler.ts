@@ -1,3 +1,4 @@
+import { sanitizeTelegramHtml } from '@/lib/boris/team-channels/ai-formatter'
 import type { Context } from 'grammy'
 import { identifyTelegramUser } from './identify-user'
 import { registerCallbackHandler } from './callback-router'
@@ -5,6 +6,7 @@ import { chatWithBoris } from '@/lib/boris/agent'
 import { executePendingAction } from '@/lib/boris/executor'
 import { TOOL_TITLES } from '@/lib/boris/preview'
 import { escapeHtml } from './notify'
+import { splitForTelegram, TELEGRAM_MAX_LEN } from './send'
 import {
   shouldRespondInChat,
   shouldRespondInGroup,
@@ -254,7 +256,9 @@ export async function handleBorisMessage(ctx: Context): Promise<void> {
         parse_mode: 'HTML',
       })
     } else {
-      sent = await ctx.reply(result.reply, { parse_mode: 'HTML' })
+      // Ответ модели: оставляем только разрешённые теги, остальное экранируем —
+      // «<» в имени клиента или лишний тег ронял сообщение целиком.
+      sent = await ctx.reply(sanitizeTelegramHtml(result.reply), { parse_mode: 'HTML' })
     }
     // Только для групп: фиксируем messageId ответа Бори для контекстного окна.
     if (chatType === 'group' || chatType === 'supergroup') {
@@ -333,39 +337,28 @@ registerCallbackHandler({
         })
         return
       }
+      // Выполнение и показ результата — раздельно: сбой правки сообщения НЕ
+      // должен выглядеть как «Ошибка выполнения» (изменения уже применены).
+      let result: Awaited<ReturnType<typeof executePendingAction>>
       try {
-        const result = await executePendingAction(id, user.id)
-        const titleFor = (tool: string) => TOOL_TITLES[tool] ?? tool
-        // Строки create_orders_for_period несут свою подпись (дата, приём, итог).
-        const labelOf = (data: unknown) =>
-          data && typeof data === 'object' && 'label' in data ? String((data as { label: unknown }).label) : null
-        const summary = result.results
-          .map((r) => {
-            const label = labelOf(r.data)
-            if (r.ok) return `✅ ${escapeHtml(label ?? titleFor(r.tool))}`
-            return r.tool === 'upsert_order_portions'
-              ? `❌ ${escapeHtml(r.error ?? 'ошибка')}`
-              : `❌ ${titleFor(r.tool)}: ${r.error ?? 'ошибка'}`
-          })
-          .join('\n')
-        await ctx.editMessageText(`${pending.previewText}\n\n${summary}`, {
-          parse_mode: 'HTML',
-        })
+        result = await executePendingAction(id, user.id)
       } catch (e) {
         console.error('[boris-handler] confirm error', e)
         await ctx.answerCallbackQuery({
           text: 'Ошибка выполнения',
           show_alert: true,
         })
+        return
       }
+      await safeAnswerBorisCallback(ctx)
+      await showBorisResult(ctx, pending.previewText, formatBorisExecutionSummary(result.results))
     } else if (action === 'cancel') {
       await prisma.borisPendingAction.update({
         where: { id },
         data: { cancelledAt: new Date() },
       })
-      await ctx.editMessageText(`${pending.previewText}\n\n✗ Отменено`, {
-        parse_mode: 'HTML',
-      })
+      await safeAnswerBorisCallback(ctx, 'Отменено')
+      await showBorisResult(ctx, pending.previewText, '✗ Отменено')
     } else {
       await ctx.answerCallbackQuery({
         text: 'Неизвестное действие',
@@ -375,3 +368,64 @@ registerCallbackHandler({
     }
   },
 })
+
+type BorisExecResult = { tool: string; ok: boolean; data?: unknown; error?: string }
+
+/** Сводка выполнения — HTML-safe (ошибки/подписи экранированы), по строке на действие. */
+export function formatBorisExecutionSummary(results: BorisExecResult[]): string {
+  const titleFor = (tool: string) => TOOL_TITLES[tool] ?? tool
+  // Строки create_orders_for_period несут свою подпись (дата, приём, итог).
+  const labelOf = (data: unknown) =>
+    data && typeof data === 'object' && 'label' in data
+      ? String((data as { label: unknown }).label)
+      : null
+  return results
+    .map((r) => {
+      const label = labelOf(r.data)
+      if (r.ok) return `✅ ${escapeHtml(label ?? titleFor(r.tool))}`
+      return r.tool === 'upsert_order_portions'
+        ? `❌ ${escapeHtml(r.error ?? 'ошибка')}`
+        : `❌ ${escapeHtml(titleFor(r.tool))}: ${escapeHtml(r.error ?? 'ошибка')}`
+    })
+    .join('\n')
+}
+
+async function safeAnswerBorisCallback(ctx: Context, text?: string): Promise<void> {
+  try {
+    if (text) await ctx.answerCallbackQuery({ text })
+    else await ctx.answerCallbackQuery()
+  } catch (err) {
+    console.error('[boris-handler] answerCallbackQuery failed', err)
+  }
+}
+
+/**
+ * Показать итог под preview. Влезает в лимит Telegram → правим сообщение.
+ * Не влезает или правка упала → итог отдельными сообщениями (по строкам,
+ * ≤ 4096), чтобы менеджер увидел результат в любом случае.
+ */
+async function showBorisResult(ctx: Context, previewText: string, summary: string): Promise<void> {
+  const combined = `${previewText}\n\n${summary}`
+  if (combined.length <= TELEGRAM_MAX_LEN) {
+    try {
+      await ctx.editMessageText(combined, { parse_mode: 'HTML' })
+      return
+    } catch (err) {
+      console.error('[boris-handler] editMessageText failed, sending result as new message', err)
+    }
+  } else {
+    // Убираем кнопки у preview (сам preview не трогаем), итог — ниже.
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined })
+    } catch (err) {
+      console.error('[boris-handler] editMessageReplyMarkup failed', err)
+    }
+  }
+  for (const part of splitForTelegram(summary)) {
+    try {
+      await ctx.reply(part, { parse_mode: 'HTML' })
+    } catch (err) {
+      console.error('[boris-handler] reply with result failed', err)
+    }
+  }
+}

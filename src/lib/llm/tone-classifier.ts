@@ -85,7 +85,7 @@ export async function classifyMessageTone(text: string): Promise<ToneLabel> {
     const client = getAnthropicClient()
     const response = await client.messages.create({
       model: getInboxModel(),
-      max_tokens: 50,
+      max_tokens: 300,
       system: SYSTEM_PROMPT,
       tools: [TONE_TOOL],
       tool_choice: { type: 'tool', name: 'submit_tone' },

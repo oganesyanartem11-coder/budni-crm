@@ -52,7 +52,7 @@ import {
   ensurePendingAnomalyInbox,
 } from '@/lib/orders/anomaly-confirmations'
 import { notifyManagersAboutAnomaly } from '@/lib/telegram/handlers/anomaly-confirmation'
-import type { BotConversation, MealType, Prisma } from '@prisma/client'
+import type { BotConversation, MealType, OrderType, Prisma } from '@prisma/client'
 
 // П3 (MEGA-4b): маппинг enum MealType → русское название для parseChangeIntent
 // (он принимает availableMealTypes как 'ЗАВТРАК'|'ОБЕД'|'УЖИН') и обратно.
@@ -201,7 +201,13 @@ export async function processClientMessage(
     return handleSpontaneous(client, text, maxChatId)
   }
 
-  const botConv = await findLatestBotConv(client.id)
+  // Ответ числом сохраняется сразу только у клиентов, которых бот спрашивает
+  // каждый день (DYNAMIC). FIXED-клиент после ответа менеджера из инбокса
+  // имел CONFIRMED-беседу и 30 дней менял заказы мимо подтверждения менеджера.
+  const asksDaily = client.locations.some((l) =>
+    l.mealConfigs.some((c) => c.isActive && c.orderType === 'DYNAMIC'),
+  )
+  const botConv = asksDaily ? await findLatestBotConv(client.id) : null
   if (botConv) {
     return handleBotResponse(client, botConv, text, maxChatId)
   }
@@ -263,6 +269,17 @@ async function handleManagerTakeover(
     })
   }
 
+  // Бот молчит, значит менеджер должен узнать сразу, а не при следующем
+  // заходе в инбокс.
+  await notifyClientSignal({
+    clientId: client.id,
+    messageText: text,
+    inboxItemId: inboxItem.id,
+    tone: null,
+    reason: inboxItem.reason,
+    priority: inboxItem.priority,
+  }).catch((e) => console.error('[bot] notifyClientSignal failed (takeover):', e))
+
   return { reply: null, action: 'inbox', inboxItemId: inboxItem.id }
 }
 
@@ -299,7 +316,9 @@ async function handleBotResponse(
 
   const locationAliases = (client.locationAliases ?? {}) as Record<string, string[]>
 
-  const parsed = await parseClientResponse({
+  let parsedOrError: Awaited<ReturnType<typeof parseClientResponse>> | Error
+  try {
+    parsedOrError = await parseClientResponse({
     clientText: text,
     clientName: client.name,
     mealTypeRu,
@@ -315,6 +334,36 @@ async function handleBotResponse(
       portions: o.portions,
     })),
   })
+  } catch (err) {
+    parsedOrError = err instanceof Error ? err : new Error(String(err))
+  }
+  // Нейросеть недоступна — сообщение не теряем: в беседу, менеджеру в inbox,
+  // беседу — менеджеру (напоминания «не ответили» клиенту не уйдут).
+  if (parsedOrError instanceof Error) {
+    console.error('[bot] parseClientResponse failed:', parsedOrError)
+    await logBotMessage({ clientId: client.id, conversationId: conv.id, direction: 'IN', text })
+    if (conv.status !== 'AWAITING_MANAGER') {
+      await prisma.botConversation.update({ where: { id: conv.id }, data: { status: 'AWAITING_MANAGER' } })
+    }
+    const inbox = await createInboxItem({
+      clientId: client.id,
+      conversationId: conv.id,
+      reason: 'NON_NUMERIC',
+      humanReason: 'Не удалось разобрать автоматически (сбой распознавания) — внесите вручную',
+      priority: 'HIGH',
+      clientMessage: text,
+    })
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: text,
+      inboxItemId: inbox.id,
+      tone: null,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => console.error('[bot] notifyClientSignal failed (parse error):', e))
+    return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+  }
+  const parsed = parsedOrError
 
   // IN-сообщение пишем сразу с метаданными парсинга — менеджер в /inbox увидит
   // и сырой текст, и tone/confidence/reason.
@@ -381,12 +430,13 @@ async function handleBotResponse(
   // в одну миллисекунду).
   if (effectiveTone === 'urgent') {
     const now = new Date()
-    const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
     try {
       const urgentOrder = await prisma.order.findFirst({
         where: {
           clientId: client.id,
-          deliveryDate: { gte: now, lte: in4h },
+          // deliveryDate — UTC-полночь МСК-дня: «сегодняшняя доставка», а не
+          // сравнение полуночи с текущим моментом (раньше не срабатывало никогда).
+          deliveryDate: new Date(`${toMskDateString(now)}T00:00:00.000Z`),
           status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
         },
         select: { id: true, deliveryDate: true, mealType: true },
@@ -690,6 +740,40 @@ async function handleBotResponse(
     return { reply: null, action: 'inbox', inboxItemId: inbox.id }
   }
 
+  // Число без даты в ответ на ВЧЕРАШНИЙ вопрос, доставка по которому уже
+  // сегодня (или раньше): приём на этот день закрыт, и клиент почти наверняка
+  // пишет про следующий день (08.10 «Промышленная тара» до вопроса 11:00).
+  // Не угадываем — спрашиваем день, менеджеру в inbox.
+  const todayDay = new Date(`${toMskDateString(new Date())}T00:00:00.000Z`)
+  if (
+    !dateFromText &&
+    conv.createdAt != null &&
+    conv.createdAt.getTime() < startOfTodayMsk().getTime() &&
+    conv.deliveryDate.getTime() <= todayDay.getTime()
+  ) {
+    const askDay = 'Спасибо! Подскажите, пожалуйста, на какой день это количество?'
+    await sendBotMessage(senderChatId, askDay)
+    await logBotMessage({ clientId: client.id, conversationId: conv.id, direction: 'OUT', text: askDay })
+    const inbox = await createInboxItem({
+      clientId: client.id,
+      conversationId: conv.id,
+      reason: 'NON_NUMERIC',
+      humanReason: 'Число без даты, а приём на день вчерашнего вопроса закрыт — спросили у клиента, на какой день',
+      priority: 'NORMAL',
+      clientMessage: text,
+      parsedJson: parsed as unknown as Prisma.InputJsonValue,
+    })
+    await notifyClientSignal({
+      clientId: client.id,
+      messageText: text,
+      inboxItemId: inbox.id,
+      tone: alertTone,
+      reason: inbox.reason,
+      priority: inbox.priority,
+    }).catch((e) => console.error('[bot] notifyClientSignal failed (stale conv):', e))
+    return { reply: askDay, action: 'inbox', inboxItemId: inbox.id }
+  }
+
   // Волна 2 (ШАГ 3): запрет записи в прошлое. Если эффективная дата раньше
   // сегодняшнего МСК-дня — заказ НЕ сохраняем, а эскалируем менеджеру (как КЕЙС D).
   // Основная защита — от порчи данных «висящей» беседой со старой deliveryDate.
@@ -729,13 +813,14 @@ async function handleBotResponse(
   // Парсер вернул число и аномалий нет — сохраняем заказ.
   const activeMealConfigsByLocation: Record<
     string,
-    Array<{ mealType: MealType; pricePerPortion: number; locationName: string }>
+    Array<{ mealType: MealType; pricePerPortion: number; locationName: string; orderType: OrderType }>
   > = {}
   for (const loc of client.locations) {
     activeMealConfigsByLocation[loc.id] = loc.mealConfigs.map((c) => ({
       mealType: c.mealType,
       pricePerPortion: Number(c.pricePerPortion),
       locationName: loc.name,
+      orderType: c.orderType,
     }))
   }
 
@@ -860,7 +945,9 @@ async function handleBotResponse(
   )
   const afterCutoff = now.getTime() >= cutoffMoment.getTime()
   const cutoffStr = formatCutoff(cutoff)
-  const wasFirstAnswer = conv.status === 'PENDING'
+  // AWAITING_MANAGER сегодняшней беседы: клиент сначала написал «Добрый день»
+  // (ушло менеджеру), потом число — это и есть первый ответ.
+  const wasFirstAnswer = conv.status === 'PENDING' || conv.status === 'AWAITING_MANAGER'
 
   const itemsForReply: SavedItemForReply[] = save.savedItems.map((s) => ({
     locationName: s.locationName,
@@ -942,6 +1029,7 @@ async function handleBotResponse(
       tone: alertTone,
       reason: inbox.reason,
       priority: inbox.priority,
+      cutoffLabel: cutoffStr,
     }).catch((e) => {
       console.error('[bot] notifyClientSignal failed:', e)
     })
@@ -1223,12 +1311,13 @@ async function handleSpontaneous(
   // 7.16.C: триггер ALERT — urgent + заказ с доставкой в ближайшие 4 часа.
   if (spontaneousTone === 'urgent') {
     const now = new Date()
-    const in4h = new Date(now.getTime() + 4 * 60 * 60 * 1000)
     try {
       const urgentOrder = await prisma.order.findFirst({
         where: {
           clientId: client.id,
-          deliveryDate: { gte: now, lte: in4h },
+          // deliveryDate — UTC-полночь МСК-дня: «сегодняшняя доставка», а не
+          // сравнение полуночи с текущим моментом (раньше не срабатывало никогда).
+          deliveryDate: new Date(`${toMskDateString(now)}T00:00:00.000Z`),
           status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION', 'OUT_FOR_DELIVERY'] },
         },
         select: { id: true, deliveryDate: true, mealType: true },
@@ -1466,6 +1555,7 @@ async function handleSpontaneous(
         mealType: resolveResult.mealType,
         action,
         proposedPortions,
+        deltaPortions: intent.mode === 'add' ? intent.portions : null,
         currentOrderId: existingOrder?.id,
         currentPortions: existingOrder?.portions ?? null,
         sourceMaxChatId: senderChatId,
@@ -1478,6 +1568,8 @@ async function handleSpontaneous(
       await promoteToActiveByChatId(senderChatId)
 
       await notifyManagerAboutOrderChange({
+        clientId: client.id,
+        conversationId: conversation.id,
         changeId: pending.id,
         clientName: client.name,
         locationName,
@@ -1656,6 +1748,8 @@ async function submitRangeChange(params: {
     )
   }
   await notifyManagerAboutRangeChange({
+    clientId: client.id,
+    conversationId: params.conversationId,
     requestId: submitted.requestId,
     payload: {
       clientName: client.name,

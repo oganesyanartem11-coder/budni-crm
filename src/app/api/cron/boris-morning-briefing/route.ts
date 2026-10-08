@@ -15,7 +15,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { alreadyRanToday, markRanToday } from '@/lib/bot/daily-summary'
-import { notifyGroup } from '@/lib/telegram/notify'
+import { notifyGroup, escapeHtml } from '@/lib/telegram/notify'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import { buildMorningContext, type MorningContext } from '@/lib/boris/morning/context-builder'
 import { generateMorningBriefing } from '@/lib/boris/morning/generator'
@@ -137,7 +137,9 @@ async function handler(request: Request) {
   }
 
   // 7. Отправка в TG
-  const result = await notifyGroup(content, { parseMode: 'HTML' })
+  // Промт просит plain text; notifyGroup шлёт в HTML-режиме — экранируем,
+  // иначе «<5 порций» или «A&B» от LLM роняют отправку целиком.
+  const result = await notifyGroup(escapeHtml(content), { parseMode: 'HTML' })
 
   await prisma.borisBriefing.update({
     where: { id: briefing.id },

@@ -26,7 +26,8 @@ import { notifyGroup } from '@/lib/telegram/notify'
 import { getTelegramEnv } from '@/lib/telegram/env'
 import { trackBorisCall } from '@/lib/boris/metrics/track'
 import { buildDayContext } from './context-builder'
-import { formatTeamPost } from './ai-formatter'
+import { formatTeamPost, sanitizeTelegramHtml, stripTelegramHtml } from './ai-formatter'
+import { sendTelegramMessage } from '@/lib/telegram/send'
 import type { TeamChannel } from './types'
 
 type EmitChannel = Extract<TeamChannel, 'LIVE' | 'ALERT'>
@@ -150,8 +151,10 @@ async function emitPost(channel: EmitChannel, event: BorisEventLog): Promise<voi
       return
     }
 
-    // SEND — отправляем в групповой чат.
-    const sendResult = await notifyGroup(text, { parseMode: 'HTML' })
+    // SEND — отправляем в групповой чат. text уже санитайзен formatTeamPost
+    // (только разрешённые теги); если Telegram всё равно отверг — один повтор
+    // плоским текстом без parse_mode, чтобы пост не потерялся.
+    const sendResult = await sendTeamPost(text, recipientChatId, channel)
 
     await prisma.borisBriefing
       .create({
@@ -215,6 +218,34 @@ async function emitPost(channel: EmitChannel, event: BorisEventLog): Promise<voi
     } catch {
       // глотаем — мы уже в обработчике ошибок
     }
+  }
+}
+
+type TeamSendResult = { ok: true } | { ok: false; error?: string }
+
+/** HTML-отправка с одним повтором плоским текстом. Никогда не throws. */
+export async function sendTeamPost(
+  text: string,
+  groupChatId: string,
+  tag: string,
+): Promise<TeamSendResult> {
+  const safe = sanitizeTelegramHtml(text)
+  let firstError: string
+  try {
+    const r = await notifyGroup(safe, { parseMode: 'HTML' })
+    if (r.ok) return { ok: true }
+    firstError = r.error ?? 'notifyGroup_failed'
+  } catch (err) {
+    firstError = err instanceof Error ? err.message : String(err)
+  }
+  console.error(`[boris-team/emit] HTML send rejected for ${tag}: ${firstError}; retry as plain text`)
+  if (!groupChatId) return { ok: false, error: firstError }
+  try {
+    const plain = await sendTelegramMessage(groupChatId, stripTelegramHtml(safe))
+    if (plain.ok) return { ok: true }
+    return { ok: false, error: `${firstError}; plain: ${plain.error}` }
+  } catch (err) {
+    return { ok: false, error: `${firstError}; plain: ${err instanceof Error ? err.message : String(err)}` }
   }
 }
 

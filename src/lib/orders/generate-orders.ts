@@ -131,6 +131,69 @@ export function planConfigDeliveryDates(
   return dates
 }
 
+/**
+ * Действия ActivityLog, которыми фиксируется осознанное решение «доставки не
+ * будет» по конкретному заказу: ручная отмена менеджером/Борисом/ботом
+ * (cancelOrderCore → ORDER_CANCELLED, вкл. «0» от клиента) и отказ при
+ * подтверждении DYNAMIC (confirmDynamicOrder c 0 → ORDER_DECLINED).
+ */
+export const DECISION_CANCEL_ACTIONS = ['ORDER_CANCELLED', 'ORDER_DECLINED'] as const
+
+/**
+ * Решает, какие существующие заказы блокируют (авто)генерацию на их ключ
+ * clientId|locationId|mealType|дата.
+ *
+ *  - Любой НЕ отменённый заказ — блокирует (антидубль, как раньше).
+ *  - CANCELLED блокирует, только если отмена — решение «не доставлять»
+ *    (есть лог ORDER_CANCELLED/ORDER_DECLINED). Иначе ночной прогон молча
+ *    воскрешал бы заказ, который менеджер отменил (праздник, «в четверг не
+ *    надо», клиент ответил «0»).
+ *  - CANCELLED без такого лога — это каскадная отмена при архивации клиента
+ *    (archiveClient) или деактивации питания (deleteMealConfig): они пишут
+ *    updateMany без per-order лога и рассчитывают, что после реактивации
+ *    генератор заново заполнит горизонт. Такие НЕ блокируют.
+ *
+ * Чистая функция — тестируется без БД.
+ */
+export function selectBlockingOrders<
+  T extends { id: string; status: string },
+>(orders: T[], decisionCancelledIds: ReadonlySet<string>): T[] {
+  return orders.filter((o) => o.status !== 'CANCELLED' || decisionCancelledIds.has(o.id))
+}
+
+/**
+ * Грузит заказы диапазона [gte..lte] и возвращает те, что блокируют генерацию
+ * (см. selectBlockingOrders). Один доп. запрос в ActivityLog только по
+ * отменённым заказам диапазона.
+ */
+async function loadBlockingOrders(gte: Date, lte: Date) {
+  const orders = await prisma.order.findMany({
+    where: { deliveryDate: { gte, lte } },
+    select: {
+      id: true,
+      status: true,
+      clientId: true,
+      locationId: true,
+      mealType: true,
+      deliveryDate: true,
+    },
+  })
+  const cancelledIds = orders.filter((o) => o.status === 'CANCELLED').map((o) => o.id)
+  let decisionIds = new Set<string>()
+  if (cancelledIds.length > 0) {
+    const logs = await prisma.activityLog.findMany({
+      where: {
+        entityType: 'Order',
+        entityId: { in: cancelledIds },
+        action: { in: [...DECISION_CANCEL_ACTIONS] },
+      },
+      select: { entityId: true },
+    })
+    decisionIds = new Set(logs.map((l) => l.entityId).filter((id): id is string => !!id))
+  }
+  return selectBlockingOrders(orders, decisionIds)
+}
+
 /** Начало (00:00:00.000) и конец (23:59:59.999) суток, в которые попадает `date`. */
 function dayWindow(date: Date): { start: Date; end: Date } {
   const start = new Date(date)
@@ -211,18 +274,9 @@ export async function generateFixedOrdersForDate(targetDate: Date, options: {
   const rangeStart = defaultWindow.start < todayWindow.start ? defaultWindow.start : todayWindow.start
   const rangeEnd = defaultWindow.end > todayWindow.end ? defaultWindow.end : todayWindow.end
 
-  const existingOrders = await prisma.order.findMany({
-    where: {
-      deliveryDate: { gte: rangeStart, lte: rangeEnd },
-      status: { not: 'CANCELLED' },
-    },
-    select: {
-      clientId: true,
-      locationId: true,
-      mealType: true,
-      deliveryDate: true,
-    },
-  })
+  // Блокируют: живые заказы + отменённые по решению «не доставлять» (см.
+  // selectBlockingOrders) — отменённый менеджером заказ не воскрешаем.
+  const existingOrders = await loadBlockingOrders(rangeStart, rangeEnd)
   // Ключ дедупа: clientId|locationId|mealType|YYYY-MM-DD (дата доставки).
   const dedupKey = (clientId: string, locationId: string, mealType: string, d: Date) =>
     `${clientId}|${locationId}|${mealType}|${dayWindow(d).start.toISOString()}`
@@ -409,20 +463,12 @@ export async function generateFixedOrdersForRange(
 
   stats.candidatesTotal = configs.length
 
-  // Существующие (не отменённые) заказы по всему диапазону — для антидубля.
+  // Существующие заказы по всему диапазону — для антидубля. Блокируют живые
+  // заказы И отменённые по решению «не доставлять» (ручная отмена / «0»):
+  // иначе ночной прогон воскрешал бы их. Каскадные отмены архивации/деактивации
+  // питания не блокируют — см. selectBlockingOrders.
   // Ключ включает дату доставки: clientId|locationId|mealType|YYYY-MM-DD (МСК).
-  const existingOrders = await prisma.order.findMany({
-    where: {
-      deliveryDate: { gte: rangeStartDate, lte: rangeEndDate },
-      status: { not: 'CANCELLED' },
-    },
-    select: {
-      clientId: true,
-      locationId: true,
-      mealType: true,
-      deliveryDate: true,
-    },
-  })
+  const existingOrders = await loadBlockingOrders(rangeStartDate, rangeEndDate)
   const dedupKey = (clientId: string, locationId: string, mealType: string, d: Date) =>
     `${clientId}|${locationId}|${mealType}|${toMskDateString(d)}`
   const existingKeys = new Set(

@@ -3,6 +3,7 @@ import type { DeliveryOverrideStatus } from '@prisma/client'
 import { resolveDeliveryOverrideRequestCore } from '@/lib/delivery/delivery-override'
 import { registerCallbackHandler } from '../callback-router'
 import { requireTelegramUser } from '../identify-user'
+import { prisma } from '@/lib/db/prisma'
 
 const MANAGER_ROLES = ['ADMIN_PRO', 'ADMIN', 'MANAGER'] as const
 
@@ -18,6 +19,32 @@ async function safeEdit(ctx: Context, text: string): Promise<void> {
     await ctx.editMessageText(text)
   } catch (error) {
     console.error('[delivery-override] editMessageText failed', error)
+  }
+}
+
+/**
+ * «ХАЛВА · Офис, курьер Иван» — чтобы после правки было видно, о какой
+ * доставке речь (исходное сообщение с этими данными затирается).
+ */
+async function loadOverrideContext(requestId: string): Promise<string | null> {
+  try {
+    const request = await prisma.deliveryOverrideRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        courierNameSnapshot: true,
+        resolvedByNameSnapshot: true,
+        stop: { select: { clientNameSnapshot: true, locationNameSnapshot: true } },
+      },
+    })
+    if (!request) return null
+    const by = request.resolvedByNameSnapshot ? ` Решение: ${request.resolvedByNameSnapshot}.` : ''
+    return (
+      `${request.stop.clientNameSnapshot} · ${request.stop.locationNameSnapshot}, ` +
+      `курьер ${request.courierNameSnapshot}.${by}`
+    )
+  } catch (error) {
+    console.error('[delivery-override] load context failed', error)
+    return null
   }
 }
 
@@ -40,10 +67,16 @@ export async function handleDeliveryOverrideCallback(
     comment: null,
     now: new Date(),
   })
-  await safeEdit(ctx, resolvedMessage(result.status))
-  await ctx.answerCallbackQuery({
-    text: result.idempotent ? 'Уже обработано' : 'Готово',
-  })
+  // Спиннер снимаем сразу после решения, правка — следом.
+  try {
+    await ctx.answerCallbackQuery({
+      text: result.idempotent ? 'Уже обработано' : 'Готово',
+    })
+  } catch (error) {
+    console.error('[delivery-override] answerCallbackQuery failed', error)
+  }
+  const about = await loadOverrideContext(requestId)
+  await safeEdit(ctx, about ? `${resolvedMessage(result.status)}\n${about}` : resolvedMessage(result.status))
 }
 
 registerCallbackHandler({

@@ -47,7 +47,9 @@ export async function findWeeklyClients() {
 }
 
 /**
- * Заявка на следующую неделю уже есть: «живая» недельная заявка ИЛИ хоть один
+ * Заявка на следующую неделю уже есть: «живая» недельная заявка (вкл. FAILED —
+ * клиент прислал фото/текст, упал разбор; это наша проблема, говорить клиенту
+ * «не получили» неверно — разбор у менеджера) ИЛИ хоть один
  * заказ с порциями на эту неделю по недельному питанию (менеджер внёс руками,
  * как неделю 05–11.10) — тогда клиента не дёргаем.
  */
@@ -61,7 +63,7 @@ export async function hasNextWeekRequest(
       // Приём заявки пишет UTC-полночь Пн; исторически встречалась и МСК-полночь
       // (вс 21:00Z) — ищем в пределах этих суток.
       weekStartDate: { gte: week.mondayMsk, lt: new Date(week.mondayMsk.getTime() + DAY_MS) },
-      status: { in: ['PARSED', 'AUTO_CONFIRMED', 'NEEDS_REVIEW'] },
+      status: { in: ['PARSED', 'AUTO_CONFIRMED', 'NEEDS_REVIEW', 'FAILED'] },
     },
     select: { id: true },
   })

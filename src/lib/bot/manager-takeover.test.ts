@@ -106,7 +106,7 @@ function makeClient() {
         sameDayDelivery: false,
         cutoffHourMsk: null,
         cutoffMinuteMsk: null,
-        mealConfigs: [{ mealType: 'LUNCH', pricePerPortion: '300', isActive: true }],
+        mealConfigs: [{ mealType: 'LUNCH', pricePerPortion: '300', isActive: true, orderType: 'DYNAMIC' }],
       },
     ],
   }

@@ -10,6 +10,7 @@ import { identifyTelegramUser } from '../identify-user'
 import { anomalyConfirmationButtons } from '../buttons'
 import { escapeHtml, notifyAllManagersDirect } from '../notify'
 import { ANOMALY_CHECK_ENABLED } from '@/lib/orders/anomaly-constants'
+import { prisma } from '@/lib/db/prisma'
 
 const ALLOWED_ANOMALY_ROLES = ['ADMIN', 'ADMIN_PRO', 'MANAGER'] as const
 
@@ -73,6 +74,43 @@ async function safeEditAnomalyMessage(ctx: Context, text: string): Promise<void>
   }
 }
 
+async function safeAnswer(
+  ctx: Context,
+  args: { text: string; show_alert?: boolean },
+): Promise<void> {
+  try {
+    await ctx.answerCallbackQuery(args)
+  } catch (error) {
+    console.error('[anomaly-confirmation] answerCallbackQuery failed', error)
+  }
+}
+
+/**
+ * «ХАЛВА · Офис, обед на 07.08» — чтобы после правки сообщения было видно,
+ * о каком заказе речь. Сбой загрузки — нейтральная подпись.
+ */
+async function loadAnomalyContext(confirmationId: string): Promise<string> {
+  try {
+    const c = await prisma.pendingAnomalyConfirmation.findUnique({
+      where: { id: confirmationId },
+      select: {
+        deliveryDate: true,
+        mealType: true,
+        client: { select: { name: true } },
+        location: { select: { name: true } },
+      },
+    })
+    if (!c) return 'Аномалия порций'
+    const day = String(c.deliveryDate.getUTCDate()).padStart(2, '0')
+    const month = String(c.deliveryDate.getUTCMonth() + 1).padStart(2, '0')
+    const meal = MEAL_TYPE_LABELS[c.mealType]?.toLowerCase() ?? c.mealType
+    return `${c.client.name} · ${c.location.name}, ${meal} на ${day}.${month}`
+  } catch (error) {
+    console.error('[anomaly-confirmation] load context failed', error)
+    return 'Аномалия порций'
+  }
+}
+
 export async function handleAnomalyConfirmationCallback(
   ctx: Context,
   action: string,
@@ -87,23 +125,37 @@ export async function handleAnomalyConfirmationCallback(
     await ctx.answerCallbackQuery({ text: 'Нет прав для подтверждения', show_alert: true })
     return
   }
+  if (action !== 'ok' && action !== 'no') {
+    await ctx.answerCallbackQuery({ text: 'Неизвестное действие', show_alert: false })
+    return
+  }
 
   if (action === 'ok') {
     const result = await confirmPendingAnomaly({
       confirmationId,
       user: { id: user.id, role: user.role },
     })
+    // Спиннер снимаем сразу после действия, правка — следом.
+    await safeAnswer(
+      ctx,
+      result.ok
+        ? { text: 'Готово' }
+        : result.reason === 'already_processed' || result.reason === 'already_processing'
+          ? { text: 'Уже обработано' }
+          : { text: 'Не получилось', show_alert: true },
+    )
+    const about = await loadAnomalyContext(confirmationId)
 
     if (result.ok && !ANOMALY_CHECK_ENABLED) {
       // Старая кнопка, висевшая до отключения проверки: число применено.
       await safeEditAnomalyMessage(
         ctx,
-        `✅ Проверка аномалий отключена, число принято: ${result.portions} порций`,
+        `✅ ${about}: проверка аномалий отключена, число принято: ${result.portions} порций`,
       )
       return
     }
     if (!result.ok && result.reason === 'already_processed' && !ANOMALY_CHECK_ENABLED) {
-      await safeEditAnomalyMessage(ctx, 'Проверка аномалий отключена, число уже принято')
+      await safeEditAnomalyMessage(ctx, `${about}: проверка аномалий отключена, число уже принято`)
       return
     }
 
@@ -111,44 +163,44 @@ export async function handleAnomalyConfirmationCallback(
       await safeEditAnomalyMessage(
         ctx,
         result.recovered
-          ? `✅ Операция восстановлена: заказ уже создан, уровень обновлён: ${result.portions} порций`
-          : `✅ Заказ создан, уровень обновлён: ${result.portions} порций`,
+          ? `✅ ${about}: операция восстановлена — заказ уже создан, уровень обновлён: ${result.portions} порций`
+          : `✅ ${about}: заказ создан, уровень обновлён: ${result.portions} порций`,
       )
       return
     }
     if (result.reason === 'already_processed') {
-      await safeEditAnomalyMessage(ctx, 'Уже обработано')
+      await safeEditAnomalyMessage(ctx, `✓ ${about}: уже обработано`)
       return
     }
     if (result.reason === 'already_processing') {
-      await safeEditAnomalyMessage(ctx, 'Уже обрабатывается')
+      await safeEditAnomalyMessage(ctx, `⏳ ${about}: уже обрабатывается`)
       return
     }
     if (result.reason === 'baseline_error' && result.orderId) {
       await safeEditAnomalyMessage(
         ctx,
-        'Заказ создан, но уровень не обновлён — проверьте baseline',
+        `⚠️ ${about}: заказ создан, но уровень не обновлён — проверьте baseline`,
       )
       return
     }
 
     await safeEditAnomalyMessage(
       ctx,
-      `❌ Не удалось создать заказ: ${result.error ?? 'неизвестная ошибка'}`,
+      `❌ ${about}: не удалось создать заказ: ${result.error ?? 'неизвестная ошибка'}`,
     )
     return
   }
 
-  if (action === 'no') {
-    const result = await rejectPendingAnomaly({ confirmationId, userId: user.id })
-    await safeEditAnomalyMessage(
-      ctx,
-      result.ok ? 'Отклонено, ушло в inbox' : 'Уже обработано',
-    )
-    return
-  }
-
-  await ctx.answerCallbackQuery({ text: 'Неизвестное действие', show_alert: false })
+  // action === 'no'
+  const result = await rejectPendingAnomaly({ confirmationId, userId: user.id })
+  await safeAnswer(ctx, { text: result.ok ? 'Отклонено' : 'Уже обработано' })
+  const about = await loadAnomalyContext(confirmationId)
+  await safeEditAnomalyMessage(
+    ctx,
+    result.ok
+      ? `❌ ${about}: отклонено, заказ не создан — ушло в inbox`
+      : `✓ ${about}: уже обработано`,
+  )
 }
 
 registerCallbackHandler({

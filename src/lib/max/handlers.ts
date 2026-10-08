@@ -7,6 +7,8 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { resolveClientByChatId } from '@/lib/bot/max-users'
 import { withDbRetry } from '@/lib/db-retry'
 import { createInboxItem } from '@/lib/bot/create-inbox-item'
+import { notifyClientSignal } from '@/lib/bot/notify-client-signal'
+import { countDateMentions, looksLikeDateRange } from '@/lib/bot/extract-delivery-date'
 import { escapeHtml, notifyAllAdminProDirect } from '@/lib/telegram/notify'
 import {
   handleWeeklyPhotoSubmission,
@@ -53,12 +55,22 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
   const client = await withDbRetry(() => resolveClientByChatId(maxChatId), {
     label: 'max-webhook',
   })
-  const isWeekly =
+  const hasWeekly =
     !!client &&
     client.isActive &&
     client.locations.some((l) =>
       l.mealConfigs.some((c) => c.orderType === 'WEEKLY' && c.isActive)
     )
+  const hasDynamic =
+    !!client && client.locations.some((l) => l.mealConfigs.some((c) => c.orderType === 'DYNAMIC' && c.isActive))
+  const attachmentsAll = ctx.message?.body?.attachments ?? []
+  // Клиент и с недельной заявкой, и с ежедневным вопросом: короткий ответ
+  // числом («15») — на вопрос дня, а не в недельный парсер (иначе число не
+  // вносилось, а клиенту в 16:00 писали «приём закрыт»). Фото, файл или
+  // несколько дат/период — недельная заявка.
+  const weeklyShaped =
+    attachmentsAll.length > 0 || looksLikeDateRange(text) || countDateMentions(text) > 1 || text.split('\n').length > 2
+  const isWeekly = hasWeekly && (!hasDynamic || weeklyShaped)
 
   if (isWeekly && client) {
     // Любой исход WEEKLY-ветки — early-return: эти сообщения НИКОГДА не уходят
@@ -142,6 +154,33 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
     }
   }
 
+  // Фото / файл / голосовое от не-недельного клиента: бот их не разбирает —
+  // раньше они молча выбрасывались (пустой текст). Теперь — менеджеру.
+  if (client && client.isActive && attachmentsAll.length > 0 && !text.trim()) {
+    const kinds = Array.from(new Set(attachmentsAll.map((a) => a?.type ?? 'файл'))).join(', ')
+    try {
+      await logBotMessage({ clientId: client.id, conversationId: null, direction: 'IN', text: `[вложение: ${kinds}]` })
+      const inbox = await createInboxItem({
+        clientId: client.id,
+        reason: 'NON_NUMERIC',
+        humanReason: `Клиент прислал вложение (${kinds}) без текста — посмотрите в MAX`,
+        priority: 'NORMAL',
+        clientMessage: null,
+      })
+      await notifyClientSignal({
+        clientId: client.id,
+        messageText: `[вложение: ${kinds}]`,
+        inboxItemId: inbox.id,
+        tone: null,
+        reason: inbox.reason,
+        priority: inbox.priority,
+      }).catch((e) => console.error('[bot] attachment signal failed:', e))
+    } catch (err) {
+      console.error('[bot] attachment handling failed:', err)
+    }
+    return
+  }
+
   try {
     const result = await processClientMessage({ maxChatId, text })
     console.log(`[bot] result: action=${result.action} reply=${result.reply ? 'YES' : 'NO'}${result.inboxItemId ? ` inbox=${result.inboxItemId}` : ''}`)
@@ -149,7 +188,22 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
     // через sendBotMessage внутри handleBotResponse (с logBotMessage для треда).
     // Парный вызов давал дубль-сообщение в MAX (см. аудит 5.7c).
   } catch (err) {
+    // Сбой нейросети/БД не должен терять сообщение клиента: inbox HIGH + личка.
     console.error('[bot] processClientMessage failed:', err)
+    if (client) {
+      const detail = err instanceof Error ? err.message : String(err)
+      await logBotMessage({ clientId: client.id, conversationId: null, direction: 'IN', text }).catch(() => {})
+      await createInboxItem({
+        clientId: client.id,
+        reason: 'NON_NUMERIC',
+        humanReason: `Сообщение не обработано автоматически (ошибка: ${detail.slice(0, 200)}) — ответьте вручную`,
+        priority: 'HIGH',
+        clientMessage: text || null,
+      }).catch((e) => console.error('[bot] failure inbox failed:', e))
+      await notifyAllAdminProDirect(
+        `⚠️ ${escapeHtml(client.name)}: сообщение не обработано автоматически — «${escapeHtml(text.slice(0, 200))}». Оно в инбоксе, ответьте вручную.`,
+      ).catch((e) => console.error('[bot] failure notify failed:', e))
+    }
   }
 }
 

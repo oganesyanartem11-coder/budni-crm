@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCandidatesWhere } from '@/lib/bot/daily-questions-core'
+import { buildCandidatesWhere, SAME_DAY_DYNAMIC_LOCATION } from '@/lib/bot/daily-questions-core'
 
 /**
  * Тестируем семантику where-builder'а напрямую (project-стиль: чистые
@@ -12,24 +12,31 @@ import { buildCandidatesWhere } from '@/lib/bot/daily-questions-core'
 
 interface FakeLocation {
   sameDayDelivery: boolean
+  /** По умолчанию true. */
+  isActive?: boolean
+  /** Есть активное DYNAMIC-питание на точке. По умолчанию true. */
+  hasDynamic?: boolean
 }
 
-/** Воспроизводит Prisma-семантику locations: { some } / { none } для where. */
+/**
+ * Воспроизводит Prisma-семантику locations: { some } / { none } для where с
+ * предикатом SAME_DAY_DYNAMIC_LOCATION (sameDayDelivery + isActive + DYNAMIC).
+ */
 function clientMatchesLocationsFilter(
   where: ReturnType<typeof buildCandidatesWhere>,
   locations: FakeLocation[]
 ): boolean {
   const locFilter = where.locations as
-    | { some?: { sameDayDelivery: boolean }; none?: { sameDayDelivery: boolean } }
+    | { some?: typeof SAME_DAY_DYNAMIC_LOCATION; none?: typeof SAME_DAY_DYNAMIC_LOCATION }
     | undefined
   if (!locFilter) return true
+  const matches = (l: FakeLocation, f: typeof SAME_DAY_DYNAMIC_LOCATION) =>
+    l.sameDayDelivery === f.sameDayDelivery &&
+    (l.isActive ?? true) === f.isActive &&
+    (f.mealConfigs ? (l.hasDynamic ?? true) : true)
 
-  if (locFilter.some) {
-    return locations.some((l) => l.sameDayDelivery === locFilter.some!.sameDayDelivery)
-  }
-  if (locFilter.none) {
-    return !locations.some((l) => l.sameDayDelivery === locFilter.none!.sameDayDelivery)
-  }
+  if (locFilter.some) return locations.some((l) => matches(l, locFilter.some!))
+  if (locFilter.none) return !locations.some((l) => matches(l, locFilter.none!))
   return true
 }
 
@@ -37,16 +44,47 @@ const samedayWhere = buildCandidatesWhere(true)
 const dailyWhere = buildCandidatesWhere(false)
 
 describe('buildCandidatesWhere — базовые инварианты', () => {
-  it('обе ветки требуют активного клиента и активного DYNAMIC-конфига', () => {
+  it('обе ветки требуют активного клиента и активного DYNAMIC-конфига на активной точке', () => {
     for (const w of [samedayWhere, dailyWhere]) {
       expect(w.isActive).toBe(true)
-      expect(w.mealConfigs).toEqual({ some: { orderType: 'DYNAMIC', isActive: true } })
+      expect(w.mealConfigs).toEqual({
+        some: { orderType: 'DYNAMIC', isActive: true, location: { isActive: true } },
+      })
     }
   })
 
-  it('sameDay cron использует locations.some, обычный — locations.none', () => {
-    expect(samedayWhere.locations).toEqual({ some: { sameDayDelivery: true } })
-    expect(dailyWhere.locations).toEqual({ none: { sameDayDelivery: true } })
+  it('sameDay cron использует locations.some, обычный — locations.none (активная same-day точка с DYNAMIC)', () => {
+    expect(samedayWhere.locations).toEqual({ some: SAME_DAY_DYNAMIC_LOCATION })
+    expect(dailyWhere.locations).toEqual({ none: SAME_DAY_DYNAMIC_LOCATION })
+    expect(SAME_DAY_DYNAMIC_LOCATION).toEqual({
+      sameDayDelivery: true,
+      isActive: true,
+      mealConfigs: { some: { orderType: 'DYNAMIC', isActive: true } },
+    })
+  })
+})
+
+describe('деактивированная same-day точка', () => {
+  const locations: FakeLocation[] = [
+    { sameDayDelivery: false },
+    { sameDayDelivery: true, isActive: false },
+  ]
+  it('клиент НЕ попадает в sameday cron (не спрашиваем в 07:40 о сегодня)', () => {
+    expect(clientMatchesLocationsFilter(samedayWhere, locations)).toBe(false)
+  })
+  it('клиент попадает в обычный cron (спрашиваем о завтра)', () => {
+    expect(clientMatchesLocationsFilter(dailyWhere, locations)).toBe(true)
+  })
+})
+
+describe('same-day точка только с FIXED-питанием', () => {
+  const locations: FakeLocation[] = [
+    { sameDayDelivery: false },
+    { sameDayDelivery: true, hasDynamic: false },
+  ]
+  it('клиент спрашивается обычным cron, не sameday', () => {
+    expect(clientMatchesLocationsFilter(samedayWhere, locations)).toBe(false)
+    expect(clientMatchesLocationsFilter(dailyWhere, locations)).toBe(true)
   })
 })
 

@@ -111,6 +111,8 @@ export function extractDateDeterministic(text: string, now: Date): string | 'amb
     }
   }
   for (const m of lower.matchAll(/(?<![\d.])(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?![\d])/g)) {
+    // «к 12.10», «до 12.30» — это время, а не дата.
+    if (/(^|[^а-я])(к|до)\s*$/.test(lower.slice(Math.max(0, m.index! - 4), m.index!))) continue
     add(m.index!, resolveDayMonth(today, Number(m[1]), Number(m[2])))
   }
   const monthRe = new RegExp(`(?<![\\d])(\\d{1,2})\\s*(?:-?го\\s+)?(${MONTH_ROOTS.join('|')})[а-я]*`, 'g')
@@ -134,6 +136,13 @@ export function extractDateDeterministic(text: string, now: Date): string | 'amb
   if (distinct.length === 0) return null
   if (distinct.length > 1) return 'ambiguous'
   return distinct[0]
+}
+
+/** Сколько разных дат названо в тексте (для маршрутизации «заявка на неделю»). */
+export function countDateMentions(text: string, now: Date = new Date()): number {
+  const r = extractDateDeterministic(text, now)
+  if (r === null) return 0
+  return r === 'ambiguous' ? 2 : 1
 }
 
 export async function extractDeliveryDateFromText(

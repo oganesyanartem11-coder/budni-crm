@@ -7,7 +7,9 @@ const {
   mockReject,
   mockNotifyManagers,
   anomalyFlag,
+  mockFindAnomaly,
 } = vi.hoisted(() => ({
+  mockFindAnomaly: vi.fn(),
   // Тесты ниже проверяют режим С проверкой аномалий (флаг можно вернуть в true);
   // режим «проверка отключена» — отдельный describe.
   anomalyFlag: { enabled: true },
@@ -30,6 +32,9 @@ vi.mock('@/lib/orders/anomaly-constants', async () => {
     },
   }
 })
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: { pendingAnomalyConfirmation: { findUnique: mockFindAnomaly } },
+}))
 vi.mock('../identify-user', () => ({ identifyTelegramUser: mockIdentify }))
 vi.mock('@/lib/orders/anomaly-confirmations', () => ({
   confirmPendingAnomaly: mockConfirm,
@@ -64,7 +69,15 @@ beforeEach(() => {
   mockNotifyManagers.mockResolvedValue({ sentTo: 2, skippedNoTelegram: 0, failed: 0 })
   mockConfirm.mockResolvedValue({ ok: true, orderId: 'order_1', portions: 5 })
   mockReject.mockResolvedValue({ ok: true, inboxItemId: 'inbox_1' })
+  mockFindAnomaly.mockResolvedValue({
+    deliveryDate: new Date('2026-08-07T00:00:00.000Z'),
+    mealType: 'LUNCH',
+    client: { name: 'ХАЛВА' },
+    location: { name: 'Офис' },
+  })
 })
+
+const ABOUT = 'ХАЛВА · Офис, обед на 07.08'
 
 describe('anomaly notification', () => {
   it('экранирует пользовательский HTML и объясняет baseline/причину', () => {
@@ -122,7 +135,7 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
       user: { id: `user_${role}`, role },
     })
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('✅ Заказ создан, уровень обновлён: 5 порций')
+      .toHaveBeenCalledWith(`✅ ${ABOUT}: заказ создан, уровень обновлён: 5 порций`)
   })
 
   it.each(['CHEF', 'COURIER'] as const)('%s не может подтвердить', async (role) => {
@@ -144,7 +157,7 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
     await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
 
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('Уже обработано')
+      .toHaveBeenCalledWith(`✓ ${ABOUT}: уже обработано`)
   })
 
   it('параллельный ok показывает «Уже обрабатывается»', async () => {
@@ -155,7 +168,7 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
     await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
 
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('Уже обрабатывается')
+      .toHaveBeenCalledWith(`⏳ ${ABOUT}: уже обрабатывается`)
   })
 
   it('recovery честно сообщает о восстановленной операции', async () => {
@@ -171,7 +184,26 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
     await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
 
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('✅ Операция восстановлена: заказ уже создан, уровень обновлён: 5 порций')
+      .toHaveBeenCalledWith(`✅ ${ABOUT}: операция восстановлена — заказ уже создан, уровень обновлён: 5 порций`)
+  })
+
+  it('ответ на кнопку — до правки сообщения; сбой загрузки контекста не ломает правку', async () => {
+    mockIdentify.mockResolvedValue({ id: 'manager_1', role: 'MANAGER', isActive: true })
+    mockFindAnomaly.mockRejectedValue(new Error('db'))
+    const ctx = makeCtx() as unknown as {
+      answerCallbackQuery: ReturnType<typeof vi.fn>
+      editMessageText: ReturnType<typeof vi.fn>
+    }
+
+    await handleAnomalyConfirmationCallback(ctx as never, 'ok', 'anom_1')
+
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Готово' })
+    expect(ctx.answerCallbackQuery.mock.invocationCallOrder[0]).toBeLessThan(
+      ctx.editMessageText.mock.invocationCallOrder[0],
+    )
+    expect(ctx.editMessageText).toHaveBeenCalledWith(
+      '✅ Аномалия порций: заказ создан, уровень обновлён: 5 порций',
+    )
   })
 
   it('частичный успех показывает точное предупреждение о baseline', async () => {
@@ -187,7 +219,7 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
     await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
 
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('Заказ создан, но уровень не обновлён — проверьте baseline')
+      .toHaveBeenCalledWith(`⚠️ ${ABOUT}: заказ создан, но уровень не обновлён — проверьте baseline`)
   })
 
   it('no отклоняет и отправляет в inbox', async () => {
@@ -197,8 +229,10 @@ describe('handleAnomalyConfirmationCallback — роли и идемпотент
     await handleAnomalyConfirmationCallback(ctx, 'no', 'anom_1')
 
     expect(mockReject).toHaveBeenCalledWith({ confirmationId: 'anom_1', userId: 'manager_1' })
+    expect((ctx as { answerCallbackQuery: ReturnType<typeof vi.fn> }).answerCallbackQuery)
+      .toHaveBeenCalledWith({ text: 'Отклонено' })
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('Отклонено, ушло в inbox')
+      .toHaveBeenCalledWith(`❌ ${ABOUT}: отклонено, заказ не создан — ушло в inbox`)
   })
 })
 
@@ -231,7 +265,7 @@ describe('handleAnomalyConfirmationCallback — проверка аномали�
       user: { id: 'manager_1', role: 'MANAGER' },
     })
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('✅ Проверка аномалий отключена, число принято: 5 порций')
+      .toHaveBeenCalledWith(`✅ ${ABOUT}: проверка аномалий отключена, число принято: 5 порций`)
   })
 
   it('повторное «Да» по уже применённому — «число уже принято»', async () => {
@@ -242,6 +276,6 @@ describe('handleAnomalyConfirmationCallback — проверка аномали�
     await handleAnomalyConfirmationCallback(ctx, 'ok', 'anom_1')
 
     expect((ctx as { editMessageText: ReturnType<typeof vi.fn> }).editMessageText)
-      .toHaveBeenCalledWith('Проверка аномалий отключена, число уже принято')
+      .toHaveBeenCalledWith(`${ABOUT}: проверка аномалий отключена, число уже принято`)
   })
 })

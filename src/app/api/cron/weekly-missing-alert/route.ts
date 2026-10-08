@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { notifyAllAdminProDirect, escapeHtml } from '@/lib/telegram/notify'
 import { alreadyRanToday, markRanToday } from '@/lib/bot/daily-summary'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
+import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
 import { findWeeklyClients, getNextWeek, hasNextWeekRequest, type NextWeek } from '@/lib/weekly/reminders'
 
 export const dynamic = 'force-dynamic'
@@ -9,9 +10,16 @@ export const maxDuration = 60
 
 const CRON_LABEL = 'weekly-missing-alert' // Пт 15:00 МСК
 
-/** Алёрт менеджеру: клиенту напомнили в пт 10:00 и 13:00, заявки нет. */
-function buildAlertText(clientName: string, week: NextWeek): string {
-  return `⚠️ ${escapeHtml(clientName)}: нет заявки на следующую неделю (${week.label}). Напомнили в пятницу в 10:00 и 13:00 — без ответа. Связаться лично?`
+/**
+ * Алёрт менеджеру: заявки нет. Есть привязанный чат — клиенту напомнили в пт
+ * 10:00 и 13:00; нет чата — напоминания не уходили (weekly-request-reminder
+ * таких пропускает), и писать «напомнили» было бы неправдой.
+ */
+function buildAlertText(clientName: string, week: NextWeek, hasChat: boolean): string {
+  const reminded = hasChat
+    ? 'Напомнили в пятницу в 10:00 и 13:00 — без ответа.'
+    : 'Напомнить не смогли — нет привязанного чата.'
+  return `⚠️ ${escapeHtml(clientName)}: нет заявки на следующую неделю (${week.label}). ${reminded} Связаться лично?`
 }
 
 export async function handler(request: Request) {
@@ -42,7 +50,8 @@ export async function handler(request: Request) {
       continue
     }
     try {
-      const text = buildAlertText(client.name, week)
+      const hasChat = (await getActiveMaxChatIdForClient(client.id)) !== null
+      const text = buildAlertText(client.name, week, hasChat)
       await notifyAllAdminProDirect(text)
       console.log(`[weekly-missing-alert] alerted manager for client=${client.id}`)
       alerted++

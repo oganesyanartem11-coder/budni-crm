@@ -629,6 +629,9 @@ model PendingOrderChange {
   mealType         MealType
   action           PendingOrderChangeAction
   proposedPortions Int
+  // «Добавьте N» / «уберите N»: изменение со знаком. При подтверждении итог
+  // считается от заказа В ЭТОТ МОМЕНТ (две «+1» подряд = +2, а не одно 11).
+  deltaPortions    Int?
   currentOrderId   String? // для EDIT: id существующего заказа
   currentPortions  Int? // для EDIT: текущее число порций
   sourceMaxChatId  String // куда слать автоответ клиенту

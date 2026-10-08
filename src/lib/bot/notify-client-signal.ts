@@ -10,9 +10,13 @@ import type { ToneLabel } from '@/lib/inbox/tone-labels'
  * и notifyToneAlert (7.15 — пуш по tone). Один шаблон, один cooldown,
  * один лог через ClientAlertLog.
  *
- * Cooldown: 2 мин per-client. Эскалация rude→urgent прорывается через
- * cooldown (если последний алёрт был rude, а новый urgent — отправляется).
- * Обратно (urgent→rude) — нет, urgent уже даёт макс-приоритет.
+ * Cooldown: 2 мин per-client — только против повторов ОДНОГО И ТОГО ЖЕ сигнала.
+ * Пробивают cooldown:
+ *  - новый InboxItem (inboxItemId не null и ещё не алёртился в окне) — это
+ *    новая работа менеджеру, глушить её нельзя;
+ *  - priority=HIGH (кроме повтора того же InboxItem);
+ *  - эскалация rude→urgent. Обратно (urgent→rude) — нет.
+ * Чистые tone-повторы (без нового InboxItem) по-прежнему гасятся.
  *
  * Title-приоритет: urgent > HIGH-priority > rude > NORMAL.
  *
@@ -28,7 +32,7 @@ const REASON_RU: Record<string, string> = {
   ANOMALY_LLM_CONFIDENCE: 'LLM не уверен в парсинге',
   NON_NUMERIC: 'Не цифровой ответ',
   CANCELLATION_INTENT: 'Клиент хочет отменить',
-  POST_CUTOFF: 'Сообщение после 16:00',
+  POST_CUTOFF: 'Сообщение после приёма заявок',
 }
 
 export interface ClientSignalInput {
@@ -40,6 +44,31 @@ export interface ClientSignalInput {
   /** InboxItemReason value (или null если алёрт не привязан к InboxItem). */
   reason?: string | null
   priority?: 'HIGH' | 'NORMAL' | null
+  /**
+   * Фактический cut-off клиента для POST_CUTOFF («15:00»). Нет — нейтральное
+   * «после приёма заявок» (у клиентов разный cut-off, 16:00 — не для всех).
+   */
+  cutoffLabel?: string | null
+}
+
+type RecentAlert = { tone: string | null; inboxItemId: string | null; priority: string | null }
+
+/**
+ * Решение cooldown. Возвращает причину прорыва или null (= глушим).
+ * recent — алёрты клиента за окно cooldown, новые первыми.
+ */
+export function cooldownBreakthrough(
+  recent: RecentAlert[],
+  input: Pick<ClientSignalInput, 'inboxItemId' | 'tone' | 'priority'>,
+): 'no_recent' | 'new_inbox_item' | 'high_priority' | 'escalation' | null {
+  if (recent.length === 0) return 'no_recent'
+  const { inboxItemId, tone, priority } = input
+  const sameInboxAlerted = !!inboxItemId && recent.some((a) => a.inboxItemId === inboxItemId)
+  if (inboxItemId && !sameInboxAlerted) return 'new_inbox_item'
+  if (priority === 'HIGH' && !sameInboxAlerted) return 'high_priority'
+  const wasUrgent = recent[0].tone === 'urgent'
+  if (tone === 'urgent' && !wasUrgent) return 'escalation'
+  return null
 }
 
 export async function notifyClientSignal(input: ClientSignalInput): Promise<void> {
@@ -66,27 +95,25 @@ export async function notifyClientSignal(input: ClientSignalInput): Promise<void
     return
   }
 
-  // Cooldown: 2 мин per-client с escalation rule.
-  const recentAlert = await prisma.clientAlertLog.findFirst({
+  // Cooldown: 2 мин per-client; новый InboxItem / HIGH / эскалация пробивают.
+  const recentAlerts: RecentAlert[] = await prisma.clientAlertLog.findMany({
     where: {
       clientId,
       createdAt: { gte: new Date(Date.now() - CLIENT_ALERT_COOLDOWN_MIN * 60_000) },
     },
     orderBy: { createdAt: 'desc' },
-    select: { tone: true },
+    select: { tone: true, inboxItemId: true, priority: true },
   })
-  if (recentAlert) {
-    const wasUrgent = recentAlert.tone === 'urgent'
-    const nowUrgent = tone === 'urgent'
-    // Прорывается только rude → urgent (или escalation в urgent с любого).
-    // Если предыдущий был urgent — новый не пробьёт (avoid spam).
-    if (wasUrgent || !nowUrgent) {
-      console.log(
-        `[bot] alert SKIPPED (cooldown): client=${clientId} lastTone=${recentAlert.tone ?? 'none'}`
-      )
-      return
-    }
-    console.log(`[bot] alert PROCEEDS (escalation rude→urgent): client=${clientId}`)
+  const breakthrough = cooldownBreakthrough(recentAlerts, { inboxItemId, tone, priority })
+  if (!breakthrough) {
+    console.log(
+      `[bot] alert SKIPPED (cooldown): client=${clientId} lastTone=${recentAlerts[0]?.tone ?? 'none'} ` +
+        `inboxItem=${inboxItemId ?? 'none'}`
+    )
+    return
+  }
+  if (breakthrough !== 'no_recent') {
+    console.log(`[bot] alert PROCEEDS (cooldown breakthrough: ${breakthrough}): client=${clientId}`)
   }
 
   // Title-приоритет: urgent > HIGH > rude > NORMAL.
@@ -107,10 +134,12 @@ export async function notifyClientSignal(input: ClientSignalInput): Promise<void
 
   let text: string
   if (reason === 'POST_CUTOFF' && tone !== 'rude' && tone !== 'urgent') {
-    // #2: человечный пуш для «после 16:00» вместо генерик «Новое в Inbox».
+    // #2: человечный пуш «после cut-off» вместо генерик «Новое в Inbox».
     // Заказ уже принят — менеджеру нужен сам факт + текст, без формальной «Причины».
+    // Cut-off у клиентов разный: реальный — если передан, иначе нейтрально.
+    const after = input.cutoffLabel ? `после ${escapeHtml(input.cutoffLabel)}` : 'после приёма заявок'
     text =
-      `⏰ <b>${escapeHtml(client.name)}</b> написал после 16:00:\n` +
+      `⏰ <b>${escapeHtml(client.name)}</b> написал ${after}:\n` +
       `<i>«${escapeHtml(preview)}»</i>`
   } else {
     const lines: string[] = []

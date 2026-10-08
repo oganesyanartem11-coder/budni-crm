@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { mockPrisma, mockPlan, mockApply } = vi.hoisted(() => ({
-  mockPrisma: { activityLog: { create: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn() } },
+  mockPrisma: { activityLog: { create: vi.fn(), findUnique: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn() } },
   mockPlan: vi.fn(),
   mockApply: vi.fn(),
 }))
@@ -19,6 +19,8 @@ import {
   rejectRangeRequest,
   submitClientRangeRequest,
   RANGE_REQUESTED_ACTION,
+  RANGE_CLAIMED_ACTION,
+  RANGE_RESOLVED_ACTION,
 } from './range-request'
 
 const REQUEST = {
@@ -46,6 +48,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockPrisma.activityLog.create.mockResolvedValue({ id: 'req_1' })
   mockPrisma.activityLog.findFirst.mockResolvedValue(null)
+  mockPrisma.activityLog.updateMany.mockResolvedValue({ count: 1 })
 })
 
 describe('запрос клиента на период', () => {
@@ -122,11 +125,60 @@ describe('запрос клиента на период', () => {
     })
     expect(mockApply).toHaveBeenCalledWith(ACTOR, LINE('08'), 'range_change', undefined)
 
-    mockPrisma.activityLog.findFirst.mockResolvedValue({ id: 'resolved' })
+    // Claim атомарный: REQUESTED → CLAIMED, решение пишется отдельным RESOLVED-логом.
+    expect(mockPrisma.activityLog.updateMany).toHaveBeenCalledWith({
+      where: { id: 'req_1', action: RANGE_REQUESTED_ACTION },
+      data: { action: RANGE_CLAIMED_ACTION },
+    })
+    expect(mockPrisma.activityLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: RANGE_RESOLVED_ACTION,
+        entityId: 'req_1',
+        payload: { decision: 'confirmed' },
+      }),
+    })
+
+    // Повтор: лог уже CLAIMED, claim не проходит → ничего не применяем.
+    mockApply.mockClear()
+    mockPrisma.activityLog.findUnique.mockResolvedValue({ ...STORED, action: RANGE_CLAIMED_ACTION })
+    mockPrisma.activityLog.updateMany.mockResolvedValue({ count: 0 })
     expect(await confirmRangeRequest({ requestId: 'req_1', actor: ACTOR })).toEqual({
       ok: false,
       reason: 'already_processed',
     })
+    expect(mockApply).not.toHaveBeenCalled()
+  })
+
+  it('гонка «Подтвердить» и «Отклонить»: выигрывает один claim, второй — already_processed', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue(STORED)
+    mockApply.mockResolvedValue({ ok: true, note: null })
+    let claimed = false
+    mockPrisma.activityLog.updateMany.mockImplementation(async () => {
+      if (claimed) return { count: 0 }
+      claimed = true
+      return { count: 1 }
+    })
+
+    const [a, b] = await Promise.all([
+      confirmRangeRequest({ requestId: 'req_1', actor: ACTOR }),
+      rejectRangeRequest({ requestId: 'req_1', actor: ACTOR }),
+    ])
+
+    expect([a.ok, b.ok].filter(Boolean)).toHaveLength(1)
+    expect([a, b]).toContainEqual({ ok: false, reason: 'already_processed' })
+    const resolvedLogs = mockPrisma.activityLog.create.mock.calls.filter(
+      (c) => c[0].data.action === RANGE_RESOLVED_ACTION,
+    )
+    expect(resolvedLogs).toHaveLength(1)
+  })
+
+  it('неизвестный id / чужой action → not_found, claim не делаем', async () => {
+    mockPrisma.activityLog.findUnique.mockResolvedValue({ ...STORED, action: 'SOMETHING_ELSE' })
+    expect(await confirmRangeRequest({ requestId: 'req_1', actor: ACTOR })).toEqual({
+      ok: false,
+      reason: 'not_found',
+    })
+    expect(mockPrisma.activityLog.updateMany).not.toHaveBeenCalled()
   })
 
   it('«Отклонить» → заказы не трогаем', async () => {

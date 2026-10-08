@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * handler напрямую — поведение GET (withCronHeartbeat) не трогаем.
  */
 
-const { mockPrisma, mockNotify } = vi.hoisted(() => ({
+const { mockPrisma, mockNotify, mockChatId } = vi.hoisted(() => ({
+  mockChatId: vi.fn(),
   mockPrisma: {
     client: { findMany: vi.fn() },
     weeklyOrderSubmission: { findFirst: vi.fn() },
@@ -18,6 +19,7 @@ const { mockPrisma, mockNotify } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
+vi.mock('@/lib/bot/max-users', () => ({ getActiveMaxChatIdForClient: mockChatId }))
 vi.mock('@/lib/telegram/notify', () => ({
   notifyAllAdminProDirect: mockNotify,
   // escapeHtml — реальная реализация, чтобы тест проверял корректное
@@ -36,6 +38,7 @@ beforeEach(() => {
   mockPrisma.activityLog.create.mockResolvedValue({ id: 'log_1' })
   mockNotify.mockResolvedValue({ sentTo: 1, skippedNoTelegram: 0, failed: 0 })
   mockPrisma.order.findFirst.mockResolvedValue(null)
+  mockChatId.mockResolvedValue('12345')
 })
 
 describe('weekly-missing-alert', () => {
@@ -107,5 +110,30 @@ describe('weekly-missing-alert', () => {
 
     expect(mockNotify).not.toHaveBeenCalled()
     expect(body.skippedHasSubmission).toBe(1)
+  })
+
+  it('нет привязанного чата → «напомнить не смогли», а не «напомнили»', async () => {
+    mockPrisma.client.findMany.mockResolvedValue([{ id: 'c1', name: 'Кафе Будни' }])
+    mockPrisma.weeklyOrderSubmission.findFirst.mockResolvedValue(null)
+    mockChatId.mockResolvedValue(null)
+
+    await handler(REQ)
+
+    const text = mockNotify.mock.calls[0][0] as string
+    expect(text).toContain('Напомнить не смогли — нет привязанного чата')
+    expect(text).not.toContain('Напомнили в пятницу')
+    expect(mockChatId).toHaveBeenCalledWith('c1')
+  })
+
+  it('FAILED-заявка (клиент прислал, упал разбор) считается заявкой → алёрта нет', async () => {
+    mockPrisma.client.findMany.mockResolvedValue([{ id: 'c1', name: 'Кафе Будни' }])
+    mockPrisma.weeklyOrderSubmission.findFirst.mockResolvedValue({ id: 'sub_failed' })
+
+    const body = await (await handler(REQ)).json()
+
+    expect(mockNotify).not.toHaveBeenCalled()
+    expect(body.skippedHasSubmission).toBe(1)
+    const where = mockPrisma.weeklyOrderSubmission.findFirst.mock.calls[0][0].where
+    expect(where.status.in).toContain('FAILED')
   })
 })

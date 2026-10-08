@@ -77,7 +77,7 @@ export async function parseClientResponse(input: ParseInput): Promise<ParsedResp
 3. Если в тексте нет цифр (вопрос, жалоба, общение) — type="question" или "noise".
 4. Если клиент даёт понять что заказа не будет ("не нужно", "праздник", "выходной", "0") — type="cancellation_intent".
 5. Confidence 0..1: 1 — полная уверенность, ниже 0.8 — есть сомнения.
-6. Reason — короткое объяснение что распознал и почему такой confidence (НЕ повторяй сам ответ).
+6. Reason — ОДНО короткое предложение, не длиннее 100 символов (НЕ повторяй сам ответ).
 7. ToneLabel — оценка тона клиента: "rude" (грубо), "thanks" (благодарность), "urgent" (срочно), "neutral" (нейтрально).
 8. Если клиент явно назвал приём пищи, верни mealType из BREAKFAST|LUNCH|DINNER. Если определить его нельзя — не выдумывай и не добавляй mealType.
 9. Если клиент просит ДОБАВИТЬ или УБРАТЬ порции к уже заказанному («добавьте 2», «+1 обед», «на 3 меньше», «уберите одну», «минус 2») — это type="numeric", у позиции "mode": "add", а portions — изменение со знаком (добавить 2 → 2, убрать 3 → -3). Если клиент называет итоговое количество («нас будет 30») — mode не указывай.
@@ -113,16 +113,25 @@ ${
 
 Ответ клиента: "${input.clientText}"
 ${isCaps ? '\nПодсказка: текст написан CAPS LOCK\'ом — это часто признак раздражения; ToneLabel="rude" по умолчанию, но при доброжелательном контексте смело меняй.\n' : ''}
-Распознай структуру. Верни JSON.`
+Распознай структуру. Верни компактный JSON одной строкой, без markdown и пояснений вокруг.`
 
   const startTime = Date.now()
 
-  const response = await client.messages.create({
-    model: getInboxModel(),
-    max_tokens: 500,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  })
+  // 08.10: Haiku 5.5 пишет развёрнутый reason и красиво форматирует JSON —
+  // при max_tokens=500 ответ обрезался посередине, «1» становилось «не цифрой»
+  // (каждый ~4-й ответ). Запас по токенам + один повтор при обрыве.
+  const ask = () =>
+    client.messages.create({
+      model: getInboxModel(),
+      max_tokens: 1500,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    })
+  let response = await ask()
+  if (response.stop_reason === 'max_tokens') {
+    console.warn('[LLM] parse hit max_tokens, retrying once')
+    response = await ask()
+  }
 
   const elapsed = Date.now() - startTime
   console.log(

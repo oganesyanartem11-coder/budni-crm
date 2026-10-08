@@ -24,6 +24,105 @@ import type { DayContext, EventContext, TeamChannel, TeamPostResult, WeekContext
 
 const MAX_TOKENS = 1200
 
+// ─── Санитайзер HTML для Telegram ────────────────────────────────────────
+// Пост пишет LLM и уходит с parse_mode=HTML. Любой «<», «>» или «&» вне
+// разрешённых тегов (например «<5 порций», «A&B», <br>, <p>) Telegram
+// отвергает целиком — пост теряется. Оставляем только поддерживаемые
+// Telegram теги из нашего промта, всё прочее экранируем.
+
+const ALLOWED_SIMPLE_TAGS = new Set(['b', 'i', 'u', 's', 'code'])
+const ENTITY_RE = /^&(?:amp|lt|gt|quot|#\d{1,6}|#x[0-9a-fA-F]{1,6});/
+const TAG_RE = /^<(\/?)([a-zA-Z]+)((?:\s+[^<>]*)?)>/
+const HREF_RE = /^\s+href\s*=\s*(?:"([^"]*)"|'([^']*)')\s*$/
+const SAFE_URL_RE = /^(?:https?:\/\/|tg:\/\/|mailto:)/i
+
+function escapeHrefValue(url: string): string {
+  return url.replace(/&(?!(?:amp|lt|gt|quot|#\d{1,6}|#x[0-9a-fA-F]{1,6});)/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/**
+ * Привести LLM-текст к валидному Telegram-HTML: выживают только <b>, <i>,
+ * <u>, <s>, <code>, <a href="http(s)|tg|mailto">; прочие «<», «>», «&»
+ * экранируются; непарные закрывающие теги — текстом, незакрытые — закрываем.
+ */
+export function sanitizeTelegramHtml(input: string): string {
+  let out = ''
+  const stack: string[] = []
+  let i = 0
+  while (i < input.length) {
+    const ch = input[i]
+    if (ch === '&') {
+      const ent = ENTITY_RE.exec(input.slice(i))
+      if (ent) {
+        out += ent[0]
+        i += ent[0].length
+      } else {
+        out += '&amp;'
+        i++
+      }
+      continue
+    }
+    if (ch === '>') {
+      out += '&gt;'
+      i++
+      continue
+    }
+    if (ch === '<') {
+      const m = TAG_RE.exec(input.slice(i))
+      if (m) {
+        const closing = m[1] === '/'
+        const name = m[2].toLowerCase()
+        const attrs = m[3] ?? ''
+        if (!closing && ALLOWED_SIMPLE_TAGS.has(name) && attrs.trim() === '') {
+          out += `<${name}>`
+          stack.push(name)
+          i += m[0].length
+          continue
+        }
+        if (!closing && name === 'a') {
+          const href = HREF_RE.exec(attrs)
+          const url = href ? (href[1] ?? href[2] ?? '') : ''
+          if (href && SAFE_URL_RE.test(url) && !stack.includes('a')) {
+            out += `<a href="${escapeHrefValue(url)}">`
+            stack.push('a')
+            i += m[0].length
+            continue
+          }
+        }
+        if (closing && attrs.trim() === '' && stack.length > 0 && stack[stack.length - 1] === name) {
+          out += `</${name}>`
+          stack.pop()
+          i += m[0].length
+          continue
+        }
+      }
+      out += '&lt;'
+      i++
+      continue
+    }
+    out += ch
+    i++
+  }
+  while (stack.length > 0) out += `</${stack.pop()}>`
+  return out
+}
+
+function codePointOr(cp: number, fallback: string): string {
+  return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : fallback
+}
+
+/** Плоский текст из (санитайзенного) HTML — для повторной отправки без parse_mode. */
+export function stripTelegramHtml(html: string): string {
+  return html
+    .replace(/<\/?(?:b|i|u|s|code|a)(?:\s[^<>]*)?>/gi, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d{1,6});/g, (m, d: string) => codePointOr(Number(d), m))
+    .replace(/&#x([0-9a-fA-F]{1,6});/g, (m, h: string) => codePointOr(parseInt(h, 16), m))
+    .replace(/&amp;/g, '&')
+}
+
 // Тариф Sonnet 4.6 — синхронизируй с src/lib/boris/metrics/track.ts при смене модели.
 const PRICE_INPUT_USD_PER_M = 3
 const PRICE_OUTPUT_USD_PER_M = 15
@@ -184,10 +283,12 @@ export async function formatTeamPost(
     }
   }
 
+  // LLM-текст уходит с parse_mode=HTML — чистим до разрешённых тегов.
+  const safeText = sanitizeTelegramHtml(text)
   return {
     shouldSend: true,
-    text,
-    briefingPayload: { channel, decision: 'SEND', textLength: text.length },
+    text: safeText,
+    briefingPayload: { channel, decision: 'SEND', textLength: safeText.length },
     metrics,
   }
 }
