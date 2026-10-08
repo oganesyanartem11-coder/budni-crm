@@ -5,6 +5,7 @@ import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { findWeeklyClients, getNextWeek, hasNextWeekRequest, type NextWeek } from '@/lib/weekly/reminders'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 const CRON_LABEL = 'weekly-missing-alert' // Пт 15:00 МСК
 

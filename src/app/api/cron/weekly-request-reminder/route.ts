@@ -12,6 +12,7 @@ import {
 } from '@/lib/weekly/reminders'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
 // Пт 10:00 и 13:00 МСК (vercel.json «0 7,10 * * 5»). До 07.10 — один раз в чт
 // 12:00; клиенты, отправляющие заявку на неделю, ответа часто не давали.
@@ -64,8 +65,9 @@ export async function handler(request: Request) {
       continue
     }
     try {
-      // delay:true — естественная задержка 15-30с как у реактивных сообщений бота.
-      await sendBotMessage(chatId, text, { delay: true })
+      // delay:false, как у остальных рассылок по расписанию: 15–30 с на клиента
+      // подряд упирались в лимит функции, и хвост списка оставался без напоминания.
+      await sendBotMessage(chatId, text, { delay: false })
       console.log(`[weekly-reminder] ${slot} sent to client=${client.id}`)
       sent++
     } catch (err) {

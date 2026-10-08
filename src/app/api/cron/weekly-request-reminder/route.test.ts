@@ -57,7 +57,7 @@ describe('weekly-request-reminder (пт 10:00 и 13:00)', () => {
     expect(mockSendBotMessage).toHaveBeenCalledWith(
       '12345',
       'Здравствуйте! Ждём заявку на следующую неделю (12.10–18.10). Пришлите, пожалуйста, фото или текст: дни и количество порций.\n\n— Будни',
-      { delay: true },
+      { delay: false },
     )
     expect(body).toMatchObject({ slot: 'morning', sent: 1, weekStartDate: '2026-10-12T00:00:00.000Z' })
     // своя метка идемпотентности на слот
