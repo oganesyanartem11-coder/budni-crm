@@ -327,3 +327,59 @@ describe('handleStickyMessage — ХАЛВА 09.10: новое число не �
     expect(mockNotifyProd).toHaveBeenCalled()
   })
 })
+
+describe('handleStickyMessage — «С 10.10.26 33 порции стабильно» (ХОЛВА 09.10)', () => {
+  const HALVA_TEXT = 'Здравствуйте \nПоваровка 6 ст1\nС 10.10.26\n33 порции \nСтабильно.'
+  // пт 9 окт 2026, 12:06 МСК
+  const FRI_1206 = new Date('2026-10-09T09:06:00.000Z')
+
+  it('новое постоянное число с указанной даты: заказы с 10.10 пересчитаны, конфиг обновлён', async () => {
+    mockParse.mockResolvedValue(numeric(33))
+    mockPrisma.order.findMany.mockResolvedValue([{ id: 'o_sat', deliveryDate: new Date('2026-10-10T00:00:00.000Z') }])
+
+    const r = await handleStickyMessage(makeClient({ fixedPortions: 32 }), HALVA_TEXT, 'chat_1', FRI_1206)
+
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-10T00:00:00.000Z'),
+    })
+    expect(mockSetPortions).toHaveBeenCalledWith(expect.anything(), { orderId: 'o_sat', portions: 33, via: 'sticky' })
+    expect(mockPrisma.clientMealConfig.update).toHaveBeenCalledWith({ where: { id: 'cfg_s' }, data: { fixedPortions: 33 } })
+    expect(r?.reply).toContain('Принято! Теперь 33 порций каждый день, начиная с сб, 10 окт.')
+  })
+
+  it('дата позже ближайшего дня — меняем только с неё (пт 9.10 пишет «с 13.10»)', async () => {
+    mockParse.mockResolvedValue(numeric(40))
+    await handleStickyMessage(makeClient(), 'С 13.10 40 порций стабильно', 'chat_1', FRI_1206)
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-13T00:00:00.000Z'),
+    })
+  })
+
+  it('«с завтра» после 16:00 → с ближайшего открытого дня и честно сказать, что завтра закрыто', async () => {
+    mockParse.mockResolvedValue(numeric(40))
+    mockPrisma.order.findMany.mockResolvedValue([{ id: 'o_mon', deliveryDate: new Date('2026-10-05T00:00:00.000Z') }])
+    // чт 1 окт 17:00 МСК: пятница закрыта, по будням — с пн 5 окт
+    const r = await handleStickyMessage(makeClient(), 'с завтра 40 стабильно', 'chat_1', new Date('2026-10-01T14:00:00.000Z'))
+    expect(r?.reply).toContain('На пт, 2 окт приём уже закрыт')
+  })
+
+  it('разовое («на пятницу 20»), период («с 7 по 14») и дальше недели — не STICKY', async () => {
+    const now = new Date('2026-10-01T09:00:00.000Z')
+    expect(await handleStickyMessage(makeClient(), 'на пятницу 20', 'c', now)).toBeNull()
+    expect(await handleStickyMessage(makeClient(), 'с 7 по 14 по 30', 'c', now)).toBeNull()
+    expect(await handleStickyMessage(makeClient(), 'с 20.10 по 40 стабильно', 'c', now)).toBeNull()
+    expect(mockParse).not.toHaveBeenCalled()
+  })
+})
+
+describe('parseOpenEndedStart', () => {
+  it('«с 10.10 по 33 порции» — начало 10.10 (не период), «с 7 по 14.10» — период', async () => {
+    const { parseOpenEndedStart } = await import('./sticky')
+    const now = new Date('2026-10-09T09:00:00.000Z')
+    expect(parseOpenEndedStart('С 10.10 по 33 порции стабильно', now)).toEqual(new Date('2026-10-10T00:00:00.000Z'))
+    expect(parseOpenEndedStart('с понедельника 30', now)).toEqual(new Date('2026-10-12T00:00:00.000Z'))
+    expect(parseOpenEndedStart('с 12 по 14.10 по 30', now)).toBeNull()
+    expect(parseOpenEndedStart('с понедельника по пятницу 30', now)).toBeNull()
+    expect(parseOpenEndedStart('на пятницу 20', now)).toBeNull()
+  })
+})

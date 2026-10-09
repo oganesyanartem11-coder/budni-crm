@@ -14,7 +14,7 @@ import { isScheduledForDate } from '@/lib/orders/generate-orders'
 import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { escapeHtml, notifyProductionChannel } from '@/lib/telegram/notify'
-import { hasDateHint, looksLikeDateRange } from './extract-delivery-date'
+import { extractDateDeterministic, hasDateHint, looksLikeDateRange } from './extract-delivery-date'
 
 const NUMBER_WORD_RE = /(^|[^а-яё])(один|одн[аоу]|дв[аеу]|двое|три|трое|четыр|пят[ьи]|шест|сем[ьи]|восем|девят|десят)/i
 import { logBotMessage } from './log-message'
@@ -63,6 +63,28 @@ interface StickyChange {
   portions: number
   changed: boolean
   effectiveFrom: Date
+  /** Клиент просил «с …» на день, приём на который уже закрыт. */
+  lateFor?: Date | null
+}
+
+const OPEN_START_RE =
+  /(^|[^а-яё])(с|со)\s+(\d{1,2}([./]\d{1,2}([./]\d{2,4})?|\s*-?го|\s+[а-яё]+)|понедельник|вторник|сред[ыу]|четверг|пятниц[ыу]|суббот[ыу]|воскресень[яе]|завтра|послезавтра|сегодня)/i
+// «по 14.10», «по 14-е», «по 14 октября», «по пятницу», «до конца недели» —
+// конец периода. «по 33 порции» — НЕ период (количество на день).
+const RANGE_END_RE =
+  /(^|[^а-яё])(по|до)\s+(\d{1,2}([./]\d{1,2}|\s*-?(е|го)(?![а-яё])|\s+(янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек))|понедельник|вторник|сред|четверг|пятниц|суббот|воскресень|конца)/i
+
+/**
+ * «С 10.10.26», «со среды», «с понедельника», «с завтра» без конца периода →
+ * дата начала (UTC-полночь МСК-дня). Период («с 7 по 14»), разовая дата
+ * («на пятницу 20») или несколько дат → null.
+ */
+export function parseOpenEndedStart(text: string, now: Date): Date | null {
+  const lower = text.toLowerCase().replace(/ё/g, 'е')
+  if (!OPEN_START_RE.test(lower) || RANGE_END_RE.test(lower)) return null
+  const date = extractDateDeterministic(text, now)
+  if (!date || date === 'ambiguous') return null
+  return new Date(`${date}T00:00:00.000Z`)
 }
 
 export async function handleStickyMessage(
@@ -72,8 +94,20 @@ export async function handleStickyMessage(
   now: Date = new Date(),
 ): Promise<{ reply: string; changed: boolean } | null> {
   // «уберите одну» / «добавьте два» — число словом тоже число.
-  if (!(/\d/.test(text) || NUMBER_WORD_RE.test(text)) || hasDateHint(text.toLowerCase()) || looksLikeDateRange(text)) {
-    return null
+  if (!(/\d/.test(text) || NUMBER_WORD_RE.test(text))) return null
+
+  // «С 10.10.26 33 порции стабильно» — главный сценарий STICKY (09.10 ХОЛВА:
+  // любое сообщение с датой отдавалось менеджеру, бот молчал). Дата «с …» без
+  // конца = с какого дня новое постоянное число. Остальное с датой («на
+  // пятницу 20», «с 7 по 14») — разовое изменение, не STICKY.
+  let requestedFrom: Date | null = null
+  if (hasDateHint(text.toLowerCase()) || looksLikeDateRange(text)) {
+    const start = parseOpenEndedStart(text, now)
+    if (!start) return null
+    // Дальше недели: дни до старта ещё не сгенерированы и взяли бы новое число
+    // раньше срока — такое отдаём менеджеру.
+    if (start.getTime() > getMskCalendarDayUtc(now, 7).getTime()) return null
+    requestedFrom = start
   }
 
   const tomorrow = getMskCalendarDayUtc(now, 1)
@@ -142,7 +176,11 @@ export async function handleStickyMessage(
 
   const changes: StickyChange[] = []
   for (const { config, location, portions } of targets) {
-    const effectiveFrom = firstEditableDeliveryDate(location, now)
+    const firstEditable = firstEditableDeliveryDate(location, now)
+    const effectiveFrom =
+      requestedFrom && requestedFrom.getTime() > firstEditable.getTime() ? requestedFrom : firstEditable
+    // Клиент просил раньше, чем ещё можно (написал после 16:00 «с завтра»).
+    const lateFor = requestedFrom && requestedFrom.getTime() < firstEditable.getTime() ? requestedFrom : null
     const oldPortions = config.fixedPortions
     const sameNumber = oldPortions === portions
 
@@ -178,7 +216,7 @@ export async function handleStickyMessage(
     // То же число, но какой-то заказ стоял иначе и выровнен — это изменение:
     // клиенту «Принято…», производству сигнал.
     if (sameNumber && updated === 0) {
-      changes.push({ locationName: location.name, portions, changed: false, effectiveFrom })
+      changes.push({ locationName: location.name, portions, changed: false, effectiveFrom, lateFor })
       continue
     }
 
@@ -208,7 +246,7 @@ export async function handleStickyMessage(
         },
       },
     })
-    changes.push({ locationName: location.name, portions, changed: true, effectiveFrom: firstDay })
+    changes.push({ locationName: location.name, portions, changed: true, effectiveFrom: firstDay, lateFor })
   }
 
   const anyChanged = changes.some((c) => c.changed)
@@ -243,8 +281,11 @@ export function formatStickyReply(changes: StickyChange[], multiLocation: boolea
   }
   if (!multiLocation) {
     const c = changes[0]
+    const late = c.lateFor
+      ? ` На ${formatStickyDate(c.lateFor)} приём уже закрыт — если нужно, менеджер свяжется.`
+      : ''
     return (
-      `Принято! Теперь ${c.portions} порций каждый день, начиная с ${formatStickyDate(c.effectiveFrom)}. ` +
+      `Принято! Теперь ${c.portions} порций каждый день, начиная с ${formatStickyDate(c.effectiveFrom)}.${late} ` +
       `Если нужно изменить — просто напишите новое число.`
     )
   }
