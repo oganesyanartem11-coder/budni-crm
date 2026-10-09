@@ -301,3 +301,29 @@ describe('handleStickyMessage — период не становится нов�
     expect(mockParse).not.toHaveBeenCalled()
   })
 })
+
+describe('handleStickyMessage — ХАЛВА 09.10: новое число не дошло до заказа на завтра', () => {
+  it('выборка не фильтрует по источнику: заказ, созданный ботом/вручную, тоже пересчитывается', async () => {
+    mockParse.mockResolvedValue(numeric(40))
+    mockPrisma.order.findMany.mockResolvedValue([{ id: 'o_bot', deliveryDate: new Date('2026-10-02T00:00:00.000Z') }])
+
+    await handleStickyMessage(makeClient(), '40', 'chat_1', new Date('2026-10-01T09:00:00.000Z'))
+
+    const where = mockPrisma.order.findMany.mock.calls[0][0].where
+    expect(where.source).toBeUndefined()
+    expect(where.sourceConfigId).toBeUndefined()
+    expect(mockSetPortions).toHaveBeenCalledWith(expect.anything(), { orderId: 'o_bot', portions: 40, via: 'sticky' })
+  })
+
+  it('то же число, но заказ на завтра стоял иначе → выровняли и сказали «Принято», а не «так и оставляем»', async () => {
+    mockParse.mockResolvedValue(numeric(33))
+    mockPrisma.order.findMany.mockResolvedValue([{ id: 'o_fri', deliveryDate: new Date('2026-10-02T00:00:00.000Z') }])
+    mockSetPortions.mockResolvedValue({ ok: true, kind: 'updated', orderId: 'o_fri', prevPortions: 30, prevStatus: 'CONFIRMED' })
+
+    const r = await handleStickyMessage(makeClient(), '33', 'chat_1', new Date('2026-10-01T09:00:00.000Z'))
+
+    expect(r?.changed).toBe(true)
+    expect(r?.reply).toContain('Принято! Теперь 33 порций')
+    expect(mockNotifyProd).toHaveBeenCalled()
+  })
+})

@@ -146,16 +146,16 @@ export async function handleStickyMessage(
     const oldPortions = config.fixedPortions
     const sameNumber = oldPortions === portions
 
-    // Только сгенерированные по этому конфигу заказы: разовые (MANUAL/BORIS/
-    // CLIENT_REQUEST) не перетираем. Проходим и при том же числе — выравниваем
-    // заказы, разошедшиеся с конфигом (идемпотентно, «без изменений» не пишется).
+    // Все будущие заказы этого питания, кто бы их ни создал: «последнее число»
+    // клиента главнее. 09.10 ХАЛВА: заказ на завтра был создан ботом/вручную
+    // (source BOT/MANUAL, без sourceConfigId) — фильтр по источнику его
+    // пропускал, и новое число на завтра не применялось. Проходим и при том же
+    // числе — выравниваем разошедшиеся заказы (идемпотентно).
     const orders = await prisma.order.findMany({
       where: {
         clientId: client.id,
         locationId: location.id,
         mealType: config.mealType,
-        sourceConfigId: config.id,
-        source: { in: ['FIXED_AUTO', 'RECURRING_AUTO'] },
         deliveryDate: { gte: effectiveFrom },
         status: { in: ['DRAFT', 'PENDING_CONFIRMATION', 'CONFIRMED'] },
         updDocumentLink: { is: null },
@@ -175,7 +175,9 @@ export async function handleStickyMessage(
       }
     }
     if (failed.length > 0) console.error('[sticky] не все заказы обновлены', { configId: config.id, failed })
-    if (sameNumber) {
+    // То же число, но какой-то заказ стоял иначе и выровнен — это изменение:
+    // клиенту «Принято…», производству сигнал.
+    if (sameNumber && updated === 0) {
       changes.push({ locationName: location.name, portions, changed: false, effectiveFrom })
       continue
     }
