@@ -3,6 +3,7 @@ import { sendBotMessage } from '@/lib/max/send-message'
 import { alreadyRanToday, markRanToday } from '@/lib/bot/daily-summary'
 import { withCronHeartbeat } from '@/lib/cron/with-heartbeat'
 import { getActiveMaxChatIdForClient } from '@/lib/bot/max-users'
+import { logBotMessage } from '@/lib/bot/log-message'
 import {
   findWeeklyClients,
   getNextWeek,
@@ -49,19 +50,27 @@ export async function handler(request: Request) {
   let skippedHasSubmission = 0
   let skippedNoChat = 0
   const errors: Array<{ clientId: string; reason: string }> = []
+  // Поимённо: «sent 2, skippedNoChat 1» не отвечало на вопрос, кому именно
+  // напоминание не ушло (09.10 ИНПАРТ).
+  const sentNames: string[] = []
+  const noChatNames: string[] = []
+  const hasRequestNames: string[] = []
 
   for (const client of clients) {
     if (await hasNextWeekRequest(client, week)) {
       skippedHasSubmission++
+      hasRequestNames.push(client.name)
       continue
     }
     const chatId = await getActiveMaxChatIdForClient(client.id)
     if (!chatId) {
       skippedNoChat++
+      noChatNames.push(client.name)
       continue
     }
     if (dryRun) {
       sent++
+      sentNames.push(client.name)
       continue
     }
     try {
@@ -70,6 +79,11 @@ export async function handler(request: Request) {
       await sendBotMessage(chatId, text, { delay: false })
       console.log(`[weekly-reminder] ${slot} sent to client=${client.id}`)
       sent++
+      sentNames.push(client.name)
+      // В переписку CRM: иначе менеджер не видит, что бот клиенту писал.
+      await logBotMessage({ clientId: client.id, conversationId: null, direction: 'OUT', text }).catch((e) =>
+        console.error('[weekly-reminder] log failed', e),
+      )
     } catch (err) {
       errors.push({
         clientId: client.id,
@@ -79,7 +93,16 @@ export async function handler(request: Request) {
   }
 
   if (!dryRun) {
-    await markRanToday(label, { slot, sent, skippedHasSubmission, skippedNoChat, errors: errors.length })
+    await markRanToday(label, {
+      slot,
+      sent,
+      skippedHasSubmission,
+      skippedNoChat,
+      errors: errors.length,
+      sentNames,
+      noChatNames,
+      hasRequestNames,
+    })
   }
 
   return NextResponse.json({
@@ -90,6 +113,9 @@ export async function handler(request: Request) {
     sent,
     skippedHasSubmission,
     skippedNoChat,
+    sentNames,
+    noChatNames,
+    hasRequestNames,
     errors,
   })
 }

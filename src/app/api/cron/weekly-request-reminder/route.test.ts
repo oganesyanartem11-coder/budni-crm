@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
  * idempotency-гарда) и sendBotMessage. Дёргаем handler напрямую.
  */
 
-const { mockPrisma, mockSendBotMessage, mockGetActiveChatId } = vi.hoisted(() => ({
+const { mockPrisma, mockSendBotMessage, mockGetActiveChatId, mockLog } = vi.hoisted(() => ({
+  mockLog: vi.fn(async () => {}),
   mockPrisma: {
     client: { findMany: vi.fn() },
     weeklyOrderSubmission: { findFirst: vi.fn() },
@@ -20,6 +21,7 @@ const { mockPrisma, mockSendBotMessage, mockGetActiveChatId } = vi.hoisted(() =>
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('@/lib/max/send-message', () => ({ sendBotMessage: mockSendBotMessage }))
+vi.mock('@/lib/bot/log-message', () => ({ logBotMessage: mockLog }))
 vi.mock('@/lib/bot/max-users', () => ({
   getActiveMaxChatIdForClient: mockGetActiveChatId,
 }))
@@ -108,5 +110,25 @@ describe('weekly-request-reminder (пт 10:00 и 13:00)', () => {
     const body = await (await handler(REQ)).json()
     expect(body.skipped).toBe(true)
     expect(mockPrisma.client.findMany).not.toHaveBeenCalled()
+  })
+})
+
+describe('weekly-request-reminder — видно, кому ушло (09.10 ИНПАРТ)', () => {
+  it('поимённо: кому отправили, у кого нет чата, у кого заявка есть; отправленное попадает в переписку CRM', async () => {
+    mockPrisma.client.findMany.mockResolvedValue([
+      { id: 'c1', name: 'ИНПАРТ', mealConfigs: [{ locationId: 'l', mealType: 'LUNCH' }] },
+      { id: 'c2', name: 'Без чата', mealConfigs: [{ locationId: 'l', mealType: 'LUNCH' }] },
+      { id: 'c3', name: 'С заявкой', mealConfigs: [{ locationId: 'l', mealType: 'LUNCH' }] },
+    ])
+    mockGetActiveChatId.mockImplementation(async (id: string) => (id === 'c2' ? null : '12345'))
+    mockPrisma.weeklyOrderSubmission.findFirst.mockImplementation(async ({ where }: { where: { clientId: string } }) =>
+      where.clientId === 'c3' ? { id: 'sub' } : null,
+    )
+
+    const body = await (await handler(REQ)).json()
+
+    expect(body).toMatchObject({ sentNames: ['ИНПАРТ'], noChatNames: ['Без чата'], hasRequestNames: ['С заявкой'] })
+    expect(mockLog).toHaveBeenCalledWith(expect.objectContaining({ clientId: 'c1', direction: 'OUT' }))
+    expect(mockPrisma.activityLog.create.mock.calls[0][0].data.payload).toMatchObject({ noChatNames: ['Без чата'] })
   })
 })
