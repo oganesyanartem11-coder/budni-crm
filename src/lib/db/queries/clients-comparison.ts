@@ -1,8 +1,8 @@
 import { prisma } from '@/lib/db/prisma'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
+import { toDbDateRange, countDbDays } from '@/lib/utils/week'
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
-const MSK_OFFSET_MS = 3 * 3600 * 1000
 
 export interface ClientComparisonRow {
   clientId: string
@@ -22,9 +22,9 @@ export interface ClientsComparisonResult {
 /**
  * Сравнивает клиентов текущего периода с эквивалентным предыдущим периодом.
  * - Текущий период:  [from, to]
- * - Предыдущий период: [from - periodMs, to - periodMs]
+ * - Предыдущий период: столько же МСК-дней непосредственно перед from
  *
- * Длина периода = totalDays в MSK-семантике (round к MSK-полуночам).
+ * Длина периода = totalDays МСК-календарных дней; фильтр по @db.Date — UTC-полночи.
  * Только клиенты с заказами в ТЕКУЩЕМ периоде. Если у клиента не было
  * заказов в prev — isNew=true, growthPct=null.
  */
@@ -32,38 +32,21 @@ export async function getClientsComparison(
   from: Date,
   to: Date
 ): Promise<ClientsComparisonResult> {
-  // MSK-нормализация границ для расчёта длины периода (как в material-cost.ts).
-  const fromMsk = new Date(from.getTime() + MSK_OFFSET_MS)
-  const startMs =
-    Date.UTC(
-      fromMsk.getUTCFullYear(),
-      fromMsk.getUTCMonth(),
-      fromMsk.getUTCDate(),
-      0, 0, 0, 0
-    ) - MSK_OFFSET_MS
-  const toMsk = new Date(to.getTime() + MSK_OFFSET_MS)
-  const endMs =
-    Date.UTC(
-      toMsk.getUTCFullYear(),
-      toMsk.getUTCMonth(),
-      toMsk.getUTCDate(),
-      0, 0, 0, 0
-    ) - MSK_OFFSET_MS
-
-  if (endMs < startMs) {
+  // @db.Date: МСК-дни [from, to] → half-open UTC-полночи. Раньше в запрос шли
+  // сырые from/to: МСК-инстант Пт 21:00Z (getFinancialWeek().from) усекался до
+  // пятницы → «эта неделя» = 8 дней (Пт–Пт).
+  const currRange = toDbDateRange(from, to)
+  const totalDays = countDbDays(currRange)
+  if (totalDays <= 0) {
     return { rows: [] }
   }
-
-  const totalDays = Math.round((endMs - startMs) / ONE_DAY_MS) + 1
   const periodMs = totalDays * ONE_DAY_MS
-
-  const prevFrom = new Date(from.getTime() - periodMs)
-  const prevTo = new Date(to.getTime() - periodMs)
+  const prevRange = { gte: new Date(currRange.gte.getTime() - periodMs), lt: currRange.gte }
 
   const [currOrders, prevOrders] = await Promise.all([
     prisma.order.findMany({
       where: {
-        deliveryDate: { gte: from, lte: to },
+        deliveryDate: { gte: currRange.gte, lt: currRange.lt },
         status: { in: REVENUE_STATUSES },
       },
       select: {
@@ -75,7 +58,7 @@ export async function getClientsComparison(
     }),
     prisma.order.findMany({
       where: {
-        deliveryDate: { gte: prevFrom, lte: prevTo },
+        deliveryDate: { gte: prevRange.gte, lt: prevRange.lt },
         status: { in: REVENUE_STATUSES },
       },
       select: {

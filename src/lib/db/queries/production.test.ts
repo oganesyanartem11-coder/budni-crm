@@ -65,4 +65,21 @@ describe('getProductionSummary — сервисная выручка', () => {
     expect(s.totalRevenue).toBe(1000)
     expect(s.deliveryRevenue).toBe(300)
   })
+
+  it('день — точная дата заказа; выручка доставки за [день, следующий день), а не пустой интервал', async () => {
+    mockPrisma.order.findMany.mockResolvedValue([])
+    mockDelivery.sumDeliveryRevenue.mockResolvedValue(new Prisma.Decimal(0))
+
+    // момент МСК-полуночи 19.10 (18.10 21:00Z) и UTC-полночь 19.10 — один и тот же день
+    for (const input of [new Date('2026-10-18T21:00:00.000Z'), new Date('2026-10-19T00:00:00.000Z')]) {
+      mockPrisma.order.findMany.mockClear()
+      mockDelivery.sumDeliveryRevenue.mockClear()
+      await getProductionSummary(input)
+      expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual(new Date('2026-10-19T00:00:00.000Z'))
+      expect(mockDelivery.sumDeliveryRevenue).toHaveBeenCalledWith({
+        from: new Date('2026-10-19T00:00:00.000Z'),
+        to: new Date('2026-10-20T00:00:00.000Z'),
+      })
+    }
+  })
 })

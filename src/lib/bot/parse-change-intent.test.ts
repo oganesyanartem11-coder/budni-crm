@@ -433,3 +433,35 @@ describe('parseChangeIntent — период «с 7 по 14» (07.10)', () => {
     expect(await ask('2026-06-05', '2026-08-01')).toEqual({ action: 'NONE', reason: 'too_far_future' })
   })
 })
+
+describe('parseChangeIntent — несколько приёмов пищи одним числом (18.10)', () => {
+  const base = { action: 'CHANGE', portions: 8, mode: 'set', date: '2026-06-05', dateTo: null, mealType: null, confidence: 0.93, reason: 'ok' }
+
+  it('«ужин обед 8 на завтра» → CHANGE mealTypes=[УЖИН, ОБЕД], mealType=null', async () => {
+    mockCreate.mockResolvedValue(toolResponse({ ...base, mealTypes: ['УЖИН', 'ОБЕД'] }))
+    const r = await run('Ужин обед на завтра 8 порции', { availableMealTypes: ['ОБЕД', 'УЖИН'] })
+    expect(r).toMatchObject({ action: 'CHANGE', portions: 8, date: '2026-06-05', mealType: null, mealTypes: ['УЖИН', 'ОБЕД'] })
+  })
+
+  it('неактивный или неизвестный тип в mealTypes → NONE unknown_meal_type', async () => {
+    mockCreate.mockResolvedValue(toolResponse({ ...base, mealTypes: ['ЗАВТРАК', 'ОБЕД'] }))
+    expect(await run('завтрак обед 8', { availableMealTypes: ['ОБЕД', 'УЖИН'] })).toEqual({ action: 'NONE', reason: 'unknown_meal_type' })
+    mockCreate.mockResolvedValue(toolResponse({ ...base, mealTypes: ['ПОЛДНИК', 'ОБЕД'] }))
+    expect(await run('полдник обед 8')).toEqual({ action: 'NONE', reason: 'unknown_meal_type' })
+  })
+
+  it('один тип в mealTypes (или дубли) → обычный mealType, без mealTypes', async () => {
+    mockCreate.mockResolvedValue(toolResponse({ ...base, mealTypes: ['ОБЕД', 'ОБЕД'] }))
+    const r = await run('обед 8 на завтра')
+    expect(r).toMatchObject({ action: 'CHANGE', mealType: 'ОБЕД' })
+    expect(r).not.toHaveProperty('mealTypes')
+  })
+
+  it('промт и схема знают про mealTypes', async () => {
+    mockCreate.mockResolvedValue(toolResponse({ ...base, mealTypes: null }))
+    await run('x')
+    const call = mockCreate.mock.calls[0][0]
+    expect(call.system).toContain('mealTypes')
+    expect(call.tools[0].input_schema.properties).toHaveProperty('mealTypes')
+  })
+})

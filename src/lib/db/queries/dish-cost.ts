@@ -11,6 +11,7 @@
  */
 
 import { prisma } from '@/lib/db/prisma'
+import { toDbDateRange } from '@/lib/utils/week'
 import type {
   DishCategory,
   MealType,
@@ -237,7 +238,9 @@ async function bulkEnrichDishMetrics(
   const orderAgg = await prisma.order.groupBy({
     by: ['mealType'],
     where: {
-      deliveryDate: { gte: thirtyDaysAgo, lte: now },
+      // @db.Date: МСК-дни [now−30д, сегодня] как UTC-полночи (lte: now на UTC
+      // сервере в 00:00–03:00 МСК терял сегодняшний день).
+      deliveryDate: toDbDateRange(thirtyDaysAgo, now),
       status: { in: PRODUCTION_STATUSES },
       ...(options.mealType ? { mealType: options.mealType } : {}),
     },
@@ -534,7 +537,8 @@ export async function getMaterialCostForRangeByMealType(
 
   for (let i = 0; i < totalDays; i++) {
     const dayStart = new Date(startMs + i * ONE_DAY_MS)
-    const dayEnd = new Date(dayStart.getTime() + ONE_DAY_MS - 1)
+    // UTC-полночь МСК-календарного дня — так хранится @db.Date deliveryDate.
+    const dayDb = new Date(dayStart.getTime() + MSK_OFFSET_MS)
     const dayMskShifted = new Date(dayStart.getTime() + MSK_OFFSET_MS)
     const jsDay = dayMskShifted.getUTCDay()
     const dayOfWeek = jsDay === 0 ? 7 : jsDay
@@ -571,7 +575,11 @@ export async function getMaterialCostForRangeByMealType(
 
     const orders = await prisma.order.findMany({
       where: {
-        deliveryDate: { gte: dayStart, lte: dayEnd },
+        // @db.Date: точное равенство UTC-полуночи МСК-дня. Раньше было
+        // { gte: dayStart, lte: dayEnd } с МСК-инстантами — Prisma усекает
+        // dayStart (Пред.день 21:00Z) до ВЧЕРАШНЕЙ даты → запрос дня D
+        // возвращал заказы D−1 и D (себестоимость ×2).
+        deliveryDate: dayDb,
         status: { in: statuses },
         ...(mealType ? { mealType } : {}),
       },
@@ -649,7 +657,8 @@ export async function getAvgDishCostPerPortion(
   const portionsAgg = await prisma.order.aggregate({
     _sum: { portions: true },
     where: {
-      deliveryDate: { gte: from, lte: to },
+      // @db.Date: те же МСК-дни, что и getMaterialCostForRangeByMealType.
+      deliveryDate: toDbDateRange(from, to),
       status: { in: PRODUCTION_STATUSES },
       ...(mealType ? { mealType } : {}),
     },

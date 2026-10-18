@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
+import { toMskDateString } from '@/lib/utils/msk-window'
 import { sumDeliveryRevenue } from '@/lib/db/queries/delivery-revenue'
 import { getCourierAssignmentOrders } from '@/lib/orders/courier-queries'
 import type { MealType, OrderStatus } from '@prisma/client'
@@ -46,15 +47,14 @@ export interface ProductionSummary {
  *    - Каждое блюдо × сумма порций = столько надо приготовить
  */
 export async function getProductionSummary(targetDate: Date): Promise<ProductionSummary> {
-  const date = new Date(targetDate)
-  date.setHours(0, 0, 0, 0)
-  const dayEnd = new Date(date)
-  dayEnd.setHours(23, 59, 59, 999)
+  // МСК-день → UTC-полночь (@db.Date). Принимает и UTC-полночь, и момент
+  // МСК-полуночи; setHours на UTC-сервере зависел от формата входа.
+  const date = new Date(`${toMskDateString(targetDate)}T00:00:00.000Z`)
 
   // 1. Заказы на дату
   const orders = await prisma.order.findMany({
     where: {
-      deliveryDate: { gte: date, lte: dayEnd },
+      deliveryDate: date,
       status: { in: PRODUCTION_STATUSES },
     },
     select: {
@@ -68,7 +68,7 @@ export async function getProductionSummary(targetDate: Date): Promise<Production
 
   const pendingOrders = await prisma.order.findMany({
     where: {
-      deliveryDate: { gte: date, lte: dayEnd },
+      deliveryDate: date,
       status: 'PENDING_CONFIRMATION',
     },
     select: { portions: true, sourceConfig: { select: { fixedPortions: true } } },
@@ -160,7 +160,10 @@ export async function getProductionSummary(targetDate: Date): Promise<Production
   const totalRevenue = Object.values(mealTypes).reduce((s, m) => s + m.totalRevenue, 0)
 
   // Волна 4: сервисная выручка (доставка) за этот день — отдельно от food.
-  const deliveryRevenue = Number(await sumDeliveryRevenue({ from: date, to: dayEnd }))
+  // sumDeliveryRevenue — полуинтервал [from, to): to = следующий день (раньше
+  // dayEnd 23:59Z усекался до того же дня, и выручка доставки была всегда 0).
+  const nextDay = new Date(date.getTime() + 24 * 60 * 60 * 1000)
+  const deliveryRevenue = Number(await sumDeliveryRevenue({ from: date, to: nextDay }))
 
   return {
     date: date.toISOString(),
@@ -207,15 +210,14 @@ export interface IngredientsSummary {
  * чтобы суммировать потребности по каждому ингредиенту.
  */
 export async function getIngredientsSummary(targetDate: Date): Promise<IngredientsSummary> {
-  const date = new Date(targetDate)
-  date.setHours(0, 0, 0, 0)
-  const dayEnd = new Date(date)
-  dayEnd.setHours(23, 59, 59, 999)
+  // МСК-день → UTC-полночь (@db.Date). Принимает и UTC-полночь, и момент
+  // МСК-полуночи; setHours на UTC-сервере зависел от формата входа.
+  const date = new Date(`${toMskDateString(targetDate)}T00:00:00.000Z`)
 
   // 1. Заказы на дату — повторяем логику из getProductionSummary
   const orders = await prisma.order.findMany({
     where: {
-      deliveryDate: { gte: date, lte: dayEnd },
+      deliveryDate: date,
       status: { in: PRODUCTION_STATUSES },
     },
     select: { mealType: true, portions: true, totalPrice: true },

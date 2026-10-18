@@ -261,89 +261,133 @@ export interface PeriodRange {
 }
 
 export function getPresetRange(preset: ReportPreset, customFrom?: string, customTo?: string): PeriodRange {
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
+  // Всё считаем от МСК-календарного «сегодня» (Vercel = UTC: local setHours /
+  // getMonth / getDate в окне 00:00–03:00 МСК дают вчерашний день).
+  //
+  // КОНТРАКТ границ (для всех пресетов):
+  //   from = UTC-полночь первого МСК-дня (как хранится @db.Date deliveryDate);
+  //   to   = «МСК 23:59:59.999 последнего дня» как UTC-инстант (XT20:59:59.999Z) —
+  //          его UTC-дата и МСК-дата совпадают, поэтому он корректен и для
+  //          `deliveryDate lte: to`, и для DateTime-фильтров, и для toDbDateRange.
+  const realNow = new Date()
+  const today = mskTodayYmd(realNow)
+  const utcMidnight = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d))
 
   switch (preset) {
     case 'today': {
-      const from = getMskCalendarDayUtc(new Date(), 0)
-      const to = new Date(getMskCalendarDayUtc(new Date(), 1).getTime() - 1)
-      return { from, to, label: 'Сегодня' }
+      return { from: utcMidnight(today.y, today.m, today.d), to: mskEndOfDayUtc(today), label: 'Сегодня' }
     }
     case 'yesterday': {
-      const from = getMskCalendarDayUtc(new Date(), -1)
-      const to = new Date(getMskCalendarDayUtc(new Date(), 0).getTime() - 1)
-      return { from, to, label: 'Вчера' }
+      const y = ymdOf(utcMidnight(today.y, today.m, today.d - 1))
+      return { from: utcMidnight(y.y, y.m, y.d), to: mskEndOfDayUtc(y), label: 'Вчера' }
     }
     case 'this_week': {
-      const { from, to } = getFinancialWeek(now)
+      // @db.Date: from = UTC-полночь МСК-субботы (не Пт 21:00Z — иначе лишняя пятница).
+      const { from, to } = getFinancialWeekForDbDate(realNow)
       return { from, to, label: 'Эта финансовая неделя' }
     }
     case 'last_week': {
-      const { from, to } = getPreviousFinancialWeek(now)
-      return { from, to, label: 'Прошлая финансовая неделя' }
+      const { from, to } = getFinancialWeekForDbDate(realNow)
+      return {
+        from: new Date(from.getTime() - 7 * DAY_MS),
+        to: new Date(to.getTime() - 7 * DAY_MS),
+        label: 'Прошлая финансовая неделя',
+      }
     }
     case 'this_month': {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1)
-      const to = new Date(now)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Этот месяц' }
+      return { from: utcMidnight(today.y, today.m, 1), to: mskEndOfDayUtc(today), label: 'Этот месяц' }
     }
     case 'last_month': {
-      const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const to = new Date(now.getFullYear(), now.getMonth(), 0)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Прошлый месяц' }
+      const lastDay = ymdOf(utcMidnight(today.y, today.m, 0))
+      return { from: utcMidnight(today.y, today.m - 1, 1), to: mskEndOfDayUtc(lastDay), label: 'Прошлый месяц' }
     }
     case 'this_quarter': {
-      const q = Math.floor(now.getMonth() / 3)
-      const from = new Date(now.getFullYear(), q * 3, 1)
-      const to = new Date(now)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Этот квартал' }
+      const q = Math.floor(today.m / 3)
+      return { from: utcMidnight(today.y, q * 3, 1), to: mskEndOfDayUtc(today), label: 'Этот квартал' }
     }
     case 'last_quarter': {
-      const q = Math.floor(now.getMonth() / 3)
-      const from = new Date(now.getFullYear(), (q - 1) * 3, 1)
-      const to = new Date(now.getFullYear(), q * 3, 0)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Прошлый квартал' }
+      const q = Math.floor(today.m / 3)
+      const lastDay = ymdOf(utcMidnight(today.y, q * 3, 0))
+      return { from: utcMidnight(today.y, (q - 1) * 3, 1), to: mskEndOfDayUtc(lastDay), label: 'Прошлый квартал' }
     }
     case 'this_year': {
-      const from = new Date(now.getFullYear(), 0, 1)
-      const to = new Date(now)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Этот год' }
+      return { from: utcMidnight(today.y, 0, 1), to: mskEndOfDayUtc(today), label: 'Этот год' }
     }
-    // ── Дашбордные rolling-окна (Sprint 7.46). Считаются в МСК, не от `now`
-    //    (тот мутирован setHours в TZ процесса) — каждый кейс берёт свежий
-    //    инстант и MSK-компоненты через mskTodayYmd. `to` = конец сегодняшнего
+    // ── Дашбордные rolling-окна (Sprint 7.46). `to` = конец сегодняшнего
     //    МСК-дня (никогда не в будущем). dashboard-stats использует lte:to.
     case 'week_to_date': {
-      const realNow = new Date()
       // @db.Date: from = UTC-полночь МСК-субботы (не МСК-инстант Пт 21:00Z, иначе
       // gte втянет лишнюю пятницу прошлой фин-недели — «Два midnight»).
       const { from } = getFinancialWeekForDbDate(realNow)
-      const to = mskEndOfDayUtc(mskTodayYmd(realNow))
-      return { from, to, label: 'Неделя по сегодня' }
+      return { from, to: mskEndOfDayUtc(today), label: 'Неделя по сегодня' }
     }
     case 'month_rolling': {
-      const realNow = new Date()
-      const today = mskTodayYmd(realNow)
       return { from: mskSubMonthsStartOfDay(today, 1), to: mskEndOfDayUtc(today), label: 'Месяц по сегодня' }
     }
     case 'last_3_months': {
-      const realNow = new Date()
-      const today = mskTodayYmd(realNow)
       return { from: mskSubMonthsStartOfDay(today, 3), to: mskEndOfDayUtc(today), label: '3 месяца по сегодня' }
     }
     case 'custom':
     default: {
-      const from = customFrom ? new Date(customFrom) : now
-      const to = customTo ? new Date(customTo) : now
-      from.setHours(0, 0, 0, 0)
-      to.setHours(23, 59, 59, 999)
-      return { from, to, label: 'Произвольный период' }
+      const fromYmd = parseCustomDay(customFrom) ?? today
+      const toYmd = parseCustomDay(customTo) ?? today
+      return {
+        from: utcMidnight(fromYmd.y, fromYmd.m, fromYmd.d),
+        to: mskEndOfDayUtc(toYmd),
+        label: 'Произвольный период',
+      }
     }
   }
+}
+
+/** Y/M/D UTC-компонент (для Date, уже являющегося UTC-полночью календарного дня). */
+function ymdOf(utcMidnightDate: Date): MskYmd {
+  return {
+    y: utcMidnightDate.getUTCFullYear(),
+    m: utcMidnightDate.getUTCMonth(),
+    d: utcMidnightDate.getUTCDate(),
+  }
+}
+
+/**
+ * Custom-граница из URL. 'YYYY-MM-DD' — календарный день как есть (без TZ);
+ * иное парсимое значение (ISO-инстант) — МСК-календарный день этого инстанта.
+ * Невалидное/пустое → null (вызывающий падает на «сегодня»).
+ */
+function parseCustomDay(value: string | undefined): MskYmd | null {
+  if (!value) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (m) return { y: Number(m[1]), m: Number(m[2]) - 1, d: Number(m[3]) }
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return null
+  return mskTodayYmd(dt)
+}
+
+/**
+ * Границы фильтра по @db.Date колонке (Order.deliveryDate) для ВКЛЮЧИТЕЛЬНОГО
+ * диапазона МСК-календарных дней [from, to].
+ *
+ * Возвращает half-open { gte, lt } из UTC-полуночей: gte = первый МСК-день,
+ * lt = день ПОСЛЕ последнего МСК-дня. Prisma усекает Date до UTC-даты, поэтому
+ * передавать в @db.Date-фильтр нужно именно UTC-полночи (не МСК-инстанты).
+ *
+ * Принимаемые входы (оба трактуются по МСК-календарю):
+ *   - UTC-полночь дня (2026-10-19T00:00:00Z → 19.10);
+ *   - UTC-инстант МСК-полночи (2026-10-18T21:00:00Z → 19.10);
+ *   - любой момент внутри МСК-дня, в т.ч. «МСК 23:59:59.999» (…T20:59:59.999Z)
+ *     и `new Date()`.
+ * НЕ передавайте UTC-конец суток (…T23:59:59.999Z) — это уже 02:59 МСК
+ * следующего дня, диапазон вырастет на день.
+ *
+ * Если to раньше from — пустой диапазон (lt === gte).
+ */
+export function toDbDateRange(from: Date, to: Date): { gte: Date; lt: Date } {
+  const gte = getMskCalendarDayUtc(from, 0)
+  const lt = getMskCalendarDayUtc(to, 1)
+  return { gte, lt: lt.getTime() < gte.getTime() ? gte : lt }
+}
+
+/** Число дней в half-open диапазоне UTC-полуночей { gte, lt } (результат toDbDateRange). */
+export function countDbDays(range: { gte: Date; lt: Date }): number {
+  return Math.round((range.lt.getTime() - range.gte.getTime()) / DAY_MS)
 }

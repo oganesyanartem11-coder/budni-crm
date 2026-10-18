@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
-import { getFinancialWeek } from '@/lib/utils/week'
+import { getFinancialWeekForDbDate } from '@/lib/utils/week'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
 import { deliveryRevenueByLocation } from '@/lib/db/queries/delivery-revenue'
 import type { MealType } from '@prisma/client'
@@ -54,34 +55,50 @@ export interface ClientAnalytics {
 const RU_MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
 const RU_MONTHS_FULL = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Финансовая неделя Сб→Пт в @db.Date-семантике: from = UTC-полночь субботы,
+ * last = UTC-полночь пятницы. Раньше брали getFinancialWeek().from (МСК-инстант
+ * Пт 21:00Z) и читали getDate() на UTC-сервере → подписи «Пт–Пт» (16–23 окт
+ * вместо 17–23 окт).
+ */
+function financialWeekDays(date: Date): { from: Date; last: Date } {
+  const { from } = getFinancialWeekForDbDate(date)
+  return { from, last: new Date(from.getTime() + 6 * DAY_MS) }
+}
+
 function financialWeekKey(date: Date): string {
-  const { from } = getFinancialWeek(date)
-  return from.toISOString().slice(0, 10)
+  return financialWeekDays(date).from.toISOString().slice(0, 10)
 }
 
 function financialWeekLabel(date: Date): string {
-  const { from, to } = getFinancialWeek(date)
-  const sameMonth = from.getMonth() === to.getMonth()
+  const { from, last } = financialWeekDays(date)
+  const sameMonth = from.getUTCMonth() === last.getUTCMonth()
   if (sameMonth) {
-    return `${from.getDate()}–${to.getDate()} ${RU_MONTHS[from.getMonth()]}`
+    return `${from.getUTCDate()}–${last.getUTCDate()} ${RU_MONTHS[from.getUTCMonth()]}`
   }
-  return `${from.getDate()} ${RU_MONTHS[from.getMonth()]} – ${to.getDate()} ${RU_MONTHS[to.getMonth()]}`
+  return `${from.getUTCDate()} ${RU_MONTHS[from.getUTCMonth()]} – ${last.getUTCDate()} ${RU_MONTHS[last.getUTCMonth()]}`
 }
 
+// date — UTC-полночь календарного дня (@db.Date или результат getMskCalendarDayUtc).
 function monthKey(date: Date): string {
-  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`
+  return `${date.getUTCFullYear()}-${(date.getUTCMonth() + 1).toString().padStart(2, '0')}`
 }
 
 function monthLabel(date: Date): string {
-  return `${RU_MONTHS_FULL[date.getMonth()]} ${date.getFullYear()}`
+  return `${RU_MONTHS_FULL[date.getUTCMonth()]} ${date.getUTCFullYear()}`
 }
 
 export async function getClientAnalytics(clientId: string): Promise<ClientAnalytics> {
   const now = new Date()
-  const startMonths = new Date(now)
-  startMonths.setMonth(startMonths.getMonth() - 12)
-  startMonths.setDate(1)
-  startMonths.setHours(0, 0, 0, 0)
+  // Все границы — UTC-полночи МСК-дней (@db.Date). Окно: 1-е число месяца
+  // 12 мес. назад … МСК-сегодня включительно. Раньше `lte: now` на UTC-сервере
+  // в 00:00–03:00 МСК отрезал сегодняшний день, а setMonth/setHours считали
+  // месяц по UTC.
+  const todayDb = getMskCalendarDayUtc(now, 0)
+  const tomorrowDb = getMskCalendarDayUtc(now, 1)
+  const startMonths = new Date(Date.UTC(todayDb.getUTCFullYear(), todayDb.getUTCMonth() - 12, 1))
 
   // Волна 4: сервисная выручка (доставка) по локациям за тот же 12-мес. период.
   // Хелпер отдаёт по всем клиентам — фильтруем по clientId и индексируем по
@@ -90,7 +107,7 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
     prisma.order.findMany({
       where: {
         clientId,
-        deliveryDate: { gte: startMonths, lte: now },
+        deliveryDate: { gte: startMonths, lt: tomorrowDb },
       },
       select: {
         id: true,
@@ -103,7 +120,8 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
         location: { select: { id: true, name: true } },
       },
     }),
-    deliveryRevenueByLocation({ from: startMonths, to: now }),
+    // half-open [from, to): to = МСК-завтра (раньше `to: now` с `lt` терял сегодня).
+    deliveryRevenueByLocation({ from: startMonths, to: tomorrowDb }),
   ])
 
   const deliveryByLocationId = new Map<string, number>()
@@ -170,21 +188,16 @@ export async function getClientAnalytics(clientId: string): Promise<ClientAnalyt
 
   const weeklyMap = new Map<string, { revenue: number; orders: number; portions: number; date: Date }>()
   for (let i = 11; i >= 0; i--) {
-    const d = new Date(now)
-    d.setDate(d.getDate() - i * 7)
+    const d = new Date(todayDb.getTime() - i * 7 * DAY_MS)
     const key = financialWeekKey(d)
     if (!weeklyMap.has(key)) {
-      const { from } = getFinancialWeek(d)
-      weeklyMap.set(key, { revenue: 0, orders: 0, portions: 0, date: from })
+      weeklyMap.set(key, { revenue: 0, orders: 0, portions: 0, date: financialWeekDays(d).from })
     }
   }
 
   const monthlyMap = new Map<string, { revenue: number; orders: number; portions: number; date: Date }>()
   for (let i = 11; i >= 0; i--) {
-    const d = new Date(now)
-    d.setMonth(d.getMonth() - i)
-    d.setDate(1)
-    d.setHours(0, 0, 0, 0)
+    const d = new Date(Date.UTC(todayDb.getUTCFullYear(), todayDb.getUTCMonth() - i, 1))
     const key = monthKey(d)
     if (!monthlyMap.has(key)) {
       monthlyMap.set(key, { revenue: 0, orders: 0, portions: 0, date: d })

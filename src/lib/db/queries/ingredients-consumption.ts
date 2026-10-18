@@ -106,7 +106,8 @@ export async function getIngredientsConsumptionForRange(
 
   for (let i = 0; i < totalDays; i++) {
     const dayStart = new Date(startMs + i * ONE_DAY_MS)
-    const dayEnd = new Date(dayStart.getTime() + ONE_DAY_MS - 1)
+    // UTC-полночь МСК-календарного дня — так хранится @db.Date deliveryDate.
+    const dayDb = new Date(dayStart.getTime() + MSK_OFFSET_MS)
 
     // MSK day-of-week (ISO: 1=Пн, 7=Вс).
     const dayMskShifted = new Date(dayStart.getTime() + MSK_OFFSET_MS)
@@ -147,7 +148,11 @@ export async function getIngredientsConsumptionForRange(
 
     const orders = await prisma.order.findMany({
       where: {
-        deliveryDate: { gte: dayStart, lte: dayEnd },
+        // @db.Date: точное равенство UTC-полуночи МСК-дня. Раньше было
+        // { gte: dayStart, lte: dayEnd } с МСК-инстантами — Prisma усекает
+        // dayStart (Пред.день 21:00Z) до ВЧЕРАШНЕЙ даты → запрос дня D
+        // возвращал заказы D−1 и D (себестоимость ×2).
+        deliveryDate: dayDb,
         status: { in: statuses },
       },
       select: { mealType: true, portions: true },

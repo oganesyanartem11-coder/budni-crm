@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { getPresetRange, getFinancialWeekForDbDate } from './week'
+import { getPresetRange, getFinancialWeekForDbDate, toDbDateRange, countDbDays } from './week'
 
 /**
  * Sprint 7.46: дашбордные rolling-окна week_to_date / month_rolling / last_3_months.
@@ -12,8 +12,9 @@ import { getPresetRange, getFinancialWeekForDbDate } from './week'
  * ((X−1)T21:00:00.000Z) — иначе Prisma усекает инстант до даты пред.дня.
  *   - month_rolling / last_3_months / week_to_date: from = UTC-полночь МСК-дня
  *     (XT00:00:00.000Z). week_to_date через getFinancialWeekForDbDate (V-15.2).
- *   - this_week / last_week: from пока МСК-инстант через getFinancialWeek
- *     (load-bearing; their @db.Date consumers — отдельный заход V-15.2.thisweek).
+ *   - ВСЕ календарные пресеты (today/yesterday/this_week/last_week/месяцы/
+ *     кварталы/год/custom) теперь тоже: from = UTC-полночь первого МСК-дня,
+ *     to = МСК 23:59:59.999 последнего дня (XT20:59:59.999Z).
  *
  * Фиксируем «сейчас» через vi.setSystemTime — getPresetRange внутри зовёт
  * new Date() для новых кейсов, fake timers делают их детерминированными.
@@ -104,5 +105,120 @@ describe('getPresetRange — sanity: to не в будущем для всех �
     const { from, to } = getPresetRange(key)
     expect(to.getTime()).toBe(endOfTodayMsk)
     expect(from.getTime()).toBeLessThan(to.getTime())
+  })
+})
+
+/**
+ * Аудит дат 18.10: календарные пресеты считались от серверного UTC
+ * now.setHours(0,0,0,0) → в 00:00–03:00 МСК «сегодня» = вчера; this_week.from
+ * был МСК-инстантом Пт 21:00Z → для @db.Date неделя Пт–Пт (8 дней).
+ */
+describe('getPresetRange — календарные пресеты в МСК (ночь 00:00–03:00 и день)', () => {
+  it('Пн 19.10 01:30 МСК (18.10 22:30Z): today = 19.10', () => {
+    freeze('2026-10-18T22:30:00.000Z')
+    const { from, to } = getPresetRange('today')
+    expect(from.toISOString()).toBe('2026-10-19T00:00:00.000Z')
+    // Было 2026-10-19T23:59:59.999Z (= 20.10 02:59 МСК) — material-cost считал 2 дня.
+    expect(to.toISOString()).toBe('2026-10-19T20:59:59.999Z')
+  })
+
+  it('Пн 19.10 01:30 МСК: yesterday = 18.10', () => {
+    freeze('2026-10-18T22:30:00.000Z')
+    const { from, to } = getPresetRange('yesterday')
+    expect(from.toISOString()).toBe('2026-10-18T00:00:00.000Z')
+    expect(to.toISOString()).toBe('2026-10-18T20:59:59.999Z')
+  })
+
+  it('Пн 19.10 01:30 МСК: this_week = Сб 17.10 → Пт 23.10 (from — UTC-полночь субботы, не Пт 21:00Z)', () => {
+    freeze('2026-10-18T22:30:00.000Z')
+    const { from, to } = getPresetRange('this_week')
+    expect(from.toISOString()).toBe('2026-10-17T00:00:00.000Z')
+    expect(to.toISOString()).toBe('2026-10-23T20:59:59.999Z')
+    expect(countDbDays(toDbDateRange(from, to))).toBe(7)
+  })
+
+  it('Пн 19.10 01:30 МСК: last_week = Сб 10.10 → Пт 16.10', () => {
+    freeze('2026-10-18T22:30:00.000Z')
+    const { from, to } = getPresetRange('last_week')
+    expect(from.toISOString()).toBe('2026-10-10T00:00:00.000Z')
+    expect(to.toISOString()).toBe('2026-10-16T20:59:59.999Z')
+  })
+
+  it('Сб 24.10 01:30 МСК (23.10 22:30Z): this_week уже НОВАЯ неделя 24.10 → 30.10', () => {
+    // Старый код: setHours(0) по UTC → Пт 23.10 → прошлая неделя.
+    freeze('2026-10-23T22:30:00.000Z')
+    const { from, to } = getPresetRange('this_week')
+    expect(from.toISOString()).toBe('2026-10-24T00:00:00.000Z')
+    expect(to.toISOString()).toBe('2026-10-30T20:59:59.999Z')
+  })
+
+  it('днём Вс 18.10 12:00 МСК: this_week = Сб 17.10 → Пт 23.10', () => {
+    freeze('2026-10-18T09:00:00.000Z')
+    const { from, to } = getPresetRange('this_week')
+    expect(from.toISOString()).toBe('2026-10-17T00:00:00.000Z')
+    expect(to.toISOString()).toBe('2026-10-23T20:59:59.999Z')
+  })
+
+  it('Вс 1.11 01:30 МСК (31.10 22:30Z): this_month = ноябрь, last_month = октябрь', () => {
+    freeze('2026-10-31T22:30:00.000Z')
+    const tm = getPresetRange('this_month')
+    expect(tm.from.toISOString()).toBe('2026-11-01T00:00:00.000Z')
+    expect(tm.to.toISOString()).toBe('2026-11-01T20:59:59.999Z')
+    const lm = getPresetRange('last_month')
+    expect(lm.from.toISOString()).toBe('2026-10-01T00:00:00.000Z')
+    expect(lm.to.toISOString()).toBe('2026-10-31T20:59:59.999Z')
+  })
+
+  it('днём 18.10: this_month / this_quarter / last_quarter / this_year', () => {
+    freeze('2026-10-18T09:00:00.000Z')
+    expect(getPresetRange('this_month').from.toISOString()).toBe('2026-10-01T00:00:00.000Z')
+    expect(getPresetRange('this_month').to.toISOString()).toBe('2026-10-18T20:59:59.999Z')
+    expect(getPresetRange('this_quarter').from.toISOString()).toBe('2026-10-01T00:00:00.000Z')
+    const lq = getPresetRange('last_quarter')
+    expect(lq.from.toISOString()).toBe('2026-07-01T00:00:00.000Z')
+    expect(lq.to.toISOString()).toBe('2026-09-30T20:59:59.999Z')
+    expect(getPresetRange('this_year').from.toISOString()).toBe('2026-01-01T00:00:00.000Z')
+  })
+
+  it('1.01.2026 01:30 МСК (31.12.2025 22:30Z): год/квартал/месяц уже 2026, прошлые — 2025', () => {
+    freeze('2025-12-31T22:30:00.000Z')
+    expect(getPresetRange('this_year').from.toISOString()).toBe('2026-01-01T00:00:00.000Z')
+    expect(getPresetRange('this_year').to.toISOString()).toBe('2026-01-01T20:59:59.999Z')
+    const lm = getPresetRange('last_month')
+    expect(lm.from.toISOString()).toBe('2025-12-01T00:00:00.000Z')
+    expect(lm.to.toISOString()).toBe('2025-12-31T20:59:59.999Z')
+    const lq = getPresetRange('last_quarter')
+    expect(lq.from.toISOString()).toBe('2025-10-01T00:00:00.000Z')
+    expect(lq.to.toISOString()).toBe('2025-12-31T20:59:59.999Z')
+  })
+
+  it("custom 'YYYY-MM-DD' — календарные дни как есть; пустой → МСК-сегодня", () => {
+    freeze('2026-10-18T22:30:00.000Z')
+    const c = getPresetRange('custom', '2026-10-01', '2026-10-05')
+    expect(c.from.toISOString()).toBe('2026-10-01T00:00:00.000Z')
+    expect(c.to.toISOString()).toBe('2026-10-05T20:59:59.999Z')
+    const d = getPresetRange('custom')
+    expect(d.from.toISOString()).toBe('2026-10-19T00:00:00.000Z')
+    expect(d.to.toISOString()).toBe('2026-10-19T20:59:59.999Z')
+  })
+})
+
+describe('toDbDateRange — включительные МСК-дни → half-open UTC-полночи', () => {
+  const D19 = '2026-10-19T00:00:00.000Z'
+  const D20 = '2026-10-20T00:00:00.000Z'
+  it.each([
+    ['UTC-полночь', '2026-10-19T00:00:00.000Z', '2026-10-19T00:00:00.000Z'],
+    ['МСК-инстант полуночи / МСК 23:59:59.999', '2026-10-18T21:00:00.000Z', '2026-10-19T20:59:59.999Z'],
+    ['момент «сейчас» 01:30 МСК', '2026-10-18T22:30:00.000Z', '2026-10-18T22:30:00.000Z'],
+  ])('%s → { gte: 19.10, lt: 20.10 }', (_name, f, t) => {
+    const r = toDbDateRange(new Date(f), new Date(t))
+    expect(r.gte.toISOString()).toBe(D19)
+    expect(r.lt.toISOString()).toBe(D20)
+    expect(countDbDays(r)).toBe(1)
+  })
+
+  it('to раньше from → пустой диапазон', () => {
+    const r = toDbDateRange(new Date('2026-10-20T00:00:00.000Z'), new Date('2026-10-18T00:00:00.000Z'))
+    expect(countDbDays(r)).toBe(0)
   })
 })

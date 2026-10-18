@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Prisma } from '@prisma/client'
 
 /**
@@ -98,5 +98,60 @@ describe('getClientAnalytics — сервисная выручка', () => {
     expect(loc1.deliveryRevenue).toBe(200)
     expect(loc2.revenue).toBe(500)
     expect(loc2.deliveryRevenue).toBe(50)
+  })
+})
+
+/**
+ * Аудит дат 18.10: подписи недель читали getDate() у МСК-инстанта Пт 21:00Z на
+ * UTC-сервере («16–23 окт», Пт–Пт); `lte: now` в 00:00–03:00 МСК терял сегодня;
+ * delivery с `to: now` при `lt` терял сегодня всегда.
+ */
+describe('getClientAnalytics — границы дат (МСК)', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    ['ночь 19.10 01:30 МСК', '2026-10-18T22:30:00.000Z'],
+    ['день 19.10 12:00 МСК', '2026-10-19T09:00:00.000Z'],
+  ])('%s: окно 1.10.2025 … 19.10 включительно; подписи Сб–Пт; заказ сегодня в текущей неделе', async (_n, nowIso) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(nowIso))
+    mockPrisma.order.findMany.mockResolvedValue([
+      order({ date: '2026-10-19T00:00:00.000Z', price: 1000 }),
+      order({ date: '2026-10-16T00:00:00.000Z', price: 300 }), // Пт прошлой фин-недели
+    ])
+    mockDelivery.deliveryRevenueByLocation.mockResolvedValue([])
+
+    const a = await getClientAnalytics('client-x')
+
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2025-10-01T00:00:00.000Z'),
+      lt: new Date('2026-10-20T00:00:00.000Z'),
+    })
+    expect(mockDelivery.deliveryRevenueByLocation).toHaveBeenCalledWith({
+      from: new Date('2025-10-01T00:00:00.000Z'),
+      to: new Date('2026-10-20T00:00:00.000Z'),
+    })
+
+    const last = a.weekly[a.weekly.length - 1]
+    expect(last.key).toBe('2026-10-17')
+    expect(last.label).toBe('17–23 окт')
+    expect(last.revenue).toBe(1000)
+    const prev = a.weekly[a.weekly.length - 2]
+    expect(prev.label).toBe('10–16 окт')
+    expect(prev.revenue).toBe(300)
+    expect(a.weekly).toHaveLength(12)
+
+    expect(a.monthly).toHaveLength(12)
+    expect(a.monthly[a.monthly.length - 1]).toMatchObject({ key: '2026-10', label: 'Октябрь 2026', revenue: 1300 })
+    expect(a.monthly[0].key).toBe('2025-11')
+  })
+
+  it('подпись недели на стыке месяцев: Сб 26.09 … Пт 2.10', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-30T09:00:00.000Z'))
+    mockPrisma.order.findMany.mockResolvedValue([])
+    mockDelivery.deliveryRevenueByLocation.mockResolvedValue([])
+    const a = await getClientAnalytics('client-x')
+    expect(a.weekly[a.weekly.length - 1].label).toBe('26 сен – 2 окт')
   })
 })

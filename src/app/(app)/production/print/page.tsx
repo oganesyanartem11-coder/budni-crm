@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getMskCalendarDayUtc, toMskDateString } from '@/lib/utils/msk-window'
 import { ArrowLeft, Printer, ChefHat, Package, FileText, FileStack, Truck, type LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/layout/page-header'
 import { requireRole } from '@/lib/auth/current-user'
@@ -11,11 +12,8 @@ export default async function PrintMenuPage({ searchParams }: PageProps) {
   await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
 
   const params = await searchParams
-  const date = params.date ?? (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    return d.toISOString().slice(0, 10)
-  })()
+  // Завтра по МСК (UTC-сервер с 00:00 до 03:00 МСК считал «завтра» сегодняшним днём).
+  const date = params.date ?? toMskDateString(getMskCalendarDayUtc(new Date(), 1))
 
   return (
     <>

@@ -100,7 +100,7 @@ export function ClientDetail({
     if (
       client.isActive &&
       !window.confirm(
-        'Архивировать клиента? Все будущие заказы клиента будут отменены (включая уже переданные производству), а типы питания — деактивированы.',
+        'Архивировать клиента? Все заказы клиента с завтрашнего дня будут отменены (включая уже переданные производству; сегодняшний остаётся), а типы питания — деактивированы.',
       )
     ) {
       return
@@ -122,10 +122,21 @@ export function ClientDetail({
   }
 
   function handleArchiveLocation(id: string, name: string, isActive: boolean) {
+    if (
+      isActive &&
+      !window.confirm(`Архивировать точку «${name}»? Её заказы с завтрашнего дня будут отменены, сегодняшний останется.`)
+    ) {
+      return
+    }
     startTransition(async () => {
       const result = await archiveLocation(id)
       if (result.ok) {
-        toast.success(isActive ? `«${name}» в архиве` : `«${name}» восстановлена`)
+        const cancelled = result.data?.cancelledCount ?? 0
+        toast.success(
+          isActive
+            ? `«${name}» в архиве${cancelled > 0 ? ` · отменено заказов с завтра: ${cancelled}` : ''}`
+            : `«${name}» восстановлена`,
+        )
         router.refresh()
       } else {
         toast.error(result.error)
@@ -151,7 +162,7 @@ export function ClientDetail({
     if (
       isActive &&
       !window.confirm(
-        'Архивировать питание? Все будущие заказы этого питания будут отменены (включая уже переданные производству).',
+        'Архивировать питание? Все заказы этого питания с завтрашнего дня будут отменены (включая уже переданные производству; сегодняшний остаётся).',
       )
     ) {
       return

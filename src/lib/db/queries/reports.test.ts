@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Prisma } from '@prisma/client'
 
 /**
@@ -21,6 +21,7 @@ const { mockDelivery } = vi.hoisted(() => ({
 vi.mock('@/lib/db/queries/delivery-revenue', () => mockDelivery)
 
 import { getFinancialReport } from './reports'
+import { getPresetRange } from '@/lib/utils/week'
 
 const FROM = new Date('2026-06-01T00:00:00.000Z')
 const TO = new Date('2026-06-02T00:00:00.000Z')
@@ -90,5 +91,58 @@ describe('getFinancialReport — сервисная выручка', () => {
     expect(c1.revenue).toBe(1000)
     expect(c1.deliveryRevenue).toBe(200)
     expect(c2.deliveryRevenue).toBe(100)
+  })
+})
+
+/**
+ * Аудит дат 18.10: раньше границы через серверный setHours (UTC) — this_week.from
+ * (МСК-инстант Пт 21:00Z) давал Пт–Пт (8 дней), delivery с `lt: end-of-day`
+ * терял последний день.
+ */
+describe('getFinancialReport — границы дат (МСК)', () => {
+  beforeEach(() => {
+    mockPrisma.order.findMany.mockResolvedValue([])
+    mockDelivery.deliveryRevenueByDay.mockResolvedValue([])
+    mockDelivery.deliveryRevenueByClient.mockResolvedValue([])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    ['ночь 19.10 01:30 МСК', '2026-10-18T22:30:00.000Z'],
+    ['день 19.10 12:00 МСК', '2026-10-19T09:00:00.000Z'],
+  ])('this_week (%s): Сб 17.10 … Пт 23.10, 7 дней', async (_n, nowIso) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(nowIso))
+    const { from, to } = getPresetRange('this_week')
+    const report = await getFinancialReport(from, to)
+
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-17T00:00:00.000Z'),
+      lt: new Date('2026-10-24T00:00:00.000Z'),
+    })
+    const expected = { from: new Date('2026-10-17T00:00:00.000Z'), to: new Date('2026-10-24T00:00:00.000Z') }
+    expect(mockDelivery.deliveryRevenueByDay).toHaveBeenCalledWith(expected)
+    expect(mockDelivery.deliveryRevenueByClient).toHaveBeenCalledWith(expected)
+    expect(report.daysInPeriod).toBe(7)
+    expect(report.daily.map((d) => d.date)).toEqual([
+      '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23',
+    ])
+    expect(report.daily[0].label).toBe('17 окт')
+  })
+
+  it('today ночью 19.10 01:30 МСК: ровно 19.10, доставка за этот же день', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-18T22:30:00.000Z'))
+    const { from, to } = getPresetRange('today')
+    const report = await getFinancialReport(from, to)
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-19T00:00:00.000Z'),
+      lt: new Date('2026-10-20T00:00:00.000Z'),
+    })
+    expect(mockDelivery.deliveryRevenueByDay).toHaveBeenCalledWith({
+      from: new Date('2026-10-19T00:00:00.000Z'),
+      to: new Date('2026-10-20T00:00:00.000Z'),
+    })
+    expect(report.daysInPeriod).toBe(1)
   })
 })

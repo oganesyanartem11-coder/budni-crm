@@ -1,8 +1,8 @@
 import { prisma } from '@/lib/db/prisma'
-import { getFinancialWeek } from '@/lib/utils/week'
+import { getFinancialWeekForDbDate, toDbDateRange, countDbDays } from '@/lib/utils/week'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
 import { getMaterialCostForRange } from '@/lib/digest/material-cost'
-import { toMskDateString } from '@/lib/utils/msk-window'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import {
   sumDeliveryRevenue,
   deliveryRevenueByDay,
@@ -65,29 +65,16 @@ const RU_MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'ию
 // много, график перестаёт читаться, отдаём пустой массив (UI покажет fallback).
 const MAX_DAILY_POINTS = 35
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d)
-  x.setHours(0, 0, 0, 0)
-  return x
-}
+const DAY_MS = 24 * 60 * 60 * 1000
 
-function endOfDay(d: Date): Date {
-  const x = new Date(d)
-  x.setHours(23, 59, 59, 999)
-  return x
-}
-
-function daysBetweenInclusive(from: Date, to: Date): number {
-  const ms = startOfDay(to).getTime() - startOfDay(from).getTime()
-  return Math.round(ms / (24 * 60 * 60 * 1000)) + 1
-}
-
-function isFinancialWeekRange(from: Date, to: Date): boolean {
-  const { from: fwFrom, to: fwTo } = getFinancialWeek(from)
-  return (
-    startOfDay(from).getTime() === fwFrom.getTime() &&
-    endOfDay(to).getTime() === fwTo.getTime()
-  )
+/**
+ * true, если МСК-дни [range.gte, range.lt) — ровно финансовая неделя Сб→Пт.
+ * Сравниваем UTC-полночи (@db.Date-семантика), без серверного setHours.
+ */
+function isFinancialWeekRange(range: { gte: Date; lt: Date }): boolean {
+  const week = getFinancialWeekForDbDate(range.gte)
+  const fw = toDbDateRange(week.from, week.to)
+  return range.gte.getTime() === fw.gte.getTime() && range.lt.getTime() === fw.lt.getTime()
 }
 
 interface Opts {
@@ -100,10 +87,18 @@ export async function getAdminDashboardData(
   rangeTo?: Date,
   opts: Opts = {}
 ): Promise<AdminDashboardData> {
-  // Дефолт: текущая финансовая неделя.
-  const { from: defaultFrom, to: defaultTo } = getFinancialWeek(new Date())
+  // Дефолт: текущая финансовая неделя (toDbDateRange ниже нормализует к МСК-дням).
+  const { from: defaultFrom, to: defaultTo } = getFinancialWeekForDbDate(new Date())
   const from = rangeFrom ?? defaultFrom
   const to = rangeTo ?? defaultTo
+
+  // КОНТРАКТ: [from, to] — ВКЛЮЧИТЕЛЬНЫЙ диапазон МСК-дней (from/to — UTC-полночь
+  // дня, МСК-инстант полуночи или момент внутри МСК-дня, см. toDbDateRange).
+  // В @db.Date-фильтры идут UTC-полночи { gte: первый день, lt: день после
+  // последнего }; в delivery-revenue (half-open [from, to)) — те же gte/lt.
+  // Раньше: delivery получал endOfDay(to) с `lt` → последний день терялся
+  // («Сегодня» — доставка 0), а МСК-инстант from втягивал лишний день.
+  const range = toDbDateRange(from, to)
 
   // Волна 4: сервисная выручка (доставка). Запрашиваем параллельно. Хелпер
   // дедупит fee один раз на (локация, день) и игнорит null-fee. Маржа на эти
@@ -111,7 +106,7 @@ export async function getAdminDashboardData(
   const [orders, deliveryTotal, deliveryByDay] = await Promise.all([
     prisma.order.findMany({
       where: {
-        deliveryDate: { gte: from, lte: to },
+        deliveryDate: { gte: range.gte, lt: range.lt },
         status: { in: REVENUE_STATUSES },
       },
       select: {
@@ -123,28 +118,27 @@ export async function getAdminDashboardData(
         client: { select: { id: true, name: true } },
       },
     }),
-    sumDeliveryRevenue({ from, to: endOfDay(to) }),
-    deliveryRevenueByDay({ from, to: endOfDay(to) }),
+    sumDeliveryRevenue({ from: range.gte, to: range.lt }),
+    deliveryRevenueByDay({ from: range.gte, to: range.lt }),
   ])
 
   const deliveryRevenue = Number(deliveryTotal)
 
   // daily — только для коротких диапазонов
-  const periodDays = daysBetweenInclusive(from, to)
+  const periodDays = countDbDays(range)
   const buildDaily = periodDays <= MAX_DAILY_POINTS
 
+  // Ключ дня = 'YYYY-MM-DD' UTC-полночи (@db.Date deliveryDate хранится так же).
+  const dayKey = (d: Date) => d.toISOString().slice(0, 10)
   const dailyMap = new Map<string, { revenue: number; deliveryRevenue: number; orders: number }>()
   if (buildDaily) {
     for (let i = 0; i < periodDays; i++) {
-      const d = new Date(from)
-      d.setDate(from.getDate() + i)
-      const key = toMskDateString(d)
-      dailyMap.set(key, { revenue: 0, deliveryRevenue: 0, orders: 0 })
+      const d = new Date(range.gte.getTime() + i * DAY_MS)
+      dailyMap.set(dayKey(d), { revenue: 0, deliveryRevenue: 0, orders: 0 })
     }
-    // Раскладываем сервисную выручку по дням (join по МСК-ISO-дате).
+    // Раскладываем сервисную выручку по дням (join по дате).
     for (const dr of deliveryByDay) {
-      const key = toMskDateString(dr.date)
-      const day = dailyMap.get(key)
+      const day = dailyMap.get(dayKey(dr.date))
       if (day) day.deliveryRevenue += Number(dr.deliveryRevenue)
     }
   }
@@ -154,8 +148,7 @@ export async function getAdminDashboardData(
   const clientMap = new Map<string, TopClient>()
 
   for (const o of orders) {
-    const key = toMskDateString(o.deliveryDate)
-    const day = dailyMap.get(key)
+    const day = dailyMap.get(dayKey(o.deliveryDate))
     const price = Number(o.totalPrice)
     if (day) {
       day.revenue += price
@@ -175,12 +168,13 @@ export async function getAdminDashboardData(
 
   const daily: DailyRevenuePoint[] = []
   if (buildDaily) {
-    const useWeekdayLabel = periodDays <= 7 && isFinancialWeekRange(from, to)
+    const useWeekdayLabel = periodDays <= 7 && isFinancialWeekRange(range)
     for (const [key, val] of dailyMap.entries()) {
-      const d = new Date(key + 'T00:00:00')
+      // UTC-полночь дня → UTC-компоненты (TZ процесса не влияет).
+      const d = new Date(key + 'T00:00:00.000Z')
       const dayLabel = useWeekdayLabel
-        ? `${WEEKDAY_NAMES_SHORT_BY_DOW[d.getDay()]} ${d.getDate()}.${(d.getMonth() + 1).toString().padStart(2, '0')}`
-        : `${d.getDate()} ${RU_MONTHS_SHORT[d.getMonth()]}`
+        ? `${WEEKDAY_NAMES_SHORT_BY_DOW[d.getUTCDay()]} ${d.getUTCDate()}.${(d.getUTCMonth() + 1).toString().padStart(2, '0')}`
+        : `${d.getUTCDate()} ${RU_MONTHS_SHORT[d.getUTCMonth()]}`
       daily.push({ date: key, dayLabel, revenue: val.revenue, deliveryRevenue: val.deliveryRevenue, orders: val.orders })
     }
   }
@@ -195,21 +189,18 @@ export async function getAdminDashboardData(
   // 7.46: prev = сдвиг РОВНО на −7 дней (одна неделя), а НЕ на −periodDays.
   // При week_to_date (Сб→сегодня) periodDays переменный; сдвиг −7 держит
   // сравнение выровненным по дням недели (тек. WTD vs те же дни прошлой недели).
+  // Все окна — half-open UTC-полночи МСК-дней (today — МСК-сегодня, а не
+  // серверный UTC setHours: в 00:00–03:00 МСК тот был «вчера»).
   let wow: AdminDashboardData['wow'] = null
   if (opts.withWoW) {
-    const today = startOfDay(new Date())
-    const isOngoing = today >= startOfDay(from) && today <= endOfDay(to)
+    const today = getMskCalendarDayUtc(new Date(), 0)
+    const isOngoing = today.getTime() >= range.gte.getTime() && today.getTime() < range.lt.getTime()
     const daysCompared = isOngoing
-      ? Math.min(daysBetweenInclusive(from, today), periodDays)
+      ? Math.min(Math.round((today.getTime() - range.gte.getTime()) / DAY_MS) + 1, periodDays)
       : periodDays
-    const compareFrom = new Date(from)
-    compareFrom.setDate(from.getDate() - 7)
-    const compareTo = new Date(compareFrom)
-    compareTo.setDate(compareFrom.getDate() + daysCompared - 1)
-    compareTo.setHours(23, 59, 59, 999)
-    const compareCutoff = new Date(from)
-    compareCutoff.setDate(from.getDate() + daysCompared - 1)
-    compareCutoff.setHours(23, 59, 59, 999)
+    const compareFrom = new Date(range.gte.getTime() - 7 * DAY_MS)
+    const compareToExcl = new Date(compareFrom.getTime() + daysCompared * DAY_MS)
+    const cutoffExcl = new Date(range.gte.getTime() + daysCompared * DAY_MS)
 
     // Волна 4: сервисная выручка для обоих окон сравнения (food-логика WoW
     // не меняется — delivery считается рядом, отдельным полем).
@@ -217,7 +208,7 @@ export async function getAdminDashboardData(
       await Promise.all([
         prisma.order.aggregate({
           where: {
-            deliveryDate: { gte: compareFrom, lte: compareTo },
+            deliveryDate: { gte: compareFrom, lt: compareToExcl },
             status: { in: REVENUE_STATUSES },
           },
           _sum: { totalPrice: true },
@@ -225,15 +216,15 @@ export async function getAdminDashboardData(
         isOngoing
           ? prisma.order.aggregate({
               where: {
-                deliveryDate: { gte: from, lte: compareCutoff },
+                deliveryDate: { gte: range.gte, lt: cutoffExcl },
                 status: { in: REVENUE_STATUSES },
               },
               _sum: { totalPrice: true },
             })
           : Promise.resolve({ _sum: { totalPrice: totalRevenue } }),
-        sumDeliveryRevenue({ from: compareFrom, to: compareTo }),
+        sumDeliveryRevenue({ from: compareFrom, to: compareToExcl }),
         isOngoing
-          ? sumDeliveryRevenue({ from, to: compareCutoff })
+          ? sumDeliveryRevenue({ from: range.gte, to: cutoffExcl })
           : Promise.resolve(deliveryTotal),
       ])
 

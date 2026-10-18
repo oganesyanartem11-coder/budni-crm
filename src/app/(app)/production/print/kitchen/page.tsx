@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getMskCalendarDayUtc, toMskDateString } from '@/lib/utils/msk-window'
 import { ArrowLeft } from 'lucide-react'
 import { requireRole } from '@/lib/auth/current-user'
 import { getProductionSummary } from '@/lib/db/queries/production'
@@ -18,15 +19,11 @@ export default async function KitchenPrintPage({ searchParams }: PageProps) {
   await requireRole(['ADMIN', 'CHEF', 'MANAGER'])
 
   const params = await searchParams
-  const targetDate = params.date ? new Date(params.date) : (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    return d
-  })()
-  targetDate.setHours(0, 0, 0, 0)
+  // YYYY-MM-DD → UTC-полночь МСК-дня (@db.Date); по умолчанию завтра по МСК.
+  const dateStr = params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : toMskDateString(getMskCalendarDayUtc(new Date(), 1))
+  const targetDate = new Date(`${dateStr}T00:00:00.000Z`)
 
   const summary = await getProductionSummary(targetDate)
-  const dateStr = params.date ?? targetDate.toISOString().slice(0, 10)
 
   return (
     <>

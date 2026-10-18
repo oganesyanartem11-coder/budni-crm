@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/db/prisma'
 import { REVENUE_STATUSES } from '@/lib/constants/order'
+import { toDbDateRange, countDbDays } from '@/lib/utils/week'
 import {
   deliveryRevenueByDay,
   deliveryRevenueByClient,
@@ -47,25 +48,34 @@ export interface FinancialReport {
 
 const RU_MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
 
+// date — UTC-полночь календарного дня (@db.Date) → читаем UTC-компоненты.
 function dailyLabel(date: Date, daysInPeriod: number): string {
   if (daysInPeriod > 60) {
-    return `${date.getDate()}.${(date.getMonth() + 1).toString().padStart(2, '0')}`
+    return `${date.getUTCDate()}.${(date.getUTCMonth() + 1).toString().padStart(2, '0')}`
   }
-  return `${date.getDate()} ${RU_MONTHS_SHORT[date.getMonth()]}`
+  return `${date.getUTCDate()} ${RU_MONTHS_SHORT[date.getUTCMonth()]}`
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Финансовый отчёт за ВКЛЮЧИТЕЛЬНЫЙ диапазон МСК-дней [from, to].
+ * from/to — UTC-полночь дня, МСК-инстант полуночи или любой момент внутри
+ * МСК-дня (см. toDbDateRange). Раньше границы строились через серверный
+ * setHours (UTC): МСК-инстант Пт 21:00Z → «пятница» (лишний день у this_week).
+ */
 export async function getFinancialReport(from: Date, to: Date): Promise<FinancialReport> {
-  const start = new Date(from)
-  start.setHours(0, 0, 0, 0)
-  const end = new Date(to)
-  end.setHours(23, 59, 59, 999)
+  const range = toDbDateRange(from, to)
+  const start = range.gte
+  // Последняя мс последнего дня в UTC-представлении @db.Date (только для вывода).
+  const end = new Date(range.lt.getTime() - 1)
 
   // Волна 4: сервисная выручка (доставка) по дням и по клиентам за период.
   // Хелпер дедупит fee один раз на (локация, день), null-fee игнорит.
   const [allOrders, deliveryByDay, deliveryByClient] = await Promise.all([
     prisma.order.findMany({
       where: {
-        deliveryDate: { gte: start, lte: end },
+        deliveryDate: { gte: range.gte, lt: range.lt },
       },
       select: {
         id: true,
@@ -77,8 +87,9 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
         client: { select: { id: true, name: true } },
       },
     }),
-    deliveryRevenueByDay({ from: start, to: end }),
-    deliveryRevenueByClient({ from: start, to: end }),
+    // delivery-revenue: half-open [from, to) — to = UTC-полночь дня ПОСЛЕ последнего.
+    deliveryRevenueByDay({ from: range.gte, to: range.lt }),
+    deliveryRevenueByClient({ from: range.gte, to: range.lt }),
   ])
 
   const deliveryByDayKey = new Map<string, number>()
@@ -104,15 +115,11 @@ export async function getFinancialReport(from: Date, to: Date): Promise<Financia
     totalPortions += o.portions
   }
 
-  const daysInPeriod = Math.max(
-    1,
-    Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
-  )
+  const daysInPeriod = Math.max(1, countDbDays(range))
 
   const dailyMap = new Map<string, { revenue: number; deliveryRevenue: number; orders: number; portions: number; date: Date }>()
   for (let i = 0; i < daysInPeriod; i++) {
-    const d = new Date(start)
-    d.setDate(start.getDate() + i)
+    const d = new Date(start.getTime() + i * DAY_MS)
     const key = d.toISOString().slice(0, 10)
     dailyMap.set(key, {
       revenue: 0,

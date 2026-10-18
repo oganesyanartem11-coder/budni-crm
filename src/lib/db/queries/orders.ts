@@ -1,5 +1,5 @@
-import { startOfDay, endOfDay } from 'date-fns'
 import { prisma } from '@/lib/db/prisma'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import type { OrderStatus, MealType, Prisma } from '@prisma/client'
 
 export interface OrderListFilter {
@@ -65,16 +65,22 @@ export async function listOrders(filter: OrderListFilter, limit = 200) {
 /**
  * Заказы для календарной сетки на неделю — те же фильтры,
  * но с агрегацией по дате/клиенту/типу.
+ *
+ * weekStart — понедельник: МСК-инстант полуночи (getMondayOfWeek, Вс 21:00Z)
+ * или UTC-полночь понедельника. Для @db.Date нормализуем к UTC-полуночи
+ * МСК-понедельника: [Пн 00:00Z, след. Пн 00:00Z). Раньше МСК-инстант уходил в
+ * фильтр как есть → Prisma усекал до ВОСКРЕСЕНЬЯ: прошлое Вс попадало, текущее
+ * Вс — нет (колонка «Вс» всегда пустая).
  */
 export async function listOrdersForWeek(weekStart: Date) {
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 7)
+  const monday = getMskCalendarDayUtc(weekStart, 0)
+  const nextMonday = getMskCalendarDayUtc(weekStart, 7)
 
   const orders = await prisma.order.findMany({
     where: {
       deliveryDate: {
-        gte: weekStart,
-        lt: weekEnd,
+        gte: monday,
+        lt: nextMonday,
       },
       status: { not: 'CANCELLED' },
     },
@@ -111,6 +117,14 @@ export async function countPendingConfirmation() {
 }
 
 /**
+ * МСК-сегодня и МСК-завтра как UTC-полночи (@db.Date). Раньше date-fns
+ * startOfDay(new Date()) на UTC-сервере в 00:00–03:00 МСК давал «вчера+сегодня».
+ */
+function mskTodayTomorrow(now: Date = new Date()): { today: Date; tomorrow: Date } {
+  return { today: getMskCalendarDayUtc(now, 0), tomorrow: getMskCalendarDayUtc(now, 1) }
+}
+
+/**
  * Подтверждение DYNAMIC до 18:00. Возвращает все заказы со статусом
  * PENDING_CONFIRMATION на сегодня и завтра.
  *
@@ -119,23 +133,21 @@ export async function countPendingConfirmation() {
  * - listPendingConfirmation для экрана быстрого ввода
  */
 export async function countPendingConfirmationToday() {
-  const today = startOfDay(new Date())
-  const tomorrowEnd = endOfDay(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  const { today, tomorrow } = mskTodayTomorrow()
   return prisma.order.count({
     where: {
       status: 'PENDING_CONFIRMATION',
-      deliveryDate: { gte: today, lte: tomorrowEnd },
+      deliveryDate: { gte: today, lte: tomorrow },
     },
   })
 }
 
 export async function listPendingConfirmation() {
-  const today = startOfDay(new Date())
-  const tomorrowEnd = endOfDay(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  const { today, tomorrow } = mskTodayTomorrow()
   return prisma.order.findMany({
     where: {
       status: 'PENDING_CONFIRMATION',
-      deliveryDate: { gte: today, lte: tomorrowEnd },
+      deliveryDate: { gte: today, lte: tomorrow },
     },
     orderBy: [
       { deliveryDate: 'asc' },
@@ -169,12 +181,11 @@ export async function listPendingConfirmation() {
  * чтобы не плодить параллельные запросы в одинаковой семантикой.
  */
 export async function listPendingCutoffData() {
-  const today = startOfDay(new Date())
-  const tomorrowEnd = endOfDay(new Date(today.getTime() + 24 * 60 * 60 * 1000))
+  const { today, tomorrow } = mskTodayTomorrow()
   return prisma.order.findMany({
     where: {
       status: 'PENDING_CONFIRMATION',
-      deliveryDate: { gte: today, lte: tomorrowEnd },
+      deliveryDate: { gte: today, lte: tomorrow },
     },
     select: {
       deliveryDate: true,

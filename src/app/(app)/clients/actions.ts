@@ -3,10 +3,10 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
-import type { MealType, OrderStatus, OrderType } from '@prisma/client'
+import type { MealType, OrderStatus, OrderType, User } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { requireRole } from '@/lib/auth/current-user'
-import { startOfTodayMsk, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
+import { getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 import { isValidPhone } from '@/lib/utils/format'
 import { notifyProductionChannel, escapeHtml } from '@/lib/telegram/notify'
 import { MEAL_TYPE_LABELS } from '@/lib/constants/client'
@@ -501,12 +501,15 @@ export async function archiveClient(id: string): Promise<ActionResult<{ cancelle
   // MEGA-AUDIT-FIX-1 B2 (D-2): при архивации в одной транзакции:
   // 1) деактивируем клиента,
   // 2) отменяем будущие заказы (статусы CONFIRMED/PENDING_CONFIRMATION/DRAFT
-  //    с deliveryDate >= сегодня по МСК),
+  //    с deliveryDate >= ЗАВТРА по МСК; сегодняшний заказ уже в работе — остаётся),
   // 3) деактивируем все ClientMealConfig клиента.
   // При восстановлении (current.isActive === false) — только step 1, заказы и
   // конфиги обратно не оживляем (это явное решение менеджера).
   const willArchive = current.isActive
-  const todayMsk = startOfTodayMsk()
+  // deliveryDate — @db.Date (UTC-полночь МСК-дня). Раньше брали момент МСК-полуночи
+  // (21:00Z вчера) — Postgres обрезал его до ВЧЕРАШНЕЙ даты → отменялись вчера и
+  // сегодня. Отменяем только будущие: с завтрашнего МСК-дня.
+  const tomorrowMsk = getMskCalendarDayUtc(new Date(), 1)
 
   // Статусы будущих заказов, отменяемых при архивации. LOCKED включён — такие
   // заказы уже переданы производству, о них дополнительно уведомляем канал
@@ -525,7 +528,7 @@ export async function archiveClient(id: string): Promise<ActionResult<{ cancelle
         where: {
           clientId: id,
           status: { in: CANCELLABLE_ON_ARCHIVE },
-          deliveryDate: { gte: todayMsk },
+          deliveryDate: { gte: tomorrowMsk },
         },
         select: { id: true, deliveryDate: true, mealType: true, portions: true, status: true },
       }),
@@ -545,7 +548,7 @@ export async function archiveClient(id: string): Promise<ActionResult<{ cancelle
         where: {
           clientId: id,
           status: { in: CANCELLABLE_ON_ARCHIVE },
-          deliveryDate: { gte: todayMsk },
+          deliveryDate: { gte: tomorrowMsk },
         },
         data: { status: 'CANCELLED' },
       }),
@@ -881,18 +884,67 @@ export async function updateLocation(
   return { ok: true, data: undefined }
 }
 
-export async function archiveLocation(id: string): Promise<ActionResult> {
-  await requireRole(['ADMIN', 'MANAGER'])
+export async function archiveLocation(id: string): Promise<ActionResult<{ cancelledCount: number }>> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
   const current = await prisma.clientLocation.findUnique({ where: { id } })
   if (!current) return { ok: false, error: 'Точка не найдена' }
 
-  await prisma.clientLocation.update({
-    where: { id },
-    data: { isActive: !current.isActive },
+  // Восстановление — только тоггл: заказы досоздаст ночная генерация.
+  if (!current.isActive) {
+    await prisma.clientLocation.update({ where: { id }, data: { isActive: true } })
+    revalidatePath(`/clients/${current.clientId}`)
+    return { ok: true, data: { cancelledCount: 0 } }
+  }
+
+  // Архивация: раньше будущие заказы точки (7 дней вперёд) оставались живыми —
+  // кухня их готовила и они шли в счёт, а в маршрутный лист не попадали.
+  // Отменяем с ЗАВТРА (сегодняшний уже в работе), как при архивации клиента.
+  const CANCELLABLE: OrderStatus[] = ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT', 'LOCKED']
+  const candidateWhere: Prisma.OrderWhereInput = {
+    locationId: id,
+    status: { in: CANCELLABLE },
+    deliveryDate: { gte: getMskCalendarDayUtc(new Date(), 1) },
+    updDocumentLink: { is: null },
+  }
+  const candidates = await prisma.order.findMany({
+    where: candidateWhere,
+    select: { deliveryDate: true, mealType: true, portions: true, status: true },
   })
+  await prisma.$transaction([
+    prisma.clientLocation.update({ where: { id }, data: { isActive: false } }),
+    prisma.order.updateMany({ where: candidateWhere, data: { status: 'CANCELLED' } }),
+    prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'LOCATION_ARCHIVED',
+        entityType: 'ClientLocation',
+        entityId: id,
+        payload: { clientId: current.clientId, name: current.name, cancelledCount: candidates.length },
+      },
+    }),
+  ])
+
+  const locked = candidates.filter((o) => o.status === 'LOCKED')
+  if (locked.length > 0) {
+    try {
+      const client = await prisma.client.findUnique({ where: { id: current.clientId }, select: { name: true } })
+      const lines = locked
+        .map((o) => `${fmtOrderDate(o.deliveryDate)} · ${MEAL_TYPE_LABELS[o.mealType]} · ${o.portions} порц.`)
+        .join('\n')
+      await notifyProductionChannel(
+        `⚠️ Точка «${escapeHtml(current.name)}» клиента ${escapeHtml(client?.name ?? '—')} в архиве. ` +
+          `Отменено ${candidates.length} будущих заказов, из них ${locked.length} уже переданы производству:\n${lines}`,
+        { parseMode: 'HTML' },
+      )
+    } catch (e) {
+      console.error('[archiveLocation] production notify failed', e)
+    }
+  }
 
   revalidatePath(`/clients/${current.clientId}`)
-  return { ok: true, data: undefined }
+  revalidatePath('/orders')
+  return { ok: true, data: { cancelledCount: candidates.length } }
 }
 
 /**
@@ -937,6 +989,65 @@ function usesFixedPortions(orderType: OrderType): boolean {
   return orderType === 'FIXED' || orderType === 'STICKY'
 }
 
+/** Графики, которым scheduleData не нужен (форма шлёт для них null). */
+const SCHEDULE_TYPES_WITHOUT_DATA = new Set(['DAILY', 'WEEKDAYS', 'WEEKENDS', 'ONE_TIME'])
+
+type MealConfigChanges = Record<string, { from: unknown; to: unknown }>
+
+function normForDiff(v: unknown): unknown {
+  if (v === undefined || v === null || v === Prisma.DbNull) return null
+  if (v instanceof Date) return v.toISOString()
+  if (Prisma.Decimal.isDecimal(v)) return Number(v)
+  return v
+}
+
+/**
+ * Что реально поменялось в конфиге: только поля из `next`, которые пишутся
+ * (undefined — поле не трогаем), и только где значение отличается.
+ */
+function diffMealConfig(prev: Record<string, unknown>, next: Record<string, unknown>): MealConfigChanges {
+  const changes: MealConfigChanges = {}
+  for (const [field, raw] of Object.entries(next)) {
+    if (raw === undefined) continue
+    const from = normForDiff(prev[field])
+    const to = normForDiff(raw)
+    if (stableJson(from) !== stableJson(to)) changes[field] = { from, to }
+  }
+  return changes
+}
+
+/** JSON с отсортированными ключами: jsonb в Postgres хранит ключи в своём порядке. */
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_k, val) =>
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? Object.fromEntries(Object.entries(val).sort(([a], [b]) => a.localeCompare(b)))
+      : val,
+  )
+}
+
+/** Журнал правок питания («кто поменял график/тип»). Сбой лога действие не роняет. */
+async function logMealConfigActivity(
+  user: Pick<User, 'id' | 'role'>,
+  action: 'MEAL_CONFIG_UPDATED' | 'MEAL_CONFIG_CREATED' | 'MEAL_CONFIG_DELETED',
+  configId: string,
+  payload: Prisma.InputJsonObject,
+): Promise<void> {
+  try {
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action,
+        entityType: 'ClientMealConfig',
+        entityId: configId,
+        payload,
+      },
+    })
+  } catch (e) {
+    console.error(`[clients/actions] ${action} log failed`, e)
+  }
+}
+
 export async function updateMealConfig(
   id: string,
   formData: MealConfigFormData
@@ -965,6 +1076,10 @@ export async function updateMealConfig(
       scheduleData: true,
       validFrom: true,
       validTo: true,
+      pricePerPortion: true,
+      deliveryHorizon: true,
+      locationId: true,
+      mealType: true,
     },
   })
   if (!existing) {
@@ -1005,11 +1120,25 @@ export async function updateMealConfig(
     orderType: parsed.data.orderType,
     deliveryHorizon: parsed.data.deliveryHorizon,
     scheduleType: parsed.data.scheduleType,
-    scheduleData: parsed.data.scheduleData ?? undefined,
+    // График без данных (каждый день/будни/выходные/разовый) — старые daysOfWeek
+    // и пр. не оставляем в БД, иначе БД расходится с формой.
+    scheduleData:
+      parsed.data.scheduleData ??
+      (parsed.data.orderType !== 'WEEKLY' && SCHEDULE_TYPES_WITHOUT_DATA.has(parsed.data.scheduleType)
+        ? Prisma.DbNull
+        : undefined),
     fixedPortions: newFixedPortions,
     pricePerPortion: parsed.data.pricePerPortion,
     validFrom: parsed.data.validFrom ? new Date(parsed.data.validFrom) : undefined,
     validTo: parsed.data.validTo ? new Date(parsed.data.validTo) : null,
+  }
+  const changes = diffMealConfig(existing, updateData)
+  const logUpdated = async () => {
+    if (Object.keys(changes).length === 0) return
+    await logMealConfigActivity(user, 'MEAL_CONFIG_UPDATED', id, {
+      clientId: existing.clientId,
+      changes: changes as Prisma.InputJsonObject,
+    })
   }
 
   // 7.41: затронутые будущие заказы при смене fixedPortions. Расширено:
@@ -1080,6 +1209,8 @@ export async function updateMealConfig(
           newOrderType: parsed.data.orderType,
           fixedPortions: newFixedPortions,
           pendingConfirmed: pending.length,
+          clientId: existing.clientId,
+          changes: changes as Prisma.InputJsonObject,
         },
       },
     })
@@ -1110,6 +1241,7 @@ export async function updateMealConfig(
       where: { id },
       data: updateData,
     })
+    await logUpdated()
     revalidatePath(`/clients/${config.clientId}`)
     return { ok: true, data: undefined }
   }
@@ -1148,6 +1280,7 @@ export async function updateMealConfig(
       where: { id },
       data: updateData,
     })
+    await logUpdated()
 
     revalidatePath(`/clients/${config.clientId}`)
     return { ok: true, data: undefined }
@@ -1210,6 +1343,8 @@ export async function updateMealConfig(
           newOrderType: parsed.data.orderType,
           resetToAsking: stale.length,
           todaysKept: todays?.portions ?? null,
+          clientId: existing.clientId,
+          changes: changes as Prisma.InputJsonObject,
         },
       },
     })
@@ -1221,6 +1356,8 @@ export async function updateMealConfig(
     where: { id },
     data: updateData,
   })
+  // Смена на DYNAMIC уже записана в MEAL_CONFIG_TYPE_SWITCHED вместе с правками полей.
+  if (!switchedToAsking) await logUpdated()
 
   revalidatePath(`/clients/${config.clientId}`)
   return { ok: true, data: note ? { note } : undefined }
@@ -1258,6 +1395,8 @@ function futureOrdersByBusinessKeyWhere(config: {
     mealType: config.mealType,
     status: { in: [...CASCADE_STATUSES] },
     deliveryDate: { gte: getMskCalendarDayUtc(new Date(), 1) },
+    // По заказу с выписанным УПД цена уже в документе — не меняем.
+    updDocumentLink: { is: null },
   }
 }
 
@@ -1374,27 +1513,32 @@ export async function cascadePriceToFutureOrders(params: {
 }
 
 export async function deleteMealConfig(id: string): Promise<ActionResult<{ cancelledCount: number }>> {
-  await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'MANAGER'])
   const config = await prisma.clientMealConfig.findUnique({ where: { id } })
   if (!config) return { ok: false, error: 'Питание не найдено' }
 
   // Реактивация (false → true): только тоггл, заказы не трогаем.
   if (!config.isActive) {
     await prisma.clientMealConfig.update({ where: { id }, data: { isActive: true } })
+    await logMealConfigActivity(user, 'MEAL_CONFIG_UPDATED', id, {
+      clientId: config.clientId,
+      changes: { isActive: { from: false, to: true } },
+    })
     revalidatePath(`/clients/${config.clientId}`)
     return { ok: true, data: { cancelledCount: 0 } }
   }
 
   // Деактивация (true → false): в одной транзакции с тогглом отменяем будущие
   // заказы ИМЕННО этого питания (client + location + mealType), включая LOCKED.
-  const todayMsk = startOfTodayMsk()
+  // Только с завтрашнего МСК-дня: сегодняшний заказ уже в работе (см. archiveClient).
+  const tomorrowMsk = getMskCalendarDayUtc(new Date(), 1)
   const CANCELLABLE_ON_ARCHIVE: OrderStatus[] = ['CONFIRMED', 'PENDING_CONFIRMATION', 'DRAFT', 'LOCKED']
   const candidateWhere: Prisma.OrderWhereInput = {
     clientId: config.clientId,
     locationId: config.locationId,
     mealType: config.mealType,
     status: { in: CANCELLABLE_ON_ARCHIVE },
-    deliveryDate: { gte: todayMsk },
+    deliveryDate: { gte: tomorrowMsk },
   }
 
   const candidates = await prisma.order.findMany({
@@ -1408,6 +1552,13 @@ export async function deleteMealConfig(id: string): Promise<ActionResult<{ cance
     prisma.clientMealConfig.update({ where: { id }, data: { isActive: false } }),
     prisma.order.updateMany({ where: candidateWhere, data: { status: 'CANCELLED' } }),
   ])
+  await logMealConfigActivity(user, 'MEAL_CONFIG_DELETED', id, {
+    clientId: config.clientId,
+    locationId: config.locationId,
+    mealType: config.mealType,
+    orderType: config.orderType,
+    cancelledCount,
+  })
 
   revalidatePath(`/clients/${config.clientId}`)
   revalidatePath('/orders')
@@ -1457,7 +1608,7 @@ export async function createMealConfigBulk(
   clientId: string,
   formData: MealConfigBulkFormData
 ): Promise<ActionResult<{ ids: string[]; autoGenerated: number }>> {
-  await requireRole(['ADMIN', 'MANAGER'])
+  const user = await requireRole(['ADMIN', 'MANAGER'])
 
   const parsed = mealConfigBulkSchema.safeParse(formData)
   if (!parsed.success) {
@@ -1504,6 +1655,22 @@ export async function createMealConfigBulk(
       })
     )
   )
+
+  for (const c of created) {
+    await logMealConfigActivity(user, 'MEAL_CONFIG_CREATED', c.id, {
+      clientId,
+      locationId: c.locationId,
+      mealType: c.mealType,
+      orderType: c.orderType,
+      scheduleType: c.scheduleType,
+      scheduleData: (c.scheduleData ?? null) as Prisma.InputJsonValue | null,
+      fixedPortions: c.fixedPortions,
+      pricePerPortion: normForDiff(c.pricePerPortion) as number | null,
+      deliveryHorizon: c.deliveryHorizon,
+      validFrom: normForDiff(c.validFrom) as string | null,
+      validTo: normForDiff(c.validTo) as string | null,
+    })
+  }
 
   // 7.41: при создании конфига сразу пролонгируем на 7 дней вперёд (как cron),
   // чтобы планирование было видно заранее. DYNAMIC → PENDING_CONFIRMATION,

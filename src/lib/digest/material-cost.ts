@@ -98,9 +98,8 @@ export async function getMaterialCostForRange(
 
   for (let i = 0; i < totalDays; i++) {
     const dayStart = new Date(startMs + i * ONE_DAY_MS)
-    // MSK-конец дня = MSK-полночь следующего дня − 1мс. lte: dayEnd
-    // эквивалентно lt: dayStart+24h, но lte привычнее для диапазонов.
-    const dayEnd = new Date(dayStart.getTime() + ONE_DAY_MS - 1)
+    // UTC-полночь МСК-календарного дня — так хранится @db.Date deliveryDate.
+    const dayDb = new Date(dayStart.getTime() + MSK_OFFSET_MS)
 
     // 1. День недели в MSK (ISO: 1=Пн, 7=Вс). Считаем от MSK-shifted
     //    точки, иначе на UTC-сервере dayStart=21:00Z даст getDay() от
@@ -147,7 +146,11 @@ export async function getMaterialCostForRange(
     // 3. Заказы на дату с фильтром по статусам, агрегируем порции по mealType.
     const orders = await prisma.order.findMany({
       where: {
-        deliveryDate: { gte: dayStart, lte: dayEnd },
+        // @db.Date: точное равенство UTC-полуночи МСК-дня. Раньше было
+        // { gte: dayStart, lte: dayEnd } с МСК-инстантами — Prisma усекает
+        // dayStart (Пред.день 21:00Z) до ВЧЕРАШНЕЙ даты → запрос дня D
+        // возвращал заказы D−1 и D (себестоимость ×2).
+        deliveryDate: dayDb,
         status: { in: statuses },
       },
       select: { mealType: true, portions: true },

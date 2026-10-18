@@ -196,10 +196,10 @@ async function loadBlockingOrders(gte: Date, lte: Date) {
 
 /** Начало (00:00:00.000) и конец (23:59:59.999) суток, в которые попадает `date`. */
 function dayWindow(date: Date): { start: Date; end: Date } {
-  const start = new Date(date)
-  start.setHours(0, 0, 0, 0)
-  const end = new Date(start)
-  end.setHours(23, 59, 59, 999)
+  // UTC-сутки: deliveryDate хранится UTC-полуночью МСК-дня; локальные setHours
+  // зависели от часового пояса процесса.
+  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1)
   return { start, end }
 }
 
@@ -210,9 +210,9 @@ function dayWindow(date: Date): { start: Date; end: Date } {
 export async function generateFixedOrdersForDate(targetDate: Date, options: {
   triggeredByUserId?: string | null
 }): Promise<GenerationStats> {
-  // Нормализуем «дефолтную» дату (обычно завтра МСК) на начало дня.
-  const date = new Date(targetDate)
-  date.setHours(0, 0, 0, 0)
+  // Нормализуем к UTC-полуночи календарного дня (формат @db.Date). setHours на
+  // UTC-сервере сдвигал МСК-полночь (21:00Z) на предыдущий день.
+  const date = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate()))
 
   // 7.39: same-day локации генерируются на СЕГОДНЯ МСК. Вычисляем один раз.
   const todayMsk = getMskCalendarDayUtc(new Date(), 0)

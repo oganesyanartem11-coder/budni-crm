@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getMskCalendarDayUtc, toMskDateString } from '@/lib/utils/msk-window'
 import { ArrowLeft, AlertTriangle, CheckCircle2, FileText } from 'lucide-react'
 import { previewUpdForDate } from './actions'
 import { GenerateButton } from './generate-button'
@@ -13,11 +14,8 @@ interface PageProps {
 export default async function UpdPreviewPage({ searchParams }: PageProps) {
   await requireRole(['ADMIN', 'MANAGER'])
   const params = await searchParams
-  const dateIso = params.date ?? (() => {
-    const d = new Date()
-    d.setDate(d.getDate() + 1)
-    return d.toISOString().slice(0, 10)
-  })()
+  // Завтра по МСК (UTC-сервер с 00:00 до 03:00 МСК считал «завтра» сегодняшним днём).
+  const dateIso = params.date ?? toMskDateString(getMskCalendarDayUtc(new Date(), 1))
 
   const res = await previewUpdForDate(dateIso)
   if (!res.ok) {

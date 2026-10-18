@@ -226,11 +226,15 @@ export async function regenerateFixedOrders(targetDateIso: string): Promise<Acti
 }>> {
   const user = await requireRole(['ADMIN', 'MANAGER'])
 
-  const date = new Date(targetDateIso)
+  // Ожидаем 'YYYY-MM-DD' (МСК-день) → UTC-полночь (@db.Date). Полный ISO-момент
+  // приводим к его МСК-дню, а не к UTC-дню (setHours на UTC-сервере уводил
+  // «полночь завтра по МСК» на сегодня).
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(targetDateIso)
+    ? new Date(`${targetDateIso}T00:00:00.000Z`)
+    : new Date(`${toMskDateString(new Date(targetDateIso))}T00:00:00.000Z`)
   if (isNaN(date.getTime())) {
     return { ok: false, error: 'Неверная дата' }
   }
-  date.setHours(0, 0, 0, 0)
 
   const stats = await generateFixedOrdersForDate(date, {
     triggeredByUserId: user.id,

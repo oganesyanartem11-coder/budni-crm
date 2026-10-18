@@ -28,6 +28,8 @@ export type ChangeIntent =
       /** Последний день периода включительно («с 7 по 14»); null — одна дата. */
       dateTo: string | null
       mealType: MealType | null
+      /** «Ужин и обед по 8» — несколько приёмов пищи одним числом (≥2); иначе не задано. */
+      mealTypes?: MealType[]
       confidence: number
       reason: string
     }
@@ -48,6 +50,11 @@ const CHANGE_TOOL: Anthropic.Messages.Tool = {
       mealType: {
         type: ['string', 'null'],
         enum: ['ЗАВТРАК', 'ОБЕД', 'УЖИН', null],
+      },
+      mealTypes: {
+        type: ['array', 'null'],
+        items: { type: 'string', enum: ['ЗАВТРАК', 'ОБЕД', 'УЖИН'] },
+        description: 'Два и больше приёма пищи с одним числом («ужин и обед по 8»); иначе null',
       },
       confidence: { type: 'number' },
       reason: { type: 'string', description: 'Одно короткое предложение, до 100 символов' },
@@ -74,6 +81,7 @@ function buildSystemPrompt(
 Если клиент просит ДОБАВИТЬ или УБРАТЬ порции к уже заказанному («добавьте 2 на завтра», «+1 обед в пятницу», «на 3 меньше завтра», «уберите одну на 08.10») — это тоже CHANGE: mode='add', portions = изменение со знаком (добавить 2 → 2, убрать 3 → -3). Если клиент называет итоговое количество — mode='set'.
 
 Если упомянут тип еды (завтрак/обед/ужин) — извлеки в mealType. У этого клиента активны: ${availableMealTypes.join(', ')}. Если только один тип активен → mealType=null (используется тот единственный). Если клиент активен на >1 типе и в тексте тип не указан → mealType=null (это потом обработает менеджер).
+Если клиент назвал НЕСКОЛЬКО типов еды с ОДНИМ числом («ужин и обед по 8», «обед ужин 8 порций») — это CHANGE (не NONE): mealTypes = все названные типы, mealType=null. Одно число на каждый из названных типов. Разные числа на разные типы («обед 8, ужин 5») — NONE.
 
 Возвращай action='NONE' когда:
 - Только число без даты («надо 13»)
@@ -101,6 +109,7 @@ Confidence ≥ 0.95 — твёрдо уверен. < 0.85 — обязатель
 12. «с 8 по 12 июня +1 обед» (сегодня 04.06) → CHANGE portions=1 mode=add date=2026-06-08 dateTo=2026-06-12 mealType=ОБЕД confidence=0.96
 13. «на следующей неделе каждый день по 30» (сегодня среда 04.06) → CHANGE portions=30 mode=set date=2026-06-08 dateTo=2026-06-14 mealType=null confidence=0.93
 14. «с понедельника добавьте 2» (без конца) → NONE
+15. «18.10.2026. Ужин обед на строительные технологий 8 порции» (сегодня 17.10.2026) → CHANGE portions=8 mode=set date=2026-10-18 dateTo=null mealType=null mealTypes=[УЖИН, ОБЕД] confidence=0.93
 
 ВАЖНО: ты НЕ исполняешь. Только классифицируешь. Менеджер проверит.`
 }
@@ -112,6 +121,7 @@ interface RawIntent {
   date?: string | null
   dateTo?: string | null
   mealType?: string | null
+  mealTypes?: unknown
   confidence?: number
   reason?: string
 }
@@ -237,6 +247,23 @@ export async function parseChangeIntent(
     mealType = raw.mealType
   }
 
+  // Несколько типов еды одним числом: каждый должен быть известным и активным.
+  let mealTypes: MealType[] | undefined
+  if (Array.isArray(raw.mealTypes) && raw.mealTypes.length > 0) {
+    const unique = Array.from(new Set(raw.mealTypes))
+    for (const m of unique) {
+      if (m !== 'ЗАВТРАК' && m !== 'ОБЕД' && m !== 'УЖИН') return NONE('unknown_meal_type')
+      if (!context.availableMealTypes.includes(m)) return NONE('unknown_meal_type')
+    }
+    const list = unique as MealType[]
+    if (list.length >= 2) {
+      mealTypes = list
+      mealType = null
+    } else if (mealType == null) {
+      mealType = list[0]
+    }
+  }
+
   return {
     action: 'CHANGE',
     portions,
@@ -244,6 +271,7 @@ export async function parseChangeIntent(
     date: startDate,
     dateTo,
     mealType,
+    ...(mealTypes ? { mealTypes } : {}),
     confidence: conf,
     reason: typeof raw.reason === 'string' ? raw.reason : '',
   }

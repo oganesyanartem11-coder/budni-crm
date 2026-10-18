@@ -83,11 +83,13 @@ export async function submitClientRangeRequest(params: {
 export function formatRangeRequestText(payload: RangeRequestPayload): string {
   const { request } = payload
   const raw = payload.rawText.replace(/\s+/g, ' ').trim()
+  // Один день («ужин и обед 8 на 18.10») — без «периода 18.10 — 18.10».
+  const oneDay = request.dateFrom === request.dateTo
   return [
-    `📩 ${payload.clientName}: изменение на период`,
+    `📩 ${payload.clientName}: ${oneDay ? 'изменение заказа' : 'изменение на период'}`,
     `💬 «${raw.length > 300 ? `${raw.slice(0, 299)}…` : raw}»`,
     '',
-    `${formatWeeklyDate(request.dateFrom)} — ${formatWeeklyDate(request.dateTo)}, ${formatRangeAmount(request.mode, request.portions)}. Если подтвердить:`,
+    `${oneDay ? formatWeeklyDate(request.dateFrom) : `${formatWeeklyDate(request.dateFrom)} — ${formatWeeklyDate(request.dateTo)}`}, ${formatRangeAmount(request.mode, request.portions)}. Если подтвердить:`,
     ...formatRangePlanLines(payload.plan),
   ].join('\n')
 }

@@ -1592,3 +1592,157 @@ describe('process-message — аудит 08.10', () => {
     expect(mockCreatePendingChange.mock.calls[0][0]).toMatchObject({ proposedPortions: 11, deltaPortions: 1 })
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────
+// 18.10: «Ужин обед … 8 порции» вне вопроса дня — оба приёма пищи одним
+// запросом через поток периода (менеджер подтверждает кнопками).
+// ─────────────────────────────────────────────────────────────────────
+describe('process-message — несколько приёмов пищи одним числом', () => {
+  const MULTI_INTENT = {
+    action: 'CHANGE',
+    portions: 8,
+    mode: 'set',
+    date: '2026-10-18',
+    dateTo: null,
+    mealType: null,
+    mealTypes: ['УЖИН', 'ОБЕД'],
+    confidence: 0.93,
+    reason: 'ok',
+  }
+  const TEXT = '18.10.2026. Ужин обед на строительные технологий 8 порции'
+
+  beforeEach(() => {
+    mockFindConv.mockResolvedValue(null)
+    mockParseChangeIntent.mockResolvedValue(MULTI_INTENT)
+    mockSubmitRange.mockResolvedValue({ kind: 'pending', requestId: 'req_m', plan: { lines: [], skipped: [], missingDates: [] } })
+    mockNotifyRange.mockResolvedValue(undefined)
+    vi.setSystemTime(new Date(Date.UTC(2026, 9, 17, 9, 0, 0)))
+  })
+
+  it('один адрес с обедом и ужином → один запрос на оба приёма, дата одна, set 8', async () => {
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: TEXT })
+
+    expect(res).toEqual({ reply: null, action: 'pending_order_change', pendingId: 'req_m' })
+    expect(mockSubmitRange).toHaveBeenCalledOnce()
+    const { request } = mockSubmitRange.mock.calls[0][0]
+    expect(request).toMatchObject({
+      clientId: 'client_1',
+      locationId: 'loc_1',
+      dateFrom: '2026-10-18',
+      dateTo: '2026-10-18',
+      mode: 'set',
+      portions: 8,
+    })
+    expect([...request.mealTypes].sort()).toEqual(['DINNER', 'LUNCH'])
+    expect(mockResolveTarget).not.toHaveBeenCalled()
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect(mockNotifyRange).toHaveBeenCalledOnce()
+  })
+
+  it('два адреса с обедом и ужином → inbox с причиной, запроса нет', async () => {
+    const client = makeMultiMealClient()
+    mockFindClient.mockResolvedValue({
+      ...client,
+      locations: [...client.locations, { ...client.locations[0], id: 'loc_2', name: 'Склад' }],
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_m', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: TEXT })
+
+    expect(res).toEqual({ reply: null, action: 'inbox', inboxItemId: 'inbox_m' })
+    expect(mockSubmitRange).not.toHaveBeenCalled()
+    expect(mockCreateInbox.mock.calls.at(-1)![0].humanReason).toContain('несколько адресов')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────
+// 18.10: «на завтра 8 порций» у клиента с обедом и ужином — одинаково и в
+// ответе на вопрос дня, и без него; догадки модели о приёме пищи не верим.
+// ─────────────────────────────────────────────────────────────────────
+describe('process-message — «на завтра 8» при обеде и ужине (18.10 СБМ)', () => {
+  it('без вопроса дня: не молча в inbox, а один запрос менеджеру на обед И ужин', async () => {
+    mockFindConv.mockResolvedValue(null)
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE', portions: 8, mode: 'set', date: '2026-06-05', dateTo: null, mealType: null, confidence: 0.95, reason: '',
+    })
+    mockSubmitRange.mockResolvedValue({ kind: 'pending', requestId: 'req_8', plan: { lines: [{}], skipped: [], missingDates: [] } })
+    mockNotifyRange.mockResolvedValue({ sentTo: 1, inboxItemId: null })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'на завтра 8 порций' })
+
+    expect(res).toMatchObject({ action: 'pending_order_change', pendingId: 'req_8' })
+    const req = mockSubmitRange.mock.calls[0][0].request
+    expect([...req.mealTypes].sort()).toEqual(['DINNER', 'LUNCH'])
+    expect(req).toMatchObject({ dateFrom: '2026-06-05', dateTo: '2026-06-05', mode: 'set', portions: 8 })
+  })
+
+  it('модель «угадала» обед, хотя в тексте его нет → игнорируем (вне вопроса дня)', async () => {
+    mockFindConv.mockResolvedValue(null)
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockParseChangeIntent.mockResolvedValue({
+      action: 'CHANGE', portions: 8, mode: 'set', date: '2026-06-05', dateTo: null, mealType: 'ОБЕД', confidence: 0.95, reason: '',
+    })
+    mockSubmitRange.mockResolvedValue({ kind: 'pending', requestId: 'req_9', plan: { lines: [{}], skipped: [], missingDates: [] } })
+    mockNotifyRange.mockResolvedValue({ sentTo: 1, inboxItemId: null })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'на завтра 8' })
+
+    expect(mockCreatePendingChange).not.toHaveBeenCalled()
+    expect([...mockSubmitRange.mock.calls[0][0].request.mealTypes].sort()).toEqual(['DINNER', 'LUNCH'])
+  })
+
+  it('в ответ на вопрос дня: «8» с угаданным обедом → в сохранение уходит без приёма пищи (на оба)', async () => {
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParse.mockResolvedValue({
+      type: 'numeric', confidence: 0.9, reason: '', toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 8, mealType: 'LUNCH' }],
+    })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    await processClientMessage({ maxChatId: 'max_1', text: '8' })
+
+    expect(mockSave.mock.calls[0][0].items).toEqual([{ locationId: 'loc_1', portions: 8 }])
+  })
+
+  it('«на обед 8» — приём назван, оставляем', async () => {
+    mockFindClient.mockResolvedValue(makeMultiMealClient())
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParse.mockResolvedValue({
+      type: 'numeric', confidence: 0.95, reason: '', toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 8, mealType: 'LUNCH' }],
+    })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'на обед 8' })
+
+    expect(mockSave.mock.calls[0][0].items).toEqual([{ locationId: 'loc_1', portions: 8, mealType: 'LUNCH' }])
+  })
+
+  it('две точки, модель не уверена («10 и 5», 0.6) → менеджеру, ничего не сохраняем', async () => {
+    const twoLocs = makeClient()
+    twoLocs.locations = [
+      ...twoLocs.locations,
+      { ...twoLocs.locations[0], id: 'loc_2', name: 'Склад' },
+    ] as never
+    mockFindClient.mockResolvedValue(twoLocs)
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    mockParse.mockResolvedValue({
+      type: 'numeric', confidence: 0.6, reason: 'точки не названы', toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 10 }, { locationId: 'loc_2', portions: 5 }],
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_m', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '10 и 5' })
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+    expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('Не уверен, как разнести числа по точкам')
+  })
+})

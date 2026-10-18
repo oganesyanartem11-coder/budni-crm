@@ -165,3 +165,17 @@ describe('deliveryRevenueByClient', () => {
     expect(byClient.find((c) => c.clientId === 'cB')!.deliveryRevenue.toFixed(2)).toBe('200.00')
   })
 })
+
+describe('контракт диапазона [from, to)', () => {
+  it('from/to уходят в @db.Date-фильтр как есть: gte from, lt to (to — UTC-полночь дня ПОСЛЕ)', async () => {
+    mockPrisma.order.findMany.mockResolvedValue([])
+    await sumDeliveryRevenue({
+      from: new Date('2026-10-19T00:00:00.000Z'),
+      to: new Date('2026-10-20T00:00:00.000Z'),
+    })
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-19T00:00:00.000Z'),
+      lt: new Date('2026-10-20T00:00:00.000Z'),
+    })
+  })
+})

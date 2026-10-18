@@ -338,12 +338,12 @@ function ServiceMenu() {
 
   function handleRegenerate() {
     setOpen(false)
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    tomorrow.setHours(0, 0, 0, 0)
+    // Завтра по МСК строкой YYYY-MM-DD: момент «полночь завтра» (сегодня 21:00Z)
+    // сервер в UTC обрезал до СЕГОДНЯ и досоздавал заказы на сегодня.
+    const tomorrow = toMskDateString(getMskCalendarDayUtc(new Date(), 1))
 
     startTransition(async () => {
-      const result = await regenerateFixedOrders(tomorrow.toISOString())
+      const result = await regenerateFixedOrders(tomorrow)
       if (result.ok) {
         const { created, skippedExisting, matchedSchedule, candidatesTotal } = result.data
         if (created > 0) {

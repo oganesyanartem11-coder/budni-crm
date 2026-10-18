@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Prisma } from '@prisma/client'
 
 /**
@@ -31,6 +31,7 @@ const { mockMaterialCost } = vi.hoisted(() => ({
 vi.mock('@/lib/digest/material-cost', () => mockMaterialCost)
 
 import { getAdminDashboardData, getMarginForPeriod } from './dashboard-stats'
+import { getPresetRange } from '@/lib/utils/week'
 
 const FROM = new Date('2026-06-01T00:00:00.000Z')
 const TO = new Date('2026-06-03T00:00:00.000Z')
@@ -161,5 +162,74 @@ describe('getMarginForPeriod — маржа независима от доста
     // deliveryRevenue присутствует отдельным полем.
     expect(noDelivery.deliveryRevenue).toBe(0)
     expect(withDelivery.deliveryRevenue).toBe(9999)
+  })
+})
+
+/**
+ * Аудит дат 18.10. Контракт: [from, to] — включительные МСК-дни; в @db.Date и
+ * delivery-revenue идут UTC-полночи { gte: первый день, lt: день после }.
+ * Раньше: delivery получал endOfDay(to) при `lt` → «Сегодня» доставка = 0;
+ * WoW считал today через серверный setHours (UTC) → в 00:00–03:00 МСК «вчера».
+ */
+describe('getAdminDashboardData — границы дат (МСК)', () => {
+  beforeEach(() => {
+    mockPrisma.order.findMany.mockResolvedValue([])
+    mockPrisma.order.aggregate.mockResolvedValue({ _sum: { totalPrice: new Prisma.Decimal(0) } })
+    mockDelivery.sumDeliveryRevenue.mockResolvedValue(new Prisma.Decimal(0))
+    mockDelivery.deliveryRevenueByDay.mockResolvedValue([])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it.each([
+    ['ночь 19.10 01:30 МСК', '2026-10-18T22:30:00.000Z'],
+    ['день 19.10 12:00 МСК', '2026-10-19T09:00:00.000Z'],
+  ])('«Сегодня» (%s): заказы и доставка ровно за 19.10', async (_n, nowIso) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(nowIso))
+    const { from, to } = getPresetRange('today')
+    await getAdminDashboardData(from, to)
+
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-19T00:00:00.000Z'),
+      lt: new Date('2026-10-20T00:00:00.000Z'),
+    })
+    const expected = { from: new Date('2026-10-19T00:00:00.000Z'), to: new Date('2026-10-20T00:00:00.000Z') }
+    expect(mockDelivery.sumDeliveryRevenue).toHaveBeenCalledWith(expected)
+    expect(mockDelivery.deliveryRevenueByDay).toHaveBeenCalledWith(expected)
+  })
+
+  it('this_week ночью 19.10 01:30 МСК: 7 дней Сб–Пт, подписи по дням недели, WoW прорейт 3 дня', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-18T22:30:00.000Z'))
+    mockPrisma.order.findMany.mockResolvedValue([
+      order({ date: '2026-10-19T00:00:00.000Z', price: 1000 }),
+    ])
+    const { from, to } = getPresetRange('this_week')
+    const data = await getAdminDashboardData(from, to, { withWoW: true })
+
+    expect(mockPrisma.order.findMany.mock.calls[0][0].where.deliveryDate).toEqual({
+      gte: new Date('2026-10-17T00:00:00.000Z'),
+      lt: new Date('2026-10-24T00:00:00.000Z'),
+    })
+    expect(data.thisPeriod.daily.map((d) => d.dayLabel)).toEqual([
+      'Сб 17.10', 'Вс 18.10', 'Пн 19.10', 'Вт 20.10', 'Ср 21.10', 'Чт 22.10', 'Пт 23.10',
+    ])
+    expect(data.thisPeriod.daily.find((d) => d.date === '2026-10-19')!.revenue).toBe(1000)
+
+    // МСК-сегодня = Пн 19.10 → сравниваем Сб..Пн (3 дня) с теми же днями −7.
+    expect(data.wow!.daysCompared).toBe(3)
+    const aggWheres = mockPrisma.order.aggregate.mock.calls.map((c) => c[0].where.deliveryDate)
+    expect(aggWheres).toEqual([
+      { gte: new Date('2026-10-10T00:00:00.000Z'), lt: new Date('2026-10-13T00:00:00.000Z') },
+      { gte: new Date('2026-10-17T00:00:00.000Z'), lt: new Date('2026-10-20T00:00:00.000Z') },
+    ])
+    expect(mockDelivery.sumDeliveryRevenue).toHaveBeenCalledWith({
+      from: new Date('2026-10-10T00:00:00.000Z'),
+      to: new Date('2026-10-13T00:00:00.000Z'),
+    })
+    expect(mockDelivery.sumDeliveryRevenue).toHaveBeenCalledWith({
+      from: new Date('2026-10-17T00:00:00.000Z'),
+      to: new Date('2026-10-20T00:00:00.000Z'),
+    })
   })
 })

@@ -28,7 +28,7 @@ import {
 } from './templates'
 import { sendBotMessage } from '@/lib/max/send-message'
 import { mskMidnightUtc } from '@/lib/bot/daily-summary'
-import { ANOMALY_CHECK_ENABLED, NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
+import { ANOMALY_CHECK_ENABLED, LLM_CONFIDENCE_THRESHOLD, NEW_CLIENT_SAFE_STREAK } from '@/lib/orders/anomaly-constants'
 import { logBorisEvent, emitLivePost, emitAlertPost } from '@/lib/boris/team-channels'
 import { toMskDateString, startOfTodayMsk } from '@/lib/utils/msk-window'
 import { waitUntil } from '@vercel/functions'
@@ -364,6 +364,17 @@ async function handleBotResponse(
     return { reply: null, action: 'inbox', inboxItemId: inbox.id }
   }
   const parsed = parsedOrError
+  // Приём пищи в тексте не назван, а модель его поставила — это догадка: на
+  // точке с обедом и ужином «8» записалось бы только на обед. Убираем, число
+  // идёт на все ежедневные приёмы точки (saveBotOrders).
+  if (!mentionsMeal(text)) {
+    for (const item of parsed.items) {
+      const loc = client.locations.find((l) => l.id === item.locationId)
+      if (item.mealType && loc && new Set(loc.mealConfigs.map((c) => c.mealType)).size > 1) {
+        delete item.mealType
+      }
+    }
+  }
 
   // IN-сообщение пишем сразу с метаданными парсинга — менеджер в /inbox увидит
   // и сырой текст, и tone/confidence/reason.
@@ -695,14 +706,22 @@ async function handleBotResponse(
 
   const portionAnomaly = portionAnomalies[0] ?? null
   const isNotNumeric = parsed.type !== 'numeric'
-  if (anomaly.isAnomaly || portionAnomaly || isNotNumeric) {
+  // Несколько точек и модель сама не уверена, как разнести числа («10 и 5»
+  // без названий): не угадываем — менеджеру. Порог аномалий выключен, а этот
+  // случай про «куда», а не «сколько».
+  const activeLocationCount = client.locations.filter((l) => l.isActive !== false).length
+  const unsureMultiLocation =
+    !isNotNumeric && activeLocationCount > 1 && parsed.confidence < LLM_CONFIDENCE_THRESHOLD
+  if (anomaly.isAnomaly || portionAnomaly || isNotNumeric || unsureMultiLocation) {
     // КЕЙС D — парсер не понял или аномалия по содержанию. Заказ НЕ сохраняем.
     const reason = anomaly.isAnomaly
       ? (anomaly.reason ?? 'NON_NUMERIC')
       : (portionAnomaly ? 'ANOMALY_HISTORICAL' : 'NON_NUMERIC')
-    const humanReason = anomaly.isAnomaly
-      ? anomaly.humanReason || (parsed.reason || 'Не цифровой ответ')
-      : portionAnomaly?.humanReason || (parsed.reason || 'Не цифровой ответ')
+    const humanReason = unsureMultiLocation && !anomaly.isAnomaly && !portionAnomaly
+      ? `Не уверен, как разнести числа по точкам (${parsed.reason || 'точки не названы'}) — проверьте`
+      : anomaly.isAnomaly
+        ? anomaly.humanReason || (parsed.reason || 'Не цифровой ответ')
+        : portionAnomaly?.humanReason || (parsed.reason || 'Не цифровой ответ')
 
     if (conv.status !== 'AWAITING_MANAGER') {
       await prisma.botConversation.update({
@@ -1413,6 +1432,36 @@ async function handleSpontaneous(
     })
 
     if (intent.action === 'CHANGE') {
+      // Модель «угадала» приём пищи, которого в тексте нет — не верим.
+      if (!mentionsMeal(text)) {
+        intent.mealType = null
+        intent.mealTypes = undefined
+      }
+      // «На завтра 8 порций» без приёма пищи, а на точке обед и ужин: как в
+      // ответе на вопрос дня — число на все приёмы (18.10 СБМ: раньше молча в
+      // inbox). Менеджер подтверждает одним сообщением «обед 20 → 8, ужин 0 → 8».
+      if (!intent.mealType && !intent.mealTypes?.length) {
+        const activeLocs = client.locations.filter((l) => l.isActive)
+        const meals = activeLocs.length === 1
+          ? Array.from(new Set(activeLocs[0].mealConfigs.filter((c) => c.isActive).map((c) => c.mealType)))
+          : []
+        if (meals.length >= 2) {
+          intent.mealTypes = meals.map((m) => MEAL_TYPE_TO_RU[m])
+        }
+      }
+      // «Ужин обед 8 на 18.10» — несколько приёмов пищи одним числом: тот же
+      // поток, что и период (один план, менеджеру одно сообщение с кнопками).
+      if (intent.mealTypes && intent.mealTypes.length >= 2) {
+        return submitMultiMealChange({
+          client,
+          conversationId: conversation.id,
+          text,
+          senderChatId,
+          intent,
+          tone: spontaneousAlertTone,
+        })
+      }
+
       // result.date = 'YYYY-MM-DD' МСК → UTC-полночь МСК-дня (как deliveryDate в проекте).
       const deliveryDate = new Date(`${intent.date}T00:00:00.000Z`)
 
@@ -1473,7 +1522,7 @@ async function handleSpontaneous(
           senderChatId,
           intent,
           locationId: resolveResult.locationId,
-          mealType: resolveResult.mealType,
+          mealTypes: [resolveResult.mealType],
           tone: spontaneousAlertTone,
         })
       }
@@ -1684,6 +1733,11 @@ async function tryRangeChangeInConversation(
   }
   await promoteToActiveByChatId(senderChatId)
 
+  const alertTone = tone === 'rude' || tone === 'urgent' ? tone : null
+  if (intent.mealTypes && intent.mealTypes.length >= 2) {
+    return submitMultiMealChange({ client, conversationId: conv.id, text, senderChatId, intent, tone: alertTone, promoted: true })
+  }
+
   const resolveResult = resolveOrderChangeTarget({
     client: {
       mealConfigs: client.locations.flatMap((l) =>
@@ -1695,7 +1749,6 @@ async function tryRangeChangeInConversation(
     },
     parsedMealType: intent.mealType != null ? RU_TO_MEAL_TYPE[intent.mealType] : null,
   })
-  const alertTone = tone === 'rude' || tone === 'urgent' ? tone : null
   if (!resolveResult.ok) {
     return rangeToInbox(client, conv.id, text, `Изменение на период — не смог определить адрес/приём пищи: ${resolveResult.reason}`, alertTone)
   }
@@ -1706,8 +1759,52 @@ async function tryRangeChangeInConversation(
     senderChatId,
     intent,
     locationId: resolveResult.locationId,
-    mealType: resolveResult.mealType,
+    mealTypes: [resolveResult.mealType],
     tone: alertTone,
+  })
+}
+
+/**
+ * «Ужин и обед по 8» (intent.mealTypes ≥2): адрес — единственный активный, где
+ * активны все названные приёмы пищи; нет такого или их несколько → менеджеру в inbox. Дальше — submitRangeChange.
+ */
+async function submitMultiMealChange(params: {
+  client: ClientWithBotContext
+  conversationId: string
+  text: string
+  senderChatId: string
+  intent: Extract<ChangeIntent, { action: 'CHANGE' }>
+  tone: 'rude' | 'urgent' | null
+  /** Отправитель уже повышен до активного (tryRangeChangeInConversation). */
+  promoted?: boolean
+}): Promise<ProcessMessageResult> {
+  const { client, intent } = params
+  const mealTypes = Array.from(new Set((intent.mealTypes ?? []).map((m) => RU_TO_MEAL_TYPE[m])))
+  const fitting = client.locations.filter(
+    (l) => l.isActive && mealTypes.every((m) => l.mealConfigs.some((c) => c.isActive && c.mealType === m)),
+  )
+  if (fitting.length !== 1) {
+    const mealsRu = (intent.mealTypes ?? []).join(', ').toLowerCase()
+    return rangeToInbox(
+      client,
+      params.conversationId,
+      params.text,
+      fitting.length === 0
+        ? `Изменение (${mealsRu}): нет адреса, где активны все эти приёмы пищи — уточните`
+        : `Изменение (${mealsRu}): у клиента несколько адресов — уточните, на какой`,
+      params.tone,
+    )
+  }
+  if (!params.promoted) await promoteToActiveByChatId(params.senderChatId)
+  return submitRangeChange({
+    client,
+    conversationId: params.conversationId,
+    text: params.text,
+    senderChatId: params.senderChatId,
+    intent,
+    locationId: fitting[0].id,
+    mealTypes,
+    tone: params.tone,
   })
 }
 
@@ -1718,16 +1815,18 @@ async function submitRangeChange(params: {
   senderChatId: string
   intent: Extract<ChangeIntent, { action: 'CHANGE' }>
   locationId: string
-  mealType: MealType
+  mealTypes: MealType[]
   tone: 'rude' | 'urgent' | null
 }): Promise<ProcessMessageResult> {
   const { client, intent } = params
+  // Одна дата («ужин и обед 8 на 18.10») — период из одного дня.
+  const dateTo = intent.dateTo ?? intent.date
   const request = {
     clientId: client.id,
     locationId: params.locationId,
-    mealTypes: [params.mealType],
+    mealTypes: params.mealTypes,
     dateFrom: intent.date,
-    dateTo: intent.dateTo as string,
+    dateTo,
     mode: intent.mode,
     portions: intent.portions,
   }
@@ -1743,7 +1842,7 @@ async function submitRangeChange(params: {
       client,
       params.conversationId,
       params.text,
-      `Изменение на период ${intent.date} — ${intent.dateTo}: нечего менять (${submitted.reason})`,
+      `${dateTo === intent.date ? `Изменение на ${intent.date}` : `Изменение на период ${intent.date} — ${dateTo}`}: нечего менять (${submitted.reason})`,
       params.tone,
     )
   }
@@ -1786,4 +1885,10 @@ async function rangeToInbox(
     priority: inbox.priority,
   }).catch((e) => console.error('[bot] notifyClientSignal failed (range):', e))
   return { reply: null, action: 'inbox', inboxItemId: inbox.id }
+}
+
+/** Назван ли в тексте приём пищи (иначе mealType от модели — догадка). */
+const MEAL_WORD_RE = /(^|[^а-яё])(завтрак|обед|ужин|полдник)/i
+function mentionsMeal(text: string): boolean {
+  return MEAL_WORD_RE.test(text.toLowerCase().replace(/ё/g, 'е'))
 }
