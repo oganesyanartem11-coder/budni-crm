@@ -195,6 +195,7 @@ export function MealConfigModal({ clientId, locations, config, open, onClose }: 
     })
     if (result.ok) {
       toast.success('Питание обновлено')
+      if (result.data?.note) toast.warning(result.data.note, { duration: 15000 })
       setConfirmState(null)
 
       // П6: цена изменилась → предлагаем каскад на будущие заказы. Сначала

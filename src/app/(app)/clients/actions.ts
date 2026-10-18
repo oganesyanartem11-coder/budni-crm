@@ -254,7 +254,7 @@ export type ActionResult<T = void> =
 // меняется fixedPortions, action возвращает needsConfirmation с числом затронутых
 // будущих DRAFT/PENDING заказов, чтобы UI спросил подтверждение у менеджера.
 export type UpdateMealConfigResult =
-  | { ok: true; data: undefined }
+  | { ok: true; data: undefined | { note: string } }
   | { ok: false; error: string }
   | {
       ok: false
@@ -1153,6 +1153,68 @@ export async function updateMealConfig(
     return { ok: true, data: undefined }
   }
 
+  // FIXED/STICKY → DYNAMIC: уже сгенерированные на 7 дней вперёд заказы стоят
+  // CONFIRMED со старым числом и блокируют создание «ждём ответа клиента»
+  // (антидубль по бизнес-ключу) — 09–18.10 СтройБетонМонолит: после перевода на
+  // «Динамику» клиенту поехало 20 обедов от старого FIXED. Возвращаем их в
+  // PENDING/0, если клиент их сам не подтверждал.
+  const switchedToAsking =
+    parsed.data.orderType === 'DYNAMIC' && usesFixedPortions(existing.orderType)
+  let note: string | undefined
+  if (switchedToAsking) {
+    const tomorrow = getMskCalendarDayUtc(new Date(), 1)
+    const stale = await prisma.order.findMany({
+      where: {
+        sourceConfigId: id,
+        source: { in: ['FIXED_AUTO', 'RECURRING_AUTO'] },
+        status: 'CONFIRMED',
+        deliveryDate: { gte: tomorrow },
+        // клиент своё число уже называл — не затираем
+        sourceConversationId: null,
+        updDocumentLink: { is: null },
+      },
+      select: { id: true },
+    })
+    const CHUNK_SIZE = 100
+    for (let i = 0; i < stale.length; i += CHUNK_SIZE) {
+      await prisma.order.updateMany({
+        where: { id: { in: stale.slice(i, i + CHUNK_SIZE).map((o) => o.id) } },
+        data: { portions: 0, totalPrice: 0, status: 'PENDING_CONFIRMATION', confirmedAt: null },
+      })
+    }
+    // Сегодняшний заказ уже в работе — не трогаем, но говорим менеджеру.
+    const today = getMskCalendarDayUtc(new Date(), 0)
+    const todays = await prisma.order.findFirst({
+      where: {
+        sourceConfigId: id,
+        status: { in: ['CONFIRMED', 'LOCKED', 'IN_PRODUCTION'] },
+        deliveryDate: today,
+        portions: { gt: 0 },
+        sourceConversationId: null,
+      },
+      select: { portions: true },
+    })
+    note =
+      (stale.length > 0 ? `Заказы на будущие дни (${stale.length}) вернули в «ждём ответа клиента». ` : '') +
+      (todays ? `Заказ на сегодня (${todays.portions} порций) создан по прежнему типу и остался — при необходимости поправьте вручную.` : '')
+    note = note.trim() || undefined
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        userRole: user.role,
+        action: 'MEAL_CONFIG_TYPE_SWITCHED',
+        entityType: 'ClientMealConfig',
+        entityId: id,
+        payload: {
+          oldOrderType: existing.orderType,
+          newOrderType: parsed.data.orderType,
+          resetToAsking: stale.length,
+          todaysKept: todays?.portions ?? null,
+        },
+      },
+    })
+  }
+
   // Все остальные случаи (portions не менялись, либо confirmDraftPortions === 'keep'):
   // обновляем только конфиг, заказы не трогаем.
   const config = await prisma.clientMealConfig.update({
@@ -1161,7 +1223,7 @@ export async function updateMealConfig(
   })
 
   revalidatePath(`/clients/${config.clientId}`)
-  return { ok: true, data: undefined }
+  return { ok: true, data: note ? { note } : undefined }
 }
 
 // П6: каскад изменения ЦЕНЫ конфига на будущие заказы ===============
