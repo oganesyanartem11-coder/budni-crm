@@ -376,6 +376,20 @@ async function handleBotResponse(
     }
   }
 
+  // «Без изменений» / «как вчера» / «как обычно» без цифр: число берём из базы —
+  // прошлый заказ по КАЖДОМУ приёму пищи отдельно. 23.10 «Идеология Еды»:
+  // модель отвечала «не число» или «45 и 75» без приёма пищи — и обед
+  // становился 45. Не хватает истории хоть по одному приёму — решает менеджер.
+  if (SAME_AS_BEFORE_RE.test(text) && !/\d/.test(text)) {
+    const repeated = await repeatPreviousPortions(client, effectiveDeliveryDate)
+    if (repeated) {
+      parsed.type = 'numeric'
+      parsed.items = repeated
+      parsed.confidence = 1
+      parsed.reason = 'Клиент: без изменений — как в прошлый заказ по каждому приёму пищи'
+    }
+  }
+
   // IN-сообщение пишем сразу с метаданными парсинга — менеджер в /inbox увидит
   // и сырой текст, и tone/confidence/reason.
   await logBotMessage({
@@ -710,8 +724,19 @@ async function handleBotResponse(
   // без названий): не угадываем — менеджеру. Порог аномалий выключен, а этот
   // случай про «куда», а не «сколько».
   const activeLocationCount = client.locations.filter((l) => l.isActive !== false).length
+  // Два разных числа на одну точку без приёмов пищи («45 и 75») — неясно, что
+  // к чему: первое число легло бы на все приёмы. Тоже менеджеру.
+  const unnamedPerLocation = new Map<string, Set<number>>()
+  for (const item of parsed.items) {
+    if (item.mealType) continue
+    const set = unnamedPerLocation.get(item.locationId) ?? new Set<number>()
+    set.add(item.portions)
+    unnamedPerLocation.set(item.locationId, set)
+  }
+  const ambiguousNumbers = [...unnamedPerLocation.values()].some((set) => set.size > 1)
   const unsureMultiLocation =
-    !isNotNumeric && activeLocationCount > 1 && parsed.confidence < LLM_CONFIDENCE_THRESHOLD
+    !isNotNumeric &&
+    ((activeLocationCount > 1 && parsed.confidence < LLM_CONFIDENCE_THRESHOLD) || ambiguousNumbers)
   if (anomaly.isAnomaly || portionAnomaly || isNotNumeric || unsureMultiLocation) {
     // КЕЙС D — парсер не понял или аномалия по содержанию. Заказ НЕ сохраняем.
     const reason = anomaly.isAnomaly
@@ -1891,4 +1916,47 @@ async function rangeToInbox(
 const MEAL_WORD_RE = /(^|[^а-яё])(завтрак|обед|ужин|полдник)/i
 function mentionsMeal(text: string): boolean {
   return MEAL_WORD_RE.test(text.toLowerCase().replace(/ё/g, 'е'))
+}
+
+/**
+ * «Без изменений», «как вчера», «как обычно», «то же самое», «аналогично».
+ * Без «так же»/«оставьте»: «так же хотели уточнить…», «оставьте на ресепшене».
+ */
+const SAME_AS_BEFORE_RE =
+  /(без\s+изменени|как\s+(вчера|обычно|всегда|раньше|и\s+вчера|в\s+прошлый\s+раз|есть)|то\s+же\s+самое|тоже\s+самое|аналогичн|по-?прежнему)/i
+
+/**
+ * Прошлый заказ по каждому ежедневному (DYNAMIC) приёму пищи до даты доставки.
+ * null — хоть по одному приёму истории нет (решает менеджер).
+ */
+async function repeatPreviousPortions(
+  client: ClientWithBotContext,
+  deliveryDate: Date,
+): Promise<Array<{ locationId: string; locationName: string; portions: number; mealType: MealType }> | null> {
+  const targets = client.locations
+    .filter((l) => l.isActive !== false)
+    .flatMap((l) =>
+      l.mealConfigs
+        .filter((c) => c.isActive && c.orderType === 'DYNAMIC')
+        .map((c) => ({ locationId: l.id, locationName: l.name, mealType: c.mealType })),
+    )
+  if (targets.length === 0) return null
+  const items: Array<{ locationId: string; locationName: string; portions: number; mealType: MealType }> = []
+  for (const t of targets) {
+    const prev = await prisma.order.findFirst({
+      where: {
+        clientId: client.id,
+        locationId: t.locationId,
+        mealType: t.mealType,
+        deliveryDate: { lt: deliveryDate },
+        status: { not: 'CANCELLED' },
+        portions: { gt: 0 },
+      },
+      orderBy: { deliveryDate: 'desc' },
+      select: { portions: true },
+    })
+    if (!prev) return null
+    items.push({ ...t, portions: prev.portions })
+  }
+  return items
 }

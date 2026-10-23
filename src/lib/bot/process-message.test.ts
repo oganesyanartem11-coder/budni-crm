@@ -1746,3 +1746,91 @@ describe('process-message — «на завтра 8» при обеде и уж�
     expect(mockCreateInbox.mock.calls[0][0].humanReason).toContain('Не уверен, как разнести числа по точкам')
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────
+// 23.10 «Идеология Еды»: «без изменений» на вопрос дня у клиента с завтраком,
+// обедом и ужином — число из прошлого заказа по КАЖДОМУ приёму, не от модели.
+// ─────────────────────────────────────────────────────────────────────
+describe('process-message — «без изменений» / «как вчера»', () => {
+  function threeMeals() {
+    const c = makeClient()
+    c.locations[0].mealConfigs = [
+      { mealType: 'BREAKFAST', pricePerPortion: '200', isActive: true, orderType: 'DYNAMIC' },
+      { mealType: 'LUNCH', pricePerPortion: '300', isActive: true, orderType: 'DYNAMIC' },
+      { mealType: 'DINNER', pricePerPortion: '250', isActive: true, orderType: 'DYNAMIC' },
+    ] as never
+    return c
+  }
+  const PREV: Record<string, number> = { BREAKFAST: 45, LUNCH: 75, DINNER: 45 }
+
+  beforeEach(() => {
+    mockFindClient.mockResolvedValue(threeMeals())
+    mockFindConv.mockResolvedValue({ id: 'conv_1', status: 'PENDING', deliveryDate: mskMidnightUtc(2026, 6, 5) })
+    vi.setSystemTime(new Date(Date.UTC(2026, 5, 4, 9, 0, 0)))
+    mockPrisma.order.findFirst.mockImplementation(async ({ where }: { where: { mealType?: string } }) =>
+      where.mealType ? { portions: PREV[where.mealType] } : null,
+    )
+  })
+
+  it('«без изменений» → завтрак 45, обед 75, ужин 45 из прошлого заказа (модель говорила «не число»)', async () => {
+    mockParse.mockResolvedValue({ type: 'noise', confidence: 0.6, reason: '', toneLabel: 'neutral', items: [] })
+
+    await processClientMessage({ maxChatId: 'max_1', text: 'Без изменений' })
+
+    const items = mockSave.mock.calls[0][0].items
+    expect(items.map((i: { mealType: string; portions: number }) => `${i.mealType}:${i.portions}`).sort()).toEqual([
+      'BREAKFAST:45',
+      'DINNER:45',
+      'LUNCH:75',
+    ])
+    // ищем строго до даты доставки и только живые заказы с порциями
+    expect(mockPrisma.order.findFirst.mock.calls[0][0].where).toMatchObject({
+      deliveryDate: { lt: new Date('2026-06-05T00:00:00.000Z') },
+      status: { not: 'CANCELLED' },
+      portions: { gt: 0 },
+    })
+  })
+
+  it('«как вчера» → то же, модельное «45 и 75» без приёмов пищи не используется', async () => {
+    mockParse.mockResolvedValue({
+      type: 'numeric', confidence: 0.6, reason: '', toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 45 }, { locationId: 'loc_1', portions: 75 }],
+    })
+    await processClientMessage({ maxChatId: 'max_1', text: 'как вчера' })
+    expect(mockSave.mock.calls[0][0].items).toHaveLength(3)
+  })
+
+  it('нет истории хоть по одному приёму → решает менеджер, ничего не сохраняем', async () => {
+    mockPrisma.order.findFirst.mockImplementation(async ({ where }: { where: { mealType?: string } }) =>
+      where.mealType === 'DINNER' ? null : { portions: 45 },
+    )
+    mockParse.mockResolvedValue({ type: 'noise', confidence: 0.6, reason: '', toneLabel: 'neutral', items: [] })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_h', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: 'без изменений' })
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+  })
+
+  it('модель вернула два разных числа на точку без приёмов («45 и 75») → менеджеру, не на угад', async () => {
+    mockParse.mockResolvedValue({
+      type: 'numeric', confidence: 0.9, reason: '', toneLabel: 'neutral',
+      items: [{ locationId: 'loc_1', portions: 45 }, { locationId: 'loc_1', portions: 75 }],
+    })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_a', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+
+    const res = await processClientMessage({ maxChatId: 'max_1', text: '45 и 75' })
+
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(res.action).toBe('inbox')
+  })
+
+  it('«так же хотели уточнить по меню» — не повтор заказа', async () => {
+    mockParse.mockResolvedValue({ type: 'question', confidence: 0.9, reason: '', toneLabel: 'neutral', items: [] })
+    mockCreateInbox.mockResolvedValue({ id: 'inbox_q', reason: 'NON_NUMERIC', priority: 'NORMAL' })
+    await processClientMessage({ maxChatId: 'max_1', text: 'так же хотели уточнить по меню' })
+    expect(mockSave).not.toHaveBeenCalled()
+    expect(mockPrisma.order.findFirst).not.toHaveBeenCalled()
+  })
+})
