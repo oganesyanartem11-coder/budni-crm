@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getAnthropicClient } from './client'
+import { getTextModelClient } from './text-client'
 
 /**
- * Generic multi-turn tool_use loop для Anthropic SDK.
+ * Общий multi-turn tool_use loop: OpenAI Responses / Anthropic.
  *
  * Основа для AI-агента «Action-Борис» (Sprint 7.16.A.1, блок A1).
  * Волна A.2 будет регистрировать сюда tools поверх этого скелета.
@@ -140,7 +140,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     onToolResult,
   } = opts
 
-  const client = getAnthropicClient()
+  const client = getTextModelClient(model)
   const messages: Anthropic.Messages.MessageParam[] = [...initialMessages]
   const toolCalls: Array<{ name: string; input: unknown; result: unknown }> = []
   // 7.16.D: cache_control на последнем tool — система+tools[0..N-1] кешируются.

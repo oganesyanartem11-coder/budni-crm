@@ -74,11 +74,12 @@ async function handler(request: Request) {
     return NextResponse.json({ ok: true, skipped: 'empty_week' })
   }
 
-  // 5. LLM-вызов. Оборачиваем в try/catch чтобы при сбое Anthropic API
+  // 5. LLM-вызов. Оборачиваем в try/catch чтобы при сбое LLM API
   // briefing всё равно создался с errorMessage и cron не упал.
   let content: string | null = null
   let inputTokens = 0
   let outputTokens = 0
+  let costUsd = 0
   let generationError: string | null = null
   const llmStartedAt = Date.now()
   try {
@@ -86,12 +87,16 @@ async function handler(request: Request) {
     content = result.content
     inputTokens = result.inputTokens
     outputTokens = result.outputTokens
+    costUsd = result.costUsd
     await trackBorisCall({
       userId: user.id,
       ok: true,
       durationMs: Date.now() - llmStartedAt,
       inputTokens,
       outputTokens,
+      cacheCreationInputTokens: result.cacheCreationInputTokens,
+      cacheReadInputTokens: result.cacheReadInputTokens,
+      model: result.model,
       source: BorisMetricSource.SELF_ANALYSIS,
     })
   } catch (err) {
@@ -105,9 +110,6 @@ async function handler(request: Request) {
       source: BorisMetricSource.SELF_ANALYSIS,
     })
   }
-
-  const costUsd =
-    Math.round(((inputTokens * 3 + outputTokens * 15) / 1_000_000) * 1_000_000) / 1_000_000
 
   // 6. Создаём BorisBriefing запись (даже при ошибке генерации — для аудита).
   const briefing = await prisma.borisBriefing.create({

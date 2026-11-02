@@ -93,7 +93,7 @@ describe('OpenAI Responses adapter', () => {
       max_output_tokens: 300, reasoning: { effort: 'none' }, store: false,
     })
     expect(result.content).toEqual([{ type: 'text', text: '{"relates":true}', citations: null }])
-    expect(result.usage).toEqual({ input_tokens: 100, output_tokens: 20 })
+    expect(result.usage).toMatchObject({ input_tokens: 100, output_tokens: 20 })
   })
 
   it('преобразует принудительный tool_choice и tool_use', async () => {

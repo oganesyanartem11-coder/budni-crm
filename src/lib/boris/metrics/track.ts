@@ -5,8 +5,7 @@
  * Принципы:
  * - НИКОГДА не throws — это инфраструктурная функция, ошибка трекинга НЕ должна
  *   ронять основной flow (чат с Борисом, executor, cron). Только console.error.
- * - costUsd считается прямо здесь по тарифу Sonnet 4.6 ($3/M input, $15/M output).
- *   Когда сменим модель — обновить в одном месте.
+ * - costUsd считается по выбранной модели и отдельным счётчикам кеша.
  * - Decimal(10,6) → достаточно 6 знаков после запятой; round чтобы избежать
  *   проблем с float-сериализацией.
  *
@@ -15,16 +14,7 @@
 
 import { prisma } from '@/lib/db/prisma'
 import type { BorisMetricSource } from '@prisma/client'
-
-// Тариф Sonnet 4.6 (USD per million tokens). При смене модели — обновить тут.
-const PRICE_INPUT_USD_PER_M = 3
-const PRICE_OUTPUT_USD_PER_M = 15
-// 7.16.D: prompt caching tier'ы Anthropic.
-//  - cache write: 1.25× базового input
-//  - cache read:  0.10× базового input
-// На output caching не влияет — output_tokens оплачивается по обычной цене.
-const PRICE_CACHE_WRITE_USD_PER_M = PRICE_INPUT_USD_PER_M * 1.25
-const PRICE_CACHE_READ_USD_PER_M = PRICE_INPUT_USD_PER_M * 0.1
+import { computeBorisCostUsd } from './cost'
 
 export interface TrackBorisCallInput {
   userId?: string
@@ -45,23 +35,8 @@ export interface TrackBorisCallInput {
    * 5-мин ephemeral TTL). Берётся из response.usage.cache_read_input_tokens.
    */
   cacheReadInputTokens?: number
+  model?: string
   source: BorisMetricSource
-}
-
-function computeCostUsd(
-  inputTokens: number,
-  outputTokens: number,
-  cacheCreationInputTokens: number,
-  cacheReadInputTokens: number,
-): number {
-  const cost =
-    (inputTokens * PRICE_INPUT_USD_PER_M +
-      outputTokens * PRICE_OUTPUT_USD_PER_M +
-      cacheCreationInputTokens * PRICE_CACHE_WRITE_USD_PER_M +
-      cacheReadInputTokens * PRICE_CACHE_READ_USD_PER_M) /
-    1_000_000
-  // Decimal(10,6) — 6 знаков после запятой.
-  return Math.round(cost * 1_000_000) / 1_000_000
 }
 
 export async function trackBorisCall(input: TrackBorisCallInput): Promise<void> {
@@ -70,11 +45,12 @@ export async function trackBorisCall(input: TrackBorisCallInput): Promise<void> 
     const outputTokens = input.outputTokens ?? 0
     const cacheCreationInputTokens = input.cacheCreationInputTokens ?? 0
     const cacheReadInputTokens = input.cacheReadInputTokens ?? 0
-    const costUsd = computeCostUsd(
+    const costUsd = computeBorisCostUsd(
       inputTokens,
       outputTokens,
       cacheCreationInputTokens,
       cacheReadInputTokens,
+      input.model,
     )
 
     await prisma.borisMetrics.create({

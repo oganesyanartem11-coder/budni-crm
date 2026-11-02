@@ -25,14 +25,6 @@ export const maxDuration = 60
 
 const JOB_LABEL = 'boris-morning-briefing'
 
-// Sonnet 4.6 тариф: $3/M input, $15/M output.
-const INPUT_USD_PER_M = 3
-const OUTPUT_USD_PER_M = 15
-
-function calcCostUsd(inputTokens: number, outputTokens: number): number {
-  return (inputTokens * INPUT_USD_PER_M + outputTokens * OUTPUT_USD_PER_M) / 1_000_000
-}
-
 /** МСК weekday (1..7, Пн=1, Вс=7). UTC+3 без учёта сезона (Москва без DST). */
 function mskWeekday(now: Date): number {
   const mskHourMs = 3 * 3600_000
@@ -88,11 +80,13 @@ async function handler(request: Request) {
   let content: string
   let inputTokens: number
   let outputTokens: number
+  let costUsd: number
   try {
     const res = await generateMorningBriefing(context)
     content = res.content
     inputTokens = res.inputTokens
     outputTokens = res.outputTokens
+    costUsd = res.costUsd
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await prisma.borisBriefing.create({
@@ -113,8 +107,6 @@ async function handler(request: Request) {
     await markRanToday(JOB_LABEL, { skipped: 'llm_error', error: msg })
     return NextResponse.json({ ok: false, skipped: 'llm_error', error: msg })
   }
-
-  const costUsd = calcCostUsd(inputTokens, outputTokens)
 
   // 6. Сохраняем BorisBriefing
   const briefing = await prisma.borisBriefing.create({

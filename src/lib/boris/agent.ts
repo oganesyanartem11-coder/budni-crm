@@ -172,11 +172,12 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
   const canMutate = isPrivate && isAdminPro
   const tools = canMutate ? BORIS_TOOLS : BORIS_READ_TOOLS
 
+  const model = getBorisModel()
   const startedAt = Date.now()
   let result
   try {
     result = await runAgentLoop({
-      model: getBorisModel(),
+      model,
       // #4: прокидываем реальный контекст в промпт, чтобы модель знала, что
       // mutate разрешён ПРЯМО СЕЙЧАС (личка+ADMIN_PRO) и не галлюцинировала отказ.
       systemPrompt: getBorisSystemPrompt({ canMutate, chatType: input.chatType, isAdminPro }),
@@ -207,6 +208,7 @@ export async function chatWithBoris(input: ChatWithBorisInput): Promise<ChatWith
     conversationId: conversation.id,
     ok: true,
     durationMs: Date.now() - startedAt,
+    model,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
     cacheCreationInputTokens: result.cacheCreationInputTokens,

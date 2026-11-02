@@ -10,8 +10,9 @@
  * Спринт 7.16.B, блок B1.5.
  */
 
-import { getAnthropicClient } from '@/lib/llm/client'
+import { getTextModelClient } from '@/lib/llm/text-client'
 import { getBorisModel } from '@/lib/ai/models'
+import { computeBorisCostUsd } from '@/lib/boris/metrics/cost'
 import { getSelfAnalysisSystemPrompt } from './system-prompt'
 import type { SelfAnalysisContext } from './context-builder'
 import type Anthropic from '@anthropic-ai/sdk'
@@ -22,6 +23,10 @@ export interface GenerateSelfAnalysisResult {
   content: string
   inputTokens: number
   outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  model: string
+  costUsd: number
 }
 
 function extractText(content: Anthropic.Messages.ContentBlock[]): string {
@@ -36,8 +41,8 @@ export async function generateSelfAnalysis(
   context: SelfAnalysisContext,
   model?: string
 ): Promise<GenerateSelfAnalysisResult> {
-  const client = getAnthropicClient()
   const resolvedModel = model ?? getBorisModel()
+  const client = getTextModelClient(resolvedModel)
 
   const userText =
     'Вот данные за неделю:\n\n```json\n' +
@@ -53,9 +58,17 @@ export async function generateSelfAnalysis(
 
   const content = extractText(response.content)
 
+  const inputTokens = response.usage.input_tokens
+  const outputTokens = response.usage.output_tokens
+  const cacheCreationInputTokens = response.usage.cache_creation_input_tokens ?? 0
+  const cacheReadInputTokens = response.usage.cache_read_input_tokens ?? 0
   return {
     content,
-    inputTokens: response.usage?.input_tokens ?? 0,
-    outputTokens: response.usage?.output_tokens ?? 0,
+    inputTokens,
+    outputTokens,
+    cacheCreationInputTokens,
+    cacheReadInputTokens,
+    model: resolvedModel,
+    costUsd: computeBorisCostUsd(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens, resolvedModel),
   }
 }

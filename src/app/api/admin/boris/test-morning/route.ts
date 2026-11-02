@@ -18,13 +18,6 @@ import { generateMorningBriefing } from '@/lib/boris/morning/generator'
 
 export const dynamic = 'force-dynamic'
 
-const INPUT_USD_PER_M = 3
-const OUTPUT_USD_PER_M = 15
-
-function calcCostUsd(inputTokens: number, outputTokens: number): number {
-  return (inputTokens * INPUT_USD_PER_M + outputTokens * OUTPUT_USD_PER_M) / 1_000_000
-}
-
 export async function POST(request: Request) {
   await requireRole(['ADMIN_PRO'])
 
@@ -95,17 +88,17 @@ export async function POST(request: Request) {
   let content: string
   let inputTokens: number
   let outputTokens: number
+  let costUsd: number
   try {
     const res = await generateMorningBriefing(context)
     content = res.content
     inputTokens = res.inputTokens
     outputTokens = res.outputTokens
+    costUsd = res.costUsd
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ ok: false, error: msg })
   }
-
-  const costUsd = calcCostUsd(inputTokens, outputTokens)
 
   const briefing = await prisma.borisBriefing.create({
     data: {

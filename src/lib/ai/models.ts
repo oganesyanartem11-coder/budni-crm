@@ -46,6 +46,14 @@ export function getInboxModel(): string {
   return process.env.ANTHROPIC_MODEL_INBOX ?? DEFAULT_INBOX_MODEL
 }
 
+/** Независимый переключатель для чата, брифингов и отчётов Бориса. */
+export function getBorisProvider(): 'openai' | 'anthropic' {
+  const provider = process.env.BORIS_AI_PROVIDER?.trim()
+  if (provider === 'openai' || provider === 'anthropic') return provider
+  if (provider) throw new Error('BORIS_AI_PROVIDER must be openai or anthropic')
+  return process.env.OPENAI_API_KEY?.trim() ? 'openai' : 'anthropic'
+}
+
 /** Используется при overloaded/5xx primary-модели в Opus-вызовах. */
 export function getFallbackModel(): string {
   return process.env.ANTHROPIC_MODEL_FALLBACK ?? DEFAULT_FALLBACK_MODEL
@@ -66,6 +74,9 @@ export function getVisionModel(): string {
  * multi-tool reasoning, Opus дорог для частых разговоров.
  */
 export function getBorisModel(): string {
+  if (getBorisProvider() === 'openai') {
+    return process.env.OPENAI_MODEL_BORIS?.trim() || 'gpt-6-luna'
+  }
   return process.env.ANTHROPIC_MODEL_BORIS ?? DEFAULT_BORIS_MODEL
 }
 

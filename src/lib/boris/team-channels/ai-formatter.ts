@@ -17,8 +17,9 @@
 
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Decimal } from '@prisma/client/runtime/library'
-import { getAnthropicClient } from '@/lib/llm/client'
+import { getTextModelClient } from '@/lib/llm/text-client'
 import { getBorisModel } from '@/lib/ai/models'
+import { computeBorisCostUsd } from '@/lib/boris/metrics/cost'
 import { getTeamBorisSystemPrompt } from './personality'
 import type { DayContext, EventContext, TeamChannel, TeamPostResult, WeekContext } from './types'
 
@@ -123,27 +124,6 @@ export function stripTelegramHtml(html: string): string {
     .replace(/&amp;/g, '&')
 }
 
-// Тариф Sonnet 4.6 — синхронизируй с src/lib/boris/metrics/track.ts при смене модели.
-const PRICE_INPUT_USD_PER_M = 3
-const PRICE_OUTPUT_USD_PER_M = 15
-const PRICE_CACHE_WRITE_USD_PER_M = PRICE_INPUT_USD_PER_M * 1.25
-const PRICE_CACHE_READ_USD_PER_M = PRICE_INPUT_USD_PER_M * 0.1
-
-function computeCostUsd(
-  inputTokens: number,
-  outputTokens: number,
-  cacheCreationInputTokens: number,
-  cacheReadInputTokens: number,
-): number {
-  const cost =
-    (inputTokens * PRICE_INPUT_USD_PER_M +
-      outputTokens * PRICE_OUTPUT_USD_PER_M +
-      cacheCreationInputTokens * PRICE_CACHE_WRITE_USD_PER_M +
-      cacheReadInputTokens * PRICE_CACHE_READ_USD_PER_M) /
-    1_000_000
-  return Math.round(cost * 1_000_000) / 1_000_000
-}
-
 interface LLMDecision {
   action: 'SEND' | 'SILENT'
   text: string
@@ -223,8 +203,8 @@ export async function formatTeamPost(
   context: DayContext | WeekContext | EventContext,
   modelOverride?: string,
 ): Promise<TeamPostResult> {
-  const client = getAnthropicClient()
   const model = modelOverride ?? getBorisModel()
+  const client = getTextModelClient(model)
   const systemPrompt = getTeamBorisSystemPrompt(channel, context)
   const userMessage = buildUserMessage(channel, context)
 
@@ -242,7 +222,7 @@ export async function formatTeamPost(
   const outputTokens = response.usage?.output_tokens ?? 0
   const cacheCreationInputTokens = response.usage?.cache_creation_input_tokens ?? 0
   const cacheReadInputTokens = response.usage?.cache_read_input_tokens ?? 0
-  const costUsd = computeCostUsd(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens)
+  const costUsd = computeBorisCostUsd(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens, model)
 
   const metrics = {
     inputTokens,

@@ -1,12 +1,13 @@
 /**
  * Генератор утреннего брифинга Бориса (Спринт 7.16.B).
  *
- * Single-shot LLM-вызов на Sonnet. Возвращает готовый текст для отправки
+ * Single-shot LLM-вызов на выбранной модели Бориса. Возвращает готовый текст для отправки
  * в TG плюс счётчики токенов (для расчёта стоимости в cron-роуте).
  */
 
-import { getAnthropicClient } from '@/lib/llm/client'
+import { getTextModelClient } from '@/lib/llm/text-client'
 import { getBorisModel } from '@/lib/ai/models'
+import { computeBorisCostUsd } from '@/lib/boris/metrics/cost'
 import { getMorningSystemPrompt } from './system-prompt'
 import type { MorningContext } from './context-builder'
 
@@ -16,13 +17,18 @@ export interface GenerateMorningResult {
   content: string
   inputTokens: number
   outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  model: string
+  costUsd: number
 }
 
 export async function generateMorningBriefing(
   context: MorningContext,
   model?: string
 ): Promise<GenerateMorningResult> {
-  const client = getAnthropicClient()
+  const resolvedModel = model ?? getBorisModel()
+  const client = getTextModelClient(resolvedModel)
   const system = getMorningSystemPrompt()
 
   const userMessage =
@@ -34,7 +40,7 @@ export async function generateMorningBriefing(
     `Только готовый текст, без преамбулы и комментариев.`
 
   const response = await client.messages.create({
-    model: model ?? getBorisModel(),
+    model: resolvedModel,
     max_tokens: MAX_TOKENS,
     system,
     messages: [{ role: 'user', content: userMessage }],
@@ -45,9 +51,17 @@ export async function generateMorningBriefing(
     throw new Error('LLM returned no text content')
   }
 
+  const inputTokens = response.usage.input_tokens
+  const outputTokens = response.usage.output_tokens
+  const cacheCreationInputTokens = response.usage.cache_creation_input_tokens ?? 0
+  const cacheReadInputTokens = response.usage.cache_read_input_tokens ?? 0
   return {
     content: textBlock.text.trim(),
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens,
+    outputTokens,
+    cacheCreationInputTokens,
+    cacheReadInputTokens,
+    model: resolvedModel,
+    costUsd: computeBorisCostUsd(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens, resolvedModel),
   }
 }

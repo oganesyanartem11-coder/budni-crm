@@ -104,11 +104,12 @@ export async function POST(request: Request) {
     })
   }
 
-  // Генерация. На исключении Anthropic API всё равно создаём briefing с errorMessage,
+  // Генерация. На исключении LLM API всё равно создаём briefing с errorMessage,
   // чтобы админ видел причину в БД.
   let content: string | null = null
   let inputTokens = 0
   let outputTokens = 0
+  let costUsd = 0
   let generationError: string | null = null
   const llmStartedAt = Date.now()
   try {
@@ -116,12 +117,16 @@ export async function POST(request: Request) {
     content = result.content
     inputTokens = result.inputTokens
     outputTokens = result.outputTokens
+    costUsd = result.costUsd
     await trackBorisCall({
       userId: user.id,
       ok: true,
       durationMs: Date.now() - llmStartedAt,
       inputTokens,
       outputTokens,
+      cacheCreationInputTokens: result.cacheCreationInputTokens,
+      cacheReadInputTokens: result.cacheReadInputTokens,
+      model: result.model,
       source: BorisMetricSource.SELF_ANALYSIS,
     })
   } catch (err) {
@@ -135,9 +140,6 @@ export async function POST(request: Request) {
       source: BorisMetricSource.SELF_ANALYSIS,
     })
   }
-
-  const costUsd =
-    Math.round(((inputTokens * 3 + outputTokens * 15) / 1_000_000) * 1_000_000) / 1_000_000
 
   const briefing = await prisma.borisBriefing.create({
     data: {
