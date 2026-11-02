@@ -1,4 +1,4 @@
-import { getAnthropicClient } from '@/lib/llm/client'
+import { getInboxClient } from '@/lib/llm/inbox-client'
 import { getInboxModel } from '@/lib/ai/models'
 import { prisma } from '@/lib/db/prisma'
 
@@ -64,7 +64,7 @@ export async function classifyMessageRelatesToBoris(
   input: ClassifyMessageInput,
 ): Promise<ClassifyMessageResult> {
   try {
-    const client = getAnthropicClient()
+    const client = getInboxClient()
 
     const userPrompt = `${
       input.lastBorisReply

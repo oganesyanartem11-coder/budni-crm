@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getAnthropicClient } from '@/lib/llm/client'
+import { getInboxClient } from '@/lib/llm/inbox-client'
 import { getInboxModel } from '@/lib/ai/models'
 import { toMskDateString, getMskCalendarDayUtc } from '@/lib/utils/msk-window'
 
@@ -145,7 +145,7 @@ export async function parseChangeIntent(
 
   let raw: RawIntent
   try {
-    const client = getAnthropicClient()
+    const client = getInboxClient()
     const response = await client.messages.create({
       model: getInboxModel(),
       // запас: Haiku 5.5 пишет длинный reason, обрыв tool_use = NONE

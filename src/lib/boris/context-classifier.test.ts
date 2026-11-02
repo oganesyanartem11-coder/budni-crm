@@ -12,8 +12,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const mockCreate = vi.hoisted(() => vi.fn())
 const mockHaikuLogCreate = vi.hoisted(() => vi.fn())
 
-vi.mock('@/lib/llm/client', () => ({
-  getAnthropicClient: () => ({ messages: { create: mockCreate } }),
+vi.mock('@/lib/llm/inbox-client', () => ({
+  getInboxClient: () => ({ messages: { create: mockCreate } }),
 }))
 vi.mock('@/lib/ai/models', () => ({ getInboxModel: () => 'claude-test' }))
 vi.mock('@/lib/db/prisma', () => ({

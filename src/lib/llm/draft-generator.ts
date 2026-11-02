@@ -1,4 +1,4 @@
-import { getAnthropicClient } from './client'
+import { getInboxClient } from './inbox-client'
 import { getInboxModel } from '@/lib/ai/models'
 import type { BotMessageDirection } from '@prisma/client'
 
@@ -9,7 +9,7 @@ export interface GenerateDraftInput {
 }
 
 export async function generateDraftReply(input: GenerateDraftInput): Promise<string> {
-  const client = getAnthropicClient()
+  const client = getInboxClient()
 
   const systemPrompt = `Ты помогаешь менеджеру кейтеринг-компании «Будни» отвечать клиентам.
 Кейтеринг доставляет обеды юрлицам (заводы, школы, офисы).

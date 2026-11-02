@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { getAnthropicClient } from './client'
+import { getInboxClient } from './inbox-client'
 import { getInboxModel } from '@/lib/ai/models'
 import { isCapsRude, type ToneLabel } from './parser'
 
@@ -82,7 +82,7 @@ export async function classifyMessageTone(text: string): Promise<ToneLabel> {
   }
 
   try {
-    const client = getAnthropicClient()
+    const client = getInboxClient()
     const response = await client.messages.create({
       model: getInboxModel(),
       max_tokens: 300,

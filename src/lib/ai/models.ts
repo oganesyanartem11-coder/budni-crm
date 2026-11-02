@@ -1,5 +1,5 @@
 /**
- * Единая точка резолва Claude-моделей для AI-вызовов.
+ * Единая точка выбора провайдера и моделей для AI-вызовов.
  *
  * Зачем env vars: A/B-тесты моделей без code-change, быстрое переключение
  * в случае инцидента (например, временно деградировать parser на Sonnet).
@@ -12,6 +12,7 @@ const DEFAULT_PARSER_MODEL = 'claude-opus-4-7'
 const DEFAULT_RECIPES_MODEL = 'claude-opus-4-7'
 // 08.10.2026: разбор сообщений клиентов (числа, изменения, тон, черновики) — Haiku 5.5.
 const DEFAULT_INBOX_MODEL = 'claude-haiku-5-5'
+const DEFAULT_OPENAI_INBOX_MODEL = 'gpt-6-luna'
 const DEFAULT_FALLBACK_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_VISION_MODEL = 'claude-sonnet-4-6'
 // 07.10.2026: Борис-ассистент (чат, утренний брифинг, самоанализ, посты команды) — Sonnet 5.
@@ -29,8 +30,19 @@ export function getRecipesModel(): string {
   return process.env.ANTHROPIC_MODEL_RECIPES ?? DEFAULT_RECIPES_MODEL
 }
 
-/** parseClientResponse + generateDraftReply: бот-флоу (Haiku, мелкие частые вызовы). */
+/** Ключ OpenAI включает Luna; явный выбор провайдера имеет приоритет. */
+export function getInboxProvider(): 'openai' | 'anthropic' {
+  const provider = process.env.INBOX_AI_PROVIDER?.trim()
+  if (provider === 'openai' || provider === 'anthropic') return provider
+  if (provider) throw new Error('INBOX_AI_PROVIDER must be openai or anthropic')
+  return process.env.OPENAI_API_KEY?.trim() ? 'openai' : 'anthropic'
+}
+
+/** Клиентские сообщения: Luna через OpenAI либо прежний Haiku. */
 export function getInboxModel(): string {
+  if (getInboxProvider() === 'openai') {
+    return process.env.OPENAI_MODEL_INBOX?.trim() || DEFAULT_OPENAI_INBOX_MODEL
+  }
   return process.env.ANTHROPIC_MODEL_INBOX ?? DEFAULT_INBOX_MODEL
 }
 

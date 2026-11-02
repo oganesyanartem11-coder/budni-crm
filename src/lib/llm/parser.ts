@@ -1,4 +1,4 @@
-import { getAnthropicClient } from './client'
+import { getInboxClient } from './inbox-client'
 import { getInboxModel } from '@/lib/ai/models'
 import type { MealType } from '@prisma/client'
 
@@ -60,7 +60,7 @@ export function isCapsRude(text: string): boolean {
 }
 
 export async function parseClientResponse(input: ParseInput): Promise<ParsedResponse> {
-  const client = getAnthropicClient()
+  const client = getInboxClient()
 
   // LLM получает hint в промпте и волен переоценить (например THANKS/URGENT
   // тоже бывают CAPS). При невалидном LLM-ответе fallback тоже rude.
