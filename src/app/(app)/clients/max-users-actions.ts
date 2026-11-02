@@ -19,6 +19,30 @@ export type ActionResult<T = void> =
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+export async function createMaxGroupInvite(clientId: string): Promise<ActionResult<string>> {
+  await requireRole(['ADMIN', 'MANAGER'])
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { isActive: true } })
+  if (!client?.isActive) return { ok: false, error: 'Активный клиент не найден' }
+  const token = generateInviteToken()
+  await prisma.clientMaxGroup.upsert({
+    where: { clientId },
+    create: { clientId, token, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
+    update: { token, expiresAt: new Date(Date.now() + 60 * 60 * 1000) },
+  })
+  revalidatePath(`/clients/${clientId}`)
+  return { ok: true, data: `/привязать ${token}` }
+}
+
+export async function disconnectMaxGroup(clientId: string): Promise<ActionResult> {
+  const user = await requireRole(['ADMIN', 'MANAGER'])
+  await prisma.$transaction(async (tx) => {
+    await tx.clientMaxGroup.updateMany({ where: { clientId }, data: { chatId: null, isActive: false, token: null, expiresAt: null } })
+    await tx.activityLog.create({ data: { action: 'MAX_GROUP_DISCONNECTED', entityType: 'Client', entityId: clientId, userId: user.id } })
+  })
+  revalidatePath(`/clients/${clientId}`)
+  return { ok: true, data: undefined }
+}
+
 export interface MaxInviteDTO {
   id: string
   token: string

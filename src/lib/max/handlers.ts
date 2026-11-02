@@ -10,6 +10,10 @@ import { createInboxItem } from '@/lib/bot/create-inbox-item'
 import { notifyClientSignal } from '@/lib/bot/notify-client-signal'
 import { countDateMentions, looksLikeDateRange } from '@/lib/bot/extract-delivery-date'
 import { escapeHtml, notifyAllAdminProDirect } from '@/lib/telegram/notify'
+import { bindGroup, isGroupOrderMessage } from './group-chat'
+import { maxGroupContext } from './group-context'
+import { MAX_BOT_USERNAME } from '@/lib/bot/onboarding'
+import { withMaxClientLock } from './client-message-lock'
 import {
   handleWeeklyPhotoSubmission,
   handleWeeklyTextSubmission,
@@ -21,7 +25,50 @@ import {
  * либо молчит (если ушло в inbox).
  */
 export async function handleMessage(ctx: FilteredContext<Context, 'message_created'>): Promise<void> {
-  const text = ctx.message?.body?.text ?? ''
+  if (ctx.message?.sender?.is_bot) return
+  const type = ctx.message?.recipient?.chat_type
+  if (type === 'channel') return
+  if (type === 'chat') {
+    const text = ctx.message?.body?.text ?? ''
+    const command = /^\/(?:привязать|bind)\s+([A-Za-z0-9_-]{16})\s*$/i.exec(text.trim())
+    if (command && ctx.chatId) {
+      try { await ctx.reply(await bindGroup(String(ctx.chatId), command[1])) }
+      catch (err) { console.error('[MAX] group binding failed', err); await ctx.reply('Не удалось подключить группу. Проверьте привязку в CRM и попробуйте ещё раз.') }
+      return
+    }
+    const group = await prisma.clientMaxGroup.findUnique({ where: { chatId: String(ctx.chatId) } })
+    if (!group?.isActive) return
+    const linkedSender = ctx.message?.link?.sender
+    const replyToBot = ctx.message?.link?.type === 'reply' && !!linkedSender?.is_bot && (
+      linkedSender.username === MAX_BOT_USERNAME ||
+      (!!ctx.botInfo && linkedSender.user_id === ctx.botInfo.user_id)
+    )
+    const groupClient = await resolveClientByChatId(String(ctx.chatId))
+    const weeklyImage = !!ctx.message?.body?.attachments?.some((a) => a.type === 'image') &&
+      !!groupClient?.locations.some((l) => l.mealConfigs.some((c) => c.orderType === 'WEEKLY'))
+    const relevant = isGroupOrderMessage(text, replyToBot, !!ctx.message?.body?.attachments?.length, weeklyImage)
+    const run = () => maxGroupContext.run({ chatId: String(ctx.chatId), senderId: String(ctx.message?.sender?.user_id ?? ''), senderName: ctx.message?.sender?.name ?? 'Участник' }, async () => {
+      if (!relevant) {
+        await logBotMessage({ clientId: group.clientId, direction: 'IN', text: text || '[вложение в группе]' })
+        return
+      }
+      const orderText = text.replace(new RegExp(`@${MAX_BOT_USERNAME}\\b`, 'gi'), '').trim()
+      await handleClientMessage(ctx, orderText)
+    })
+    return relevant ? withMaxClientLock(group.clientId, ctx.message, run) : run()
+  }
+  if (type === 'dialog') {
+    const link = await prisma.clientMaxUser.findUnique({ where: { chatId: String(ctx.chatId) }, select: { clientId: true } })
+    if (link) {
+      const group = await prisma.clientMaxGroup.findUnique({ where: { clientId: link.clientId } })
+      if (group?.isActive) return withMaxClientLock(link.clientId, ctx.message, () => handleClientMessage(ctx))
+    }
+  }
+  await handleClientMessage(ctx)
+}
+
+async function handleClientMessage(ctx: FilteredContext<Context, 'message_created'>, textOverride?: string): Promise<void> {
+  const text = textOverride ?? ctx.message?.body?.text ?? ''
   const chatId = ctx.chatId
   if (!chatId) {
     console.warn('[bot] message_created without chatId')
@@ -33,7 +80,7 @@ export async function handleMessage(ctx: FilteredContext<Context, 'message_creat
 
   // Back-fill username привязки (7.55: на уровне ClientMaxUser, не Client).
   const senderUsername = ctx.message?.sender?.username ?? null
-  if (senderUsername) {
+  if (senderUsername && ctx.message?.recipient?.chat_type !== 'chat') {
     try {
       await prisma.clientMaxUser.updateMany({
         where: { chatId: maxChatId, username: null },

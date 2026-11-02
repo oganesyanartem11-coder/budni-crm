@@ -300,7 +300,7 @@ export async function runDailyQuestions(opts: RunDailyQuestionsOptions): Promise
           },
         }))
 
-      await sendBotMessage(chatId, text, { delay: false })
+      await sendBotMessage(chatId, text, { delay: false, broadcastClientId: client.id })
 
       await prisma.botMessage.create({
         data: {

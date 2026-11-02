@@ -492,6 +492,7 @@ model Client {
   contacts                    ClientContact[]
   courierRouteStops           CourierRouteStop[]
   maxUsers                    ClientMaxUser[]
+  maxGroup                    ClientMaxGroup?
   maxInvites                  ClientMaxInvite[]
   // Sprint 8.0 «Продажи»: заявки воронки, из которых вырос клиент.
   landingLeads                LandingLead[]
@@ -505,6 +506,29 @@ model Client {
 // любой момент ровно один isActive=true — бот пушит только активному. Партиальный
 // уникальный индекс «один активный на клиента» добавлен raw-SQL в миграции
 // (Prisma его декларативно не выражает): ClientMaxUser_clientId_active_unique.
+model ClientMaxGroup {
+  id        String   @id @default(cuid())
+  clientId  String   @unique
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  chatId    String?  @unique
+  token     String?  @unique
+  expiresAt DateTime?
+  isActive  Boolean  @default(false)
+  linkedAt  DateTime?
+  lastMessageAt DateTime?
+  lastMessageId String?
+  processingToken String?
+  processingUntil DateTime?
+}
+
+model MaxInboundReceipt {
+  id        String @id
+  clientId  String
+  status    String @default("RECEIVED")
+  createdAt DateTime @default(now())
+  @@index([clientId, status])
+}
+
 model ClientMaxUser {
   id         String    @id @default(cuid())
   clientId   String

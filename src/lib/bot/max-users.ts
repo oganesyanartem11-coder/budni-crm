@@ -24,7 +24,9 @@ export async function getActiveMaxChatIdForClient(clientId: string): Promise<str
     where: { clientId, isActive: true },
     select: { chatId: true },
   })
-  return row?.chatId ?? null
+  if (row) return row.chatId
+  const group = await prisma.clientMaxGroup.findUnique({ where: { clientId } })
+  return group?.isActive ? group.chatId : null
 }
 
 /**
@@ -38,7 +40,11 @@ export async function resolveClientByChatId(chatId: string) {
     where: { chatId },
     select: { id: true, clientId: true },
   })
-  if (!link) return null
+  if (!link) {
+    const group = await prisma.clientMaxGroup.findUnique({ where: { chatId } })
+    if (!group?.isActive) return null
+    return prisma.client.findUnique({ where: { id: group.clientId }, include: CLIENT_BOT_INCLUDE })
+  }
 
   void prisma.clientMaxUser
     .update({ where: { id: link.id }, data: { lastSeenAt: new Date() } })

@@ -10,6 +10,8 @@ import {
   revokeMaxInvite,
   promoteMaxUserManually,
   deleteMaxUser,
+  createMaxGroupInvite,
+  disconnectMaxGroup,
 } from '../max-users-actions'
 
 export interface MaxUser {
@@ -36,6 +38,7 @@ interface Props {
   users: MaxUser[]
   invites: PendingInvite[]
   botUsername: string
+  group?: { chatId: string | null; isActive: boolean } | null
 }
 
 function inviteUrl(botUsername: string, token: string): string {
@@ -70,10 +73,11 @@ async function copyToClipboard(text: string, successMessage: string): Promise<vo
   }
 }
 
-export function MaxUsersBlock({ clientId, users, invites, botUsername }: Props) {
+export function MaxUsersBlock({ clientId, users, invites, botUsername, group }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [modalOpen, setModalOpen] = useState(false)
+  const [groupCommand, setGroupCommand] = useState('')
 
   const isEmpty = users.length === 0 && invites.length === 0
 
@@ -128,12 +132,35 @@ export function MaxUsersBlock({ clientId, users, invites, botUsername }: Props) 
         </h3>
       </div>
 
+      <div className="rounded-xl border border-border p-3 mb-3 space-y-2">
+        <p className="text-sm font-medium">Группа MAX{group?.isActive ? ` · подключена (${group.chatId})` : ''}</p>
+        <p className="text-sm text-fg-muted">Вопросы приходят в группу и активному пользователю в личку. Ответить может любой участник группы.</p>
+        <button type="button" disabled={isPending} className="text-sm underline min-h-[44px]"
+          onClick={() => startTransition(async () => {
+            const result = await createMaxGroupInvite(clientId)
+            if (result.ok) setGroupCommand(result.data)
+            else toast.error(result.error)
+          })}>Подключить группу</button>
+        {group?.isActive && <button type="button" disabled={isPending} className="text-sm underline ml-4 min-h-[44px]"
+          onClick={() => startTransition(async () => {
+            const result = await disconnectMaxGroup(clientId)
+            if (result.ok) { setGroupCommand(''); router.refresh() }
+            else toast.error(result.error)
+          })}>Отключить группу</button>}
+        {groupCommand && <div className="space-y-2 text-sm">
+          <p>Добавьте @{botUsername} в группу, выдайте право читать сообщения и отправьте эту команду. Код действует 1 час, один раз.</p>
+          <code className="block break-all select-all">{groupCommand}</code>
+          <button type="button" className="underline min-h-[44px]" onClick={() => copyToClipboard(groupCommand, 'Команда скопирована')}>Скопировать команду</button>
+        </div>}
+      </div>
+
       {/* 1) Пусто — нет ни привязок, ни инвайтов */}
       {isEmpty && (
         <div className="space-y-3">
           <p className="text-sm text-fg-muted">
-            У клиента нет MAX-привязок — бот не сможет ему писать. Добавьте пользователя через
-            ссылку-приглашение.
+            {group?.isActive
+              ? 'Личный чат ещё не подключён: сейчас бот пишет в группу. Добавьте пользователя через ссылку-приглашение, чтобы вопросы приходили и в личку.'
+              : 'У клиента нет личных MAX-привязок. Добавьте пользователя через ссылку-приглашение или подключите группу выше.'}
           </p>
           <button
             type="button"

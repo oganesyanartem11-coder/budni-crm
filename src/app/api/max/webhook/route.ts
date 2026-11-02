@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Update } from '@maxhub/max-bot-api/types'
 import { getMaxBot } from '@/lib/max/client'
 import { handleMessage, handleBotStarted } from '@/lib/max/handlers'
+import { handleBotAdded, handleBotRemoved } from '@/lib/max/group-chat'
+import { MaxClientBusyError } from '@/lib/max/client-message-lock'
 
 export const dynamic = 'force-dynamic'
 // 60 сек — потолок Hobby. Нужно из-за задержки 15-30 сек в sendBotMessage:
@@ -63,10 +65,15 @@ export async function POST(req: NextRequest) {
     if (!bot._handlersRegistered) {
       bot.on('message_created', handleMessage as (ctx: unknown) => unknown)
       bot.on('bot_started', handleBotStarted as (ctx: unknown) => unknown)
+      bot.on('bot_added', handleBotAdded as (ctx: unknown) => unknown)
+      bot.on('bot_removed', handleBotRemoved as (ctx: unknown) => unknown)
       bot._handlersRegistered = true
     }
     await bot.handleUpdate(update)
   } catch (err) {
+    if (err instanceof MaxClientBusyError) {
+      return NextResponse.json({ error: 'client_busy' }, { status: 503, headers: { 'Retry-After': '5' } })
+    }
     console.error('[MAX] handler error:', err)
     // 200 чтобы MAX не ретраил — ошибки внутри логики наша забота
   }

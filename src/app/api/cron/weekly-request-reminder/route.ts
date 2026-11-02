@@ -76,7 +76,7 @@ export async function handler(request: Request) {
     try {
       // delay:false, как у остальных рассылок по расписанию: 15–30 с на клиента
       // подряд упирались в лимит функции, и хвост списка оставался без напоминания.
-      await sendBotMessage(chatId, text, { delay: false })
+      await sendBotMessage(chatId, text, { delay: false, broadcastClientId: client.id })
       console.log(`[weekly-reminder] ${slot} sent to client=${client.id}`)
       sent++
       sentNames.push(client.name)
@@ -92,7 +92,7 @@ export async function handler(request: Request) {
     }
   }
 
-  if (!dryRun) {
+  if (!dryRun && errors.length === 0) {
     await markRanToday(label, {
       slot,
       sent,

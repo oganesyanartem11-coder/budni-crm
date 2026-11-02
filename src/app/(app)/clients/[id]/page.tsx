@@ -68,6 +68,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             linkedAt: true,
           },
         },
+        maxGroup: true,
         maxInvites: {
           where: { usedAt: null, expiresAt: { gt: new Date() } },
           orderBy: { createdAt: 'desc' },
@@ -124,6 +125,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         users={serialize(client.maxUsers)}
         invites={serialize(client.maxInvites)}
         botUsername={MAX_BOT_USERNAME}
+        group={serialize(client.maxGroup)}
       />
       <ClientDetail
         client={serialize(client)}

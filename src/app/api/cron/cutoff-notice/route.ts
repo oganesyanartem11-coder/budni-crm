@@ -69,7 +69,7 @@ export async function handler(_request: Request) {
         continue
       }
 
-      await sendBotMessage(chatId, CUTOFF_NOTICE_TEXT, { delay: false })
+      await sendBotMessage(chatId, CUTOFF_NOTICE_TEXT, { delay: false, broadcastClientId: conv.clientId })
       await prisma.botMessage.create({
         data: {
           clientId: conv.clientId,
